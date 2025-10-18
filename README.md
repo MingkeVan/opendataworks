@@ -315,7 +315,7 @@ opendataworks/
 #### 1. 克隆项目
 
 ```bash
-git clone https://github.com/your-org/opendataworks.git
+git clone https://github.com/MingkeVan/opendataworks.git
 cd opendataworks
 ```
 
@@ -949,8 +949,8 @@ services:
 
 ## 📞 联系我们
 
-- **项目主页**: https://github.com/your-org/opendataworks
-- **问题反馈**: https://github.com/your-org/opendataworks/issues
+- **项目主页**: https://github.com/MingkeVan/opendataworks
+- **问题反馈**: https://github.com/MingkeVan/opendataworks/issues
 
 ---
 
