@@ -1,4 +1,4 @@
-# OneData Portal - 统一数据门户
+# opendataworks
 
 <div align="center">
 
@@ -20,7 +20,7 @@
 
 ## 📖 项目简介
 
-OneData Portal 是一个面向大数据平台的统一数据门户系统,旨在为企业提供一站式的数据资产管理、任务调度编排和血缘关系追踪解决方案。
+opendataworks 是一个面向大数据平台的统一数据门户系统,旨在为企业提供一站式的数据资产管理、任务调度编排和血缘关系追踪解决方案。
 
 ### 🎯 项目目标
 
@@ -222,7 +222,7 @@ OneData Portal 是一个面向大数据平台的统一数据门户系统,旨在�
 ### 项目结构
 
 ```
-onedata-works/
+opendataworks/
 ├── backend/                          # Java 后端服务
 │   ├── src/main/
 │   │   ├── java/com/onedata/portal/
@@ -315,8 +315,8 @@ onedata-works/
 #### 1. 克隆项目
 
 ```bash
-git clone https://github.com/your-org/onedata-works.git
-cd onedata-works
+git clone https://github.com/your-org/opendataworks.git
+cd opendataworks
 ```
 
 #### 2. 数据库初始化
@@ -747,17 +747,17 @@ server {
 
 #### 4. Systemd 服务配置
 
-**后端服务** (`/etc/systemd/system/onedata-portal.service`):
+**后端服务** (`/etc/systemd/system/opendataworks.service`):
 
 ```ini
 [Unit]
-Description=OneData Portal Backend
+Description=opendataworks Backend
 After=network.target
 
 [Service]
 Type=simple
-User=onedata
-ExecStart=/usr/bin/java -jar /opt/onedata-portal/data-portal-1.0.0.jar
+User=opendataworks
+ExecStart=/usr/bin/java -jar /opt/opendataworks/data-portal-1.0.0.jar
 Restart=on-failure
 
 [Install]
@@ -773,7 +773,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=onedata
+User=opendataworks
 WorkingDirectory=/opt/dolphinscheduler-service
 ExecStart=/opt/dolphinscheduler-service/venv/bin/uvicorn dolphinscheduler_service.main:app --host 0.0.0.0 --port 5001
 Restart=on-failure
@@ -785,8 +785,8 @@ WantedBy=multi-user.target
 启动服务:
 
 ```bash
-sudo systemctl enable onedata-portal
-sudo systemctl start onedata-portal
+sudo systemctl enable opendataworks
+sudo systemctl start opendataworks
 
 sudo systemctl enable dolphinscheduler-service
 sudo systemctl start dolphinscheduler-service
@@ -949,10 +949,8 @@ services:
 
 ## 📞 联系我们
 
-- **项目主页**: https://github.com/your-org/onedata-works
-- **问题反馈**: https://github.com/your-org/onedata-works/issues
-- **邮件**: onedata@example.com
-- **微信群**: 添加小助手微信 xxx 入群交流
+- **项目主页**: https://github.com/your-org/opendataworks
+- **问题反馈**: https://github.com/your-org/opendataworks/issues
 
 ---
 
@@ -960,6 +958,6 @@ services:
 
 **如果这个项目对你有帮助,请给我们一个 ⭐️ Star!**
 
-Made with ❤️ by OneData Team
+Made with ❤️ by opendataworks Team
 
 </div>
