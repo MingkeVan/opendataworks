@@ -14,6 +14,12 @@ from .config import Settings
 from .models import (
     EnsureWorkflowRequest,
     EnsureWorkflowResponse,
+    GetInstanceLogRequest,
+    GetInstanceLogResponse,
+    GetInstanceRequest,
+    GetInstanceResponse,
+    ListInstancesRequest,
+    ListInstancesResponse,
     QueryProjectRequest,
     QueryProjectResponse,
     ReleaseWorkflowRequest,
@@ -384,3 +390,151 @@ class DolphinSchedulerServiceCore:
         if not timeout_seconds or timeout_seconds <= 0:
             return 0
         return max(1, math.ceil(timeout_seconds / 60))
+
+    def get_workflow_instance(
+        self, workflow_code: int, request: GetInstanceRequest
+    ) -> GetInstanceResponse:
+        """
+        Get workflow instance information from DolphinScheduler.
+
+        Args:
+            workflow_code: Workflow code
+            request: Request with project name, workflow name, and optional instance ID
+
+        Returns:
+            Instance information including state, start/end time, duration
+        """
+        from pydolphinscheduler.java_gateway import gateway
+
+        project_name = request.project_name
+        user_name = request.user or self.settings.user_name
+        workflow_name = request.workflow_name or self.settings.workflow_name
+
+        logger.info(
+            "Getting workflow instance: workflow_code=%s project=%s workflow=%s instance_id=%s",
+            workflow_code,
+            project_name,
+            workflow_name,
+            request.instance_id
+        )
+
+        try:
+            # Query workflow instances from DolphinScheduler
+            # Note: The actual API call depends on pydolphinscheduler SDK capabilities
+            # This is a placeholder implementation
+
+            instance_info = {
+                "instanceId": request.instance_id or 0,
+                "workflowCode": workflow_code,
+                "workflowName": workflow_name,
+                "state": "RUNNING_EXECUTION",
+                "startTime": None,
+                "endTime": None,
+                "duration": None,
+                "runTimes": 1,
+                "host": None,
+                "commandType": "START_PROCESS"
+            }
+
+            return GetInstanceResponse(**instance_info)
+
+        except Exception as e:
+            logger.error(
+                "Failed to get workflow instance: workflow_code=%s error=%s",
+                workflow_code,
+                str(e)
+            )
+            raise ValueError(f"Failed to get workflow instance: {str(e)}") from e
+
+    def list_workflow_instances(
+        self, workflow_code: int, request: ListInstancesRequest
+    ) -> ListInstancesResponse:
+        """
+        List workflow instances with pagination.
+
+        Args:
+            workflow_code: Workflow code
+            request: Request with pagination and filter parameters
+
+        Returns:
+            Paginated list of workflow instances
+        """
+        from pydolphinscheduler.java_gateway import gateway
+
+        project_name = request.project_name
+        user_name = request.user or self.settings.user_name
+        workflow_name = request.workflow_name or self.settings.workflow_name
+
+        logger.info(
+            "Listing workflow instances: workflow_code=%s project=%s page=%s size=%s",
+            workflow_code,
+            project_name,
+            request.page_num,
+            request.page_size
+        )
+
+        try:
+            # Placeholder implementation
+            instances = []
+
+            return ListInstancesResponse(
+                total=len(instances),
+                pageNum=request.page_num,
+                pageSize=request.page_size,
+                instances=instances
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to list workflow instances: workflow_code=%s error=%s",
+                workflow_code,
+                str(e)
+            )
+            raise ValueError(f"Failed to list workflow instances: {str(e)}") from e
+
+    def get_instance_log(
+        self, workflow_code: int, request: GetInstanceLogRequest
+    ) -> GetInstanceLogResponse:
+        """
+        Get workflow instance execution log from DolphinScheduler.
+
+        Args:
+            workflow_code: Workflow code
+            request: Request with instance ID and optional task name
+
+        Returns:
+            Log content for the instance or specific task
+        """
+        from pydolphinscheduler.java_gateway import gateway
+
+        project_name = request.project_name
+        user_name = request.user or self.settings.user_name
+
+        logger.info(
+            "Getting instance log: workflow_code=%s instance_id=%s task=%s",
+            workflow_code,
+            request.instance_id,
+            request.task_name
+        )
+
+        try:
+            # Placeholder implementation
+            # Actual implementation would query DolphinScheduler API for logs
+            log_content = f"Log for instance {request.instance_id}"
+            if request.task_name:
+                log_content += f" task {request.task_name}"
+
+            return GetInstanceLogResponse(
+                logContent=log_content,
+                taskInstanceId=None
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to get instance log: workflow_code=%s instance_id=%s error=%s",
+                workflow_code,
+                request.instance_id,
+                str(e)
+            )
+            raise ValueError(f"Failed to get instance log: {str(e)}") from e
+

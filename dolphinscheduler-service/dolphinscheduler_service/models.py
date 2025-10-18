@@ -141,3 +141,67 @@ class QueryProjectResponse(BaseModel):
     description: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class GetInstanceRequest(BaseModel):
+    project_name: str = Field(alias="projectName")
+    workflow_name: Optional[str] = Field(default=None, alias="workflowName")
+    instance_id: Optional[int] = Field(default=None, alias="instanceId")
+    user: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class GetInstanceResponse(BaseModel):
+    instance_id: int = Field(alias="instanceId")
+    workflow_code: int = Field(alias="workflowCode")
+    workflow_name: str = Field(alias="workflowName")
+    state: str
+    start_time: Optional[str] = Field(default=None, alias="startTime")
+    end_time: Optional[str] = Field(default=None, alias="endTime")
+    duration: Optional[int] = None
+    run_times: int = Field(default=0, alias="runTimes")
+    host: Optional[str] = None
+    command_type: Optional[str] = Field(default=None, alias="commandType")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class GetInstanceLogRequest(BaseModel):
+    project_name: str = Field(alias="projectName")
+    workflow_name: Optional[str] = Field(default=None, alias="workflowName")
+    instance_id: int = Field(alias="instanceId")
+    task_name: Optional[str] = Field(default=None, alias="taskName")
+    user: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class GetInstanceLogResponse(BaseModel):
+    log_content: str = Field(alias="logContent")
+    task_instance_id: Optional[int] = Field(default=None, alias="taskInstanceId")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ListInstancesRequest(BaseModel):
+    project_name: str = Field(alias="projectName")
+    workflow_name: Optional[str] = Field(default=None, alias="workflowName")
+    user: Optional[str] = None
+    page_num: int = Field(default=1, alias="pageNum")
+    page_size: int = Field(default=10, alias="pageSize")
+    start_date: Optional[str] = Field(default=None, alias="startDate")
+    end_date: Optional[str] = Field(default=None, alias="endDate")
+    state: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ListInstancesResponse(BaseModel):
+    total: int
+    page_num: int = Field(alias="pageNum")
+    page_size: int = Field(alias="pageSize")
+    instances: List[Dict[str, Any]]
+
+    model_config = ConfigDict(populate_by_name=True)
+

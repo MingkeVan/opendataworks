@@ -11,6 +11,9 @@ from .config import Settings, get_settings
 from .models import (
     ApiResponse,
     EnsureWorkflowRequest,
+    GetInstanceLogRequest,
+    GetInstanceRequest,
+    ListInstancesRequest,
     QueryProjectRequest,
     ReleaseWorkflowRequest,
     StartWorkflowRequest,
@@ -123,6 +126,57 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         def task():
             result = service.query_project(payload)
+            return success(result.model_dump(by_alias=True))
+
+        return await run(task)
+
+    @app.post("/api/v1/workflows/{workflow_code}/instances/get")
+    async def get_workflow_instance(
+        workflow_code: int,
+        payload: GetInstanceRequest,
+    ) -> dict:
+        logger.debug(
+            "get_workflow_instance workflow_code=%s payload=%s",
+            workflow_code,
+            payload.model_dump(by_alias=True),
+        )
+
+        def task():
+            result = service.get_workflow_instance(workflow_code, payload)
+            return success(result.model_dump(by_alias=True))
+
+        return await run(task)
+
+    @app.post("/api/v1/workflows/{workflow_code}/instances/list")
+    async def list_workflow_instances(
+        workflow_code: int,
+        payload: ListInstancesRequest,
+    ) -> dict:
+        logger.debug(
+            "list_workflow_instances workflow_code=%s payload=%s",
+            workflow_code,
+            payload.model_dump(by_alias=True),
+        )
+
+        def task():
+            result = service.list_workflow_instances(workflow_code, payload)
+            return success(result.model_dump(by_alias=True))
+
+        return await run(task)
+
+    @app.post("/api/v1/workflows/{workflow_code}/instances/log")
+    async def get_instance_log(
+        workflow_code: int,
+        payload: GetInstanceLogRequest,
+    ) -> dict:
+        logger.debug(
+            "get_instance_log workflow_code=%s payload=%s",
+            workflow_code,
+            payload.model_dump(by_alias=True),
+        )
+
+        def task():
+            result = service.get_instance_log(workflow_code, payload)
             return success(result.model_dump(by_alias=True))
 
         return await run(task)
