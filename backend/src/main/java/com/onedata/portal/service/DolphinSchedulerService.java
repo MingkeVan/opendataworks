@@ -197,6 +197,43 @@ public class DolphinSchedulerService {
     }
 
     /**
+     * Generate DolphinScheduler Web UI URL for workflow definition.
+     * Format: http://{host}:{port}/dolphinscheduler/ui/#/projects/{projectCode}/workflow/definition/{workflowCode}
+     */
+    public String getWorkflowDefinitionUrl(Long workflowCode) {
+        if (workflowCode == null) {
+            return null;
+        }
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            log.warn("Cannot generate workflow URL without project code");
+            return null;
+        }
+        // Extract base URL from service URL (remove /api paths)
+        String baseUrl = properties.getServiceUrl().replaceAll("/api.*$", "");
+        return String.format("%s/dolphinscheduler/ui/#/projects/%d/workflow/definition/%d",
+            baseUrl, projectCode, workflowCode);
+    }
+
+    /**
+     * Generate DolphinScheduler Web UI URL for task definition.
+     * Format: http://{host}:{port}/dolphinscheduler/ui/#/projects/{projectCode}/task/definition/{taskCode}
+     */
+    public String getTaskDefinitionUrl(Long taskCode) {
+        if (taskCode == null) {
+            return null;
+        }
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            log.warn("Cannot generate task URL without project code");
+            return null;
+        }
+        String baseUrl = properties.getServiceUrl().replaceAll("/api.*$", "");
+        return String.format("%s/dolphinscheduler/ui/#/projects/%d/task/definition/%d",
+            baseUrl, projectCode, taskCode);
+    }
+
+    /**
      * Generate the next DolphinScheduler task code locally.
      */
     public long nextTaskCode() {
