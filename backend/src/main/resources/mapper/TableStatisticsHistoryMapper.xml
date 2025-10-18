@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.onedata.portal.mapper.TableStatisticsHistoryMapper">
+
+    <!-- 获取指定表的最近N条统计记录 -->
+    <select id="selectRecentHistory" resultType="com.onedata.portal.entity.TableStatisticsHistory">
+        SELECT *
+        FROM table_statistics_history
+        WHERE table_id = #{tableId}
+        ORDER BY statistics_time DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 获取指定时间范围内的统计记录 -->
+    <select id="selectHistoryByTimeRange" resultType="com.onedata.portal.entity.TableStatisticsHistory">
+        SELECT *
+        FROM table_statistics_history
+        WHERE table_id = #{tableId}
+          AND statistics_time BETWEEN #{startTime} AND #{endTime}
+        ORDER BY statistics_time ASC
+    </select>
+
+</mapper>

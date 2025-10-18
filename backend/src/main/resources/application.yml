@@ -1,0 +1,53 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: data-portal
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/data_portal?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+    serialization:
+      write-dates-as-timestamps: false
+
+# MyBatis Plus 配置
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.onedata.portal.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# DolphinScheduler 配置
+dolphin:
+  service-url: http://localhost:5001
+  project-name: test-project
+  workflow-name: data-portal-workflow
+  tenant-code: default
+  worker-group: default
+  execution-type: PARALLEL
+
+# Dinky 配置（预留）
+dinky:
+  api-url: http://localhost:8888
+  token: your-dinky-token
+  enabled: false
+
+# 日志配置
+logging:
+  level:
+    com.onedata.portal: debug
+    org.springframework.web: info

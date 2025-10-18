@@ -1,0 +1,28 @@
+version: '3'
+services:
+  doris-fe:
+    image: apache/doris:doris-all-in-one-2.1.0
+    container_name: doris-fe
+    hostname: doris-fe
+    ports:
+      - "8030:8030"   # FE Web UI
+      - "9030:9030"   # FE MySQL Protocol
+    environment:
+      - FE_SERVERS=fe1:doris-fe:9010
+      - FE_ID=1
+    volumes:
+      - doris-fe-data:/opt/apache-doris/fe/doris-meta
+    networks:
+      - doris-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8030/api/bootstrap"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  doris-fe-data:
+
+networks:
+  doris-network:
+    driver: bridge

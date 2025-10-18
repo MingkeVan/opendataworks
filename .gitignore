@@ -1,0 +1,62 @@
+# External Source Code - DO NOT COMMIT
+dinky/
+dolphinscheduler/
+
+# Maven
+backend/target/
+backend/*.jar
+backend/*.war
+backend/*.ear
+backend/*.class
+
+# IntelliJ IDEA
+backend/.idea/
+backend/*.iml
+backend/*.iws
+backend/*.ipr
+
+# Node.js
+frontend/node_modules/
+frontend/dist/
+frontend/.DS_Store
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# Python
+dolphinscheduler-service/__pycache__/
+dolphinscheduler-service/*.pyc
+dolphinscheduler-service/.pytest_cache/
+dolphinscheduler-service/venv/
+dolphinscheduler-service/.venv/
+dolphinscheduler-service/*.egg-info/
+
+# Editor
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+/tmp/
+
+# Database
+*.db
+*.sqlite
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Playwright MCP
+.playwright-mcp/
+
+# Test outputs
+integration-test-results/
