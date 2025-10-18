@@ -576,12 +576,13 @@ public class DataTaskService {
         }
 
         // 生成 DolphinScheduler Web UI 跳转链接
-        if (task.getDolphinProcessCode() != null) {
-            status.setDolphinWorkflowUrl(dolphinSchedulerService.getWorkflowDefinitionUrl(task.getDolphinProcessCode()));
-        }
-        if (task.getDolphinTaskCode() != null) {
-            status.setDolphinTaskUrl(dolphinSchedulerService.getTaskDefinitionUrl(task.getDolphinTaskCode()));
-        }
+        // TODO: Implement getWorkflowDefinitionUrl and getTaskDefinitionUrl in DolphinSchedulerService
+        // if (task.getDolphinProcessCode() != null) {
+        //     status.setDolphinWorkflowUrl(dolphinSchedulerService.getWorkflowDefinitionUrl(task.getDolphinProcessCode()));
+        // }
+        // if (task.getDolphinTaskCode() != null) {
+        //     status.setDolphinTaskUrl(dolphinSchedulerService.getTaskDefinitionUrl(task.getDolphinTaskCode()));
+        // }
 
         return status;
     }

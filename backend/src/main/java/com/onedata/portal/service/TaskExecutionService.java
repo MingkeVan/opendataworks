@@ -23,6 +23,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class TaskExecutionService {
 
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(TaskExecutionService.class);
+
     private final TaskExecutionLogMapper executionLogMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
 
@@ -65,32 +67,33 @@ public class TaskExecutionService {
      * 同步执行状态 - 从 DolphinScheduler 获取最新状态
      */
     public TaskExecutionLog syncExecutionStatus(Long executionLogId) {
-        TaskExecutionLog log = executionLogMapper.selectById(executionLogId);
-        if (log == null) {
+        TaskExecutionLog execLog = executionLogMapper.selectById(executionLogId);
+        if (execLog == null) {
             throw new IllegalArgumentException("Execution log not found: " + executionLogId);
         }
 
         // 如果已经是终态,不再同步
-        if (isTerminalStatus(log.getStatus())) {
-            return log;
+        if (isTerminalStatus(execLog.getStatus())) {
+            return execLog;
         }
 
         try {
             // 从 DolphinScheduler 获取实例状态
             JsonNode instanceStatus = dolphinSchedulerService.getWorkflowInstanceStatus(
-                log.getTaskId(), // 使用 taskCode 作为 workflowCode
-                log.getExecutionId()
+                execLog.getTaskId(), // 使用 taskCode 作为 workflowCode
+                execLog.getExecutionId()
             );
 
             if (instanceStatus != null) {
-                updateExecutionLog(log, instanceStatus);
-                executionLogMapper.updateById(log);
+                updateExecutionLog(execLog, instanceStatus);
+                executionLogMapper.updateById(execLog);
             }
         } catch (Exception e) {
-            log.warn("Failed to sync execution status for log {}: {}", executionLogId, e.getMessage());
+            // Use the class logger, not the entity variable
+            logger.warn("Failed to sync execution status for log {}: {}", executionLogId, e.getMessage());
         }
 
-        return log;
+        return execLog;
     }
 
     /**
