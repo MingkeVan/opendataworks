@@ -57,7 +57,7 @@ const routes = [
       {
         path: '/monitor',
         name: 'Monitor',
-        component: () => import('@/views/monitor/MonitorView.vue'),
+        component: () => import('@/views/executions/ExecutionMonitor.vue'),
         meta: { title: '执行监控' }
       }
     ]
