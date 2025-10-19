@@ -1,6 +1,7 @@
 package com.onedata.portal.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.onedata.portal.dto.Result;
 import com.onedata.portal.entity.TaskExecutionLog;
 import com.onedata.portal.service.TaskExecutionService;
 import lombok.RequiredArgsConstructor;
@@ -33,7 +34,7 @@ public class TaskExecutionController {
      * @return 执行历史分页数据
      */
     @GetMapping("/history")
-    public Map<String, Object> getExecutionHistory(
+    public Result<Map<String, Object>> getExecutionHistory(
             @RequestParam(required = false) Long taskId,
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "10") Integer pageSize) {
@@ -47,7 +48,7 @@ public class TaskExecutionController {
         result.put("pageSize", page.getSize());
         result.put("records", page.getRecords());
 
-        return result;
+        return Result.success(result);
     }
 
     /**
@@ -57,9 +58,9 @@ public class TaskExecutionController {
      * @return 执行记录详情
      */
     @GetMapping("/{id}")
-    public TaskExecutionLog getExecutionDetail(@PathVariable Long id) {
+    public Result<TaskExecutionLog> getExecutionDetail(@PathVariable Long id) {
         log.info("Query execution detail: id={}", id);
-        return executionService.getExecutionDetail(id);
+        return Result.success(executionService.getExecutionDetail(id));
     }
 
     /**
@@ -70,11 +71,11 @@ public class TaskExecutionController {
      * @return 最近执行记录列表
      */
     @GetMapping("/recent")
-    public List<TaskExecutionLog> getRecentExecutions(
+    public Result<List<TaskExecutionLog>> getRecentExecutions(
             @RequestParam Long taskId,
             @RequestParam(defaultValue = "10") Integer limit) {
         log.info("Query recent executions: taskId={}, limit={}", taskId, limit);
-        return executionService.getRecentExecutions(taskId, limit);
+        return Result.success(executionService.getRecentExecutions(taskId, limit));
     }
 
     /**
@@ -84,9 +85,9 @@ public class TaskExecutionController {
      * @return 更新后的执行记录
      */
     @PostMapping("/{id}/sync")
-    public TaskExecutionLog syncExecutionStatus(@PathVariable Long id) {
+    public Result<TaskExecutionLog> syncExecutionStatus(@PathVariable Long id) {
         log.info("Sync execution status: id={}", id);
-        return executionService.syncExecutionStatus(id);
+        return Result.success(executionService.syncExecutionStatus(id));
     }
 
     /**
@@ -98,12 +99,12 @@ public class TaskExecutionController {
      * @return 统计信息
      */
     @GetMapping("/statistics")
-    public Map<String, Object> getExecutionStatistics(
+    public Result<Map<String, Object>> getExecutionStatistics(
             @RequestParam(required = false) Long taskId,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
         log.info("Query execution statistics: taskId={}, startTime={}, endTime={}", taskId, startTime, endTime);
-        return executionService.getExecutionStatistics(taskId, startTime, endTime);
+        return Result.success(executionService.getExecutionStatistics(taskId, startTime, endTime));
     }
 
     /**
@@ -113,10 +114,10 @@ public class TaskExecutionController {
      * @return 失败任务列表
      */
     @GetMapping("/failed")
-    public List<TaskExecutionLog> getFailedExecutions(
+    public Result<List<TaskExecutionLog>> getFailedExecutions(
             @RequestParam(required = false, defaultValue = "50") Integer limit) {
         log.info("Query failed executions: limit={}", limit);
-        return executionService.getFailedExecutions(limit);
+        return Result.success(executionService.getFailedExecutions(limit));
     }
 
     /**
@@ -125,9 +126,9 @@ public class TaskExecutionController {
      * @return 运行中任务列表
      */
     @GetMapping("/running")
-    public List<TaskExecutionLog> getRunningExecutions() {
+    public Result<List<TaskExecutionLog>> getRunningExecutions() {
         log.info("Query running executions");
-        return executionService.getRunningExecutions();
+        return Result.success(executionService.getRunningExecutions());
     }
 
     /**
@@ -137,15 +138,15 @@ public class TaskExecutionController {
      * @return 创建的执行记录
      */
     @PostMapping
-    public TaskExecutionLog createExecutionLog(@RequestBody CreateExecutionLogRequest request) {
+    public Result<TaskExecutionLog> createExecutionLog(@RequestBody CreateExecutionLogRequest request) {
         log.info("Create execution log: taskId={}, executionId={}, triggerType={}",
                 request.getTaskId(), request.getExecutionId(), request.getTriggerType());
 
-        return executionService.createExecutionLog(
+        return Result.success(executionService.createExecutionLog(
                 request.getTaskId(),
                 request.getExecutionId(),
                 request.getTriggerType()
-        );
+        ));
     }
 
     /**

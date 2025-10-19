@@ -69,6 +69,12 @@ public class DataTaskService {
      */
     @Transactional
     public DataTask create(DataTask task, List<Long> inputTableIds, List<Long> outputTableIds) {
+        // 如果未提供任务编码,自动生成一个唯一编码
+        String taskCode = task.getTaskCode();
+        if (taskCode == null || taskCode.trim().isEmpty()) {
+            task.setTaskCode(generateUniqueTaskCode(task.getTaskName()));
+        }
+
         // 检查任务编码是否已存在
         DataTask exists = dataTaskMapper.selectOne(
             new LambdaQueryWrapper<DataTask>()
@@ -167,23 +173,33 @@ public class DataTaskService {
      */
     @Transactional
     public void publish(Long taskId) {
+        log.info("开始发布任务: taskId={}", taskId);
+
         DataTask target = dataTaskMapper.selectById(taskId);
         if (target == null) {
-            throw new RuntimeException("任务不存在");
+            log.error("任务不存在: taskId={}", taskId);
+            throw new RuntimeException("任务不存在: ID=" + taskId);
         }
         if (!"dolphin".equalsIgnoreCase(target.getEngine())) {
-            throw new RuntimeException("仅支持 Dolphin 引擎任务发布");
+            log.error("不支持的引擎类型: taskId={}, engine={}", taskId, target.getEngine());
+            throw new RuntimeException("仅支持 Dolphin 引擎任务发布，当前引擎: " + target.getEngine());
         }
 
+        log.info("任务信息: taskCode={}, taskName={}, engine={}",
+            target.getTaskCode(), target.getTaskName(), target.getEngine());
+
         // 查询全部 Dolphin 任务，构建统一工作流
+        log.info("查询所有 Dolphin 引擎任务...");
         List<DataTask> dolphinTasks = dataTaskMapper.selectList(
             new LambdaQueryWrapper<DataTask>()
                 .eq(DataTask::getEngine, "dolphin")
                 .orderByAsc(DataTask::getId)
         );
         if (dolphinTasks.isEmpty()) {
+            log.error("未找到任何 Dolphin 引擎任务");
             throw new RuntimeException("未找到任何 Dolphin 引擎任务");
         }
+        log.info("找到 {} 个 Dolphin 引擎任务", dolphinTasks.size());
 
         // 获取已存在的 workflow code (如果有的话)
         Long existingWorkflowCode = dolphinTasks.stream()
@@ -282,30 +298,41 @@ public class DataTaskService {
         }
 
         // syncWorkflow 返回实际的 workflow code (如果是新建则返回新的 code)
-        long actualWorkflowCode = dolphinSchedulerService.syncWorkflow(
-            workflowCode,
-            dolphinSchedulerService.getWorkflowName(),
-            definitions,
-            relations,
-            locations
-        );
+        log.info("开始同步工作流到 DolphinScheduler: workflowCode={}, taskCount={}",
+            workflowCode, definitions.size());
+        try {
+            long actualWorkflowCode = dolphinSchedulerService.syncWorkflow(
+                workflowCode,
+                dolphinSchedulerService.getWorkflowName(),
+                definitions,
+                relations,
+                locations
+            );
+            log.info("工作流同步成功: actualWorkflowCode={}", actualWorkflowCode);
 
-        // 更新所有 dolphin 任务的 dolphinProcessCode
-        for (DataTask dataTask : dolphinTasks) {
-            if (!Objects.equals(dataTask.getDolphinProcessCode(), actualWorkflowCode)) {
-                dataTask.setDolphinProcessCode(actualWorkflowCode);
-                dataTaskMapper.updateById(dataTask);
+            // 更新所有 dolphin 任务的 dolphinProcessCode
+            log.info("更新任务的 workflow code...");
+            for (DataTask dataTask : dolphinTasks) {
+                if (!Objects.equals(dataTask.getDolphinProcessCode(), actualWorkflowCode)) {
+                    dataTask.setDolphinProcessCode(actualWorkflowCode);
+                    dataTaskMapper.updateById(dataTask);
+                }
             }
+
+            // Auto-release workflow to ONLINE state
+            log.info("设置工作流状态为 ONLINE: workflowCode={}", actualWorkflowCode);
+            dolphinSchedulerService.setWorkflowReleaseState(actualWorkflowCode, "ONLINE");
+
+            target.setStatus("published");
+            target.setDolphinProcessCode(actualWorkflowCode);
+            dataTaskMapper.updateById(target);
+            log.info("任务发布成功: taskId={}, taskName={}, workflowCode={}, status=ONLINE",
+                taskId, target.getTaskName(), actualWorkflowCode);
+        } catch (Exception e) {
+            log.error("发布任务失败: taskId={}, taskName={}, error={}",
+                taskId, target.getTaskName(), e.getMessage(), e);
+            throw new RuntimeException("发布任务到 DolphinScheduler 失败: " + e.getMessage(), e);
         }
-
-        // Auto-release workflow to ONLINE state
-        dolphinSchedulerService.setWorkflowReleaseState(actualWorkflowCode, "ONLINE");
-
-        target.setStatus("published");
-        target.setDolphinProcessCode(actualWorkflowCode);
-        dataTaskMapper.updateById(target);
-        log.info("Published and released task {} to DolphinScheduler workflow {} (ONLINE)",
-            target.getTaskName(), actualWorkflowCode);
     }
 
     private List<DataTask> resolveUpstreamTasks(Long taskId, Map<Long, DataTask> taskMap) {
@@ -440,7 +467,7 @@ public class DataTaskService {
         executionLog.setTaskId(taskId);
         executionLog.setStatus("pending");
         executionLog.setStartTime(LocalDateTime.now());
-        executionLog.setTriggerType("manual-test");
+        executionLog.setTriggerType("manual");
         executionLogMapper.insert(executionLog);
 
         // 执行临时工作流
@@ -472,7 +499,7 @@ public class DataTaskService {
         executionLog.setTaskId(taskId);
         executionLog.setStatus("pending");
         executionLog.setStartTime(LocalDateTime.now());
-        executionLog.setTriggerType("manual-workflow");
+        executionLog.setTriggerType("manual");
         executionLogMapper.insert(executionLog);
 
         // 执行统一工作流
@@ -608,6 +635,16 @@ public class DataTaskService {
             default:
                 return "pending";
         }
+    }
+
+    /**
+     * 生成唯一的任务编码
+     * 规则: task_ + 时间戳 + 随机数
+     */
+    private String generateUniqueTaskCode(String taskName) {
+        long timestamp = System.currentTimeMillis();
+        int random = (int) (Math.random() * 1000);
+        return String.format("task_%d_%03d", timestamp, random);
     }
 
     /**

@@ -15,6 +15,9 @@ public class DolphinSchedulerProperties {
     /** dolphinscheduler-service base url, for example: http://localhost:8081 */
     private String serviceUrl;
 
+    /** DolphinScheduler Web UI base URL, for example: http://localhost:12345/dolphinscheduler */
+    private String webuiUrl;
+
     /** DolphinScheduler project name managed by the Python service. */
     private String projectName = "data-portal";
 

@@ -204,15 +204,17 @@ public class DolphinSchedulerService {
         if (workflowCode == null) {
             return null;
         }
+        if (properties.getWebuiUrl() == null || properties.getWebuiUrl().isEmpty()) {
+            log.warn("dolphin.webui-url is not configured, cannot generate workflow URL");
+            return null;
+        }
         Long projectCode = getProjectCode();
         if (projectCode == null) {
             log.warn("Cannot generate workflow URL without project code");
             return null;
         }
-        // Extract base URL from service URL (remove /api paths)
-        String baseUrl = properties.getServiceUrl().replaceAll("/api.*$", "");
-        return String.format("%s/dolphinscheduler/ui/#/projects/%d/workflow/definition/%d",
-            baseUrl, projectCode, workflowCode);
+        return String.format("%s/ui/#/projects/%d/workflow/definition/%d",
+            properties.getWebuiUrl(), projectCode, workflowCode);
     }
 
     /**
@@ -223,14 +225,17 @@ public class DolphinSchedulerService {
         if (taskCode == null) {
             return null;
         }
+        if (properties.getWebuiUrl() == null || properties.getWebuiUrl().isEmpty()) {
+            log.warn("dolphin.webui-url is not configured, cannot generate task URL");
+            return null;
+        }
         Long projectCode = getProjectCode();
         if (projectCode == null) {
             log.warn("Cannot generate task URL without project code");
             return null;
         }
-        String baseUrl = properties.getServiceUrl().replaceAll("/api.*$", "");
-        return String.format("%s/dolphinscheduler/ui/#/projects/%d/task/definition/%d",
-            baseUrl, projectCode, taskCode);
+        return String.format("%s/ui/#/projects/%d/task/definition/%d",
+            properties.getWebuiUrl(), projectCode, taskCode);
     }
 
     /**
@@ -478,7 +483,8 @@ public class DolphinSchedulerService {
             // SQL type: 0=NON_QUERY, 1=QUERY
             this.sqlType = sql != null && sql.trim().toUpperCase().startsWith("SELECT") ? 1 : 0;
             this.displayRows = 10;
-            this.type = datasourceType != null ? datasourceType : "MYSQL";
+            // Don't default to MYSQL - let DolphinScheduler infer type from datasource name
+            this.type = datasourceType;
         }
     }
 }

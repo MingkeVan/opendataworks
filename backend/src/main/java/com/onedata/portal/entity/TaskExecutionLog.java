@@ -39,4 +39,20 @@ public class TaskExecutionLog {
 
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
+
+    // DolphinScheduler 相关字段 (不存储到数据库,仅用于API响应)
+    @TableField(exist = false)
+    private Long workflowCode;
+
+    @TableField(exist = false)
+    private String workflowName;
+
+    @TableField(exist = false)
+    private String workflowInstanceUrl; // DolphinScheduler WebUI 工作流实例链接
+
+    @TableField(exist = false)
+    private String taskDefinitionUrl; // DolphinScheduler WebUI 任务定义链接
+
+    @TableField(exist = false)
+    private Object dolphinInstanceDetail; // DolphinScheduler 实例详情 (来自实时查询)
 }

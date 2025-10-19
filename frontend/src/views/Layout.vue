@@ -31,6 +31,10 @@
             <el-icon><Monitor /></el-icon>
             <span>执行监控</span>
           </el-menu-item>
+          <el-menu-item index="/inspection">
+            <el-icon><Warning /></el-icon>
+            <span>数据巡检</span>
+          </el-menu-item>
         </el-menu>
       </div>
     </el-header>
@@ -44,7 +48,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Grid, Management, Connection, Monitor, Collection } from '@element-plus/icons-vue'
+import { Grid, Management, Connection, Monitor, Collection, Warning } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => {
@@ -63,6 +67,9 @@ const activeMenu = computed(() => {
   }
   if (path.startsWith('/monitor')) {
     return '/monitor'
+  }
+  if (path.startsWith('/inspection')) {
+    return '/inspection'
   }
   return path
 })

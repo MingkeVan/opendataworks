@@ -20,6 +20,7 @@ request.interceptors.request.use(
 request.interceptors.response.use(
   response => {
     const res = response.data
+    // 后端统一返回格式 {code, data, message}
     if (res.code !== 200) {
       ElMessage.error(res.message || '请求失败')
       return Promise.reject(new Error(res.message || '请求失败'))

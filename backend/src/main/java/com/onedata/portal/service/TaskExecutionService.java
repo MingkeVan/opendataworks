@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.TaskExecutionLog;
+import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,10 +28,11 @@ public class TaskExecutionService {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(TaskExecutionService.class);
 
     private final TaskExecutionLogMapper executionLogMapper;
+    private final DataTaskMapper dataTaskMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
 
     /**
-     * 查询任务执行历史
+     * 查询任务执行历史 - 从 DolphinScheduler 实时同步状态
      */
     public IPage<TaskExecutionLog> getExecutionHistory(Long taskId, Integer pageNum, Integer pageSize) {
         Page<TaskExecutionLog> page = new Page<>(pageNum, pageSize);
@@ -41,18 +44,27 @@ public class TaskExecutionService {
 
         wrapper.orderByDesc(TaskExecutionLog::getStartTime);
 
-        return executionLogMapper.selectPage(page, wrapper);
+        IPage<TaskExecutionLog> result = executionLogMapper.selectPage(page, wrapper);
+
+        // 丰富每条记录的 DolphinScheduler 信息
+        result.getRecords().forEach(this::enrichWithDolphinData);
+
+        return result;
     }
 
     /**
-     * 获取单个执行记录详情
+     * 获取单个执行记录详情 - 以 DolphinScheduler 数据为准
      */
     public TaskExecutionLog getExecutionDetail(Long executionLogId) {
-        return executionLogMapper.selectById(executionLogId);
+        TaskExecutionLog log = executionLogMapper.selectById(executionLogId);
+        if (log != null) {
+            enrichWithDolphinData(log);
+        }
+        return log;
     }
 
     /**
-     * 查询最近的执行记录
+     * 查询最近的执行记录 - 包含 DolphinScheduler 实时状态
      */
     public List<TaskExecutionLog> getRecentExecutions(Long taskId, Integer limit) {
         LambdaQueryWrapper<TaskExecutionLog> wrapper = new LambdaQueryWrapper<>();
@@ -60,7 +72,76 @@ public class TaskExecutionService {
                 .orderByDesc(TaskExecutionLog::getStartTime)
                 .last("LIMIT " + limit);
 
-        return executionLogMapper.selectList(wrapper);
+        List<TaskExecutionLog> logs = executionLogMapper.selectList(wrapper);
+        logs.forEach(this::enrichWithDolphinData);
+        return logs;
+    }
+
+    /**
+     * 丰富执行日志数据 - 添加 DolphinScheduler 实时信息和 WebUI 链接
+     * 以 DolphinScheduler 为权威数据源
+     */
+    private void enrichWithDolphinData(TaskExecutionLog log) {
+        try {
+            // 1. 获取任务信息以获取 workflow code
+            DataTask task = dataTaskMapper.selectById(log.getTaskId());
+            if (task != null) {
+                Long workflowCode = task.getDolphinProcessCode();
+                Long taskCode = task.getDolphinTaskCode();
+
+                log.setWorkflowCode(workflowCode);
+                log.setWorkflowName(dolphinSchedulerService.getWorkflowName());
+
+                // 2. 生成 DolphinScheduler WebUI 链接
+                if (taskCode != null) {
+                    String taskUrl = dolphinSchedulerService.getTaskDefinitionUrl(taskCode);
+                    log.setTaskDefinitionUrl(taskUrl);
+                }
+
+                // 3. 从 DolphinScheduler 获取实时实例状态 (作为权威数据源)
+                if (workflowCode != null && log.getExecutionId() != null) {
+                    JsonNode instanceDetail = dolphinSchedulerService.getWorkflowInstanceStatus(
+                        workflowCode,
+                        log.getExecutionId()
+                    );
+
+                    if (instanceDetail != null) {
+                        // 保存完整的 Dolphin 实例详情
+                        log.setDolphinInstanceDetail(instanceDetail);
+
+                        // 4. 使用 DolphinScheduler 的状态更新本地记录 (Dolphin 为准)
+                        String dolphinState = instanceDetail.path("state").asText();
+                        String mappedStatus = mapDolphinStatusToOurs(dolphinState);
+
+                        // 如果 Dolphin 状态与本地不一致,以 Dolphin 为准并更新本地
+                        if (!mappedStatus.equals(log.getStatus()) && !isTerminalStatus(log.getStatus())) {
+                            log.setStatus(mappedStatus);
+                            updateExecutionLogFromDolphin(log, instanceDetail);
+                            executionLogMapper.updateById(log);
+                            logger.info("Updated execution log {} status from Dolphin: {} -> {}",
+                                log.getId(), log.getStatus(), mappedStatus);
+                        }
+
+                        // 5. 生成工作流实例 WebUI 链接
+                        Long projectCode = dolphinSchedulerService.getProjectCode();
+                        if (projectCode != null && workflowCode != null) {
+                            String workflowDefUrl = dolphinSchedulerService.getWorkflowDefinitionUrl(workflowCode);
+                            if (workflowDefUrl != null) {
+                                String baseUrl = workflowDefUrl.replaceAll("/workflow/definition/.*$", "");
+                                String instanceUrl = String.format(
+                                    "%s/workflow/instance/%d/%s",
+                                    baseUrl, workflowCode, log.getExecutionId()
+                                );
+                                log.setWorkflowInstanceUrl(instanceUrl);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to enrich execution log {} with Dolphin data: {}",
+                log.getId(), e.getMessage());
+        }
     }
 
     /**
@@ -78,14 +159,21 @@ public class TaskExecutionService {
         }
 
         try {
+            // Get the workflow code from the DataTask, not from the execution log's taskId
+            DataTask task = dataTaskMapper.selectById(execLog.getTaskId());
+            if (task == null || task.getDolphinProcessCode() == null) {
+                logger.warn("Cannot sync execution status: DataTask {} not found or missing DolphinProcessCode", execLog.getTaskId());
+                return execLog;
+            }
+
             // 从 DolphinScheduler 获取实例状态
             JsonNode instanceStatus = dolphinSchedulerService.getWorkflowInstanceStatus(
-                execLog.getTaskId(), // 使用 taskCode 作为 workflowCode
+                task.getDolphinProcessCode(), // Use the correct workflow code from DataTask
                 execLog.getExecutionId()
             );
 
             if (instanceStatus != null) {
-                updateExecutionLog(execLog, instanceStatus);
+                updateExecutionLogFromDolphin(execLog, instanceStatus);
                 executionLogMapper.updateById(execLog);
             }
         } catch (Exception e) {
@@ -172,7 +260,7 @@ public class TaskExecutionService {
     }
 
     /**
-     * 获取失败任务列表
+     * 获取失败任务列表 - 包含 DolphinScheduler 实时状态
      */
     public List<TaskExecutionLog> getFailedExecutions(Integer limit) {
         LambdaQueryWrapper<TaskExecutionLog> wrapper = new LambdaQueryWrapper<>();
@@ -180,18 +268,22 @@ public class TaskExecutionService {
                 .orderByDesc(TaskExecutionLog::getStartTime)
                 .last(limit != null ? "LIMIT " + limit : "LIMIT 50");
 
-        return executionLogMapper.selectList(wrapper);
+        List<TaskExecutionLog> logs = executionLogMapper.selectList(wrapper);
+        logs.forEach(this::enrichWithDolphinData);
+        return logs;
     }
 
     /**
-     * 获取正在运行的任务
+     * 获取正在运行的任务 - 包含 DolphinScheduler 实时状态
      */
     public List<TaskExecutionLog> getRunningExecutions() {
         LambdaQueryWrapper<TaskExecutionLog> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(TaskExecutionLog::getStatus, "running")
                 .orderByDesc(TaskExecutionLog::getStartTime);
 
-        return executionLogMapper.selectList(wrapper);
+        List<TaskExecutionLog> logs = executionLogMapper.selectList(wrapper);
+        logs.forEach(this::enrichWithDolphinData);
+        return logs;
     }
 
     /**
@@ -210,9 +302,9 @@ public class TaskExecutionService {
     }
 
     /**
-     * 更新执行日志
+     * 更新执行日志 - 从 DolphinScheduler 实例信息
      */
-    private void updateExecutionLog(TaskExecutionLog log, JsonNode instanceStatus) {
+    private void updateExecutionLogFromDolphin(TaskExecutionLog log, JsonNode instanceStatus) {
         // 解析 DolphinScheduler 返回的状态
         String state = instanceStatus.path("state").asText();
         log.setStatus(mapDolphinStatusToOurs(state));

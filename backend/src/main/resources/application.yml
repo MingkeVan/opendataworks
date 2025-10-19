@@ -8,7 +8,7 @@ spring:
     name: data-portal
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/data_portal?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://localhost:3306/data_portal?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: root
     password: root
   jackson:
@@ -34,6 +34,7 @@ mybatis-plus:
 # DolphinScheduler 配置
 dolphin:
   service-url: http://localhost:5001
+  webui-url: http://localhost:12345/dolphinscheduler
   project-name: test-project
   workflow-name: data-portal-workflow
   tenant-code: default

@@ -170,6 +170,15 @@ const handlePublish = async (id) => {
     loadData()
   } catch (error) {
     console.error('发布失败:', error)
+
+    // 从后端响应中提取错误信息
+    const errorMessage = error.response?.data?.message || error.message || '发布失败，请稍后重试'
+
+    ElMessage.error({
+      message: errorMessage,
+      duration: 6000,
+      showClose: true
+    })
   }
 }
 
@@ -177,8 +186,16 @@ const handleExecuteTask = async (id) => {
   try {
     await taskApi.execute(id)
     ElMessage.success('单任务执行已触发')
+    // 刷新执行状态
+    setTimeout(() => loadData(), 1000)
   } catch (error) {
     console.error('执行失败:', error)
+    const errorMessage = error.response?.data?.message || error.message || '执行失败，请稍后重试'
+    ElMessage.error({
+      message: errorMessage,
+      duration: 6000,
+      showClose: true
+    })
   }
 }
 
@@ -186,8 +203,16 @@ const handleExecuteWorkflow = async (id) => {
   try {
     await taskApi.executeWorkflow(id)
     ElMessage.success('工作流执行已触发')
+    // 刷新执行状态
+    setTimeout(() => loadData(), 1000)
   } catch (error) {
     console.error('执行失败:', error)
+    const errorMessage = error.response?.data?.message || error.message || '执行失败，请稍后重试'
+    ElMessage.error({
+      message: errorMessage,
+      duration: 6000,
+      showClose: true
+    })
   }
 }
 
@@ -198,6 +223,12 @@ const handleDelete = async (id) => {
     loadData()
   } catch (error) {
     console.error('删除失败:', error)
+    const errorMessage = error.response?.data?.message || error.message || '删除失败，请稍后重试'
+    ElMessage.error({
+      message: errorMessage,
+      duration: 6000,
+      showClose: true
+    })
   }
 }
 
