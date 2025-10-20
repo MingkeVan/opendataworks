@@ -31,6 +31,12 @@ const routes = [
         meta: { title: '表详情' }
       },
       {
+        path: '/query',
+        name: 'DataQuery',
+        component: () => import('@/views/query/DataQuery.vue'),
+        meta: { title: '数据查询' }
+      },
+      {
         path: '/domains',
         name: 'Domains',
         component: () => import('@/views/domains/DomainManagement.vue'),

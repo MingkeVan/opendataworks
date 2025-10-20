@@ -15,6 +15,10 @@
             <el-icon><Grid /></el-icon>
             <span>表管理</span>
           </el-menu-item>
+          <el-menu-item index="/query">
+            <el-icon><Search /></el-icon>
+            <span>数据查询</span>
+          </el-menu-item>
           <el-menu-item index="/domains">
             <el-icon><Collection /></el-icon>
             <span>域管理</span>
@@ -48,13 +52,16 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Grid, Management, Connection, Monitor, Collection, Warning } from '@element-plus/icons-vue'
+import { Grid, Management, Connection, Monitor, Collection, Warning, Search } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => {
   const path = route.path
   if (path.startsWith('/tables')) {
     return '/tables'
+  }
+  if (path.startsWith('/query')) {
+    return '/query'
   }
   if (path.startsWith('/domains')) {
     return '/domains'
