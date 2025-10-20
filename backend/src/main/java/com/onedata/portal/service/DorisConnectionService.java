@@ -63,6 +63,14 @@ public class DorisConnectionService {
         return getConnection(cluster, null);
     }
 
+    /**
+     * 获取连接并指定数据库
+     */
+    public Connection getConnection(Long clusterId, String database) throws SQLException {
+        DorisCluster cluster = resolveCluster(clusterId);
+        return getConnection(cluster, database);
+    }
+
     private Connection getConnection(DorisCluster cluster, String database) throws SQLException {
         String targetDb = StringUtils.hasText(database) ? database : DEFAULT_DB;
         String url = String.format(JDBC_TEMPLATE, cluster.getFeHost(), cluster.getFePort(), targetDb);

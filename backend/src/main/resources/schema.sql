@@ -115,6 +115,23 @@ CREATE TABLE IF NOT EXISTS `task_execution_log` (
     KEY `idx_start_time` (`start_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='任务执行日志';
 
+-- SQL 查询历史表
+CREATE TABLE IF NOT EXISTS `data_query_history` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `cluster_id` BIGINT DEFAULT NULL COMMENT 'Doris 集群ID',
+    `cluster_name` VARCHAR(100) DEFAULT NULL COMMENT '集群名称',
+    `database_name` VARCHAR(100) DEFAULT NULL COMMENT '数据库名称',
+    `sql_text` TEXT NOT NULL COMMENT '执行 SQL',
+    `preview_row_count` INT DEFAULT 0 COMMENT '返回的预览行数',
+    `duration_ms` BIGINT DEFAULT 0 COMMENT '执行耗时（毫秒）',
+    `has_more` TINYINT DEFAULT 0 COMMENT '是否存在更多数据',
+    `result_preview` MEDIUMTEXT DEFAULT NULL COMMENT '结果预览(JSON)',
+    `executed_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '执行时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_cluster_id` (`cluster_id`),
+    KEY `idx_executed_at` (`executed_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SQL 查询历史记录';
+
 -- 插入测试数据
 -- ODS层示例表
 INSERT INTO `data_table` (`table_name`, `table_comment`, `layer`, `db_name`, `owner`, `status`)
