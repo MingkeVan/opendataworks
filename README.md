@@ -10,7 +10,7 @@
 
 **一站式数据任务管理与数据血缘可视化平台**
 
-[English](README_EN.md) | 简体中文
+[🌐 项目主页](https://mingkevan.github.io/opendataworks/) | [English](README_EN.md) | 简体中文
 
 [快速开始](#快速开始) · [功能特性](#功能特性) · [架构设计](#架构设计) · [开发文档](#开发文档) · [贡献指南](#贡献指南)
 
@@ -322,12 +322,135 @@ cd opendataworks
 
 #### 2. 数据库初始化
 
-```bash
-# 创建数据库
-mysql -u root -p -e "CREATE DATABASE data_portal CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+##### 方法一：使用自动化脚本（推荐）
 
-# 执行建表脚本
+使用提供的初始化脚本自动完成数据库创建、用户配置和表结构初始化：
+
+```bash
+# 基本用法
+./init-database.sh -r root密码 -p 应用密码
+
+# 包含示例数据
+./init-database.sh -r root密码 -p 应用密码 -s
+
+# 自定义配置
+./init-database.sh \
+  -h localhost \
+  -P 3306 \
+  -d data_portal \
+  -u onedata \
+  -p 应用密码 \
+  -r root密码 \
+  -s
+
+# 查看所有选项
+./init-database.sh --help
+```
+
+**脚本功能**:
+- ✅ 自动创建数据库（UTF-8MB4 字符集）
+- ✅ 创建应用用户并授权
+- ✅ 执行建表脚本
+- ✅ 加载巡检模块表结构
+- ✅ 可选加载示例数据
+- ✅ 验证初始化结果
+- ✅ 显示连接信息
+
+##### 方法二：手动初始化
+
+如果需要手动控制每个步骤：
+
+```bash
+# 1. 创建数据库
+mysql -u root -p << EOF
+CREATE DATABASE data_portal
+  DEFAULT CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+EOF
+
+# 2. 创建应用用户（推荐，避免使用 root）
+mysql -u root -p << EOF
+CREATE USER 'onedata'@'localhost' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON data_portal.* TO 'onedata'@'localhost';
+
+-- 如需远程访问，添加远程用户
+CREATE USER 'onedata'@'%' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON data_portal.* TO 'onedata'@'%';
+
+FLUSH PRIVILEGES;
+EOF
+
+# 3. 执行建表脚本（核心表结构）
 mysql -u root -p data_portal < backend/src/main/resources/schema.sql
+
+# 4. 执行巡检模块脚本（可选）
+mysql -u root -p data_portal < backend/src/main/resources/inspection_schema.sql
+
+# 5. 加载示例数据（可选，用于测试）
+mysql -u root -p data_portal < backend/src/main/resources/sample_data.sql
+```
+
+##### 验证数据库初始化
+
+```bash
+# 检查数据库是否创建成功
+mysql -u onedata -p data_portal -e "SHOW TABLES;"
+
+# 预期输出应包含以下表：
+# - data_table（数据表元信息）
+# - data_task（任务定义）
+# - data_lineage（血缘关系）
+# - task_execution_log（执行日志）
+# - data_domain（数据域）
+# - business_domain（业务域）
+# - inspection_task（巡检任务，可选）
+# - inspection_rule（巡检规则，可选）
+
+# 查看表数量
+mysql -u onedata -p data_portal -e "SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = 'data_portal';"
+```
+
+##### 数据库迁移（如果需要）
+
+如果数据库已存在且需要升级：
+
+```bash
+# 查看当前数据库版本
+mysql -u onedata -p data_portal -e "SELECT * FROM schema_version LIMIT 1;"
+
+# 执行增量迁移脚本
+mysql -u onedata -p data_portal < backend/src/main/resources/db/migration/V2__add_table_features.sql
+mysql -u onedata -p data_portal < backend/src/main/resources/db/migration/V3__add_statistics_history.sql
+```
+
+##### 常见问题排查
+
+**问题1：字符集错误**
+```bash
+# 检查数据库字符集
+mysql -u root -p -e "SELECT default_character_set_name, default_collation_name FROM information_schema.schemata WHERE schema_name = 'data_portal';"
+
+# 如果字符集不正确，修改
+mysql -u root -p -e "ALTER DATABASE data_portal CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+```
+
+**问题2：权限不足**
+```bash
+# 检查用户权限
+mysql -u root -p -e "SHOW GRANTS FOR 'onedata'@'localhost';"
+
+# 重新授权
+mysql -u root -p -e "GRANT ALL PRIVILEGES ON data_portal.* TO 'onedata'@'localhost'; FLUSH PRIVILEGES;"
+```
+
+**问题3：表已存在**
+```bash
+# 备份现有数据
+mysqldump -u root -p data_portal > data_portal_backup_$(date +%Y%m%d).sql
+
+# 删除数据库重建
+mysql -u root -p -e "DROP DATABASE data_portal;"
+./init-database.sh -r root密码 -p 应用密码
 ```
 
 #### 3. 启动 DolphinScheduler (可选)
@@ -369,9 +492,9 @@ spring:
     username: root
     password: your_password
 
-# 配置 DolphinScheduler 服务地址
+# 配置 DolphinScheduler 服务地址（注意：这是 Python 中间服务的地址，不是 DolphinScheduler 的 API 地址）
 dolphin:
-  service-url: http://localhost:5001
+  service-url: http://localhost:5001  # Python 中间服务地址
   project-name: test-project
 
 # 编译并启动
@@ -958,8 +1081,10 @@ services:
 
 ## 📞 联系我们
 
-- **项目主页**: https://github.com/MingkeVan/opendataworks
-- **问题反馈**: https://github.com/MingkeVan/opendataworks/issues
+- **🌐 项目主页**: https://mingkevan.github.io/opendataworks/
+- **📦 GitHub**: https://github.com/MingkeVan/opendataworks
+- **🐛 问题反馈**: https://github.com/MingkeVan/opendataworks/issues
+- **💬 讨论区**: https://github.com/MingkeVan/opendataworks/discussions
 
 ---
 

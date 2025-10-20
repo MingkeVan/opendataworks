@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="OneData Works - 一站式数据任务管理与数据血缘可视化平台">
+    <meta name="keywords" content="数据门户,数据血缘,任务调度,DolphinScheduler,开源,大数据">
+    <meta name="author" content="OneData Works Team">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://mingkevan.github.io/opendataworks/">
+    <meta property="og:title" content="OneData Works - 一站式数据门户">
+    <meta property="og:description" content="统一数据资产管理、任务调度编排和血缘关系追踪解决方案">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://mingkevan.github.io/opendataworks/">
+    <meta property="twitter:title" content="OneData Works">
+    <meta property="twitter:description" content="一站式数据任务管理与数据血缘可视化平台">
+
+    <title>OneData Works - 一站式数据门户平台</title>
+
+    <style>
+        :root {
+            --primary-color: #3b82f6;
+            --primary-dark: #2563eb;
+            --secondary-color: #8b5cf6;
+            --success-color: #10b981;
+            --text-color: #1f2937;
+            --text-light: #6b7280;
+            --bg-light: #f9fafb;
+            --border-color: #e5e7eb;
+            --shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+        }
+
+        /* Header */
+        header {
+            position: sticky;
+            top: 0;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 0;
+            z-index: 1000;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        nav {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 2rem;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-color);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+
+        .nav-links a:hover {
+            color: var(--primary-color);
+        }
+
+        /* Hero Section */
+        .hero {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 6rem 2rem;
+            text-align: center;
+        }
+
+        .hero-content {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .hero h1 {
+            font-size: 3rem;
+            margin-bottom: 1.5rem;
+            font-weight: 800;
+        }
+
+        .hero p {
+            font-size: 1.25rem;
+            margin-bottom: 2.5rem;
+            opacity: 0.95;
+        }
+
+        .cta-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 0.875rem 2rem;
+            border-radius: 0.5rem;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: white;
+            color: var(--primary-color);
+            box-shadow: var(--shadow);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid white;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Container */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        /* Section */
+        section {
+            padding: 5rem 0;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            font-weight: 700;
+        }
+
+        .section-subtitle {
+            text-align: center;
+            color: var(--text-light);
+            font-size: 1.125rem;
+            margin-bottom: 3rem;
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 3rem;
+        }
+
+        .feature-card {
+            background: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: var(--shadow);
+            transition: transform 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 0.75rem;
+            color: var(--text-color);
+        }
+
+        .feature-card p {
+            color: var(--text-light);
+            line-height: 1.7;
+        }
+
+        /* Quick Start */
+        .quickstart {
+            background: var(--bg-light);
+        }
+
+        .code-block {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            margin: 1.5rem 0;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 0.875rem;
+            line-height: 1.7;
+        }
+
+        .code-block pre {
+            margin: 0;
+        }
+
+        /* Stats */
+        .stats {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            text-align: center;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 3rem;
+            margin-top: 2rem;
+        }
+
+        .stat-item h3 {
+            font-size: 3rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-item p {
+            font-size: 1.125rem;
+            opacity: 0.9;
+        }
+
+        /* Architecture */
+        .architecture-diagram {
+            background: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: var(--shadow);
+            margin-top: 2rem;
+        }
+
+        .architecture-diagram img {
+            width: 100%;
+            height: auto;
+        }
+
+        /* CTA Section */
+        .cta-section {
+            background: var(--bg-light);
+            text-align: center;
+        }
+
+        .cta-section h2 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .cta-section p {
+            font-size: 1.25rem;
+            color: var(--text-light);
+            margin-bottom: 2rem;
+        }
+
+        /* Footer */
+        footer {
+            background: #1f2937;
+            color: white;
+            padding: 3rem 0 1.5rem;
+        }
+
+        .footer-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .footer-section h4 {
+            margin-bottom: 1rem;
+            font-size: 1.125rem;
+        }
+
+        .footer-section ul {
+            list-style: none;
+        }
+
+        .footer-section a {
+            color: #9ca3af;
+            text-decoration: none;
+            transition: color 0.3s;
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+
+        .footer-section a:hover {
+            color: white;
+        }
+
+        .footer-bottom {
+            text-align: center;
+            padding-top: 2rem;
+            border-top: 1px solid #374151;
+            color: #9ca3af;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2rem;
+            }
+
+            .hero p {
+                font-size: 1rem;
+            }
+
+            .section-title {
+                font-size: 2rem;
+            }
+
+            .nav-links {
+                display: none;
+            }
+        }
+
+        /* Badges */
+        .badges {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+            margin: 2rem 0;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <nav>
+            <a href="#" class="logo">🚀 OneData Works</a>
+            <ul class="nav-links">
+                <li><a href="#features">功能特性</a></li>
+                <li><a href="#quickstart">快速开始</a></li>
+                <li><a href="#architecture">系统架构</a></li>
+                <li><a href="https://github.com/MingkeVan/opendataworks">GitHub</a></li>
+                <li><a href="../README.md">文档</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <h1>OneData Works</h1>
+            <p>一站式数据任务管理与数据血缘可视化平台<br>统一数据资产管理 · 智能任务调度 · 血缘关系追踪</p>
+
+            <div class="badges">
+                <a class="badge" href="https://github.com/MingkeVan/opendataworks/blob/main/LICENSE">
+                    <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
+                </a>
+                <a class="badge" href="https://www.oracle.com/java/">
+                    <img src="https://img.shields.io/badge/Java-8+-orange.svg" alt="Java">
+                </a>
+                <a class="badge" href="https://spring.io/projects/spring-boot">
+                    <img src="https://img.shields.io/badge/Spring%20Boot-2.7.18-brightgreen.svg" alt="Spring Boot">
+                </a>
+                <a class="badge" href="https://vuejs.org/">
+                    <img src="https://img.shields.io/badge/Vue-3.4+-green.svg" alt="Vue">
+                </a>
+                <a class="badge" href="https://dolphinscheduler.apache.org/">
+                    <img src="https://img.shields.io/badge/DolphinScheduler-3.2.0-blue.svg" alt="DolphinScheduler">
+                </a>
+            </div>
+
+            <div class="cta-buttons">
+                <a href="https://github.com/MingkeVan/opendataworks" class="btn btn-primary">⭐ GitHub Star</a>
+                <a href="#quickstart" class="btn btn-secondary">📚 快速开始</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features">
+        <div class="container">
+            <h2 class="section-title">核心功能</h2>
+            <p class="section-subtitle">为企业数据平台提供全方位的管理和监控解决方案</p>
+
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>数据资产管理</h3>
+                    <p>统一管理数据表元信息、字段级别管理、数据域和业务域分类，支持 ODS/DWD/DIM/DWS/ADS 完整分层</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🔄</div>
+                    <h3>任务调度编排</h3>
+                    <p>可视化配置批处理和流处理任务，深度集成 DolphinScheduler，支持 SQL 和 Shell 任务类型</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🔗</div>
+                    <h3>数据血缘追踪</h3>
+                    <p>基于任务输入输出自动生成血缘关系图，ECharts 力导向图可视化展示，支持链路追踪</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">📈</div>
+                    <h3>执行监控</h3>
+                    <p>实时监控任务执行状态，查看执行历史和日志，统计任务成功率和耗时，失败任务告警</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h3>智能调度</h3>
+                    <p>自动查询 DolphinScheduler 项目信息，无需硬编码，支持任务依赖配置，工作流上线/下线管理</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🖥️</div>
+                    <h3>现代化界面</h3>
+                    <p>Vue 3 + Element Plus 构建，响应式设计，支持多种分辨率，顶部水平菜单布局，操作简洁流畅</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="stats">
+        <div class="container">
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <h3>50%+</h3>
+                    <p>开发效率提升</p>
+                </div>
+                <div class="stat-item">
+                    <h3>100%</h3>
+                    <p>开源免费</p>
+                </div>
+                <div class="stat-item">
+                    <h3>3层</h3>
+                    <p>架构设计</p>
+                </div>
+                <div class="stat-item">
+                    <h3>6+</h3>
+                    <p>核心模块</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quick Start Section -->
+    <section id="quickstart" class="quickstart">
+        <div class="container">
+            <h2 class="section-title">快速开始</h2>
+            <p class="section-subtitle">三步即可启动 OneData Works 数据门户</p>
+
+            <div class="code-block">
+                <pre># 1. 克隆项目
+git clone https://github.com/MingkeVan/opendataworks.git
+cd opendataworks
+
+# 2. 初始化数据库
+./init-database.sh -r root密码 -p 应用密码
+
+# 3. 启动服务（使用自动化脚本）
+./quick-deploy.sh
+
+# 访问应用
+# 前端: http://localhost:3000
+# 后端 API: http://localhost:8080
+# DolphinScheduler: http://localhost:12345/dolphinscheduler</pre>
+            </div>
+
+            <div style="text-align: center; margin-top: 2rem;">
+                <a href="../DEPLOYMENT.md" class="btn btn-primary" style="color: var(--primary-color);">📖 查看完整部署文档</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Architecture Section -->
+    <section id="architecture">
+        <div class="container">
+            <h2 class="section-title">系统架构</h2>
+            <p class="section-subtitle">采用前后端分离架构，支持微服务扩展</p>
+
+            <div class="architecture-diagram">
+                <pre style="font-size: 0.75rem; line-height: 1.4; color: #374151;">
+┌─────────────────────────────────────────────────────────────────┐
+│                         用户浏览器                                │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                │ HTTP/HTTPS
+                                ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    前端应用 (Vue 3 + Vite)                       │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│  │ 表管理   │  │ 任务管理  │  │ 血缘关系  │  │ 执行监控  │       │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                │ REST API
+                                ↓
+┌─────────────────────────────────────────────────────────────────┐
+│              后端应用 (Spring Boot 2.7.18)                       │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Controller → Service → Mapper (MyBatis-Plus)           │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+                    │                           │
+                    ↓                           ↓
+    ┌──────────────────────┐    ┌────────────────────────────────┐
+    │   MySQL 8.0+         │    │  DolphinScheduler Service      │
+    │   (数据持久化)        │    │  (Python FastAPI)              │
+    └──────────────────────┘    └────────────────────────────────┘
+                                                │
+                                                ↓
+                            ┌────────────────────────────────────┐
+                            │   Apache DolphinScheduler          │
+                            │   (Workflow Orchestration)         │
+                            └────────────────────────────────────┘
+                </pre>
+            </div>
+
+            <div style="margin-top: 3rem;">
+                <h3 style="font-size: 1.5rem; margin-bottom: 1.5rem; text-align: center;">技术栈</h3>
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <h3>后端技术</h3>
+                        <ul style="color: var(--text-light); line-height: 2;">
+                            <li>✓ Spring Boot 2.7.18</li>
+                            <li>✓ MyBatis-Plus 3.5.5</li>
+                            <li>✓ MySQL 8.0+</li>
+                            <li>✓ WebFlux 响应式</li>
+                        </ul>
+                    </div>
+                    <div class="feature-card">
+                        <h3>前端技术</h3>
+                        <ul style="color: var(--text-light); line-height: 2;">
+                            <li>✓ Vue 3.4+</li>
+                            <li>✓ Element Plus UI</li>
+                            <li>✓ ECharts 图表</li>
+                            <li>✓ Vite 构建工具</li>
+                        </ul>
+                    </div>
+                    <div class="feature-card">
+                        <h3>中间服务</h3>
+                        <ul style="color: var(--text-light); line-height: 2;">
+                            <li>✓ Python 3.9+</li>
+                            <li>✓ FastAPI 框架</li>
+                            <li>✓ pydolphinscheduler</li>
+                            <li>✓ Uvicorn ASGI</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="container">
+            <h2>准备好开始了吗？</h2>
+            <p>立即部署 OneData Works，提升您的数据管理效率</p>
+            <div class="cta-buttons">
+                <a href="https://github.com/MingkeVan/opendataworks" class="btn btn-primary">
+                    🚀 立即开始
+                </a>
+                <a href="https://github.com/MingkeVan/opendataworks/issues" class="btn btn-secondary" style="color: var(--text-color);">
+                    💬 问题反馈
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>资源</h4>
+                    <ul>
+                        <li><a href="../README.md">项目文档</a></li>
+                        <li><a href="../DEPLOYMENT.md">部署指南</a></li>
+                        <li><a href="../docs/guides/">使用指南</a></li>
+                        <li><a href="../docs/features/">功能文档</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>社区</h4>
+                    <ul>
+                        <li><a href="https://github.com/MingkeVan/opendataworks">GitHub</a></li>
+                        <li><a href="https://github.com/MingkeVan/opendataworks/issues">问题反馈</a></li>
+                        <li><a href="https://github.com/MingkeVan/opendataworks/discussions">讨论区</a></li>
+                        <li><a href="https://github.com/MingkeVan/opendataworks/pulls">贡献代码</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>关于</h4>
+                    <ul>
+                        <li><a href="https://github.com/MingkeVan/opendataworks/blob/main/LICENSE">开源协议</a></li>
+                        <li><a href="../CHANGELOG.md">更新日志</a></li>
+                        <li><a href="../README.md#开发路线图">开发路线图</a></li>
+                        <li><a href="../README.md#贡献指南">贡献指南</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>相关项目</h4>
+                    <ul>
+                        <li><a href="https://dolphinscheduler.apache.org/">Apache DolphinScheduler</a></li>
+                        <li><a href="https://spring.io/projects/spring-boot">Spring Boot</a></li>
+                        <li><a href="https://vuejs.org/">Vue.js</a></li>
+                        <li><a href="https://element-plus.org/">Element Plus</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 OneData Works Team. 采用 Apache License 2.0 开源协议</p>
+                <p>Made with ❤️ by the OneData Works community</p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Smooth scrolling for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Add animation on scroll
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -100px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.feature-card, .stat-item').forEach(el => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(20px)';
+            el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+            observer.observe(el);
+        });
+    </script>
+</body>
+</html>
