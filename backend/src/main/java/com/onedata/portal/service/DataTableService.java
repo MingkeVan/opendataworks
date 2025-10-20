@@ -329,27 +329,55 @@ public class DataTableService {
     public TableRelatedLineageResponse getRelatedLineage(Long tableId) {
         TableRelatedLineageResponse response = new TableRelatedLineageResponse();
 
-        List<DataLineage> lineageRecords = dataLineageMapper.selectList(
-            new LambdaQueryWrapper<DataLineage>()
-                .and(wrapper -> wrapper.eq(DataLineage::getUpstreamTableId, tableId)
-                    .or()
-                    .eq(DataLineage::getDownstreamTableId, tableId))
+        // 1. 找到所有写入当前表的任务（这些任务读取的表是上游表）
+        List<TableTaskRelation> writeRelations = tableTaskRelationMapper.selectList(
+            new LambdaQueryWrapper<TableTaskRelation>()
+                .eq(TableTaskRelation::getTableId, tableId)
+                .eq(TableTaskRelation::getRelationType, "write")
         );
 
-        if (lineageRecords.isEmpty()) {
-            return response;
+        Set<Long> writeTasks = writeRelations.stream()
+            .map(TableTaskRelation::getTaskId)
+            .collect(Collectors.toSet());
+
+        // 2. 找到所有从当前表读取的任务（这些任务写入的表是下游表）
+        List<TableTaskRelation> readRelations = tableTaskRelationMapper.selectList(
+            new LambdaQueryWrapper<TableTaskRelation>()
+                .eq(TableTaskRelation::getTableId, tableId)
+                .eq(TableTaskRelation::getRelationType, "read")
+        );
+
+        Set<Long> readTasks = readRelations.stream()
+            .map(TableTaskRelation::getTaskId)
+            .collect(Collectors.toSet());
+
+        // 3. 获取上游表ID（写入任务读取的表）
+        Set<Long> upstreamIds = new LinkedHashSet<>();
+        if (!writeTasks.isEmpty()) {
+            List<TableTaskRelation> upstreamRelations = tableTaskRelationMapper.selectList(
+                new LambdaQueryWrapper<TableTaskRelation>()
+                    .in(TableTaskRelation::getTaskId, writeTasks)
+                    .eq(TableTaskRelation::getRelationType, "read")
+            );
+            upstreamIds = upstreamRelations.stream()
+                .map(TableTaskRelation::getTableId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         }
 
-        Set<Long> upstreamIds = lineageRecords.stream()
-            .filter(record -> Objects.equals(record.getDownstreamTableId(), tableId) && record.getUpstreamTableId() != null)
-            .map(DataLineage::getUpstreamTableId)
-            .collect(Collectors.toCollection(LinkedHashSet::new));
+        // 4. 获取下游表ID（读取任务写入的表）
+        Set<Long> downstreamIds = new LinkedHashSet<>();
+        if (!readTasks.isEmpty()) {
+            List<TableTaskRelation> downstreamRelations = tableTaskRelationMapper.selectList(
+                new LambdaQueryWrapper<TableTaskRelation>()
+                    .in(TableTaskRelation::getTaskId, readTasks)
+                    .eq(TableTaskRelation::getRelationType, "write")
+            );
+            downstreamIds = downstreamRelations.stream()
+                .map(TableTaskRelation::getTableId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        }
 
-        Set<Long> downstreamIds = lineageRecords.stream()
-            .filter(record -> Objects.equals(record.getUpstreamTableId(), tableId) && record.getDownstreamTableId() != null)
-            .map(DataLineage::getDownstreamTableId)
-            .collect(Collectors.toCollection(LinkedHashSet::new));
-
+        // 5. 查询表详情
         Set<Long> allIds = new HashSet<>();
         allIds.addAll(upstreamIds);
         allIds.addAll(downstreamIds);
@@ -362,6 +390,7 @@ public class DataTableService {
         Map<Long, DataTable> tableMap = tables.stream()
             .collect(Collectors.toMap(DataTable::getId, t -> t));
 
+        // 6. 构建响应
         for (Long id : upstreamIds) {
             DataTable table = tableMap.get(id);
             if (table != null) {
