@@ -38,7 +38,7 @@
               >
                 <template #title>
                   <div class="database-title">
-                    <el-icon><Database /></el-icon>
+                    <el-icon><Folder /></el-icon>
                     <span class="db-name">{{ db }}</span>
                     <el-badge
                       :value="getTableCount(db)"
@@ -369,7 +369,7 @@ import { ElMessage } from 'element-plus'
 import {
   Search,
   Plus,
-  Database,
+  Folder,
   Document,
   List,
   Link,
