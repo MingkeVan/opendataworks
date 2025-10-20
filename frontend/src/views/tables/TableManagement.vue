@@ -27,6 +27,32 @@
             </template>
           </el-input>
 
+          <!-- 排序选项 -->
+          <div class="sort-options">
+            <el-select
+              v-model="sortField"
+              size="small"
+              placeholder="排序字段"
+              style="width: 140px"
+              @change="handleSortChange"
+            >
+              <el-option label="创建时间" value="createdAt" />
+              <el-option label="更新时间" value="lastUpdated" />
+              <el-option label="表名" value="tableName" />
+              <el-option label="数据量" value="rowCount" />
+              <el-option label="存储大小" value="storageSize" />
+            </el-select>
+            <el-select
+              v-model="sortOrder"
+              size="small"
+              style="width: 100px"
+              @change="handleSortChange"
+            >
+              <el-option label="降序" value="desc" />
+              <el-option label="升序" value="asc" />
+            </el-select>
+          </div>
+
           <!-- 数据库列表 -->
           <div class="database-list" v-loading="loading">
             <el-collapse v-model="activeDatabase" accordion>
@@ -47,32 +73,6 @@
                     />
                   </div>
                 </template>
-
-                <!-- 排序选项 -->
-                <div class="sort-options">
-                  <el-select
-                    v-model="sortField"
-                    size="small"
-                    placeholder="排序字段"
-                    style="width: 140px; margin-right: 10px"
-                    @change="loadTablesForDatabase(db)"
-                  >
-                    <el-option label="创建时间" value="createdAt" />
-                    <el-option label="更新时间" value="lastUpdated" />
-                    <el-option label="表名" value="tableName" />
-                    <el-option label="数据量" value="rowCount" />
-                    <el-option label="存储大小" value="storageSize" />
-                  </el-select>
-                  <el-select
-                    v-model="sortOrder"
-                    size="small"
-                    style="width: 100px"
-                    @change="loadTablesForDatabase(db)"
-                  >
-                    <el-option label="降序" value="desc" />
-                    <el-option label="升序" value="asc" />
-                  </el-select>
-                </div>
 
                 <!-- 表列表 -->
                 <div class="table-list">
@@ -1218,6 +1218,14 @@ const handleSearch = () => {
   // 触发重新计算
 }
 
+// 处理排序变化
+const handleSortChange = () => {
+  // 重新加载所有已加载的数据库的表
+  Object.keys(tablesByDatabase.value).forEach(database => {
+    loadTablesForDatabase(database)
+  })
+}
+
 // 复制DDL
 const copyDdl = async () => {
   if (!selectedTable.value?.dorisDdl) return
@@ -1516,8 +1524,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
-  padding: 6px;
+  margin-bottom: 12px;
+  padding: 8px;
   background-color: #f5f7fa;
   border-radius: 6px;
 }
