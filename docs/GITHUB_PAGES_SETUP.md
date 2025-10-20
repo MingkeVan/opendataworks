@@ -29,15 +29,17 @@ Your site is live at https://mingkevan.github.io/opendataworks/
 
 ### 3. 访问项目主页
 
-- **主页 URL**: https://mingkevan.github.io/opendataworks/site/
-- **完整 URL**: https://mingkevan.github.io/opendataworks/site/index.html
+- **主页 URL**: https://mingkevan.github.io/opendataworks/
+- **备用 URL**: https://mingkevan.github.io/opendataworks/site/ (子目录访问)
+- **完整 URL**: https://mingkevan.github.io/opendataworks/index.html
 
 ## 📁 项目主页文件结构
 
 ```
 docs/
+├── index.html              # 项目主页（根目录，直接访问）
 ├── site/
-│   └── index.html          # 项目主页 (HTML 单页应用)
+│   └── index.html          # 项目主页（子目录备份）
 ├── _config.yml             # GitHub Pages 配置
 ├── features/               # 功能文档
 ├── guides/                 # 使用指南
@@ -73,7 +75,7 @@ docs/
 
 ### 修改内容
 
-编辑 `docs/site/index.html` 文件：
+编辑 `docs/index.html` 文件（或 `docs/site/index.html`）：
 
 ```html
 <!-- 修改项目标题 -->
@@ -207,12 +209,12 @@ opendataworks.com
 
 ### 添加分享图片
 
-创建 `docs/site/og-image.png` (推荐尺寸: 1200x630px)
+创建 `docs/og-image.png` (推荐尺寸: 1200x630px)
 
 在 `index.html` 的 `<head>` 中添加:
 ```html
-<meta property="og:image" content="https://mingkevan.github.io/opendataworks/site/og-image.png">
-<meta property="twitter:image" content="https://mingkevan.github.io/opendataworks/site/og-image.png">
+<meta property="og:image" content="https://mingkevan.github.io/opendataworks/og-image.png">
+<meta property="twitter:image" content="https://mingkevan.github.io/opendataworks/og-image.png">
 ```
 
 ## 🚧 故障排查
@@ -255,11 +257,11 @@ opendataworks.com
 
 部署前检查：
 
-- [ ] 确认 `docs/site/index.html` 文件存在且内容完整
+- [ ] 确认 `docs/index.html` 文件存在且内容完整
 - [ ] 确认 `docs/_config.yml` 配置正确
 - [ ] 在 GitHub Settings → Pages 启用 Pages (源: main /docs)
 - [ ] 等待部署完成（查看 Actions 标签）
-- [ ] 访问 https://mingkevan.github.io/opendataworks/site/ 验证
+- [ ] 访问 https://mingkevan.github.io/opendataworks/ 验证
 - [ ] 测试所有链接是否正常工作
 - [ ] 在不同设备/浏览器测试响应式设计
 - [ ] 检查 SEO meta 标签是否正确
@@ -269,7 +271,7 @@ opendataworks.com
 
 恭喜！你的项目主页已经上线。
 
-访问 https://mingkevan.github.io/opendataworks/site/ 查看效果。
+访问 https://mingkevan.github.io/opendataworks/ 查看效果。
 
 如有问题，请参考 [GitHub Pages 文档](https://docs.github.com/en/pages) 或提交 [Issue](https://github.com/MingkeVan/opendataworks/issues)。
 

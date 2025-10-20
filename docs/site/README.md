@@ -8,7 +8,8 @@
 
 ## 🌐 在线访问
 
-- **主页 URL**: https://mingkevan.github.io/opendataworks/site/
+- **主页 URL**: https://mingkevan.github.io/opendataworks/
+- **备用 URL**: https://mingkevan.github.io/opendataworks/site/ (子目录访问)
 
 ## 🎨 主页特点
 
