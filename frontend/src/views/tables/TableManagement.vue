@@ -1535,14 +1535,14 @@ onMounted(() => {
 <style scoped>
 .table-management {
   height: 100%;
-  padding: 12px;
+  padding: 6px;
   background-color: #f5f7fa;
 }
 
 .management-container {
   display: flex;
-  gap: 12px;
-  height: calc(100vh - 104px);
+  gap: 8px;
+  height: calc(100vh - 92px);
 }
 
 /* 左侧面板 */
