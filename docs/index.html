@@ -85,10 +85,31 @@
             text-decoration: none;
             font-weight: 500;
             transition: color 0.3s;
+            position: relative;
+            display: inline-block;
         }
 
         .nav-links a:hover {
             color: var(--primary-color);
+        }
+
+        .nav-links a.active {
+            color: var(--primary-color);
+        }
+
+        .nav-links a.active::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: -0.5rem;
+            height: 3px;
+            background: var(--primary-color);
+            border-radius: 999px;
+        }
+
+        .nav-links li {
+            position: relative;
         }
 
         /* Hero Section */
@@ -220,13 +241,59 @@
             background: var(--bg-light);
         }
 
+        .quickstart-tabs {
+            background: white;
+            border-radius: 1rem;
+            box-shadow: var(--shadow);
+            padding: 2rem;
+        }
+
+        .tab-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .tab-button {
+            border: 1px solid var(--border-color);
+            background: transparent;
+            padding: 0.75rem 1.25rem;
+            border-radius: 999px;
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--text-light);
+            transition: all 0.3s ease;
+        }
+
+        .tab-button.active,
+        .tab-button:hover {
+            color: white;
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+            box-shadow: 0 10px 20px -10px rgba(59, 130, 246, 0.6);
+        }
+
+        .tab-content {
+            position: relative;
+        }
+
+        .tab-panel {
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
         .code-block {
             background: #1e293b;
             color: #e2e8f0;
             padding: 1.5rem;
-            border-radius: 0.5rem;
+            border-radius: 0.75rem;
             overflow-x: auto;
-            margin: 1.5rem 0;
+            margin: 1rem 0 0;
             font-family: 'Monaco', 'Consolas', monospace;
             font-size: 0.875rem;
             line-height: 1.7;
@@ -234,6 +301,237 @@
 
         .code-block pre {
             margin: 0;
+        }
+
+        .tab-meta {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            color: var(--text-light);
+            font-size: 0.95rem;
+        }
+
+        .tab-meta span {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .doc-section {
+            background: white;
+        }
+
+        .doc-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .doc-card {
+            border: 1px solid var(--border-color);
+            border-radius: 1rem;
+            padding: 1.75rem;
+            box-shadow: 0 10px 30px -20px rgba(37, 99, 235, 0.35);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            background: linear-gradient(180deg, rgba(59,130,246,0.05), rgba(139,92,246,0.05));
+        }
+
+        .doc-card:hover {
+            transform: translateY(-6px);
+            box-shadow: 0 25px 45px -20px rgba(59, 130, 246, 0.25);
+        }
+
+        .doc-card h3 {
+            margin-bottom: 0.75rem;
+            font-size: 1.35rem;
+        }
+
+        .doc-card p {
+            color: var(--text-light);
+            margin-bottom: 1rem;
+        }
+
+        .doc-card details {
+            background: rgba(59, 130, 246, 0.08);
+            border-radius: 0.75rem;
+            padding: 0.75rem 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .doc-card summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--primary-dark);
+        }
+
+        .doc-card ul {
+            margin-left: 1.25rem;
+            margin-top: 0.75rem;
+            color: var(--text-light);
+            line-height: 1.8;
+        }
+
+        .doc-actions {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .inline-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            color: var(--primary-dark);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .inline-link::after {
+            content: '→';
+            font-size: 0.9rem;
+        }
+
+        .inline-link:hover {
+            text-decoration: underline;
+        }
+
+        .highlight-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: rgba(16, 185, 129, 0.12);
+            color: var(--success-color);
+            padding: 0.35rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .timeline {
+            margin-top: 3rem;
+            border-left: 3px solid rgba(59, 130, 246, 0.15);
+            padding-left: 1.5rem;
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-bottom: 1.5rem;
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -1.7rem;
+            top: 0.3rem;
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background: var(--primary-color);
+            box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.12);
+        }
+
+        .timeline-item h4 {
+            font-size: 1.1rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .timeline-item p {
+            color: var(--text-light);
+            margin-bottom: 0;
+        }
+
+        .community-section {
+            background: var(--bg-light);
+        }
+
+        .community-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .community-card {
+            background: white;
+            padding: 1.75rem;
+            border-radius: 1rem;
+            box-shadow: var(--shadow);
+            transition: transform 0.3s ease;
+        }
+
+        .community-card:hover {
+            transform: translateY(-6px);
+        }
+
+        .community-card h3 {
+            margin-bottom: 0.5rem;
+        }
+
+        .community-card p {
+            color: var(--text-light);
+            margin-bottom: 1rem;
+        }
+
+        .community-actions {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .community-actions button,
+        .community-actions a {
+            padding: 0.5rem 1rem;
+            border-radius: 999px;
+            border: 1px solid var(--border-color);
+            background: rgba(59, 130, 246, 0.08);
+            color: var(--primary-dark);
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .community-actions a:hover,
+        .community-actions button:hover:not(:disabled) {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .community-actions button:disabled {
+            opacity: 0.6;
+            cursor: default;
+        }
+
+        .back-to-top {
+            position: fixed;
+            right: 1.5rem;
+            bottom: 1.5rem;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            width: 3rem;
+            height: 3rem;
+            border-radius: 50%;
+            box-shadow: 0 20px 35px -15px rgba(59, 130, 246, 0.65);
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+        }
+
+        .back-to-top.show {
+            display: flex;
         }
 
         /* Stats */
@@ -374,9 +672,9 @@
             <ul class="nav-links">
                 <li><a href="#features">功能特性</a></li>
                 <li><a href="#quickstart">快速开始</a></li>
+                <li><a href="#docs">项目文档</a></li>
                 <li><a href="#architecture">系统架构</a></li>
-                <li><a href="https://github.com/MingkeVan/opendataworks">GitHub</a></li>
-                <li><a href="../README.md">文档</a></li>
+                <li><a href="#community">社区</a></li>
             </ul>
         </nav>
     </header>
@@ -408,6 +706,7 @@
             <div class="cta-buttons">
                 <a href="https://github.com/MingkeVan/opendataworks" class="btn btn-primary">⭐ GitHub Star</a>
                 <a href="#quickstart" class="btn btn-secondary">📚 快速开始</a>
+                <a href="#docs" class="btn btn-secondary" style="border-color: rgba(255,255,255,0.6);">🧭 浏览文档</a>
             </div>
         </div>
     </section>
@@ -486,27 +785,179 @@
     <section id="quickstart" class="quickstart">
         <div class="container">
             <h2 class="section-title">快速开始</h2>
-            <p class="section-subtitle">三步即可启动 OpenDataWorks 数据门户</p>
+            <p class="section-subtitle">根据场景选择合适的部署方式，一页即可完成准备工作</p>
 
-            <div class="code-block">
-                <pre># 1. 克隆项目
+            <div class="quickstart-tabs">
+                <div class="tab-buttons">
+                    <button class="tab-button active" data-target="tab-script">🚀 一键脚本部署</button>
+                    <button class="tab-button" data-target="tab-docker">🐳 Docker Compose</button>
+                    <button class="tab-button" data-target="tab-dev">🛠️ 本地开发环境</button>
+                </div>
+
+                <div class="tab-content">
+                    <div class="tab-panel active" id="tab-script">
+                        <div class="tab-meta">
+                            <span>⏱️ 约 5 分钟</span>
+                            <span>🧰 适用场景：首次体验 / 快速演示</span>
+                        </div>
+                        <div class="code-block">
+<pre># 克隆项目并进入目录
 git clone https://github.com/MingkeVan/opendataworks.git
 cd opendataworks
 
-# 2. 初始化数据库
-./init-database.sh -r root密码 -p 应用密码
+#!/bin/bash
+# 初始化数据库（自定义 root 与应用密码）
+./init-database.sh -r &lt;mysql-root&gt; -p &lt;app-password&gt;
 
-# 3. 启动服务（使用自动化脚本）
-./quick-deploy.sh
+# 一键启动前后端与编排服务
+./quick-deploy.sh --with-doris=false
 
-# 访问应用
-# 前端: http://localhost:3000
-# 后端 API: http://localhost:8080
+# 浏览器访问
+# 前端:           http://localhost:3000
+# 后端 API:       http://localhost:8080
 # DolphinScheduler: http://localhost:12345/dolphinscheduler</pre>
+                        </div>
+                    </div>
+
+                    <div class="tab-panel" id="tab-docker">
+                        <div class="tab-meta">
+                            <span>⏱️ 约 8 分钟</span>
+                            <span>🧰 适用场景：CI/CD 集成 / 云主机部署</span>
+                        </div>
+                        <div class="code-block">
+<pre># 克隆仓库并进入目录
+git clone https://github.com/MingkeVan/opendataworks.git
+cd opendataworks
+
+cp sample.env .env # 根据环境修改变量
+
+# 启动服务（前后端、MySQL、DolphinScheduler）
+docker compose -f docker-compose.yml up -d
+
+# 查看运行状态
+docker compose ps
+
+# 停止服务
+docker compose down
+
+# 可选：集成 Doris
+# docker compose -f docker-compose-doris.yml up -d</pre>
+                        </div>
+                    </div>
+
+                    <div class="tab-panel" id="tab-dev">
+                        <div class="tab-meta">
+                            <span>⏱️ 约 12 分钟</span>
+                            <span>🧰 适用场景：二次开发 / 团队协作</span>
+                        </div>
+                        <div class="code-block">
+<pre># 准备前端环境
+cd frontend
+npm install
+npm run dev -- --host 0.0.0.0 --port 3000
+
+# 新开终端：启动后端
+cd backend
+mvn clean install -DskipTests
+mvn spring-boot:run
+
+# 启动 DolphinScheduler 服务
+cd ../dolphinscheduler-service
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 9000</pre>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <div style="text-align: center; margin-top: 2rem;">
-                <a href="../DEPLOYMENT.md" class="btn btn-primary" style="color: var(--primary-color);">📖 查看完整部署文档</a>
+            <div class="timeline">
+                <div class="timeline-item">
+                    <h4>准备阶段 <span class="highlight-badge">建议：8 核 / 16 GB</span></h4>
+                    <p>确认 MySQL、Docker 环境或 JDK 8+ 等依赖已安装，可选创建独立的操作系统用户。</p>
+                </div>
+                <div class="timeline-item">
+                    <h4>部署阶段</h4>
+                    <p>按照上方选定的方式完成部署，等待服务端口全部就绪后执行健康检查脚本 <code>scripts/check-services.sh</code>。</p>
+                </div>
+                <div class="timeline-item">
+                    <h4>体验阶段</h4>
+                    <p>登录 DolphinScheduler 创建首个流程，使用前端血缘图谱确认任务运行情况，并在首页仪表盘查看实时指标。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Documentation Section -->
+    <section id="docs" class="doc-section">
+        <div class="container">
+            <h2 class="section-title">项目文档</h2>
+            <p class="section-subtitle">在页面内快速预览关键章节，降低跳转频率</p>
+
+            <div class="doc-grid">
+                <div class="doc-card">
+                    <h3>项目总览</h3>
+                    <p>了解 OpenDataWorks 的整体定位、模块划分与能力边界，帮助团队进行方案选型。</p>
+                    <details>
+                        <summary>核心内容</summary>
+                        <ul>
+                            <li>平台优势与目标用户画像</li>
+                            <li>功能地图与迭代规划</li>
+                            <li>常见问题与 FAQ</li>
+                        </ul>
+                    </details>
+                    <div class="doc-actions">
+                        <a class="inline-link" href="../README.md">查看 README 原文</a>
+                    </div>
+                </div>
+
+                <div class="doc-card">
+                    <h3>部署指南</h3>
+                    <p>针对不同运行环境给出最佳实践，确保部署过程稳定、可复制。</p>
+                    <details>
+                        <summary>核心步骤</summary>
+                        <ul>
+                            <li>环境要求与网络端口清单</li>
+                            <li>Docker & Shell 自动化脚本说明</li>
+                            <li>多租户与安全加固建议</li>
+                        </ul>
+                    </details>
+                    <div class="doc-actions">
+                        <a class="inline-link" href="../DEPLOYMENT.md">部署文档全文</a>
+                    </div>
+                </div>
+
+                <div class="doc-card">
+                    <h3>功能场景</h3>
+                    <p>聚焦任务调度、血缘分析、资产管理等高频场景，提供操作路径与最佳实践。</p>
+                    <details>
+                        <summary>精选用例</summary>
+                        <ul>
+                            <li>在 DolphinScheduler 中编排跨源作业</li>
+                            <li>构建字段级血缘链路</li>
+                            <li>指标看板与任务监控</li>
+                        </ul>
+                    </details>
+                    <div class="doc-actions">
+                        <a class="inline-link" href="../docs/features/">功能文档目录</a>
+                    </div>
+                </div>
+
+                <div class="doc-card">
+                    <h3>操作手册</h3>
+                    <p>涵盖产品体验流程与常用指令，便于新同学快速熟悉平台。</p>
+                    <details>
+                        <summary>推荐阅读</summary>
+                        <ul>
+                            <li>快速手动验证流程</li>
+                            <li>集成测试执行说明</li>
+                            <li>贡献指南与代码规范</li>
+                        </ul>
+                    </details>
+                    <div class="doc-actions">
+                        <a class="inline-link" href="../docs/guides/">操作指南合集</a>
+                    </div>
+                </div>
             </div>
         </div>
     </section>
@@ -590,6 +1041,50 @@ cd opendataworks
         </div>
     </section>
 
+    <!-- Community Section -->
+    <section id="community" class="community-section">
+        <div class="container">
+            <h2 class="section-title">社区共建</h2>
+            <p class="section-subtitle">吸收优秀开源社区经验，打造友好透明的协作流程</p>
+
+            <div class="community-grid">
+                <div class="community-card">
+                    <h3>加入贡献者计划</h3>
+                    <p>参考 Apache、Vue 等社区最佳实践，提供标准化 Issue 模板与代码规范，帮助你高效提交改动。</p>
+                    <div class="community-actions">
+                        <button type="button" data-copy="git clone https://github.com/MingkeVan/opendataworks.git">复制仓库地址</button>
+                        <a href="../README.md#贡献指南">贡献步骤</a>
+                    </div>
+                </div>
+
+                <div class="community-card">
+                    <h3>版本路线图</h3>
+                    <p>每月发布一次迭代计划，涵盖血缘可视化增强、调度编排优化以及数据质量评估等重点特性。</p>
+                    <details>
+                        <summary>下一步计划</summary>
+                        <ul style="color: var(--text-light); line-height: 1.8; margin-top: 0.75rem;">
+                            <li>更智能的血缘分析与异常提醒</li>
+                            <li>统一的多云部署配置模板</li>
+                            <li>数据质量评分与告警集成</li>
+                        </ul>
+                    </details>
+                    <div class="community-actions">
+                        <a href="../README.md#开发路线图">路线图概览</a>
+                    </div>
+                </div>
+
+                <div class="community-card">
+                    <h3>反馈与支持</h3>
+                    <p>在 Issue、Discussions 中与 Maintainer 实时沟通，也可通过脚本快速导出诊断信息。</p>
+                    <div class="community-actions">
+                        <a href="https://github.com/MingkeVan/opendataworks/issues">提交 Issue</a>
+                        <button type="button" data-copy="scripts/export-diagnostics.sh">复制诊断脚本</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- CTA Section -->
     <section class="cta-section">
         <div class="container">
@@ -613,10 +1108,10 @@ cd opendataworks
                 <div class="footer-section">
                     <h4>资源</h4>
                     <ul>
-                        <li><a href="../README.md">项目文档</a></li>
+                        <li><a href="#docs">文档概览</a></li>
                         <li><a href="../DEPLOYMENT.md">部署指南</a></li>
-                        <li><a href="../docs/guides/">使用指南</a></li>
-                        <li><a href="../docs/features/">功能文档</a></li>
+                        <li><a href="#quickstart">快速上手</a></li>
+                        <li><a href="#community">社区支持</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
@@ -624,7 +1119,7 @@ cd opendataworks
                     <ul>
                         <li><a href="https://github.com/MingkeVan/opendataworks">GitHub</a></li>
                         <li><a href="https://github.com/MingkeVan/opendataworks/issues">问题反馈</a></li>
-                        <li><a href="https://github.com/MingkeVan/opendataworks/discussions">讨论区</a></li>
+                        <li><a href="#community">讨论区入口</a></li>
                         <li><a href="https://github.com/MingkeVan/opendataworks/pulls">贡献代码</a></li>
                     </ul>
                 </div>
@@ -633,8 +1128,8 @@ cd opendataworks
                     <ul>
                         <li><a href="https://github.com/MingkeVan/opendataworks/blob/main/LICENSE">开源协议</a></li>
                         <li><a href="../CHANGELOG.md">更新日志</a></li>
-                        <li><a href="../README.md#开发路线图">开发路线图</a></li>
-                        <li><a href="../README.md#贡献指南">贡献指南</a></li>
+                        <li><a href="#community">开发路线图</a></li>
+                        <li><a href="#community">贡献指南</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
@@ -654,12 +1149,19 @@ cd opendataworks
         </div>
     </footer>
 
+    <button class="back-to-top" aria-label="回到顶部">↑</button>
+
     <script>
         // Smooth scrolling for anchor links
         document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            const href = anchor.getAttribute('href');
+            if (href === '#') {
+                return;
+            }
+
             anchor.addEventListener('click', function (e) {
                 e.preventDefault();
-                const target = document.querySelector(this.getAttribute('href'));
+                const target = document.querySelector(href);
                 if (target) {
                     target.scrollIntoView({
                         behavior: 'smooth',
@@ -669,26 +1171,96 @@ cd opendataworks
             });
         });
 
-        // Add animation on scroll
-        const observerOptions = {
-            threshold: 0.1,
-            rootMargin: '0px 0px -100px 0px'
-        };
+        // Tab interactions
+        const tabButtons = document.querySelectorAll('.tab-button');
+        const tabPanels = document.querySelectorAll('.tab-panel');
 
-        const observer = new IntersectionObserver((entries) => {
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const targetId = button.getAttribute('data-target');
+                tabButtons.forEach(btn => btn.classList.toggle('active', btn === button));
+                tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === targetId));
+            });
+        });
+
+        // Animate elements on scroll
+        const revealElements = document.querySelectorAll('.feature-card, .stat-item, .doc-card, .community-card');
+        const revealObserver = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
                     entry.target.style.opacity = '1';
                     entry.target.style.transform = 'translateY(0)';
+                    revealObserver.unobserve(entry.target);
                 }
             });
-        }, observerOptions);
+        }, { threshold: 0.15, rootMargin: '0px 0px -80px 0px' });
 
-        document.querySelectorAll('.feature-card, .stat-item').forEach(el => {
+        revealElements.forEach(el => {
             el.style.opacity = '0';
             el.style.transform = 'translateY(20px)';
             el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
-            observer.observe(el);
+            revealObserver.observe(el);
+        });
+
+        // Active navigation on scroll
+        const navLinks = document.querySelectorAll('.nav-links a[href^="#"]');
+        if (navLinks.length) {
+            navLinks[0].classList.add('active');
+        }
+        const sectionObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                const id = entry.target.getAttribute('id');
+                const link = document.querySelector(`.nav-links a[href="#${id}"]`);
+                if (!link) return;
+                if (entry.isIntersecting) {
+                    navLinks.forEach(item => item.classList.remove('active'));
+                    link.classList.add('active');
+                }
+            });
+        }, { threshold: 0.35 });
+
+        document.querySelectorAll('section[id]').forEach(section => sectionObserver.observe(section));
+
+        // Back to top button
+        const backToTop = document.querySelector('.back-to-top');
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 600) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        backToTop.addEventListener('click', () => {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+
+        // Clipboard helper
+        document.querySelectorAll('button[data-copy]').forEach(button => {
+            button.addEventListener('click', async () => {
+                const content = button.getAttribute('data-copy');
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(content);
+                    } else {
+                        const tempInput = document.createElement('textarea');
+                        tempInput.value = content;
+                        document.body.appendChild(tempInput);
+                        tempInput.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(tempInput);
+                    }
+                    const originalText = button.textContent;
+                    button.textContent = '已复制 ✔';
+                    button.disabled = true;
+                    setTimeout(() => {
+                        button.textContent = originalText;
+                        button.disabled = false;
+                    }, 2000);
+                } catch (err) {
+                    console.error('复制失败', err);
+                }
+            });
         });
     </script>
 </body>
