@@ -784,19 +784,18 @@ const applyEditForm = async (data) => {
   editForm.tableName = data.tableName || ''
   editForm.tableComment = data.tableComment || ''
   editForm.layer = data.layer || ''
-  editForm.businessDomain = normalizeSegment(data.businessDomain || '')
+  editForm.businessDomain = data.businessDomain || ''
   await loadDataDomainOptions(editForm.businessDomain)
   ensureBusinessDomainOption(editForm.businessDomain)
-  editForm.dataDomain = normalizeSegment(data.dataDomain || '')
+  editForm.dataDomain = data.dataDomain || ''
   ensureDataDomainOption(editForm.dataDomain, editForm.businessDomain)
-  editForm.customIdentifier = normalizeSegment(data.customIdentifier || '')
+  editForm.customIdentifier = data.customIdentifier || ''
   editForm.statisticsCycle = data.statisticsCycle || ''
   editForm.updateType = data.updateType || ''
   editForm.owner = data.owner || ''
 }
 
 const handleEditBusinessDomainChange = async () => {
-  editForm.businessDomain = normalizeSegment(editForm.businessDomain)
   await loadDataDomainOptions(editForm.businessDomain)
   if (
     editForm.dataDomain &&
@@ -811,9 +810,9 @@ const handleGenerateTableName = async () => {
   try {
     const payload = {
       layer: editForm.layer,
-      businessDomain: editForm.businessDomain,
-      dataDomain: editForm.dataDomain,
-      customIdentifier: editForm.customIdentifier,
+      businessDomain: normalizeSegment(editForm.businessDomain),
+      dataDomain: normalizeSegment(editForm.dataDomain),
+      customIdentifier: normalizeSegment(editForm.customIdentifier),
       statisticsCycle: editForm.statisticsCycle || null,
       updateType: editForm.updateType
     }
