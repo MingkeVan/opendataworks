@@ -84,23 +84,34 @@
                       :class="{ active: selectedTable?.id === item.id }"
                       @click.stop="handleTableClick(item)"
                     >
-                      <el-icon class="table-icon"><Document /></el-icon>
-                      <div class="table-info">
-                        <span class="table-name" :title="item.tableName">
-                          {{ item.tableName }}
+                      <!-- 数据量进度条背景 -->
+                      <div
+                        class="table-progress-bg"
+                        :style="{ width: getTableProgressWidth(db, item) }"
+                      ></div>
+
+                      <div class="table-content">
+                        <el-icon class="table-icon"><Document /></el-icon>
+                        <div class="table-info">
+                          <span class="table-name" :title="item.tableName">
+                            {{ item.tableName }}
+                          </span>
+                          <span v-if="item.tableComment" class="table-comment" :title="item.tableComment">
+                            {{ item.tableComment }}
+                          </span>
+                        </div>
+                        <span v-if="item.rowCount" class="row-count" :title="`数据量: ${formatNumber(item.rowCount)} 行`">
+                          {{ formatRowCount(item.rowCount) }}
                         </span>
-                        <span v-if="item.tableComment" class="table-comment" :title="item.tableComment">
-                          {{ item.tableComment }}
-                        </span>
+                        <el-tag
+                          v-if="item.layer"
+                          size="small"
+                          :type="getLayerType(item.layer)"
+                          class="layer-tag"
+                        >
+                          {{ item.layer }}
+                        </el-tag>
                       </div>
-                      <el-tag
-                        v-if="item.layer"
-                        size="small"
-                        :type="getLayerType(item.layer)"
-                        class="layer-tag"
-                      >
-                        {{ item.layer }}
-                      </el-tag>
                     </div>
                   </template>
                   <el-empty
@@ -1358,6 +1369,29 @@ const formatNumber = (num) => {
   return num.toLocaleString('zh-CN')
 }
 
+// 格式化行数（简化显示）
+const formatRowCount = (rowCount) => {
+  if (!rowCount) return ''
+  if (rowCount < 1000) return rowCount.toString()
+  if (rowCount < 1000000) return (rowCount / 1000).toFixed(1) + 'K'
+  if (rowCount < 1000000000) return (rowCount / 1000000).toFixed(1) + 'M'
+  return (rowCount / 1000000000).toFixed(1) + 'B'
+}
+
+// 计算表的数据量进度条宽度
+const getTableProgressWidth = (database, table) => {
+  const tables = tablesByDatabase.value[database] || []
+  if (!tables.length || !table.rowCount) return '0%'
+
+  // 找出该数据库中最大的数据量
+  const maxRowCount = Math.max(...tables.map(t => t.rowCount || 0))
+  if (maxRowCount === 0) return '0%'
+
+  // 计算百分比，最小10%以保证有基本可见度
+  const percentage = Math.max(10, (table.rowCount / maxRowCount) * 100)
+  return percentage.toFixed(1) + '%'
+}
+
 // 格式化日期时间
 const formatDateTime = (dateTime) => {
   if (!dateTime) return '-'
@@ -1464,6 +1498,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  position: relative;
+  overflow: hidden;
 }
 
 .table-item:hover {
@@ -1474,6 +1510,36 @@ onMounted(() => {
 .table-item.active {
   border-color: #409eff;
   background-color: #ecf5ff;
+}
+
+/* 数据量进度条背景 */
+.table-progress-bg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, rgba(64, 158, 255, 0.08) 0%, rgba(64, 158, 255, 0.03) 100%);
+  transition: width 0.3s ease;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.table-item:hover .table-progress-bg {
+  background: linear-gradient(90deg, rgba(64, 158, 255, 0.15) 0%, rgba(64, 158, 255, 0.05) 100%);
+}
+
+.table-item.active .table-progress-bg {
+  background: linear-gradient(90deg, rgba(64, 158, 255, 0.2) 0%, rgba(64, 158, 255, 0.08) 100%);
+}
+
+/* 表内容容器 */
+.table-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  position: relative;
+  z-index: 1;
 }
 
 .table-icon {
@@ -1496,7 +1562,7 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex-shrink: 0;
-  max-width: 150px;
+  max-width: 120px;
 }
 
 .table-comment {
@@ -1507,6 +1573,18 @@ onMounted(() => {
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+}
+
+.row-count {
+  font-size: 11px;
+  color: #606266;
+  font-weight: 500;
+  padding: 2px 6px;
+  background-color: rgba(64, 158, 255, 0.1);
+  border-radius: 3px;
+  flex-shrink: 0;
+  min-width: 35px;
+  text-align: center;
 }
 
 .layer-tag {
