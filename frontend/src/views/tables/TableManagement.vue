@@ -1536,7 +1536,7 @@ onMounted(() => {
 .table-management {
   height: 100%;
   padding: 6px;
-  background-color: #f5f7fa;
+  background-color: #f8fafc;
 }
 
 .management-container {
@@ -1555,6 +1555,14 @@ onMounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.3s ease;
+}
+
+.database-card:hover {
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.12);
 }
 
 .search-bar {
@@ -1596,8 +1604,8 @@ onMounted(() => {
   gap: 8px;
   margin-bottom: 12px;
   padding: 8px;
-  background-color: #f5f7fa;
-  border-radius: 6px;
+  background-color: #f8fafc;
+  border-radius: 8px;
 }
 
 .table-list {
@@ -1609,10 +1617,10 @@ onMounted(() => {
 
 .table-item {
   padding: 6px 8px;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s ease;
   background-color: #fff;
   display: flex;
   align-items: center;
@@ -1622,13 +1630,16 @@ onMounted(() => {
 }
 
 .table-item:hover {
-  border-color: #409eff;
-  background-color: #ecf5ff;
+  border-color: #667eea;
+  background-color: #f0f4ff;
+  transform: translateX(4px);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.12);
 }
 
 .table-item.active {
-  border-color: #409eff;
-  background-color: #ecf5ff;
+  border-color: #667eea;
+  background-color: #f0f4ff;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
 }
 
 /* 数据量进度条背景 */
@@ -1637,18 +1648,18 @@ onMounted(() => {
   left: 0;
   top: 0;
   bottom: 0;
-  background: linear-gradient(90deg, rgba(64, 158, 255, 0.08) 0%, rgba(64, 158, 255, 0.03) 100%);
+  background: linear-gradient(90deg, rgba(102, 126, 234, 0.08) 0%, rgba(102, 126, 234, 0.02) 100%);
   transition: width 0.3s ease;
   pointer-events: none;
   z-index: 0;
 }
 
 .table-item:hover .table-progress-bg {
-  background: linear-gradient(90deg, rgba(64, 158, 255, 0.15) 0%, rgba(64, 158, 255, 0.05) 100%);
+  background: linear-gradient(90deg, rgba(102, 126, 234, 0.12) 0%, rgba(102, 126, 234, 0.04) 100%);
 }
 
 .table-item.active .table-progress-bg {
-  background: linear-gradient(90deg, rgba(64, 158, 255, 0.2) 0%, rgba(64, 158, 255, 0.08) 100%);
+  background: linear-gradient(90deg, rgba(102, 126, 234, 0.18) 0%, rgba(102, 126, 234, 0.06) 100%);
 }
 
 /* 表内容容器 */
@@ -1662,7 +1673,7 @@ onMounted(() => {
 }
 
 .table-icon {
-  color: #409eff;
+  color: #667eea;
   flex-shrink: 0;
 }
 
@@ -1704,11 +1715,11 @@ onMounted(() => {
 
 .row-count {
   font-size: 11px;
-  color: #606266;
+  color: #475569;
   font-weight: 500;
   padding: 2px 6px;
-  background-color: rgba(64, 158, 255, 0.1);
-  border-radius: 3px;
+  background-color: rgba(102, 126, 234, 0.1);
+  border-radius: 4px;
   min-width: 35px;
   text-align: center;
 }
@@ -1717,19 +1728,19 @@ onMounted(() => {
   font-size: 11px;
   font-weight: 500;
   padding: 2px 5px;
-  border-radius: 3px;
+  border-radius: 4px;
   min-width: 28px;
   text-align: center;
 }
 
 .lineage-count.upstream {
-  color: #67c23a;
-  background-color: rgba(103, 194, 58, 0.1);
+  color: #10b981;
+  background-color: rgba(16, 185, 129, 0.1);
 }
 
 .lineage-count.downstream {
-  color: #e6a23c;
-  background-color: rgba(230, 162, 60, 0.1);
+  color: #f59e0b;
+  background-color: rgba(245, 158, 11, 0.1);
 }
 
 .layer-tag {
@@ -1746,6 +1757,10 @@ onMounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.3s ease;
 }
 
 .empty-state {
@@ -1825,15 +1840,17 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   padding: 8px;
-  border: 1px solid #e4e7ed;
-  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s ease;
 }
 
 .lineage-item:hover {
-  border-color: #409eff;
-  background-color: #ecf5ff;
+  border-color: #667eea;
+  background-color: #f0f4ff;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.12);
 }
 
 .table-info-mini {
@@ -1860,10 +1877,11 @@ onMounted(() => {
 /* 编辑区域 */
 .inline-edit-wrapper {
   padding: 20px;
-  background-color: #f9fafc;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
   margin-bottom: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .edit-form {
@@ -1910,8 +1928,9 @@ onMounted(() => {
 .trend-chart {
   background-color: #fff;
   padding: 20px;
-  border-radius: 8px;
-  border: 1px solid #ebeef5;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .trend-chart h4 {
@@ -1937,8 +1956,8 @@ onMounted(() => {
   margin-top: 12px;
   text-align: center;
   padding: 12px;
-  background-color: #f5f7fa;
-  border-radius: 4px;
+  background-color: #f8fafc;
+  border-radius: 8px;
 }
 
 :deep(.el-card__body) {

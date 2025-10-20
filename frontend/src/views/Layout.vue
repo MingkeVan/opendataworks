@@ -90,9 +90,11 @@ const activeMenu = computed(() => {
 }
 
 .el-header {
-  background-color: #304156;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 0;
-  border-bottom: 2px solid #263445;
+  box-shadow: 0 2px 12px rgba(102, 126, 234, 0.15);
+  position: relative;
+  z-index: 100;
 }
 
 .header-wrapper {
@@ -107,19 +109,22 @@ const activeMenu = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #263445;
+  background: rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
 }
 
 .logo h2 {
   color: #fff;
-  font-size: 18px;
+  font-size: 20px;
+  font-weight: 600;
   margin: 0;
+  letter-spacing: 1px;
 }
 
 .menu {
   flex: 1;
   border: none;
-  background-color: #304156;
+  background: transparent;
 }
 
 .el-menu--horizontal {
@@ -127,19 +132,28 @@ const activeMenu = computed(() => {
 }
 
 .el-menu-item {
-  color: #bfcbd9;
+  color: rgba(255, 255, 255, 0.85);
   border-bottom: none;
+  transition: all 0.3s ease;
+  font-weight: 500;
 }
 
-.el-menu-item:hover,
+.el-menu-item:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+  border-bottom: none;
+  transform: translateY(-2px);
+}
+
 .el-menu-item.is-active {
-  background-color: #263445 !important;
-  color: #409eff !important;
-  border-bottom: 2px solid #409eff;
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  color: #fff !important;
+  border-bottom: 3px solid rgba(255, 255, 255, 0.9);
+  font-weight: 600;
 }
 
 .el-main {
-  background-color: #f0f2f5;
+  background-color: #f8fafc;
   padding: 4px;
   flex: 1;
   overflow-y: auto;

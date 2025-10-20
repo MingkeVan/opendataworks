@@ -471,11 +471,13 @@ function formatDate(value) {
 .data-query-page {
   padding: 12px;
   height: calc(100vh - 80px);
-  background-color: #f5f7fa;
+  background-color: #f8fafc;
 }
 
 .unified-card {
   height: 100%;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 :deep(.el-card__body) {
@@ -502,7 +504,7 @@ function formatDate(value) {
 .section-title {
   font-size: 16px;
   font-weight: 600;
-  color: #303133;
+  color: #1e293b;
 }
 
 .compact-form {
@@ -554,6 +556,11 @@ function formatDate(value) {
 .sql-editor {
   font-family: 'Fira Code', 'Source Code Pro', Consolas, monospace;
   font-size: 13px;
+  border-radius: 8px;
+}
+
+.sql-editor :deep(.el-textarea__inner) {
+  border-radius: 8px;
 }
 
 .action-buttons {
@@ -628,7 +635,8 @@ function formatDate(value) {
 
 .preview-wrapper {
   padding: 12px;
-  background-color: #f9fafc;
+  background-color: #f8fafc;
+  border-radius: 8px;
 }
 
 .preview-empty {
