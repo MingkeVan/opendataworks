@@ -331,7 +331,6 @@ public class DataTableService {
 
         List<DataLineage> lineageRecords = dataLineageMapper.selectList(
             new LambdaQueryWrapper<DataLineage>()
-                .eq(DataLineage::getLineageType, "table")
                 .and(wrapper -> wrapper.eq(DataLineage::getUpstreamTableId, tableId)
                     .or()
                     .eq(DataLineage::getDownstreamTableId, tableId))
