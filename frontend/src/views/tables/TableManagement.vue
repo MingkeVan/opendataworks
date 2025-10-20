@@ -4,28 +4,24 @@
       <!-- 左侧：数据库和表列表 -->
       <div class="left-panel">
         <el-card shadow="never" class="database-card">
-          <template #header>
-            <div class="card-header">
-              <span class="title">数据库和表</span>
-              <el-button type="primary" size="small" @click="goCreate">
-                <el-icon><Plus /></el-icon>
-                新建表
-              </el-button>
-            </div>
-          </template>
-
-          <!-- 搜索框 -->
-          <el-input
-            v-model="searchKeyword"
-            placeholder="搜索表名..."
-            clearable
-            class="search-input"
-            @input="handleSearch"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
+          <!-- 搜索框和新建按钮 -->
+          <div class="search-bar">
+            <el-input
+              v-model="searchKeyword"
+              placeholder="搜索表名..."
+              clearable
+              class="search-input"
+              @input="handleSearch"
+            >
+              <template #prefix>
+                <el-icon><Search /></el-icon>
+              </template>
+            </el-input>
+            <el-button type="primary" @click="goCreate">
+              <el-icon><Plus /></el-icon>
+              新建表
+            </el-button>
+          </div>
 
           <!-- 排序选项 -->
           <div class="sort-options">
@@ -151,35 +147,6 @@
           </div>
 
           <template v-else>
-            <!-- 表头操作区 -->
-            <div class="detail-header">
-              <div class="table-title-section">
-                <h2 class="table-title">{{ selectedTable.tableName }}</h2>
-                <el-tag
-                  :type="selectedTable.status === 'active' ? 'success' : 'info'"
-                  size="large"
-                >
-                  {{ selectedTable.status === 'active' ? '活跃' : '已废弃' }}
-                </el-tag>
-              </div>
-              <div class="action-buttons">
-                <el-button type="primary" link @click="goLineage">
-                  查看血缘关系
-                </el-button>
-                <el-popconfirm
-                  width="300"
-                  confirm-button-text="确定删除"
-                  cancel-button-text="取消"
-                  :title="`确定删除表「${selectedTable.tableName}」吗？此操作不可恢复！`"
-                  @confirm="handleDelete(selectedTable.id)"
-                >
-                  <template #reference>
-                    <el-button type="danger">删除表</el-button>
-                  </template>
-                </el-popconfirm>
-              </div>
-            </div>
-
             <!-- 标签页 -->
             <el-tabs v-model="activeTab" class="detail-tabs">
               <!-- 基本信息 -->
@@ -1590,19 +1557,15 @@ onMounted(() => {
   flex-direction: column;
 }
 
-.card-header {
+.search-bar {
   display: flex;
-  justify-content: space-between;
+  gap: 12px;
   align-items: center;
-  font-weight: 600;
-}
-
-.title {
-  font-size: 16px;
-}
-
-.search-input {
   margin-bottom: 12px;
+}
+
+.search-bar .search-input {
+  flex: 1;
 }
 
 .database-list {
@@ -1792,32 +1755,6 @@ onMounted(() => {
   height: 100%;
 }
 
-.detail-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 2px solid #ebeef5;
-}
-
-.table-title-section {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.table-title {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 10px;
-}
-
 .detail-tabs {
   flex: 1;
   overflow-y: auto;
@@ -1843,6 +1780,11 @@ onMounted(() => {
 .section-header h3 {
   margin: 0;
   font-size: 18px;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
 }
 
 .info-cards {
