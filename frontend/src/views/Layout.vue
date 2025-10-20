@@ -140,7 +140,7 @@ const activeMenu = computed(() => {
 
 .el-main {
   background-color: #f0f2f5;
-  padding: 20px;
+  padding: 4px;
   flex: 1;
   overflow-y: auto;
 }
