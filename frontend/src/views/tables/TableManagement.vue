@@ -84,43 +84,23 @@
                       :class="{ active: selectedTable?.id === item.id }"
                       @click.stop="handleTableClick(item)"
                     >
+                      <el-icon class="table-icon"><Document /></el-icon>
                       <div class="table-info">
-                        <div class="table-name-row">
-                          <el-icon class="table-icon"><Document /></el-icon>
-                          <span class="table-name" :title="item.tableName">
-                            {{ item.tableName }}
-                          </span>
-                          <el-tag
-                            v-if="item.layer"
-                            size="small"
-                            :type="getLayerType(item.layer)"
-                            class="layer-tag"
-                          >
-                            {{ item.layer }}
-                          </el-tag>
-                        </div>
-                        <div class="table-meta">
-                          <span
-                            v-if="item.tableComment"
-                            class="table-comment"
-                            :title="item.tableComment"
-                          >
-                            {{ item.tableComment }}
-                          </span>
-                          <span v-if="item.rowCount" class="stat-item">
-                            <el-icon><List /></el-icon>
-                            {{ formatNumber(item.rowCount) }} 行
-                          </span>
-                          <span class="stat-item">
-                            <el-icon><Link /></el-icon>
-                            上游 {{ getUpstreamCount(item.id) }}
-                          </span>
-                          <span class="stat-item">
-                            <el-icon><Connection /></el-icon>
-                            下游 {{ getDownstreamCount(item.id) }}
-                          </span>
-                        </div>
+                        <span class="table-name" :title="item.tableName">
+                          {{ item.tableName }}
+                        </span>
+                        <span v-if="item.tableComment" class="table-comment" :title="item.tableComment">
+                          {{ item.tableComment }}
+                        </span>
                       </div>
+                      <el-tag
+                        v-if="item.layer"
+                        size="small"
+                        :type="getLayerType(item.layer)"
+                        class="layer-tag"
+                      >
+                        {{ item.layer }}
+                      </el-tag>
                     </div>
                   </template>
                   <el-empty
@@ -1471,19 +1451,19 @@ onMounted(() => {
   padding: 4px 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .table-item {
-  padding: 8px 10px;
+  padding: 6px 8px;
   border: 1px solid #e4e7ed;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s;
   background-color: #fff;
-  min-height: 56px;
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 8px;
 }
 
 .table-item:hover {
@@ -1496,56 +1476,41 @@ onMounted(() => {
   background-color: #ecf5ff;
 }
 
-.table-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-}
-
-.table-name-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .table-icon {
   color: #409eff;
+  flex-shrink: 0;
+}
+
+.table-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
 }
 
 .table-name {
   font-weight: 600;
   font-size: 13px;
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.layer-tag {
-  margin-left: auto;
-}
-
-.table-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  font-size: 12px;
-  color: #606266;
+  flex-shrink: 0;
+  max-width: 150px;
 }
 
 .table-comment {
-  flex: 1 1 100%;
   color: #909399;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
-.stat-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.layer-tag {
+  flex-shrink: 0;
 }
 
 /* 右侧面板 */
