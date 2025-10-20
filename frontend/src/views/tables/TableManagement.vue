@@ -76,60 +76,53 @@
 
                 <!-- 表列表 -->
                 <div class="table-list">
-                  <el-virtual-list
-                    v-if="getTablesForDatabase(db).length"
-                    :data="getTablesForDatabase(db)"
-                    :item-size="tableItemSize"
-                    :height="getVirtualListHeight(db)"
-                    :item-key="(item) => item.id"
-                    class="table-virtual-list"
-                  >
-                    <template #default="{ item }">
-                      <div
-                        class="table-item"
-                        :class="{ active: selectedTable?.id === item.id }"
-                        @click.stop="handleTableClick(item)"
-                      >
-                        <div class="table-info">
-                          <div class="table-name-row">
-                            <el-icon class="table-icon"><Document /></el-icon>
-                            <span class="table-name" :title="item.tableName">
-                              {{ item.tableName }}
-                            </span>
-                            <el-tag
-                              v-if="item.layer"
-                              size="small"
-                              :type="getLayerType(item.layer)"
-                              class="layer-tag"
-                            >
-                              {{ item.layer }}
-                            </el-tag>
-                          </div>
-                          <div class="table-meta">
-                            <span
-                              v-if="item.tableComment"
-                              class="table-comment"
-                              :title="item.tableComment"
-                            >
-                              {{ item.tableComment }}
-                            </span>
-                            <span v-if="item.rowCount" class="stat-item">
-                              <el-icon><List /></el-icon>
-                              {{ formatNumber(item.rowCount) }} 行
-                            </span>
-                            <span class="stat-item">
-                              <el-icon><Link /></el-icon>
-                              上游 {{ getUpstreamCount(item.id) }}
-                            </span>
-                            <span class="stat-item">
-                              <el-icon><Connection /></el-icon>
-                              下游 {{ getDownstreamCount(item.id) }}
-                            </span>
-                          </div>
+                  <template v-if="getTablesForDatabase(db).length">
+                    <div
+                      v-for="item in getTablesForDatabase(db)"
+                      :key="item.id"
+                      class="table-item"
+                      :class="{ active: selectedTable?.id === item.id }"
+                      @click.stop="handleTableClick(item)"
+                    >
+                      <div class="table-info">
+                        <div class="table-name-row">
+                          <el-icon class="table-icon"><Document /></el-icon>
+                          <span class="table-name" :title="item.tableName">
+                            {{ item.tableName }}
+                          </span>
+                          <el-tag
+                            v-if="item.layer"
+                            size="small"
+                            :type="getLayerType(item.layer)"
+                            class="layer-tag"
+                          >
+                            {{ item.layer }}
+                          </el-tag>
+                        </div>
+                        <div class="table-meta">
+                          <span
+                            v-if="item.tableComment"
+                            class="table-comment"
+                            :title="item.tableComment"
+                          >
+                            {{ item.tableComment }}
+                          </span>
+                          <span v-if="item.rowCount" class="stat-item">
+                            <el-icon><List /></el-icon>
+                            {{ formatNumber(item.rowCount) }} 行
+                          </span>
+                          <span class="stat-item">
+                            <el-icon><Link /></el-icon>
+                            上游 {{ getUpstreamCount(item.id) }}
+                          </span>
+                          <span class="stat-item">
+                            <el-icon><Connection /></el-icon>
+                            下游 {{ getDownstreamCount(item.id) }}
+                          </span>
                         </div>
                       </div>
-                    </template>
-                  </el-virtual-list>
+                    </div>
+                  </template>
                   <el-empty
                     v-else
                     description="暂无表"
