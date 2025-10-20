@@ -76,47 +76,62 @@
 
                 <!-- 表列表 -->
                 <div class="table-list">
-                  <div
-                    v-for="table in getTablesForDatabase(db)"
-                    :key="table.id"
-                    class="table-item"
-                    :class="{ active: selectedTable?.id === table.id }"
-                    @click.stop="handleTableClick(table)"
+                  <el-virtual-list
+                    v-if="getTablesForDatabase(db).length"
+                    :data="getTablesForDatabase(db)"
+                    :item-size="tableItemSize"
+                    :height="getVirtualListHeight(db)"
+                    :item-key="(item) => item.id"
+                    class="table-virtual-list"
                   >
-                    <div class="table-info">
-                      <div class="table-name-row">
-                        <el-icon class="table-icon"><Document /></el-icon>
-                        <span class="table-name">{{ table.tableName }}</span>
-                        <el-tag
-                          v-if="table.layer"
-                          size="small"
-                          :type="getLayerType(table.layer)"
-                          class="layer-tag"
-                        >
-                          {{ table.layer }}
-                        </el-tag>
+                    <template #default="{ item }">
+                      <div
+                        class="table-item"
+                        :class="{ active: selectedTable?.id === item.id }"
+                        @click.stop="handleTableClick(item)"
+                      >
+                        <div class="table-info">
+                          <div class="table-name-row">
+                            <el-icon class="table-icon"><Document /></el-icon>
+                            <span class="table-name" :title="item.tableName">
+                              {{ item.tableName }}
+                            </span>
+                            <el-tag
+                              v-if="item.layer"
+                              size="small"
+                              :type="getLayerType(item.layer)"
+                              class="layer-tag"
+                            >
+                              {{ item.layer }}
+                            </el-tag>
+                          </div>
+                          <div class="table-meta">
+                            <span
+                              v-if="item.tableComment"
+                              class="table-comment"
+                              :title="item.tableComment"
+                            >
+                              {{ item.tableComment }}
+                            </span>
+                            <span v-if="item.rowCount" class="stat-item">
+                              <el-icon><List /></el-icon>
+                              {{ formatNumber(item.rowCount) }} 行
+                            </span>
+                            <span class="stat-item">
+                              <el-icon><Link /></el-icon>
+                              上游 {{ getUpstreamCount(item.id) }}
+                            </span>
+                            <span class="stat-item">
+                              <el-icon><Connection /></el-icon>
+                              下游 {{ getDownstreamCount(item.id) }}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <div class="table-desc" v-if="table.tableComment">
-                        {{ table.tableComment }}
-                      </div>
-                      <div class="table-stats">
-                        <span v-if="table.rowCount" class="stat-item">
-                          <el-icon><List /></el-icon>
-                          {{ formatNumber(table.rowCount) }} 行
-                        </span>
-                        <span class="stat-item">
-                          <el-icon><Link /></el-icon>
-                          上游 {{ getUpstreamCount(table.id) }}
-                        </span>
-                        <span class="stat-item">
-                          <el-icon><Connection /></el-icon>
-                          下游 {{ getDownstreamCount(table.id) }}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+                    </template>
+                  </el-virtual-list>
                   <el-empty
-                    v-if="getTablesForDatabase(db).length === 0"
+                    v-else
                     description="暂无表"
                     :image-size="60"
                   />
@@ -159,15 +174,29 @@
                 <el-button type="primary" link @click="goLineage">
                   查看血缘关系
                 </el-button>
-                <el-button type="primary" @click="goEdit">编辑</el-button>
-                <el-popconfirm
-                  title="确定删除吗?"
-                  @confirm="handleDelete(selectedTable.id)"
-                >
-                  <template #reference>
-                    <el-button type="danger">删除</el-button>
-                  </template>
-                </el-popconfirm>
+                <template v-if="isEditing">
+                  <el-button @click="handleEditCancel" :disabled="editSubmitting">
+                    取消
+                  </el-button>
+                  <el-button
+                    type="primary"
+                    :loading="editSubmitting"
+                    @click="handleEditSubmit"
+                  >
+                    保存
+                  </el-button>
+                </template>
+                <template v-else>
+                  <el-button type="primary" @click="startEditing">编辑</el-button>
+                  <el-popconfirm
+                    title="确定删除吗?"
+                    @confirm="handleDelete(selectedTable.id)"
+                  >
+                    <template #reference>
+                      <el-button type="danger">删除</el-button>
+                    </template>
+                  </el-popconfirm>
+                </template>
               </div>
             </div>
 
@@ -175,58 +204,201 @@
             <el-tabs v-model="activeTab" class="detail-tabs">
               <!-- 基本信息 -->
               <el-tab-pane label="基本信息" name="basic">
-                <el-row :gutter="20">
-                  <el-col :span="12">
-                    <el-descriptions title="表信息" :column="1" border>
-                      <el-descriptions-item label="表名">
-                        {{ selectedTable.tableName }}
-                      </el-descriptions-item>
-                      <el-descriptions-item label="表注释">
-                        {{ selectedTable.tableComment || '-' }}
-                      </el-descriptions-item>
-                      <el-descriptions-item label="数据分层">
-                        {{ selectedTable.layer || '-' }}
-                      </el-descriptions-item>
-                      <el-descriptions-item label="业务域">
-                        {{ selectedTable.businessDomain || '-' }}
-                      </el-descriptions-item>
-                      <el-descriptions-item label="数据域">
-                        {{ selectedTable.dataDomain || '-' }}
-                      </el-descriptions-item>
-                      <el-descriptions-item label="数据库">
-                        {{ selectedTable.dbName || '-' }}
-                      </el-descriptions-item>
-                      <el-descriptions-item label="负责人">
-                        {{ selectedTable.owner || '-' }}
-                      </el-descriptions-item>
-                      <el-descriptions-item label="创建时间">
-                        {{ formatDateTime(selectedTable.createdAt) }}
-                      </el-descriptions-item>
-                    </el-descriptions>
-                  </el-col>
-                  <el-col :span="12">
-                    <el-descriptions title="Doris 配置" :column="1" border>
-                      <el-descriptions-item label="表模型">
-                        {{ selectedTable.tableModel || '-' }}
-                      </el-descriptions-item>
-                      <el-descriptions-item label="主键列">
-                        {{ selectedTable.keyColumns || '-' }}
-                      </el-descriptions-item>
-                      <el-descriptions-item label="分区字段">
-                        {{ selectedTable.partitionColumn || '-' }}
-                      </el-descriptions-item>
-                      <el-descriptions-item label="分桶字段">
-                        {{ selectedTable.distributionColumn || '-' }}
-                      </el-descriptions-item>
-                      <el-descriptions-item label="分桶数">
-                        {{ selectedTable.bucketNum || '-' }}
-                      </el-descriptions-item>
-                      <el-descriptions-item label="副本数">
-                        {{ selectedTable.replicaNum || '-' }}
-                      </el-descriptions-item>
-                    </el-descriptions>
-                  </el-col>
-                </el-row>
+                <template v-if="isEditing">
+                  <div class="inline-edit-wrapper">
+                    <el-form
+                      ref="editFormRef"
+                      :model="editForm"
+                      :rules="editFormRules"
+                      label-width="110px"
+                      class="edit-form"
+                    >
+                      <el-row :gutter="16">
+                        <el-col :span="24">
+                          <el-form-item label="表名" prop="tableName">
+                            <div class="table-name-input-group">
+                              <el-input v-model="editForm.tableName" placeholder="请输入表名" />
+                              <el-button
+                                type="primary"
+                                link
+                                size="small"
+                                :disabled="!canGenerateEditName"
+                                @click="handleGenerateTableName"
+                              >
+                                生成
+                              </el-button>
+                            </div>
+                          </el-form-item>
+                        </el-col>
+                      </el-row>
+
+                      <el-row :gutter="16">
+                        <el-col :span="12">
+                          <el-form-item label="数据分层" prop="layer">
+                            <el-select v-model="editForm.layer" placeholder="选择数据分层">
+                              <el-option
+                                v-for="item in layerOptions"
+                                :key="item.value"
+                                :label="item.label"
+                                :value="item.value"
+                              />
+                            </el-select>
+                          </el-form-item>
+                        </el-col>
+                        <el-col :span="12">
+                          <el-form-item label="业务域" prop="businessDomain">
+                            <el-select
+                              v-model="editForm.businessDomain"
+                              placeholder="选择业务域"
+                              filterable
+                              @change="handleEditBusinessDomainChange"
+                            >
+                              <el-option
+                                v-for="item in businessDomainOptions"
+                                :key="item.domainCode"
+                                :label="`${item.domainCode} - ${item.domainName}`"
+                                :value="item.domainCode"
+                              />
+                            </el-select>
+                          </el-form-item>
+                        </el-col>
+                      </el-row>
+
+                      <el-row :gutter="16">
+                        <el-col :span="12">
+                          <el-form-item label="数据域" prop="dataDomain">
+                            <el-select
+                              v-model="editForm.dataDomain"
+                              placeholder="选择数据域"
+                              :disabled="!editForm.businessDomain"
+                              filterable
+                            >
+                              <el-option
+                                v-for="item in dataDomainOptions"
+                                :key="item.domainCode"
+                                :label="`${item.domainCode} - ${item.domainName}`"
+                                :value="item.domainCode"
+                              />
+                            </el-select>
+                          </el-form-item>
+                        </el-col>
+                        <el-col :span="12">
+                          <el-form-item label="自定义标识" prop="customIdentifier">
+                            <el-input
+                              v-model="editForm.customIdentifier"
+                              placeholder="如: cmp_performance"
+                              @blur="() => handleNormalizeSegment('customIdentifier')"
+                            />
+                          </el-form-item>
+                        </el-col>
+                      </el-row>
+
+                      <el-row :gutter="16">
+                        <el-col :span="12">
+                          <el-form-item label="统计周期">
+                            <el-select v-model="editForm.statisticsCycle" placeholder="可选">
+                              <el-option label="无" value="" />
+                              <el-option
+                                v-for="item in statisticsOptions"
+                                :key="item.value"
+                                :label="item.label"
+                                :value="item.value"
+                              />
+                            </el-select>
+                          </el-form-item>
+                        </el-col>
+                        <el-col :span="12">
+                          <el-form-item label="更新类型" prop="updateType">
+                            <el-select v-model="editForm.updateType" placeholder="选择更新类型">
+                              <el-option
+                                v-for="item in updateTypeOptions"
+                                :key="item.value"
+                                :label="item.label"
+                                :value="item.value"
+                              />
+                            </el-select>
+                          </el-form-item>
+                        </el-col>
+                      </el-row>
+
+                      <el-row :gutter="16">
+                        <el-col :span="12">
+                          <el-form-item label="负责人" prop="owner">
+                            <el-input v-model="editForm.owner" placeholder="负责人" />
+                          </el-form-item>
+                        </el-col>
+                        <el-col :span="12">
+                          <el-form-item label="数据库">
+                            <el-input :model-value="selectedTable.dbName" disabled />
+                          </el-form-item>
+                        </el-col>
+                      </el-row>
+
+                      <el-form-item label="表注释">
+                        <el-input
+                          v-model="editForm.tableComment"
+                          type="textarea"
+                          :rows="3"
+                          placeholder="请输入表业务含义"
+                        />
+                      </el-form-item>
+                    </el-form>
+                  </div>
+                </template>
+                <template v-else>
+                  <el-row :gutter="20">
+                    <el-col :span="12">
+                      <el-descriptions title="表信息" :column="1" border>
+                        <el-descriptions-item label="表名">
+                          {{ selectedTable.tableName }}
+                        </el-descriptions-item>
+                        <el-descriptions-item label="表注释">
+                          {{ selectedTable.tableComment || '-' }}
+                        </el-descriptions-item>
+                        <el-descriptions-item label="数据分层">
+                          {{ selectedTable.layer || '-' }}
+                        </el-descriptions-item>
+                        <el-descriptions-item label="业务域">
+                          {{ selectedTable.businessDomain || '-' }}
+                        </el-descriptions-item>
+                        <el-descriptions-item label="数据域">
+                          {{ selectedTable.dataDomain || '-' }}
+                        </el-descriptions-item>
+                        <el-descriptions-item label="数据库">
+                          {{ selectedTable.dbName || '-' }}
+                        </el-descriptions-item>
+                        <el-descriptions-item label="负责人">
+                          {{ selectedTable.owner || '-' }}
+                        </el-descriptions-item>
+                        <el-descriptions-item label="创建时间">
+                          {{ formatDateTime(selectedTable.createdAt) }}
+                        </el-descriptions-item>
+                      </el-descriptions>
+                    </el-col>
+                    <el-col :span="12">
+                      <el-descriptions title="Doris 配置" :column="1" border>
+                        <el-descriptions-item label="表模型">
+                          {{ selectedTable.tableModel || '-' }}
+                        </el-descriptions-item>
+                        <el-descriptions-item label="主键列">
+                          {{ selectedTable.keyColumns || '-' }}
+                        </el-descriptions-item>
+                        <el-descriptions-item label="分区字段">
+                          {{ selectedTable.partitionColumn || '-' }}
+                        </el-descriptions-item>
+                        <el-descriptions-item label="分桶字段">
+                          {{ selectedTable.distributionColumn || '-' }}
+                        </el-descriptions-item>
+                        <el-descriptions-item label="分桶数">
+                          {{ selectedTable.bucketNum || '-' }}
+                        </el-descriptions-item>
+                        <el-descriptions-item label="副本数">
+                          {{ selectedTable.replicaNum || '-' }}
+                        </el-descriptions-item>
+                      </el-descriptions>
+                    </el-col>
+                  </el-row>
+                </template>
               </el-tab-pane>
 
               <!-- 统计信息 -->
@@ -359,11 +531,12 @@
         </el-card>
       </div>
     </div>
+
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -378,6 +551,8 @@ import {
 } from '@element-plus/icons-vue'
 import { tableApi } from '@/api/table'
 import * as echarts from 'echarts'
+import { businessDomainApi, dataDomainApi } from '@/api/domain'
+import { tableDesignerApi } from '@/api/tableDesigner'
 
 const router = useRouter()
 
@@ -396,6 +571,88 @@ const statisticsHistory = ref([])
 const activeTab = ref('basic')
 const chartContainer = ref(null)
 let chartInstance = null
+
+const tableItemSize = 56
+
+const isEditing = ref(false)
+const editFormRef = ref(null)
+const editSubmitting = ref(false)
+
+const TABLE_NAME_PATTERN = /^[a-z0-9_]+$/
+
+const layerOptions = [
+  { label: 'ODS - 原始数据层', value: 'ODS' },
+  { label: 'DWD - 明细数据层', value: 'DWD' },
+  { label: 'DIM - 维度数据层', value: 'DIM' },
+  { label: 'DWS - 汇总数据层', value: 'DWS' },
+  { label: 'ADS - 应用数据层', value: 'ADS' }
+]
+
+const statisticsOptions = [
+  { label: '10分钟', value: '10m' },
+  { label: '30分钟', value: '30m' },
+  { label: '1小时', value: '1h' },
+  { label: '1天', value: '1d' },
+  { label: '实时', value: 'realtime' }
+]
+
+const updateTypeOptions = [
+  { label: 'di - 日增量', value: 'di' },
+  { label: 'df - 日全量', value: 'df' },
+  { label: 'hi - 小时增量', value: 'hi' },
+  { label: 'hf - 小时全量', value: 'hf' },
+  { label: 'ri - 实时增量', value: 'ri' }
+]
+
+const businessDomainOptions = ref([])
+const dataDomainOptions = ref([])
+
+const editForm = reactive({
+  tableName: '',
+  tableComment: '',
+  layer: '',
+  businessDomain: '',
+  dataDomain: '',
+  customIdentifier: '',
+  statisticsCycle: '',
+  updateType: '',
+  owner: ''
+})
+
+const editFormRules = {
+  layer: [{ required: true, message: '请选择数据分层', trigger: 'change' }],
+  businessDomain: [{ required: true, message: '请选择业务域', trigger: 'change' }],
+  dataDomain: [{ required: true, message: '请选择数据域', trigger: 'change' }],
+  customIdentifier: [
+    { required: true, message: '请输入自定义标识', trigger: 'blur' },
+    {
+      pattern: TABLE_NAME_PATTERN,
+      message: '仅支持小写字母、数字和下划线',
+      trigger: 'blur'
+    }
+  ],
+  updateType: [{ required: true, message: '请选择更新类型', trigger: 'change' }],
+  tableName: [
+    { required: true, message: '表名不能为空', trigger: 'blur' },
+    {
+      pattern: TABLE_NAME_PATTERN,
+      message: '表名仅支持小写字母、数字和下划线',
+      trigger: 'blur'
+    }
+  ],
+  owner: [{ required: true, message: '请输入负责人', trigger: 'blur' }]
+}
+
+const canGenerateEditName = computed(
+  () =>
+    !!(
+      editForm.layer &&
+      editForm.businessDomain &&
+      editForm.dataDomain &&
+      editForm.customIdentifier &&
+      editForm.updateType
+    )
+)
 
 // 排序选项
 const sortField = ref('createdAt')
@@ -462,6 +719,184 @@ const getTableCount = (database) => {
   return getTablesForDatabase(database).length
 }
 
+const getVirtualListHeight = (database) => {
+  const count = getTablesForDatabase(database).length
+  const visibleCount = Math.min(Math.max(count, 6), 18)
+  return visibleCount * tableItemSize
+}
+
+const normalizeSegment = (value) =>
+  value ? value.trim().toLowerCase().replace(/\s+/g, '_').replace(/-+/g, '_') : ''
+
+const handleNormalizeSegment = (field) => {
+  editForm[field] = normalizeSegment(editForm[field])
+}
+
+const loadBusinessDomainOptions = async () => {
+  try {
+    businessDomainOptions.value = await businessDomainApi.list()
+  } catch (error) {
+    console.error('加载业务域失败:', error)
+    businessDomainOptions.value = []
+  }
+}
+
+const loadDataDomainOptions = async (businessDomain) => {
+  if (!businessDomain) {
+    dataDomainOptions.value = []
+    return
+  }
+  try {
+    dataDomainOptions.value = await dataDomainApi.list({ businessDomain })
+  } catch (error) {
+    console.error('加载数据域失败:', error)
+    dataDomainOptions.value = []
+  }
+}
+
+const ensureBusinessDomainOption = (code) => {
+  if (
+    code &&
+    !businessDomainOptions.value.some((item) => item.domainCode === code)
+  ) {
+    businessDomainOptions.value.push({
+      domainCode: code,
+      domainName: code
+    })
+  }
+}
+
+const ensureDataDomainOption = (code, businessDomain) => {
+  if (
+    code &&
+    !dataDomainOptions.value.some((item) => item.domainCode === code)
+  ) {
+    dataDomainOptions.value.push({
+      domainCode: code,
+      domainName: code,
+      businessDomain
+    })
+  }
+}
+
+const applyEditForm = async (data) => {
+  if (!data) return
+  editForm.tableName = data.tableName || ''
+  editForm.tableComment = data.tableComment || ''
+  editForm.layer = data.layer || ''
+  editForm.businessDomain = data.businessDomain || ''
+  await loadDataDomainOptions(editForm.businessDomain)
+  ensureBusinessDomainOption(editForm.businessDomain)
+  editForm.dataDomain = data.dataDomain || ''
+  ensureDataDomainOption(editForm.dataDomain, editForm.businessDomain)
+  editForm.customIdentifier = data.customIdentifier || ''
+  editForm.statisticsCycle = data.statisticsCycle || ''
+  editForm.updateType = data.updateType || ''
+  editForm.owner = data.owner || ''
+}
+
+const handleEditBusinessDomainChange = async () => {
+  await loadDataDomainOptions(editForm.businessDomain)
+  if (
+    editForm.dataDomain &&
+    !dataDomainOptions.value.some((item) => item.domainCode === editForm.dataDomain)
+  ) {
+    editForm.dataDomain = ''
+  }
+}
+
+const handleGenerateTableName = async () => {
+  if (!canGenerateEditName.value) return
+  try {
+    const payload = {
+      layer: editForm.layer,
+      businessDomain: normalizeSegment(editForm.businessDomain),
+      dataDomain: normalizeSegment(editForm.dataDomain),
+      customIdentifier: normalizeSegment(editForm.customIdentifier),
+      statisticsCycle: editForm.statisticsCycle || null,
+      updateType: editForm.updateType
+    }
+    const name = await tableDesignerApi.generateTableName(payload)
+    editForm.tableName = name
+    ElMessage.success('已生成推荐表名')
+  } catch (error) {
+    console.error('生成表名失败:', error)
+    ElMessage.error('生成表名失败')
+  }
+}
+
+const startEditing = async () => {
+  if (!selectedTable.value) return
+  await loadBusinessDomainOptions()
+  await applyEditForm(selectedTable.value)
+  isEditing.value = true
+  await nextTick()
+  if (editFormRef.value) {
+    editFormRef.value.clearValidate()
+  }
+}
+
+const handleEditCancel = async () => {
+  if (editSubmitting.value) return
+  await applyEditForm(selectedTable.value)
+  isEditing.value = false
+  await nextTick()
+  if (editFormRef.value) {
+    editFormRef.value.clearValidate()
+  }
+}
+
+const updateCachedTable = (updatedTable) => {
+  if (!activeDatabase.value) return
+  const list = tablesByDatabase.value[activeDatabase.value] || []
+  const index = list.findIndex((item) => item.id === updatedTable.id)
+  if (index === -1) return
+  const updatedList = [...list]
+  updatedList[index] = { ...updatedList[index], ...updatedTable }
+  tablesByDatabase.value = {
+    ...tablesByDatabase.value,
+    [activeDatabase.value]: updatedList
+  }
+}
+
+const handleEditSubmit = async () => {
+  if (!selectedTable.value) return
+  if (!editFormRef.value) return
+  handleNormalizeSegment('customIdentifier')
+  try {
+    await editFormRef.value.validate()
+  } catch (error) {
+    return
+  }
+
+  editSubmitting.value = true
+  try {
+    const payload = {
+      ...selectedTable.value,
+      tableName: editForm.tableName.trim(),
+      tableComment: editForm.tableComment,
+      owner: editForm.owner,
+      layer: editForm.layer,
+      businessDomain: editForm.businessDomain,
+      dataDomain: editForm.dataDomain,
+      customIdentifier: editForm.customIdentifier,
+      statisticsCycle: editForm.statisticsCycle || null,
+      updateType: editForm.updateType
+    }
+    const updated = await tableApi.update(selectedTable.value.id, payload)
+    await loadTableDetail(updated.id)
+    updateCachedTable(updated)
+    ElMessage.success('更新成功')
+    await applyEditForm(selectedTable.value)
+    isEditing.value = false
+  } catch (error) {
+    console.error('更新失败:', error)
+    ElMessage.error('更新失败')
+  } finally {
+    editSubmitting.value = false
+  }
+}
+
 // 获取上游表数量
 const getUpstreamCount = (tableId) => {
   const lineage = lineageCache.value[tableId]
@@ -485,6 +920,10 @@ const handleDatabaseClick = (database) => {
 const handleTableClick = async (table) => {
   selectedTable.value = table
   activeTab.value = 'basic'
+  isEditing.value = false
+  if (editFormRef.value) {
+    editFormRef.value.clearValidate()
+  }
   await loadTableDetail(table.id)
 }
 
@@ -498,6 +937,7 @@ const loadTableDetail = async (tableId) => {
     ])
     selectedTable.value = tableInfo
     fields.value = fieldList
+    await applyEditForm(tableInfo)
   } catch (error) {
     console.error('加载表详情失败:', error)
     ElMessage.error('加载表详情失败')
@@ -600,13 +1040,6 @@ const goCreate = () => {
   router.push('/tables/create')
 }
 
-// 跳转到编辑页面
-const goEdit = () => {
-  if (selectedTable.value) {
-    router.push(`/tables/${selectedTable.value.id}`)
-  }
-}
-
 // 跳转到血缘关系页面
 const goLineage = () => {
   if (selectedTable.value) {
@@ -664,6 +1097,7 @@ const formatDateTime = (dateTime) => {
 
 onMounted(() => {
   loadDatabases()
+  loadBusinessDomainOptions()
 })
 </script>
 
@@ -682,7 +1116,7 @@ onMounted(() => {
 
 /* 左侧面板 */
 .left-panel {
-  width: 400px;
+  width: 320px;
   flex-shrink: 0;
 }
 
@@ -704,12 +1138,13 @@ onMounted(() => {
 }
 
 .search-input {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .database-list {
   flex: 1;
   overflow-y: auto;
+  padding-right: 6px;
 }
 
 .database-title {
@@ -730,25 +1165,32 @@ onMounted(() => {
 
 .sort-options {
   display: flex;
-  margin-bottom: 12px;
-  padding: 8px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px;
   background-color: #f5f7fa;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .table-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  padding: 4px 0;
+}
+
+.table-virtual-list {
+  width: 100%;
 }
 
 .table-item {
-  padding: 12px;
-  border: 1px solid #ebeef5;
+  padding: 8px 10px;
+  border: 1px solid #e4e7ed;
   border-radius: 6px;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.2s;
   background-color: #fff;
+  min-height: 56px;
+  display: flex;
+  align-items: stretch;
 }
 
 .table-item:hover {
@@ -761,10 +1203,12 @@ onMounted(() => {
   background-color: #ecf5ff;
 }
 
+
 .table-info {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  width: 100%;
 }
 
 .table-name-row {
@@ -777,9 +1221,10 @@ onMounted(() => {
   color: #409eff;
 }
 
+
 .table-name {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   flex: 1;
 }
 
@@ -787,25 +1232,51 @@ onMounted(() => {
   margin-left: auto;
 }
 
-.table-desc {
+.table-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   font-size: 12px;
+  color: #606266;
+}
+
+.table-comment {
+  flex: 1 1 100%;
   color: #909399;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.table-stats {
-  display: flex;
-  gap: 12px;
-  font-size: 12px;
-  color: #606266;
-}
-
 .stat-item {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* 编辑区域 */
+.inline-edit-wrapper {
+  padding: 20px;
+  background-color: #f9fafc;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+}
+
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.table-name-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.table-name-input-group :deep(.el-input) {
+  flex: 1;
 }
 
 /* 右侧面板 */
