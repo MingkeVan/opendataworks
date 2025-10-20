@@ -477,49 +477,126 @@
                 <div class="fields-section">
                   <div class="section-header">
                     <h3>字段定义</h3>
-                    <el-button type="primary" @click="handleAddField">
+                    <el-button type="primary" @click="handleAddField" :disabled="isAddingField">
                       <el-icon><Plus /></el-icon>
                       新增字段
                     </el-button>
                   </div>
-                  <el-table :data="fields" border style="width: 100%">
-                    <el-table-column prop="fieldName" label="字段名" width="200" />
-                    <el-table-column prop="fieldType" label="类型" width="150" />
-                    <el-table-column prop="isNullable" label="可为空" width="100">
+                  <el-table :data="displayFields" border style="width: 100%">
+                    <el-table-column label="字段名" width="180">
                       <template #default="{ row }">
-                        <el-tag :type="row.isNullable ? 'success' : 'danger'">
+                        <el-input
+                          v-if="row._isEditing || row._isNew"
+                          v-model="row.fieldName"
+                          placeholder="字段名"
+                          size="small"
+                        />
+                        <span v-else>{{ row.fieldName }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="类型" width="150">
+                      <template #default="{ row }">
+                        <el-input
+                          v-if="row._isEditing || row._isNew"
+                          v-model="row.fieldType"
+                          placeholder="VARCHAR(255)"
+                          size="small"
+                        />
+                        <span v-else>{{ row.fieldType }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="可为空" width="100">
+                      <template #default="{ row }">
+                        <el-switch
+                          v-if="row._isEditing || row._isNew"
+                          v-model="row.isNullable"
+                          :active-value="1"
+                          :inactive-value="0"
+                          size="small"
+                        />
+                        <el-tag v-else :type="row.isNullable ? 'success' : 'danger'" size="small">
                           {{ row.isNullable ? '是' : '否' }}
                         </el-tag>
                       </template>
                     </el-table-column>
-                    <el-table-column prop="isPrimary" label="主键" width="100">
+                    <el-table-column label="主键" width="90">
                       <template #default="{ row }">
-                        <el-tag v-if="row.isPrimary" type="info">是</el-tag>
-                        <span v-else>-</span>
+                        <el-switch
+                          v-if="row._isEditing || row._isNew"
+                          v-model="row.isPrimary"
+                          :active-value="1"
+                          :inactive-value="0"
+                          size="small"
+                        />
+                        <template v-else>
+                          <el-tag v-if="row.isPrimary" type="info" size="small">是</el-tag>
+                          <span v-else>-</span>
+                        </template>
                       </template>
                     </el-table-column>
-                    <el-table-column prop="defaultValue" label="默认值" width="150" />
-                    <el-table-column prop="fieldComment" label="注释" />
-                    <el-table-column label="操作" width="150" fixed="right">
+                    <el-table-column label="默认值" width="120">
                       <template #default="{ row }">
-                        <el-button type="primary" link @click="handleEditField(row)">
-                          编辑
-                        </el-button>
-                        <el-popconfirm
-                          width="250"
-                          confirm-button-text="确定"
-                          cancel-button-text="取消"
-                          :title="`确定删除字段「${row.fieldName}」吗？`"
-                          @confirm="handleDeleteField(row)"
-                        >
-                          <template #reference>
-                            <el-button type="danger" link>删除</el-button>
-                          </template>
-                        </el-popconfirm>
+                        <el-input
+                          v-if="row._isEditing || row._isNew"
+                          v-model="row.defaultValue"
+                          placeholder="可选"
+                          size="small"
+                        />
+                        <span v-else>{{ row.defaultValue || '-' }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="注释" min-width="150">
+                      <template #default="{ row }">
+                        <el-input
+                          v-if="row._isEditing || row._isNew"
+                          v-model="row.fieldComment"
+                          placeholder="字段注释"
+                          size="small"
+                        />
+                        <span v-else>{{ row.fieldComment || '-' }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="操作" width="150" fixed="right">
+                      <template #default="{ row, $index }">
+                        <template v-if="row._isEditing || row._isNew">
+                          <el-button
+                            type="primary"
+                            link
+                            size="small"
+                            @click="handleSaveField(row, $index)"
+                            :loading="fieldSubmitting"
+                          >
+                            保存
+                          </el-button>
+                          <el-button
+                            link
+                            size="small"
+                            @click="handleCancelFieldEdit(row, $index)"
+                            :disabled="fieldSubmitting"
+                          >
+                            取消
+                          </el-button>
+                        </template>
+                        <template v-else>
+                          <el-button type="primary" link size="small" @click="handleEditFieldInline(row)">
+                            编辑
+                          </el-button>
+                          <el-popconfirm
+                            width="250"
+                            confirm-button-text="确定"
+                            cancel-button-text="取消"
+                            :title="`确定删除字段「${row.fieldName}」吗？`"
+                            @confirm="handleDeleteField(row)"
+                          >
+                            <template #reference>
+                              <el-button type="danger" link size="small">删除</el-button>
+                            </template>
+                          </el-popconfirm>
+                        </template>
                       </template>
                     </el-table-column>
                   </el-table>
-                  <el-empty v-if="!fields.length" description="暂无字段信息" />
+                  <el-empty v-if="!displayFields.length" description="暂无字段信息" />
                 </div>
               </el-tab-pane>
 
@@ -629,48 +706,6 @@
         </el-card>
       </div>
     </div>
-
-    <!-- 字段编辑对话框 -->
-    <el-dialog
-      v-model="fieldDialogVisible"
-      :title="fieldDialogMode === 'add' ? '新增字段' : '编辑字段'"
-      width="600px"
-    >
-      <el-form
-        ref="fieldFormRef"
-        :model="fieldForm"
-        :rules="fieldFormRules"
-        label-width="100px"
-      >
-        <el-form-item label="字段名" prop="fieldName">
-          <el-input v-model="fieldForm.fieldName" placeholder="请输入字段名" />
-        </el-form-item>
-        <el-form-item label="字段类型" prop="fieldType">
-          <el-input v-model="fieldForm.fieldType" placeholder="如: VARCHAR(255), INT, DECIMAL(10,2)" />
-        </el-form-item>
-        <el-form-item label="字段注释" prop="fieldComment">
-          <el-input v-model="fieldForm.fieldComment" type="textarea" :rows="2" placeholder="请输入字段注释" />
-        </el-form-item>
-        <el-form-item label="可为空">
-          <el-switch v-model="fieldForm.isNullable" :active-value="1" :inactive-value="0" />
-        </el-form-item>
-        <el-form-item label="是否主键">
-          <el-switch v-model="fieldForm.isPrimary" :active-value="1" :inactive-value="0" />
-        </el-form-item>
-        <el-form-item label="默认值">
-          <el-input v-model="fieldForm.defaultValue" placeholder="可选" />
-        </el-form-item>
-        <el-form-item label="排序序号">
-          <el-input-number v-model="fieldForm.fieldOrder" :min="0" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="fieldDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleFieldSubmit" :loading="fieldSubmitting">
-          确定
-        </el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -706,6 +741,9 @@ const activeDatabase = ref('')
 const searchKeyword = ref('')
 const selectedTable = ref(null)
 const fields = ref([])
+const isAddingField = ref(false)
+const fieldSubmitting = ref(false)
+const editingFieldBackup = ref(null)
 const statistics = ref(null)
 const statisticsHistory = ref([])
 const activeTab = ref('basic')
@@ -717,26 +755,8 @@ const isEditing = ref(false)
 const editFormRef = ref(null)
 const editSubmitting = ref(false)
 
-// 字段编辑相关
-const fieldDialogVisible = ref(false)
-const fieldDialogMode = ref('add') // add or edit
-const fieldFormRef = ref(null)
-const fieldSubmitting = ref(false)
-const fieldForm = reactive({
-  id: null,
-  fieldName: '',
-  fieldType: '',
-  fieldComment: '',
-  isNullable: 1,
-  isPrimary: 0,
-  defaultValue: '',
-  fieldOrder: 0
-})
-
-const fieldFormRules = {
-  fieldName: [{ required: true, message: '请输入字段名', trigger: 'blur' }],
-  fieldType: [{ required: true, message: '请输入字段类型', trigger: 'blur' }]
-}
+// 字段管理计算属性
+const displayFields = computed(() => fields.value)
 
 const TABLE_NAME_PATTERN = /^[a-z0-9_]+$/
 
@@ -1234,8 +1254,9 @@ const handleDelete = async (id) => {
 
 // 字段管理相关方法
 const handleAddField = () => {
-  fieldDialogMode.value = 'add'
-  Object.assign(fieldForm, {
+  if (isAddingField.value) return
+
+  const newField = {
     id: null,
     fieldName: '',
     fieldType: '',
@@ -1243,54 +1264,80 @@ const handleAddField = () => {
     isNullable: 1,
     isPrimary: 0,
     defaultValue: '',
-    fieldOrder: fields.value.length
-  })
-  fieldDialogVisible.value = true
-  nextTick(() => {
-    if (fieldFormRef.value) {
-      fieldFormRef.value.clearValidate()
-    }
-  })
+    fieldOrder: fields.value.length,
+    _isNew: true,
+    _isEditing: false
+  }
+
+  fields.value.unshift(newField)
+  isAddingField.value = true
 }
 
-const handleEditField = (row) => {
-  fieldDialogMode.value = 'edit'
-  Object.assign(fieldForm, {
-    id: row.id,
-    fieldName: row.fieldName,
-    fieldType: row.fieldType,
-    fieldComment: row.fieldComment || '',
-    isNullable: row.isNullable || 0,
-    isPrimary: row.isPrimary || 0,
-    defaultValue: row.defaultValue || '',
-    fieldOrder: row.fieldOrder || 0
-  })
-  fieldDialogVisible.value = true
-  nextTick(() => {
-    if (fieldFormRef.value) {
-      fieldFormRef.value.clearValidate()
-    }
-  })
+const handleEditFieldInline = (row) => {
+  // 保存原始数据用于取消时恢复
+  editingFieldBackup.value = { ...row }
+  row._isEditing = true
 }
 
-const handleFieldSubmit = async () => {
-  if (!fieldFormRef.value) return
-  try {
-    await fieldFormRef.value.validate()
-  } catch (error) {
+const handleCancelFieldEdit = (row, index) => {
+  if (row._isNew) {
+    // 如果是新增的行，直接删除
+    fields.value.splice(index, 1)
+    isAddingField.value = false
+  } else {
+    // 如果是编辑的行，恢复原始数据
+    if (editingFieldBackup.value) {
+      Object.assign(row, editingFieldBackup.value)
+      delete row._isEditing
+      editingFieldBackup.value = null
+    }
+  }
+}
+
+const handleSaveField = async (row, index) => {
+  // 验证必填字段
+  if (!row.fieldName || !row.fieldName.trim()) {
+    ElMessage.warning('请输入字段名')
+    return
+  }
+  if (!row.fieldType || !row.fieldType.trim()) {
+    ElMessage.warning('请输入字段类型')
     return
   }
 
   fieldSubmitting.value = true
   try {
-    if (fieldDialogMode.value === 'add') {
-      await tableApi.createField(selectedTable.value.id, fieldForm)
+    if (row._isNew) {
+      // 新增字段
+      const payload = {
+        fieldName: row.fieldName.trim(),
+        fieldType: row.fieldType.trim(),
+        fieldComment: row.fieldComment || '',
+        isNullable: row.isNullable,
+        isPrimary: row.isPrimary,
+        defaultValue: row.defaultValue || '',
+        fieldOrder: row.fieldOrder
+      }
+      await tableApi.createField(selectedTable.value.id, payload)
       ElMessage.success('新增字段成功')
+      isAddingField.value = false
     } else {
-      await tableApi.updateField(selectedTable.value.id, fieldForm.id, fieldForm)
+      // 更新字段
+      const payload = {
+        fieldName: row.fieldName.trim(),
+        fieldType: row.fieldType.trim(),
+        fieldComment: row.fieldComment || '',
+        isNullable: row.isNullable,
+        isPrimary: row.isPrimary,
+        defaultValue: row.defaultValue || '',
+        fieldOrder: row.fieldOrder
+      }
+      await tableApi.updateField(selectedTable.value.id, row.id, payload)
       ElMessage.success('更新字段成功')
+      delete row._isEditing
+      editingFieldBackup.value = null
     }
-    fieldDialogVisible.value = false
+
     // 重新加载字段列表
     await loadTableDetail(selectedTable.value.id)
   } catch (error) {
