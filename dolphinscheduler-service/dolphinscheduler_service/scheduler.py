@@ -538,3 +538,131 @@ class DolphinSchedulerServiceCore:
             )
             raise ValueError(f"Failed to get instance log: {str(e)}") from e
 
+    def delete_workflow(self, workflow_code: int, project_name: str) -> None:
+        """
+        Delete a workflow definition from DolphinScheduler via REST API.
+
+        Args:
+            workflow_code: Workflow code to delete
+            project_name: Project name
+
+        Note: This is used for cleaning up temporary test workflows.
+        """
+        logger.info(
+            "Deleting workflow: code=%s project=%s",
+            workflow_code,
+            project_name,
+        )
+
+        try:
+            from pydolphinscheduler.java_gateway import gateway
+            import requests
+
+            # Get project code first
+            user_name = self.settings.user_name
+            try:
+                project_info = gateway.query_project_by_name(user_name, project_name)
+                project_code = int(project_info.getCode())
+            except Exception as e:
+                logger.error(
+                    "Failed to get project code for deletion: project=%s error=%s",
+                    project_name,
+                    str(e)
+                )
+                # Still try to remove from cache
+                if workflow_code in self._workflow_cache:
+                    del self._workflow_cache[workflow_code]
+                return
+
+            # Use DolphinScheduler REST API to delete workflow
+            # First, we need to authenticate and get the token
+            api_base = self.settings.api_base_url
+            login_url = f"{api_base}/login"
+
+            # Login to get token
+            login_response = requests.post(
+                login_url,
+                data={
+                    "userName": self.settings.user_name,
+                    "userPassword": self.settings.user_password
+                }
+            )
+
+            if login_response.status_code != 200:
+                logger.warning(
+                    "Failed to login to DolphinScheduler API for deletion: status=%s",
+                    login_response.status_code
+                )
+                # Still remove from cache
+                if workflow_code in self._workflow_cache:
+                    del self._workflow_cache[workflow_code]
+                return
+
+            response_data = login_response.json()
+            if not response_data.get("success"):
+                logger.warning(
+                    "DolphinScheduler API login failed: %s",
+                    response_data.get("msg")
+                )
+                if workflow_code in self._workflow_cache:
+                    del self._workflow_cache[workflow_code]
+                return
+
+            token = response_data.get("data", {}).get("sessionId")
+            if not token:
+                logger.warning("No sessionId returned from DolphinScheduler API login")
+                if workflow_code in self._workflow_cache:
+                    del self._workflow_cache[workflow_code]
+                return
+
+            # Delete the workflow using REST API
+            delete_url = f"{api_base}/projects/{project_code}/process-definition/{workflow_code}"
+            delete_response = requests.delete(
+                delete_url,
+                params={"token": token}
+            )
+
+            if delete_response.status_code == 200:
+                delete_data = delete_response.json()
+                if delete_data.get("success"):
+                    logger.info(
+                        "Successfully deleted workflow from DolphinScheduler: code=%s project=%s",
+                        workflow_code,
+                        project_name
+                    )
+                else:
+                    logger.warning(
+                        "DolphinScheduler API delete failed: %s",
+                        delete_data.get("msg")
+                    )
+            else:
+                logger.warning(
+                    "Failed to delete workflow via API: status=%s code=%s",
+                    delete_response.status_code,
+                    workflow_code
+                )
+
+            # Remove from cache regardless of API success
+            if workflow_code in self._workflow_cache:
+                del self._workflow_cache[workflow_code]
+                logger.info(
+                    "Removed workflow from cache: code=%s project=%s",
+                    workflow_code,
+                    project_name,
+                )
+
+        except Exception as e:
+            logger.error(
+                "Failed to delete workflow: code=%s project=%s error=%s",
+                workflow_code,
+                project_name,
+                str(e)
+            )
+            # Don't raise - deletion is best-effort for cleanup
+            # Still try to remove from cache
+            try:
+                if workflow_code in self._workflow_cache:
+                    del self._workflow_cache[workflow_code]
+            except:
+                pass
+

@@ -3,7 +3,7 @@ import { ElMessage } from 'element-plus'
 
 const request = axios.create({
   baseURL: '/api',
-  timeout: 30000
+  timeout: 60000  // 增加到60秒，支持较长时间的操作（如工作流执行）
 })
 
 // 请求拦截器

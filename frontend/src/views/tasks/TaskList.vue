@@ -74,6 +74,15 @@
           <template #default="{ row }">
             <el-button link type="primary" @click="$router.push(`/tasks/${row.id}/edit`)">编辑</el-button>
             <el-button link type="success" @click="handlePublish(row.id)" v-if="row.status === 'draft'">发布</el-button>
+            <el-popconfirm
+              title="确定要重新发布到DolphinScheduler吗？这将覆盖现有配置。"
+              @confirm="handleRepublish(row.id)"
+              v-if="row.status === 'published'"
+            >
+              <template #reference>
+                <el-button link type="warning">重新发布</el-button>
+              </template>
+            </el-popconfirm>
             <el-button link type="warning" @click="handleExecuteTask(row.id)" v-if="row.status === 'published'">执行任务</el-button>
             <el-button link type="primary" @click="handleExecuteWorkflow(row.id)" v-if="row.status === 'published'">执行工作流</el-button>
             <el-button link type="info" @click="openDolphinWorkflow(row)" v-if="row.executionStatus && row.executionStatus.dolphinWorkflowUrl">
@@ -173,6 +182,25 @@ const handlePublish = async (id) => {
 
     // 从后端响应中提取错误信息
     const errorMessage = error.response?.data?.message || error.message || '发布失败，请稍后重试'
+
+    ElMessage.error({
+      message: errorMessage,
+      duration: 6000,
+      showClose: true
+    })
+  }
+}
+
+const handleRepublish = async (id) => {
+  try {
+    await taskApi.publish(id)
+    ElMessage.success('重新发布成功')
+    loadData()
+  } catch (error) {
+    console.error('重新发布失败:', error)
+
+    // 从后端响应中提取错误信息
+    const errorMessage = error.response?.data?.message || error.message || '重新发布失败，请稍后重试'
 
     ElMessage.error({
       message: errorMessage,

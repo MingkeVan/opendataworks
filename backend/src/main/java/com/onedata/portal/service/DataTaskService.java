@@ -13,6 +13,7 @@ import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -201,7 +202,13 @@ public class DataTaskService {
         }
         log.info("找到 {} 个 Dolphin 引擎任务", dolphinTasks.size());
 
+        // 强制刷新 project code 缓存,确保使用最新的项目信息
+        // 这对于 DolphinScheduler 重置后获取正确的 projectCode 很重要
+        dolphinSchedulerService.clearProjectCodeCache();
+        log.info("已清除 project code 缓存");
+
         // 获取已存在的 workflow code (如果有的话)
+        // 如果数据库中有记录,尝试复用;如果没有或者 syncWorkflow 失败,会创建新的
         Long existingWorkflowCode = dolphinTasks.stream()
             .map(DataTask::getDolphinProcessCode)
             .filter(Objects::nonNull)
@@ -209,6 +216,8 @@ public class DataTaskService {
             .orElse(null);
 
         long workflowCode = existingWorkflowCode != null ? existingWorkflowCode : 0L;
+        log.info("使用 workflow code: {} ({})", workflowCode,
+            workflowCode > 0 ? "更新现有工作流" : "创建新工作流");
 
         // 对齐任务编号生成器，避免与已存在的任务编码冲突
         dolphinSchedulerService.alignSequenceWithExistingTasks(
@@ -451,7 +460,8 @@ public class DataTaskService {
         locations.add(dolphinSchedulerService.buildLocation(task.getDolphinTaskCode(), 0, 0));
 
         // 同步临时工作流（使用 0 表示创建新工作流）
-        long tempWorkflowCode = dolphinSchedulerService.syncWorkflow(
+        // 注意: DolphinScheduler 会自动生成 workflow code，返回的可能与请求的不同
+        long actualWorkflowCode = dolphinSchedulerService.syncWorkflow(
             0L,
             tempWorkflowName,
             Collections.singletonList(definition),
@@ -459,8 +469,11 @@ public class DataTaskService {
             locations
         );
 
+        log.info("Created temporary workflow: name={} actualCode={}",
+            tempWorkflowName, actualWorkflowCode);
+
         // 设置为 ONLINE 状态
-        dolphinSchedulerService.setWorkflowReleaseState(tempWorkflowCode, "ONLINE");
+        dolphinSchedulerService.setWorkflowReleaseState(actualWorkflowCode, "ONLINE");
 
         // 创建执行日志
         TaskExecutionLog executionLog = new TaskExecutionLog();
@@ -471,13 +484,36 @@ public class DataTaskService {
         executionLogMapper.insert(executionLog);
 
         // 执行临时工作流
-        String executionId = dolphinSchedulerService.startProcessInstance(tempWorkflowCode);
+        String executionId = dolphinSchedulerService.startProcessInstance(actualWorkflowCode);
         executionLog.setExecutionId(executionId);
         executionLog.setStatus("running");
         executionLogMapper.updateById(executionLog);
 
-        log.info("Started single task execution (test mode): task={} workflow={} execution={}",
-            task.getTaskName(), tempWorkflowName, executionId);
+        log.info("Started single task execution (test mode): task={} workflow={} actualCode={} execution={}",
+            task.getTaskName(), tempWorkflowName, actualWorkflowCode, executionId);
+
+        // 异步清理临时工作流（使用实际的 workflow code）
+        cleanupTempWorkflowAsync(actualWorkflowCode, task.getTaskName());
+    }
+
+    /**
+     * 异步清理临时测试工作流
+     * 等待一段时间后删除，确保任务有足够时间执行
+     */
+    @Async
+    public void cleanupTempWorkflowAsync(Long workflowCode, String taskName) {
+        try {
+            // 等待 5 分钟再删除，给任务足够的执行时间
+            Thread.sleep(5 * 60 * 1000);
+            dolphinSchedulerService.deleteWorkflow(workflowCode);
+            log.info("Cleaned up temporary workflow {} for task {}", workflowCode, taskName);
+        } catch (InterruptedException e) {
+            log.warn("Cleanup interrupted for workflow {} of task {}", workflowCode, taskName);
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            log.error("Failed to cleanup temporary workflow {} for task {}: {}",
+                workflowCode, taskName, e.getMessage());
+        }
     }
 
     /**

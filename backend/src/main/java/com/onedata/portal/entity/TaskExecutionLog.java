@@ -42,10 +42,13 @@ public class TaskExecutionLog {
 
     // DolphinScheduler 相关字段 (不存储到数据库,仅用于API响应)
     @TableField(exist = false)
-    private Long workflowCode;
+    private Long workflowCode; // DolphinScheduler 工作流代码
 
     @TableField(exist = false)
-    private String workflowName;
+    private String workflowName; // DolphinScheduler 工作流名称
+
+    @TableField(exist = false)
+    private Long taskCode; // DolphinScheduler 任务代码
 
     @TableField(exist = false)
     private String workflowInstanceUrl; // DolphinScheduler WebUI 工作流实例链接
@@ -54,5 +57,29 @@ public class TaskExecutionLog {
     private String taskDefinitionUrl; // DolphinScheduler WebUI 任务定义链接
 
     @TableField(exist = false)
-    private Object dolphinInstanceDetail; // DolphinScheduler 实例详情 (来自实时查询)
+    private Integer dolphinInstanceId; // DolphinScheduler 实例ID
+
+    @TableField(exist = false)
+    private String dolphinState; // DolphinScheduler 原始状态
+
+    @TableField(exist = false)
+    private String dolphinStartTime; // DolphinScheduler 开始时间 (原始格式)
+
+    @TableField(exist = false)
+    private String dolphinEndTime; // DolphinScheduler 结束时间 (原始格式)
+
+    @TableField(exist = false)
+    private Integer dolphinDuration; // DolphinScheduler 持续时间(秒)
+
+    @TableField(exist = false)
+    private Integer runTimes; // 运行次数
+
+    @TableField(exist = false)
+    private String host; // 执行主机
+
+    @TableField(exist = false)
+    private String commandType; // 命令类型
+
+    @TableField(exist = false)
+    private Object dolphinInstanceDetail; // DolphinScheduler 实例详情 (来自实时查询,包含完整JSON)
 }

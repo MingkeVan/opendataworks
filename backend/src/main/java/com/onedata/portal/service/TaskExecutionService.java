@@ -91,6 +91,7 @@ public class TaskExecutionService {
 
                 log.setWorkflowCode(workflowCode);
                 log.setWorkflowName(dolphinSchedulerService.getWorkflowName());
+                log.setTaskCode(taskCode);
 
                 // 2. 生成 DolphinScheduler WebUI 链接
                 if (taskCode != null) {
@@ -109,8 +110,39 @@ public class TaskExecutionService {
                         // 保存完整的 Dolphin 实例详情
                         log.setDolphinInstanceDetail(instanceDetail);
 
-                        // 4. 使用 DolphinScheduler 的状态更新本地记录 (Dolphin 为准)
+                        // 提取并设置 DolphinScheduler 实例信息到直接字段
+                        if (instanceDetail.has("instanceId")) {
+                            log.setDolphinInstanceId(instanceDetail.path("instanceId").asInt());
+                        }
+
                         String dolphinState = instanceDetail.path("state").asText();
+                        log.setDolphinState(dolphinState);
+
+                        if (instanceDetail.has("startTime") && !instanceDetail.path("startTime").isNull()) {
+                            log.setDolphinStartTime(instanceDetail.path("startTime").asText());
+                        }
+
+                        if (instanceDetail.has("endTime") && !instanceDetail.path("endTime").isNull()) {
+                            log.setDolphinEndTime(instanceDetail.path("endTime").asText());
+                        }
+
+                        if (instanceDetail.has("duration") && !instanceDetail.path("duration").isNull()) {
+                            log.setDolphinDuration(instanceDetail.path("duration").asInt());
+                        }
+
+                        if (instanceDetail.has("runTimes")) {
+                            log.setRunTimes(instanceDetail.path("runTimes").asInt());
+                        }
+
+                        if (instanceDetail.has("host") && !instanceDetail.path("host").isNull()) {
+                            log.setHost(instanceDetail.path("host").asText());
+                        }
+
+                        if (instanceDetail.has("commandType") && !instanceDetail.path("commandType").isNull()) {
+                            log.setCommandType(instanceDetail.path("commandType").asText());
+                        }
+
+                        // 4. 使用 DolphinScheduler 的状态更新本地记录 (Dolphin 为准)
                         String mappedStatus = mapDolphinStatusToOurs(dolphinState);
 
                         // 如果 Dolphin 状态与本地不一致,以 Dolphin 为准并更新本地
@@ -309,23 +341,42 @@ public class TaskExecutionService {
         String state = instanceStatus.path("state").asText();
         log.setStatus(mapDolphinStatusToOurs(state));
 
-        // 更新时间信息
+        // 更新时间信息 - 从 DolphinScheduler 同步时间
         String startTimeStr = instanceStatus.path("startTime").asText();
         String endTimeStr = instanceStatus.path("endTime").asText();
 
-        if (startTimeStr != null && !startTimeStr.isEmpty()) {
-            // 根据实际的时间格式解析
-            // log.setStartTime(parseDateTime(startTimeStr));
+        if (startTimeStr != null && !startTimeStr.isEmpty() && !"null".equals(startTimeStr)) {
+            try {
+                // DolphinScheduler 返回的时间格式通常为 "yyyy-MM-dd HH:mm:ss"
+                LocalDateTime startTime = LocalDateTime.parse(
+                    startTimeStr.replace(" ", "T")  // 转换为 ISO 格式
+                );
+                log.setStartTime(startTime);
+            } catch (Exception e) {
+                logger.warn("Failed to parse start time from Dolphin: {}", startTimeStr);
+            }
         }
 
         if (endTimeStr != null && !endTimeStr.isEmpty() && !"null".equals(endTimeStr)) {
-            // log.setEndTime(parseDateTime(endTimeStr));
-
-            // 计算执行时长
-            if (log.getStartTime() != null && log.getEndTime() != null) {
-                Duration duration = Duration.between(log.getStartTime(), log.getEndTime());
-                log.setDurationSeconds((int) duration.getSeconds());
+            try {
+                LocalDateTime endTime = LocalDateTime.parse(
+                    endTimeStr.replace(" ", "T")  // 转换为 ISO 格式
+                );
+                log.setEndTime(endTime);
+            } catch (Exception e) {
+                logger.warn("Failed to parse end time from Dolphin: {}", endTimeStr);
             }
+        }
+
+        // 计算执行时长
+        if (log.getStartTime() != null && log.getEndTime() != null) {
+            Duration duration = Duration.between(log.getStartTime(), log.getEndTime());
+            log.setDurationSeconds((int) duration.getSeconds());
+        }
+
+        // 如果 DolphinScheduler 返回了 duration 字段,优先使用它
+        if (instanceStatus.has("duration") && !instanceStatus.path("duration").isNull()) {
+            log.setDurationSeconds(instanceStatus.path("duration").asInt());
         }
     }
 

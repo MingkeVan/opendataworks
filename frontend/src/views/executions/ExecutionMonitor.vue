@@ -124,12 +124,38 @@
       >
         <el-table-column prop="id" label="执行ID" width="80" />
         <el-table-column prop="taskId" label="任务ID" width="100" />
-        <el-table-column prop="executionId" label="实例ID" width="200" />
-        <el-table-column prop="status" label="状态" width="120">
+        <el-table-column prop="executionId" label="实例ID" width="180" />
+
+        <!-- DolphinScheduler 相关列 -->
+        <el-table-column prop="workflowName" label="工作流名称" width="150" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">
+            {{ row.workflowName || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="workflowCode" label="工作流ID" width="120">
+          <template #default="{ row }">
+            {{ row.workflowCode || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="dolphinInstanceId" label="DS实例ID" width="120">
+          <template #default="{ row }">
+            {{ row.dolphinInstanceId || '-' }}
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getStatusType(row.status)" size="small">
               {{ getStatusText(row.status) }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="dolphinState" label="DS状态" width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tag size="small" effect="plain" v-if="row.dolphinState">
+              {{ row.dolphinState }}
+            </el-tag>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column prop="triggerType" label="触发方式" width="100">
@@ -139,23 +165,28 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="startTime" label="开始时间" width="180">
+        <el-table-column prop="startTime" label="开始时间" width="160">
           <template #default="{ row }">
             {{ formatDateTime(row.startTime) }}
           </template>
         </el-table-column>
-        <el-table-column prop="endTime" label="结束时间" width="180">
+        <el-table-column prop="endTime" label="结束时间" width="160">
           <template #default="{ row }">
             {{ formatDateTime(row.endTime) }}
           </template>
         </el-table-column>
-        <el-table-column prop="durationSeconds" label="执行时长" width="120">
+        <el-table-column prop="durationSeconds" label="执行时长" width="100">
           <template #default="{ row }">
             {{ formatDuration(row.durationSeconds) }}
           </template>
         </el-table-column>
-        <el-table-column prop="rowsOutput" label="输出行数" width="120" />
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column prop="host" label="执行主机" width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.host || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="rowsOutput" label="输出行数" width="100" />
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button
               link
@@ -178,6 +209,15 @@
               link
               type="primary"
               size="small"
+              v-if="row.workflowInstanceUrl"
+              @click="openDolphinWebUI(row.workflowInstanceUrl)"
+            >
+              DS实例
+            </el-button>
+            <el-button
+              link
+              type="primary"
+              size="small"
               @click="handleViewLog(row)"
             >
               查看日志
@@ -186,8 +226,9 @@
         </el-table-column>
       </el-table>
 
-      <!-- 分页 -->
+      <!-- 分页 - 仅在"全部"模式下显示 -->
       <el-pagination
+        v-if="activeFilter === 'all'"
         v-model:current-page="queryParams.pageNum"
         v-model:page-size="queryParams.pageSize"
         :total="total"
@@ -197,6 +238,13 @@
         @current-change="handleQuery"
         style="margin-top: 20px; justify-content: flex-end"
       />
+      <!-- 快捷筛选模式提示 -->
+      <div v-else style="margin-top: 20px; text-align: center; color: #909399;">
+        共 {{ total }} 条记录（快捷筛选模式，不支持分页）
+        <el-button link type="primary" @click="handleQuickFilter('all')" style="margin-left: 10px;">
+          切换到全部模式以使用分页
+        </el-button>
+      </div>
     </el-card>
 
     <!-- 执行详情对话框 -->
@@ -214,6 +262,33 @@
             {{ getStatusText(currentExecution.status) }}
           </el-tag>
         </el-descriptions-item>
+
+        <!-- DolphinScheduler 信息 -->
+        <el-descriptions-item label="工作流名称" v-if="currentExecution.workflowName">
+          {{ currentExecution.workflowName }}
+        </el-descriptions-item>
+        <el-descriptions-item label="工作流ID" v-if="currentExecution.workflowCode">
+          {{ currentExecution.workflowCode }}
+        </el-descriptions-item>
+        <el-descriptions-item label="任务代码" v-if="currentExecution.taskCode">
+          {{ currentExecution.taskCode }}
+        </el-descriptions-item>
+        <el-descriptions-item label="DS实例ID" v-if="currentExecution.dolphinInstanceId">
+          {{ currentExecution.dolphinInstanceId }}
+        </el-descriptions-item>
+        <el-descriptions-item label="DS状态" v-if="currentExecution.dolphinState">
+          <el-tag size="small">{{ currentExecution.dolphinState }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="执行主机" v-if="currentExecution.host">
+          {{ currentExecution.host }}
+        </el-descriptions-item>
+        <el-descriptions-item label="运行次数" v-if="currentExecution.runTimes">
+          {{ currentExecution.runTimes }}
+        </el-descriptions-item>
+        <el-descriptions-item label="命令类型" v-if="currentExecution.commandType">
+          {{ currentExecution.commandType }}
+        </el-descriptions-item>
+
         <el-descriptions-item label="触发方式">
           {{ getTriggerTypeText(currentExecution.triggerType) }}
         </el-descriptions-item>
@@ -229,6 +304,19 @@
         <el-descriptions-item label="输出行数">
           {{ currentExecution.rowsOutput || '-' }}
         </el-descriptions-item>
+
+        <!-- WebUI 链接 -->
+        <el-descriptions-item label="工作流实例" v-if="currentExecution.workflowInstanceUrl">
+          <el-link :href="currentExecution.workflowInstanceUrl" type="primary" target="_blank" :icon="Link">
+            打开DolphinScheduler
+          </el-link>
+        </el-descriptions-item>
+        <el-descriptions-item label="任务定义" v-if="currentExecution.taskDefinitionUrl">
+          <el-link :href="currentExecution.taskDefinitionUrl" type="primary" target="_blank" :icon="Link">
+            查看任务定义
+          </el-link>
+        </el-descriptions-item>
+
         <el-descriptions-item label="日志URL">
           <el-link :href="currentExecution.logUrl" type="primary" target="_blank" v-if="currentExecution.logUrl">
             查看日志
@@ -274,7 +362,8 @@ import {
   Document,
   CircleCheck,
   CircleClose,
-  Timer
+  Timer,
+  Link
 } from '@element-plus/icons-vue'
 import {
   getExecutionHistory,
@@ -448,6 +537,13 @@ const handleViewLog = (row) => {
 // 刷新日志
 const handleRefreshLog = () => {
   executionLog.value = '日志已刷新...\n\n暂未实现从 DolphinScheduler 获取日志的功能'
+}
+
+// 打开 DolphinScheduler WebUI
+const openDolphinWebUI = (url) => {
+  if (url) {
+    window.open(url, '_blank')
+  }
 }
 
 // 工具函数

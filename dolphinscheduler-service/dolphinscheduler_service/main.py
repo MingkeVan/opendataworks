@@ -181,6 +181,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         return await run(task)
 
+    @app.post("/api/v1/workflows/{workflow_code}/delete")
+    async def delete_workflow(
+        workflow_code: int,
+        payload: dict,
+    ) -> dict:
+        logger.debug(
+            "delete_workflow workflow_code=%s payload=%s",
+            workflow_code,
+            payload,
+        )
+
+        def task():
+            project_name = payload.get("projectName")
+            service.delete_workflow(workflow_code, project_name)
+            return success({"workflowCode": workflow_code, "deleted": True})
+
+        return await run(task)
+
     return app
 
 
