@@ -876,6 +876,7 @@ const loadLineageForTable = async (tableId) => {
   try {
     const lineageData = await tableApi.getLineage(tableId)
     lineageCache.value[tableId] = lineageData
+    console.log(`表 ${tableId} 的血缘关系:`, lineageData)
   } catch (error) {
     console.error('加载血缘关系失败:', error)
   }
@@ -1073,13 +1074,21 @@ const handleEditSubmit = async () => {
 // 获取上游表数量
 const getUpstreamCount = (tableId) => {
   const lineageData = lineageCache.value[tableId]
-  return lineageData?.upstreamTables?.length || 0
+  const count = lineageData?.upstreamTables?.length || 0
+  if (count > 0) {
+    console.log(`表 ${tableId} 有 ${count} 个上游表`)
+  }
+  return count
 }
 
 // 获取下游表数量
 const getDownstreamCount = (tableId) => {
   const lineageData = lineageCache.value[tableId]
-  return lineageData?.downstreamTables?.length || 0
+  const count = lineageData?.downstreamTables?.length || 0
+  if (count > 0) {
+    console.log(`表 ${tableId} 有 ${count} 个下游表`)
+  }
+  return count
 }
 
 // 处理数据库点击
