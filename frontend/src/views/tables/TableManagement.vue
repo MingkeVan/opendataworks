@@ -657,22 +657,34 @@
                 <div class="ddl-section">
                   <div class="section-header">
                     <h3>Doris 建表语句</h3>
-                    <el-button
-                      type="primary"
-                      size="small"
-                      @click="copyDdl"
-                      :disabled="!selectedTable.dorisDdl"
-                    >
-                      复制
-                    </el-button>
+                    <div class="action-buttons">
+                      <el-button
+                        type="primary"
+                        size="small"
+                        @click="loadTableDdl"
+                        :loading="ddlLoading"
+                        v-if="!tableDdl"
+                      >
+                        加载DDL
+                      </el-button>
+                      <el-button
+                        type="primary"
+                        size="small"
+                        @click="copyDdl"
+                        :disabled="!tableDdl"
+                        v-if="tableDdl"
+                      >
+                        复制
+                      </el-button>
+                    </div>
                   </div>
                   <el-input
-                    :value="selectedTable.dorisDdl || ''"
+                    v-model="tableDdl"
                     type="textarea"
                     :rows="20"
                     readonly
                     class="ddl-textarea"
-                    placeholder="暂无 Doris 建表语句"
+                    placeholder="点击「加载DDL」按钮获取建表语句"
                   />
                 </div>
               </el-tab-pane>
@@ -680,11 +692,60 @@
               <!-- 数据预览 -->
               <el-tab-pane label="数据预览" name="preview">
                 <div class="preview-section">
-                  <el-alert
-                    type="info"
-                    :closable="false"
-                    show-icon
-                    title="数据预览功能即将上线，敬请期待"
+                  <div class="section-header">
+                    <h3>数据预览</h3>
+                    <div class="preview-controls">
+                      <el-input-number
+                        v-model="previewLimit"
+                        :min="10"
+                        :max="1000"
+                        :step="10"
+                        size="small"
+                        style="width: 120px"
+                      />
+                      <el-button
+                        type="primary"
+                        size="small"
+                        @click="loadPreviewData"
+                        :loading="previewLoading"
+                      >
+                        {{ previewData.length > 0 ? '刷新' : '加载数据' }}
+                      </el-button>
+                    </div>
+                  </div>
+
+                  <div v-if="previewData.length > 0" class="preview-table-wrapper">
+                    <el-table
+                      :data="previewData"
+                      border
+                      stripe
+                      style="width: 100%"
+                      max-height="600"
+                    >
+                      <el-table-column
+                        v-for="column in previewColumns"
+                        :key="column"
+                        :prop="column"
+                        :label="column"
+                        min-width="120"
+                        show-overflow-tooltip
+                      >
+                        <template #default="{ row }">
+                          {{ formatCellValue(row[column]) }}
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                    <div class="preview-footer">
+                      <el-text type="info">
+                        显示 {{ previewData.length }} 条记录
+                        {{ previewData.length >= previewLimit ? '（已达到限制）' : '' }}
+                      </el-text>
+                    </div>
+                  </div>
+                  <el-empty
+                    v-else
+                    description="点击「加载数据」按钮预览表数据"
+                    :image-size="80"
                   />
                 </div>
               </el-tab-pane>
@@ -732,6 +793,8 @@ const router = useRouter()
 const loading = ref(false)
 const detailLoading = ref(false)
 const statisticsLoading = ref(false)
+const ddlLoading = ref(false)
+const previewLoading = ref(false)
 const databases = ref([])
 const tablesByDatabase = ref({})
 const lineageCache = ref({})
@@ -745,6 +808,9 @@ const fieldSubmitting = ref(false)
 const editingFieldBackup = ref(null)
 const statistics = ref(null)
 const statisticsHistory = ref([])
+const tableDdl = ref('')
+const previewData = ref([])
+const previewLimit = ref(100)
 const activeTab = ref('basic')
 const chartContainer = ref(null)
 let chartInstance = null
@@ -756,6 +822,12 @@ const editSubmitting = ref(false)
 
 // 字段管理计算属性
 const displayFields = computed(() => fields.value)
+
+// 数据预览列名
+const previewColumns = computed(() => {
+  if (previewData.value.length === 0) return []
+  return Object.keys(previewData.value[0])
+})
 
 const TABLE_NAME_PATTERN = /^[a-z0-9_]+$/
 
@@ -1107,6 +1179,9 @@ const handleTableClick = async (table) => {
   if (editFormRef.value) {
     editFormRef.value.clearValidate()
   }
+  // 切换表时清空DDL和预览数据
+  tableDdl.value = ''
+  previewData.value = []
   await loadTableDetail(targetTable.id)
 }
 
@@ -1219,13 +1294,54 @@ const handleSortChange = () => {
 
 // 复制DDL
 const copyDdl = async () => {
-  if (!selectedTable.value?.dorisDdl) return
+  if (!tableDdl.value) return
   try {
-    await navigator.clipboard.writeText(selectedTable.value.dorisDdl)
+    await navigator.clipboard.writeText(tableDdl.value)
     ElMessage.success('已复制到剪贴板')
   } catch (error) {
     ElMessage.error('复制失败')
   }
+}
+
+// 加载表DDL
+const loadTableDdl = async () => {
+  if (!selectedTable.value) return
+  ddlLoading.value = true
+  try {
+    const ddl = await tableApi.getTableDdl(selectedTable.value.id)
+    tableDdl.value = ddl
+    ElMessage.success('DDL加载成功')
+  } catch (error) {
+    console.error('加载DDL失败:', error)
+    ElMessage.error('加载DDL失败: ' + (error.message || '未知错误'))
+  } finally {
+    ddlLoading.value = false
+  }
+}
+
+// 加载预览数据
+const loadPreviewData = async () => {
+  if (!selectedTable.value) return
+  previewLoading.value = true
+  try {
+    const data = await tableApi.previewTableData(selectedTable.value.id, null, previewLimit.value)
+    previewData.value = data
+    ElMessage.success(`加载了 ${data.length} 条记录`)
+  } catch (error) {
+    console.error('加载预览数据失败:', error)
+    ElMessage.error('加载预览数据失败: ' + (error.message || '未知错误'))
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+// 格式化单元格值
+const formatCellValue = (value) => {
+  if (value === null || value === undefined) return '-'
+  if (typeof value === 'object') {
+    return JSON.stringify(value)
+  }
+  return String(value)
 }
 
 // 跳转到创建页面
@@ -1593,6 +1709,7 @@ onMounted(() => {
   gap: 8px;
   flex: 1;
   min-width: 0;
+  max-width: 200px; /* 限制表信息区域的最大宽度，确保右侧标签可见 */
 }
 
 .table-name {
@@ -1602,7 +1719,7 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex-shrink: 0;
-  max-width: 180px;
+  max-width: 100px; /* 减小表名最大宽度，给注释更多空间 */
 }
 
 .table-comment {
@@ -1862,6 +1979,24 @@ onMounted(() => {
 
 .ddl-textarea {
   font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+.preview-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.preview-table-wrapper {
+  margin-top: 16px;
+}
+
+.preview-footer {
+  margin-top: 12px;
+  text-align: center;
+  padding: 12px;
+  background-color: #f5f7fa;
+  border-radius: 4px;
 }
 
 :deep(.el-card__body) {

@@ -89,6 +89,20 @@ export const tableApi = {
     return request.get(`/v1/tables/${id}/statistics/history/last30days`)
   },
 
+  // 获取表的DDL（建表语句）
+  getTableDdl(id, clusterId = null) {
+    return request.get(`/v1/tables/${id}/ddl`, {
+      params: { clusterId }
+    })
+  },
+
+  // 预览表数据
+  previewTableData(id, clusterId = null, limit = 100) {
+    return request.get(`/v1/tables/${id}/preview`, {
+      params: { clusterId, limit }
+    })
+  },
+
   // 创建表
   create(data) {
     return request.post('/v1/tables', data)

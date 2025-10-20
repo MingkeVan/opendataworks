@@ -11,8 +11,7 @@ import org.springframework.util.StringUtils;
 
 import java.sql.*;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 /**
  * Doris 连接服务
@@ -297,6 +296,63 @@ public class DorisConnectionService {
         } catch (SQLException e) {
             log.warn("Failed to get table details from SHOW CREATE TABLE for {}.{}", database, tableName, e);
         }
+    }
+
+    /**
+     * 获取表的建表语句（DDL）
+     */
+    public String getTableDdl(Long clusterId, String database, String tableName) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        String showCreateSql = "SHOW CREATE TABLE `" + database + "`.`" + tableName + "`";
+
+        try (Connection connection = getConnection(cluster, null);
+             Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(showCreateSql)) {
+
+            if (rs.next()) {
+                return rs.getString(2);
+            }
+        } catch (SQLException e) {
+            log.error("Failed to get DDL for {}.{}", database, tableName, e);
+            throw new RuntimeException("获取建表语句失败: " + e.getMessage(), e);
+        }
+
+        throw new RuntimeException(String.format("表 %s.%s 不存在", database, tableName));
+    }
+
+    /**
+     * 预览表数据
+     */
+    public List<Map<String, Object>> previewTableData(Long clusterId, String database, String tableName, int limit) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        // 限制最大预览行数
+        int maxLimit = Math.min(limit, 1000);
+        String sql = "SELECT * FROM `" + database + "`.`" + tableName + "` LIMIT " + maxLimit;
+
+        try (Connection connection = getConnection(cluster, database);
+             Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            ResultSetMetaData metaData = rs.getMetaData();
+            int columnCount = metaData.getColumnCount();
+
+            while (rs.next()) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                for (int i = 1; i <= columnCount; i++) {
+                    String columnName = metaData.getColumnName(i);
+                    Object value = rs.getObject(i);
+                    row.put(columnName, value);
+                }
+                result.add(row);
+            }
+        } catch (SQLException e) {
+            log.error("Failed to preview data for {}.{}", database, tableName, e);
+            throw new RuntimeException("预览表数据失败: " + e.getMessage(), e);
+        }
+
+        return result;
     }
 
     /**

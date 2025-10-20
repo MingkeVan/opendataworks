@@ -1,17 +1,19 @@
 <template>
   <div class="data-query-page">
-    <el-card class="query-card" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>数据查询</span>
-          <el-tag type="info" effect="plain">仅支持只读 SQL，自动拦截 DELETE/DROP/ALTER</el-tag>
+    <el-card class="unified-card" shadow="never">
+      <!-- 紧凑的查询区域 -->
+      <div class="query-section">
+        <div class="query-header">
+          <span class="section-title">数据查询</span>
+          <el-tag type="info" effect="plain" size="small">仅支持只读 SQL，自动拦截 DELETE/DROP/ALTER</el-tag>
         </div>
-      </template>
-      <el-form label-width="100px" class="query-form">
-        <el-row :gutter="16">
-          <el-col :span="8" :xs="24">
-            <el-form-item label="Doris 集群">
-              <el-select v-model="queryForm.clusterId" placeholder="使用默认集群" clearable filterable>
+
+        <el-form class="compact-form" size="small">
+          <!-- 第一行：集群、数据库、行数 -->
+          <div class="params-row">
+            <div class="param-item">
+              <label class="form-label">集群</label>
+              <el-select v-model="queryForm.clusterId" placeholder="默认集群" clearable filterable>
                 <el-option
                   v-for="cluster in clusterOptions"
                   :key="cluster.id"
@@ -19,126 +21,159 @@
                   :value="cluster.id"
                 />
               </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="8" :xs="24">
-            <el-form-item label="数据库">
-              <el-input v-model="queryForm.database" placeholder="如: doris_ods" clearable />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8" :xs="24">
-            <el-form-item label="返回行数">
-              <el-input-number v-model="queryForm.limit" :min="10" :max="1000" :step="10" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item label="SQL 语句" class="sql-item">
-          <el-input
-            v-model="queryForm.sql"
-            type="textarea"
-            :rows="8"
-            placeholder="请输入 SELECT/SHOW/EXPLAIN 等只读 SQL"
-            resize="vertical"
-            class="sql-editor"
-          />
-        </el-form-item>
-        <div class="query-actions">
-          <el-button type="primary" :loading="queryLoading" @click="executeQuery">执行查询</el-button>
-          <el-button :disabled="!queryResult.rows.length" @click="exportResult">导出结果</el-button>
-          <el-button @click="resetForm">清空</el-button>
-        </div>
-      </el-form>
-    </el-card>
+            </div>
 
-    <el-card class="result-card" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>查询结果</span>
-          <span class="result-meta" v-if="queryResult.executedAt">
-            <el-tag type="success" effect="plain">耗时 {{ formatDuration(queryResult.durationMs) }}</el-tag>
-            <el-tag type="info" effect="plain">执行于 {{ formatDate(queryResult.executedAt) }}</el-tag>
-            <el-tag v-if="queryResult.hasMore" type="warning" effect="plain">结果已截断，建议增加过滤条件</el-tag>
-          </span>
-        </div>
-      </template>
-      <el-empty v-if="!queryResult.rows.length" description="暂无查询结果" />
-      <div v-else>
-        <el-tabs v-model="activeResultTab">
-          <el-tab-pane label="表格" name="table">
-            <el-table :data="queryResult.rows" border height="400px">
-              <el-table-column
-                v-for="column in queryResult.columns"
-                :key="column"
-                :prop="column"
-                :label="column"
-                show-overflow-tooltip
+            <div class="param-item">
+              <label class="form-label">数据库</label>
+              <el-input v-model="queryForm.database" placeholder="doris_ods" clearable />
+            </div>
+
+            <div class="param-item">
+              <label class="form-label">返回行数</label>
+              <el-input-number
+                v-model="queryForm.limit"
+                :min="10"
+                :max="1000"
+                :step="10"
+                controls-position="right"
+                style="width: 100%"
               />
-            </el-table>
-          </el-tab-pane>
-          <el-tab-pane label="图表" name="chart">
-            <div v-if="chartMessage" class="chart-message">{{ chartMessage }}</div>
-            <div v-else ref="chartRef" class="chart-container"></div>
-          </el-tab-pane>
-        </el-tabs>
-      </div>
-    </el-card>
+            </div>
+          </div>
 
-    <el-card class="history-card" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>查询历史</span>
+          <!-- 第二行：SQL编辑器 + 执行按钮 -->
+          <div class="sql-row">
+            <div class="sql-wrapper">
+              <label class="form-label">SQL 语句</label>
+              <el-input
+                v-model="queryForm.sql"
+                type="textarea"
+                :rows="4"
+                placeholder="请输入 SELECT/SHOW/EXPLAIN 等只读 SQL"
+                resize="vertical"
+                class="sql-editor"
+              />
+            </div>
+            <div class="action-buttons">
+              <el-button type="primary" :loading="queryLoading" @click="executeQuery">
+                执行查询
+              </el-button>
+              <el-button @click="resetForm">清空</el-button>
+            </div>
+          </div>
+        </el-form>
+      </div>
+
+      <!-- 分隔线 -->
+      <el-divider style="margin: 16px 0" />
+
+      <!-- 查询结果区域 -->
+      <div class="result-section">
+        <div class="result-header">
+          <div class="result-header-left">
+            <span class="section-title">查询结果</span>
+            <div class="result-meta" v-if="queryResult.executedAt">
+              <el-tag type="success" effect="plain" size="small">耗时 {{ formatDuration(queryResult.durationMs) }}</el-tag>
+              <el-tag type="info" effect="plain" size="small">执行于 {{ formatDate(queryResult.executedAt) }}</el-tag>
+              <el-tag v-if="queryResult.hasMore" type="warning" effect="plain" size="small">结果已截断，建议增加过滤条件</el-tag>
+            </div>
+          </div>
+          <div class="result-header-right">
+            <el-button
+              size="small"
+              :disabled="!queryResult.rows.length"
+              @click="exportResult"
+            >
+              导出结果
+            </el-button>
+          </div>
         </div>
-      </template>
-      <el-table :data="historyData" v-loading="historyLoading" border>
-        <el-table-column type="expand">
-          <template #default="{ row }">
-            <div class="preview-wrapper" v-if="getHistoryPreview(row)">
-              <el-table :data="getHistoryPreview(row).rows" size="small" border>
+
+        <div v-if="!queryResult.rows.length" class="empty-result">
+          <el-empty description="暂无查询结果" :image-size="100" />
+        </div>
+        <div v-else class="result-content">
+          <el-tabs v-model="activeResultTab" class="result-tabs">
+            <el-tab-pane label="表格" name="table">
+              <el-table :data="queryResult.rows" border height="500px" size="small">
                 <el-table-column
-                  v-for="column in getHistoryPreview(row).columns"
+                  v-for="column in queryResult.columns"
                   :key="column"
                   :prop="column"
                   :label="column"
                   show-overflow-tooltip
+                  min-width="120"
                 />
               </el-table>
-            </div>
-            <div v-else class="preview-empty">暂无预览数据</div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="sqlText" label="SQL" min-width="260">
-          <template #default="{ row }">
-            <code class="sql-text">{{ row.sqlText }}</code>
-          </template>
-        </el-table-column>
-        <el-table-column prop="clusterName" label="集群" width="140" />
-        <el-table-column prop="databaseName" label="数据库" width="140" />
-        <el-table-column prop="previewRowCount" label="返回行数" width="120" />
-        <el-table-column prop="durationMs" label="耗时" width="120">
-          <template #default="{ row }">
-            {{ formatDuration(row.durationMs) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="executedAt" label="执行时间" width="180">
-          <template #default="{ row }">
-            {{ formatDate(row.executedAt) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120">
-          <template #default="{ row }">
-            <el-button type="primary" link @click="useHistory(row)">复用查询</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div class="history-pagination">
-        <el-pagination
-          background
-          layout="total, prev, pager, next"
-          :total="historyPager.total"
-          :page-size="historyPager.pageSize"
-          :current-page="historyPager.pageNum"
-          @current-change="handleHistoryPageChange"
-        />
+            </el-tab-pane>
+            <el-tab-pane label="图表" name="chart">
+              <div v-if="chartMessage" class="chart-message">{{ chartMessage }}</div>
+              <div v-else ref="chartRef" class="chart-container"></div>
+            </el-tab-pane>
+          </el-tabs>
+        </div>
+      </div>
+
+      <!-- 分隔线 -->
+      <el-divider style="margin: 16px 0" />
+
+      <!-- 查询历史区域 -->
+      <div class="history-section">
+        <div class="history-header">
+          <span class="section-title">查询历史</span>
+        </div>
+
+        <el-table :data="historyData" v-loading="historyLoading" border size="small">
+          <el-table-column type="expand">
+            <template #default="{ row }">
+              <div class="preview-wrapper" v-if="getHistoryPreview(row)">
+                <el-table :data="getHistoryPreview(row).rows" size="small" border>
+                  <el-table-column
+                    v-for="column in getHistoryPreview(row).columns"
+                    :key="column"
+                    :prop="column"
+                    :label="column"
+                    show-overflow-tooltip
+                  />
+                </el-table>
+              </div>
+              <div v-else class="preview-empty">暂无预览数据</div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="sqlText" label="SQL" min-width="260">
+            <template #default="{ row }">
+              <code class="sql-text">{{ row.sqlText }}</code>
+            </template>
+          </el-table-column>
+          <el-table-column prop="clusterName" label="集群" width="140" />
+          <el-table-column prop="databaseName" label="数据库" width="140" />
+          <el-table-column prop="previewRowCount" label="返回行数" width="120" />
+          <el-table-column prop="durationMs" label="耗时" width="120">
+            <template #default="{ row }">
+              {{ formatDuration(row.durationMs) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="executedAt" label="执行时间" width="180">
+            <template #default="{ row }">
+              {{ formatDate(row.executedAt) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button type="primary" link @click="useHistory(row)">复用查询</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="history-pagination">
+          <el-pagination
+            background
+            layout="total, prev, pager, next"
+            :total="historyPager.total"
+            :page-size="historyPager.pageSize"
+            :current-page="historyPager.pageNum"
+            @current-change="handleHistoryPageChange"
+          />
+        </div>
       </div>
     </el-card>
   </div>
@@ -434,34 +469,121 @@ function formatDate(value) {
 
 <style scoped>
 .data-query-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  padding: 12px;
+  height: calc(100vh - 80px);
+  background-color: #f5f7fa;
 }
 
-.card-header {
+.unified-card {
+  height: 100%;
+}
+
+:deep(.el-card__body) {
+  padding: 20px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* 查询区域 - 紧凑布局 */
+.query-section {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+}
+
+.query-header {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section-title {
+  font-size: 16px;
   font-weight: 600;
+  color: #303133;
 }
 
-.query-form {
-  padding-top: 8px;
+.compact-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.sql-item .el-form-item__content {
+/* 第一行：参数 */
+.params-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.param-item {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-label {
+  font-size: 13px;
+  color: #606266;
+  font-weight: 500;
+}
+
+.param-item :deep(.el-select),
+.param-item :deep(.el-input),
+.param-item :deep(.el-input-number) {
+  width: 100%;
+}
+
+/* 第二行：SQL + 按钮 */
+.sql-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.sql-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .sql-editor {
-  font-family: 'Fira Code', 'Source Code Pro', monospace;
+  font-family: 'Fira Code', 'Source Code Pro', Consolas, monospace;
+  font-size: 13px;
 }
 
-.query-actions {
+.action-buttons {
   display: flex;
+  gap: 8px;
+  padding-bottom: 2px;
+}
+
+/* 结果区域 */
+.result-section {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+}
+
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.result-header-left {
+  display: flex;
+  align-items: center;
   gap: 12px;
-  justify-content: flex-end;
+  flex: 1;
+}
+
+.result-header-right {
+  flex-shrink: 0;
 }
 
 .result-meta {
@@ -470,15 +592,38 @@ function formatDate(value) {
   align-items: center;
 }
 
+.empty-result {
+  padding: 60px 0;
+  text-align: center;
+}
+
+.result-content {
+  /* 不设置固定高度，让内容自适应 */
+}
+
+.result-tabs :deep(.el-table) {
+  /* 表格使用固定高度 */
+}
+
 .chart-container {
   width: 100%;
-  height: 400px;
+  height: 500px;
 }
 
 .chart-message {
   text-align: center;
-  padding: 60px 0;
+  padding: 80px 0;
   color: #909399;
+  font-size: 14px;
+}
+
+/* 历史区域 */
+.history-section {
+  flex-shrink: 0;
+}
+
+.history-header {
+  margin-bottom: 12px;
 }
 
 .preview-wrapper {
@@ -496,6 +641,8 @@ function formatDate(value) {
   max-width: 100%;
   white-space: pre-wrap;
   word-break: break-all;
+  font-family: 'Fira Code', 'Source Code Pro', Consolas, monospace;
+  font-size: 12px;
 }
 
 .history-pagination {

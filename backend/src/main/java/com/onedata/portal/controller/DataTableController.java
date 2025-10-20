@@ -13,10 +13,19 @@ import com.onedata.portal.service.DataTableService;
 import com.onedata.portal.service.DorisConnectionService;
 import com.onedata.portal.service.TableStatisticsCacheService;
 import com.onedata.portal.service.TableStatisticsHistoryService;
+import com.onedata.portal.service.DataExportService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 数据表管理 Controller
@@ -30,6 +39,7 @@ public class DataTableController {
     private final DorisConnectionService dorisConnectionService;
     private final TableStatisticsCacheService cacheService;
     private final TableStatisticsHistoryService historyService;
+    private final DataExportService dataExportService;
 
     /**
      * 分页查询表列表
@@ -276,6 +286,158 @@ public class DataTableController {
             return Result.success(history);
         } catch (Exception e) {
             return Result.fail("获取统计历史记录失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取表的建表语句（DDL）
+     */
+    @GetMapping("/{id}/ddl")
+    public Result<String> getTableDdl(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long clusterId) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return Result.fail("表不存在");
+        }
+
+        String database;
+        String actualTableName;
+
+        if (table.getDbName() != null && !table.getDbName().isEmpty()) {
+            database = table.getDbName();
+            actualTableName = table.getTableName().contains(".")
+                    ? table.getTableName().split("\\.", 2)[1]
+                    : table.getTableName();
+        } else if (table.getTableName().contains(".")) {
+            String[] parts = table.getTableName().split("\\.", 2);
+            database = parts[0];
+            actualTableName = parts[1];
+        } else {
+            return Result.fail("表未配置数据库名，请先设置 dbName 字段");
+        }
+
+        try {
+            String ddl = dorisConnectionService.getTableDdl(clusterId, database, actualTableName);
+            return Result.success(ddl);
+        } catch (Exception e) {
+            return Result.fail("获取建表语句失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 预览表数据
+     */
+    @GetMapping("/{id}/preview")
+    public Result<List<Map<String, Object>>> previewTableData(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long clusterId,
+            @RequestParam(defaultValue = "100") int limit) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return Result.fail("表不存在");
+        }
+
+        String database;
+        String actualTableName;
+
+        if (table.getDbName() != null && !table.getDbName().isEmpty()) {
+            database = table.getDbName();
+            actualTableName = table.getTableName().contains(".")
+                    ? table.getTableName().split("\\.", 2)[1]
+                    : table.getTableName();
+        } else if (table.getTableName().contains(".")) {
+            String[] parts = table.getTableName().split("\\.", 2);
+            database = parts[0];
+            actualTableName = parts[1];
+        } else {
+            return Result.fail("表未配置数据库名，请先设置 dbName 字段");
+        }
+
+        try {
+            List<Map<String, Object>> data = dorisConnectionService.previewTableData(
+                    clusterId, database, actualTableName, limit);
+            return Result.success(data);
+        } catch (Exception e) {
+            return Result.fail("预览表数据失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 导出表数据
+     */
+    @GetMapping("/{id}/export")
+    public ResponseEntity<byte[]> exportTableData(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long clusterId,
+            @RequestParam(defaultValue = "csv") String format,
+            @RequestParam(defaultValue = "1000") int limit) {
+
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        String database;
+        String actualTableName;
+
+        if (table.getDbName() != null && !table.getDbName().isEmpty()) {
+            database = table.getDbName();
+            actualTableName = table.getTableName().contains(".")
+                    ? table.getTableName().split("\\.", 2)[1]
+                    : table.getTableName();
+        } else if (table.getTableName().contains(".")) {
+            String[] parts = table.getTableName().split("\\.", 2);
+            database = parts[0];
+            actualTableName = parts[1];
+        } else {
+            return ResponseEntity.badRequest().build();
+        }
+
+        try {
+            byte[] data;
+            String contentType;
+            String fileExtension;
+
+            switch (format.toLowerCase()) {
+                case "excel":
+                case "xlsx":
+                    data = dataExportService.exportToExcel(clusterId, database, actualTableName, limit);
+                    contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                    fileExtension = "xlsx";
+                    break;
+                case "json":
+                    data = dataExportService.exportToJson(clusterId, database, actualTableName, limit);
+                    contentType = "application/json";
+                    fileExtension = "json";
+                    break;
+                case "csv":
+                default:
+                    data = dataExportService.exportToCsv(clusterId, database, actualTableName, limit);
+                    contentType = "text/csv";
+                    fileExtension = "csv";
+                    break;
+            }
+
+            // 生成文件名
+            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+            String filename = String.format("%s_%s.%s", actualTableName, timestamp, fileExtension);
+
+            // URL编码文件名以支持中文
+            String encodedFilename;
+            try {
+                encodedFilename = URLEncoder.encode(filename, "UTF-8").replaceAll("\\+", "%20");
+            } catch (UnsupportedEncodingException e) {
+                encodedFilename = filename;
+            }
+
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                            "attachment; filename=\"" + filename + "\"; filename*=UTF-8''" + encodedFilename)
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .body(data);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
         }
     }
 }
