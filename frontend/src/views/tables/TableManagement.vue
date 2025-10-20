@@ -100,17 +100,25 @@
                             {{ item.tableComment }}
                           </span>
                         </div>
-                        <span v-if="item.rowCount" class="row-count" :title="`数据量: ${formatNumber(item.rowCount)} 行`">
-                          {{ formatRowCount(item.rowCount) }}
-                        </span>
-                        <el-tag
-                          v-if="item.layer"
-                          size="small"
-                          :type="getLayerType(item.layer)"
-                          class="layer-tag"
-                        >
-                          {{ item.layer }}
-                        </el-tag>
+                        <div class="table-meta-tags">
+                          <span v-if="item.rowCount" class="row-count" :title="`数据量: ${formatNumber(item.rowCount)} 行`">
+                            {{ formatRowCount(item.rowCount) }}
+                          </span>
+                          <span v-if="getUpstreamCount(item.id) > 0" class="lineage-count upstream" :title="`上游表: ${getUpstreamCount(item.id)} 个`">
+                            ↑{{ getUpstreamCount(item.id) }}
+                          </span>
+                          <span v-if="getDownstreamCount(item.id) > 0" class="lineage-count downstream" :title="`下游表: ${getDownstreamCount(item.id)} 个`">
+                            ↓{{ getDownstreamCount(item.id) }}
+                          </span>
+                          <el-tag
+                            v-if="item.layer"
+                            size="small"
+                            :type="getLayerType(item.layer)"
+                            class="layer-tag"
+                          >
+                            {{ item.layer }}
+                          </el-tag>
+                        </div>
                       </div>
                     </div>
                   </template>
@@ -1412,19 +1420,19 @@ onMounted(() => {
 <style scoped>
 .table-management {
   height: 100%;
-  padding: 20px;
+  padding: 12px;
   background-color: #f5f7fa;
 }
 
 .management-container {
   display: flex;
-  gap: 20px;
-  height: calc(100vh - 140px);
+  gap: 12px;
+  height: calc(100vh - 104px);
 }
 
 /* 左侧面板 */
 .left-panel {
-  width: 320px;
+  width: 420px;
   flex-shrink: 0;
 }
 
@@ -1562,7 +1570,7 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex-shrink: 0;
-  max-width: 120px;
+  max-width: 180px;
 }
 
 .table-comment {
@@ -1575,6 +1583,13 @@ onMounted(() => {
   min-width: 0;
 }
 
+.table-meta-tags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .row-count {
   font-size: 11px;
   color: #606266;
@@ -1582,9 +1597,27 @@ onMounted(() => {
   padding: 2px 6px;
   background-color: rgba(64, 158, 255, 0.1);
   border-radius: 3px;
-  flex-shrink: 0;
   min-width: 35px;
   text-align: center;
+}
+
+.lineage-count {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 5px;
+  border-radius: 3px;
+  min-width: 28px;
+  text-align: center;
+}
+
+.lineage-count.upstream {
+  color: #67c23a;
+  background-color: rgba(103, 194, 58, 0.1);
+}
+
+.lineage-count.downstream {
+  color: #e6a23c;
+  background-color: rgba(230, 162, 60, 0.1);
 }
 
 .layer-tag {
