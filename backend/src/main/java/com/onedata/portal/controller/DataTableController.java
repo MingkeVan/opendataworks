@@ -92,6 +92,34 @@ public class DataTableController {
     }
 
     /**
+     * 新增字段
+     */
+    @PostMapping("/{id}/fields")
+    public Result<DataField> createField(@PathVariable Long id, @RequestBody DataField field) {
+        field.setTableId(id);
+        return Result.success(dataTableService.createField(field));
+    }
+
+    /**
+     * 更新字段
+     */
+    @PutMapping("/{id}/fields/{fieldId}")
+    public Result<DataField> updateField(@PathVariable Long id, @PathVariable Long fieldId, @RequestBody DataField field) {
+        field.setId(fieldId);
+        field.setTableId(id);
+        return Result.success(dataTableService.updateField(field));
+    }
+
+    /**
+     * 删除字段
+     */
+    @DeleteMapping("/{id}/fields/{fieldId}")
+    public Result<Void> deleteField(@PathVariable Long id, @PathVariable Long fieldId) {
+        dataTableService.deleteField(fieldId);
+        return Result.success();
+    }
+
+    /**
      * 获取表关联任务
      */
     @GetMapping("/{id}/tasks")

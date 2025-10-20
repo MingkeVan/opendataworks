@@ -167,29 +167,17 @@
                 <el-button type="primary" link @click="goLineage">
                   查看血缘关系
                 </el-button>
-                <template v-if="isEditing">
-                  <el-button @click="handleEditCancel" :disabled="editSubmitting">
-                    取消
-                  </el-button>
-                  <el-button
-                    type="primary"
-                    :loading="editSubmitting"
-                    @click="handleEditSubmit"
-                  >
-                    保存
-                  </el-button>
-                </template>
-                <template v-else>
-                  <el-button type="primary" @click="startEditing">编辑</el-button>
-                  <el-popconfirm
-                    title="确定删除吗?"
-                    @confirm="handleDelete(selectedTable.id)"
-                  >
-                    <template #reference>
-                      <el-button type="danger">删除</el-button>
-                    </template>
-                  </el-popconfirm>
-                </template>
+                <el-popconfirm
+                  width="300"
+                  confirm-button-text="确定删除"
+                  cancel-button-text="取消"
+                  :title="`确定删除表「${selectedTable.tableName}」吗？此操作不可恢复！`"
+                  @confirm="handleDelete(selectedTable.id)"
+                >
+                  <template #reference>
+                    <el-button type="danger">删除表</el-button>
+                  </template>
+                </el-popconfirm>
               </div>
             </div>
 
@@ -197,201 +185,342 @@
             <el-tabs v-model="activeTab" class="detail-tabs">
               <!-- 基本信息 -->
               <el-tab-pane label="基本信息" name="basic">
-                <template v-if="isEditing">
-                  <div class="inline-edit-wrapper">
-                    <el-form
-                      ref="editFormRef"
-                      :model="editForm"
-                      :rules="editFormRules"
-                      label-width="110px"
-                      class="edit-form"
-                    >
-                      <el-row :gutter="16">
-                        <el-col :span="24">
-                          <el-form-item label="表名" prop="tableName">
-                            <div class="table-name-input-group">
-                              <el-input v-model="editForm.tableName" placeholder="请输入表名" />
-                              <el-button
-                                type="primary"
-                                link
-                                size="small"
-                                :disabled="!canGenerateEditName"
-                                @click="handleGenerateTableName"
-                              >
-                                生成
-                              </el-button>
-                            </div>
-                          </el-form-item>
-                        </el-col>
-                      </el-row>
-
-                      <el-row :gutter="16">
-                        <el-col :span="12">
-                          <el-form-item label="数据分层" prop="layer">
-                            <el-select v-model="editForm.layer" placeholder="选择数据分层">
-                              <el-option
-                                v-for="item in layerOptions"
-                                :key="item.value"
-                                :label="item.label"
-                                :value="item.value"
-                              />
-                            </el-select>
-                          </el-form-item>
-                        </el-col>
-                        <el-col :span="12">
-                          <el-form-item label="业务域" prop="businessDomain">
-                            <el-select
-                              v-model="editForm.businessDomain"
-                              placeholder="选择业务域"
-                              filterable
-                              @change="handleEditBusinessDomainChange"
-                            >
-                              <el-option
-                                v-for="item in businessDomainOptions"
-                                :key="item.domainCode"
-                                :label="`${item.domainCode} - ${item.domainName}`"
-                                :value="item.domainCode"
-                              />
-                            </el-select>
-                          </el-form-item>
-                        </el-col>
-                      </el-row>
-
-                      <el-row :gutter="16">
-                        <el-col :span="12">
-                          <el-form-item label="数据域" prop="dataDomain">
-                            <el-select
-                              v-model="editForm.dataDomain"
-                              placeholder="选择数据域"
-                              :disabled="!editForm.businessDomain"
-                              filterable
-                            >
-                              <el-option
-                                v-for="item in dataDomainOptions"
-                                :key="item.domainCode"
-                                :label="`${item.domainCode} - ${item.domainName}`"
-                                :value="item.domainCode"
-                              />
-                            </el-select>
-                          </el-form-item>
-                        </el-col>
-                        <el-col :span="12">
-                          <el-form-item label="自定义标识" prop="customIdentifier">
-                            <el-input
-                              v-model="editForm.customIdentifier"
-                              placeholder="如: cmp_performance"
-                              @blur="() => handleNormalizeSegment('customIdentifier')"
-                            />
-                          </el-form-item>
-                        </el-col>
-                      </el-row>
-
-                      <el-row :gutter="16">
-                        <el-col :span="12">
-                          <el-form-item label="统计周期">
-                            <el-select v-model="editForm.statisticsCycle" placeholder="可选">
-                              <el-option label="无" value="" />
-                              <el-option
-                                v-for="item in statisticsOptions"
-                                :key="item.value"
-                                :label="item.label"
-                                :value="item.value"
-                              />
-                            </el-select>
-                          </el-form-item>
-                        </el-col>
-                        <el-col :span="12">
-                          <el-form-item label="更新类型" prop="updateType">
-                            <el-select v-model="editForm.updateType" placeholder="选择更新类型">
-                              <el-option
-                                v-for="item in updateTypeOptions"
-                                :key="item.value"
-                                :label="item.label"
-                                :value="item.value"
-                              />
-                            </el-select>
-                          </el-form-item>
-                        </el-col>
-                      </el-row>
-
-                      <el-row :gutter="16">
-                        <el-col :span="12">
-                          <el-form-item label="负责人" prop="owner">
-                            <el-input v-model="editForm.owner" placeholder="负责人" />
-                          </el-form-item>
-                        </el-col>
-                        <el-col :span="12">
-                          <el-form-item label="数据库">
-                            <el-input :model-value="selectedTable.dbName" disabled />
-                          </el-form-item>
-                        </el-col>
-                      </el-row>
-
-                      <el-form-item label="表注释">
-                        <el-input
-                          v-model="editForm.tableComment"
-                          type="textarea"
-                          :rows="3"
-                          placeholder="请输入表业务含义"
-                        />
-                      </el-form-item>
-                    </el-form>
+                <div class="basic-section">
+                  <div class="section-header">
+                    <h3>表信息</h3>
+                    <template v-if="isEditing">
+                      <div class="action-buttons">
+                        <el-button @click="handleEditCancel" :disabled="editSubmitting">
+                          取消
+                        </el-button>
+                        <el-button
+                          type="primary"
+                          :loading="editSubmitting"
+                          @click="handleEditSubmit"
+                        >
+                          保存
+                        </el-button>
+                      </div>
+                    </template>
+                    <el-button v-else type="primary" @click="startEditing">
+                      编辑表信息
+                    </el-button>
                   </div>
-                </template>
-                <template v-else>
-                  <el-row :gutter="20">
-                    <el-col :span="12">
-                      <el-descriptions title="表信息" :column="1" border>
-                        <el-descriptions-item label="表名">
-                          {{ selectedTable.tableName }}
-                        </el-descriptions-item>
-                        <el-descriptions-item label="表注释">
-                          {{ selectedTable.tableComment || '-' }}
-                        </el-descriptions-item>
-                        <el-descriptions-item label="数据分层">
-                          {{ selectedTable.layer || '-' }}
-                        </el-descriptions-item>
-                        <el-descriptions-item label="业务域">
-                          {{ selectedTable.businessDomain || '-' }}
-                        </el-descriptions-item>
-                        <el-descriptions-item label="数据域">
-                          {{ selectedTable.dataDomain || '-' }}
-                        </el-descriptions-item>
-                        <el-descriptions-item label="数据库">
-                          {{ selectedTable.dbName || '-' }}
-                        </el-descriptions-item>
-                        <el-descriptions-item label="负责人">
-                          {{ selectedTable.owner || '-' }}
-                        </el-descriptions-item>
-                        <el-descriptions-item label="创建时间">
-                          {{ formatDateTime(selectedTable.createdAt) }}
-                        </el-descriptions-item>
-                      </el-descriptions>
-                    </el-col>
-                    <el-col :span="12">
-                      <el-descriptions title="Doris 配置" :column="1" border>
-                        <el-descriptions-item label="表模型">
-                          {{ selectedTable.tableModel || '-' }}
-                        </el-descriptions-item>
-                        <el-descriptions-item label="主键列">
-                          {{ selectedTable.keyColumns || '-' }}
-                        </el-descriptions-item>
-                        <el-descriptions-item label="分区字段">
-                          {{ selectedTable.partitionColumn || '-' }}
-                        </el-descriptions-item>
-                        <el-descriptions-item label="分桶字段">
-                          {{ selectedTable.distributionColumn || '-' }}
-                        </el-descriptions-item>
-                        <el-descriptions-item label="分桶数">
-                          {{ selectedTable.bucketNum || '-' }}
-                        </el-descriptions-item>
-                        <el-descriptions-item label="副本数">
-                          {{ selectedTable.replicaNum || '-' }}
-                        </el-descriptions-item>
-                      </el-descriptions>
-                    </el-col>
-                  </el-row>
-                </template>
+
+                  <template v-if="isEditing">
+                    <div class="inline-edit-wrapper">
+                      <el-form
+                        ref="editFormRef"
+                        :model="editForm"
+                        :rules="editFormRules"
+                        label-width="110px"
+                        class="edit-form"
+                      >
+                        <el-row :gutter="16">
+                          <el-col :span="24">
+                            <el-form-item label="表名" prop="tableName">
+                              <div class="table-name-input-group">
+                                <el-input v-model="editForm.tableName" placeholder="请输入表名" />
+                                <el-button
+                                  type="primary"
+                                  link
+                                  size="small"
+                                  :disabled="!canGenerateEditName"
+                                  @click="handleGenerateTableName"
+                                >
+                                  生成
+                                </el-button>
+                              </div>
+                            </el-form-item>
+                          </el-col>
+                        </el-row>
+
+                        <el-row :gutter="16">
+                          <el-col :span="12">
+                            <el-form-item label="数据分层" prop="layer">
+                              <el-select v-model="editForm.layer" placeholder="选择数据分层">
+                                <el-option
+                                  v-for="item in layerOptions"
+                                  :key="item.value"
+                                  :label="item.label"
+                                  :value="item.value"
+                                />
+                              </el-select>
+                            </el-form-item>
+                          </el-col>
+                          <el-col :span="12">
+                            <el-form-item label="业务域" prop="businessDomain">
+                              <el-select
+                                v-model="editForm.businessDomain"
+                                placeholder="选择业务域"
+                                filterable
+                                @change="handleEditBusinessDomainChange"
+                              >
+                                <el-option
+                                  v-for="item in businessDomainOptions"
+                                  :key="item.domainCode"
+                                  :label="`${item.domainCode} - ${item.domainName}`"
+                                  :value="item.domainCode"
+                                />
+                              </el-select>
+                            </el-form-item>
+                          </el-col>
+                        </el-row>
+
+                        <el-row :gutter="16">
+                          <el-col :span="12">
+                            <el-form-item label="数据域" prop="dataDomain">
+                              <el-select
+                                v-model="editForm.dataDomain"
+                                placeholder="选择数据域"
+                                :disabled="!editForm.businessDomain"
+                                filterable
+                              >
+                                <el-option
+                                  v-for="item in dataDomainOptions"
+                                  :key="item.domainCode"
+                                  :label="`${item.domainCode} - ${item.domainName}`"
+                                  :value="item.domainCode"
+                                />
+                              </el-select>
+                            </el-form-item>
+                          </el-col>
+                          <el-col :span="12">
+                            <el-form-item label="自定义标识" prop="customIdentifier">
+                              <el-input
+                                v-model="editForm.customIdentifier"
+                                placeholder="如: cmp_performance"
+                                @blur="() => handleNormalizeSegment('customIdentifier')"
+                              />
+                            </el-form-item>
+                          </el-col>
+                        </el-row>
+
+                        <el-row :gutter="16">
+                          <el-col :span="12">
+                            <el-form-item label="统计周期">
+                              <el-select v-model="editForm.statisticsCycle" placeholder="可选">
+                                <el-option label="无" value="" />
+                                <el-option
+                                  v-for="item in statisticsOptions"
+                                  :key="item.value"
+                                  :label="item.label"
+                                  :value="item.value"
+                                />
+                              </el-select>
+                            </el-form-item>
+                          </el-col>
+                          <el-col :span="12">
+                            <el-form-item label="更新类型" prop="updateType">
+                              <el-select v-model="editForm.updateType" placeholder="选择更新类型">
+                                <el-option
+                                  v-for="item in updateTypeOptions"
+                                  :key="item.value"
+                                  :label="item.label"
+                                  :value="item.value"
+                                />
+                              </el-select>
+                            </el-form-item>
+                          </el-col>
+                        </el-row>
+
+                        <el-row :gutter="16">
+                          <el-col :span="12">
+                            <el-form-item label="负责人" prop="owner">
+                              <el-input v-model="editForm.owner" placeholder="负责人" />
+                            </el-form-item>
+                          </el-col>
+                          <el-col :span="12">
+                            <el-form-item label="数据库">
+                              <el-input :model-value="selectedTable.dbName" disabled />
+                            </el-form-item>
+                          </el-col>
+                        </el-row>
+
+                        <el-form-item label="表注释">
+                          <el-input
+                            v-model="editForm.tableComment"
+                            type="textarea"
+                            :rows="3"
+                            placeholder="请输入表业务含义"
+                          />
+                        </el-form-item>
+                      </el-form>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <el-row :gutter="20" class="info-cards">
+                      <el-col :span="12">
+                        <el-descriptions title="表信息" :column="1" border>
+                          <el-descriptions-item label="表名">
+                            {{ selectedTable.tableName }}
+                          </el-descriptions-item>
+                          <el-descriptions-item label="表注释">
+                            {{ selectedTable.tableComment || '-' }}
+                          </el-descriptions-item>
+                          <el-descriptions-item label="数据分层">
+                            {{ selectedTable.layer || '-' }}
+                          </el-descriptions-item>
+                          <el-descriptions-item label="业务域">
+                            {{ selectedTable.businessDomain || '-' }}
+                          </el-descriptions-item>
+                          <el-descriptions-item label="数据域">
+                            {{ selectedTable.dataDomain || '-' }}
+                          </el-descriptions-item>
+                          <el-descriptions-item label="数据库">
+                            {{ selectedTable.dbName || '-' }}
+                          </el-descriptions-item>
+                          <el-descriptions-item label="负责人">
+                            {{ selectedTable.owner || '-' }}
+                          </el-descriptions-item>
+                          <el-descriptions-item label="创建时间">
+                            {{ formatDateTime(selectedTable.createdAt) }}
+                          </el-descriptions-item>
+                        </el-descriptions>
+                      </el-col>
+                      <el-col :span="12">
+                        <el-descriptions title="Doris 配置" :column="1" border>
+                          <el-descriptions-item label="表模型">
+                            {{ selectedTable.tableModel || '-' }}
+                          </el-descriptions-item>
+                          <el-descriptions-item label="主键列">
+                            {{ selectedTable.keyColumns || '-' }}
+                          </el-descriptions-item>
+                          <el-descriptions-item label="分区字段">
+                            {{ selectedTable.partitionColumn || '-' }}
+                          </el-descriptions-item>
+                          <el-descriptions-item label="分桶字段">
+                            {{ selectedTable.distributionColumn || '-' }}
+                          </el-descriptions-item>
+                          <el-descriptions-item label="分桶数">
+                            {{ selectedTable.bucketNum || '-' }}
+                          </el-descriptions-item>
+                          <el-descriptions-item label="副本数">
+                            {{ selectedTable.replicaNum || '-' }}
+                          </el-descriptions-item>
+                        </el-descriptions>
+                      </el-col>
+                    </el-row>
+
+                    <!-- 血缘关系 -->
+                    <div class="lineage-section">
+                      <h3>血缘关系</h3>
+                      <el-row :gutter="20">
+                        <el-col :span="12">
+                          <el-card shadow="never" class="lineage-card">
+                            <template #header>
+                              <div class="lineage-header">
+                                <span>上游表 ({{ lineage.upstreamTables?.length || 0 }})</span>
+                                <el-button type="primary" link size="small" @click="goLineage">
+                                  查看完整血缘
+                                </el-button>
+                              </div>
+                            </template>
+                            <div v-if="lineage.upstreamTables?.length" class="lineage-list">
+                              <div
+                                v-for="table in lineage.upstreamTables"
+                                :key="table.id"
+                                class="lineage-item"
+                                @click="handleTableClick(table)"
+                              >
+                                <el-icon class="table-icon"><Document /></el-icon>
+                                <div class="table-info-mini">
+                                  <div class="table-name">{{ table.tableName }}</div>
+                                  <div class="table-desc">{{ table.tableComment || '-' }}</div>
+                                </div>
+                                <el-tag v-if="table.layer" size="small" :type="getLayerType(table.layer)">
+                                  {{ table.layer }}
+                                </el-tag>
+                              </div>
+                            </div>
+                            <el-empty v-else description="暂无上游表" :image-size="60" />
+                          </el-card>
+                        </el-col>
+                        <el-col :span="12">
+                          <el-card shadow="never" class="lineage-card">
+                            <template #header>
+                              <div class="lineage-header">
+                                <span>下游表 ({{ lineage.downstreamTables?.length || 0 }})</span>
+                                <el-button type="primary" link size="small" @click="goLineage">
+                                  查看完整血缘
+                                </el-button>
+                              </div>
+                            </template>
+                            <div v-if="lineage.downstreamTables?.length" class="lineage-list">
+                              <div
+                                v-for="table in lineage.downstreamTables"
+                                :key="table.id"
+                                class="lineage-item"
+                                @click="handleTableClick(table)"
+                              >
+                                <el-icon class="table-icon"><Document /></el-icon>
+                                <div class="table-info-mini">
+                                  <div class="table-name">{{ table.tableName }}</div>
+                                  <div class="table-desc">{{ table.tableComment || '-' }}</div>
+                                </div>
+                                <el-tag v-if="table.layer" size="small" :type="getLayerType(table.layer)">
+                                  {{ table.layer }}
+                                </el-tag>
+                              </div>
+                            </div>
+                            <el-empty v-else description="暂无下游表" :image-size="60" />
+                          </el-card>
+                        </el-col>
+                      </el-row>
+                    </div>
+                  </template>
+                </div>
+              </el-tab-pane>
+
+              <!-- 字段列表 -->
+              <el-tab-pane label="字段列表" name="fields">
+                <div class="fields-section">
+                  <div class="section-header">
+                    <h3>字段定义</h3>
+                    <el-button type="primary" @click="handleAddField">
+                      <el-icon><Plus /></el-icon>
+                      新增字段
+                    </el-button>
+                  </div>
+                  <el-table :data="fields" border style="width: 100%">
+                    <el-table-column prop="fieldName" label="字段名" width="200" />
+                    <el-table-column prop="fieldType" label="类型" width="150" />
+                    <el-table-column prop="isNullable" label="可为空" width="100">
+                      <template #default="{ row }">
+                        <el-tag :type="row.isNullable ? 'success' : 'danger'">
+                          {{ row.isNullable ? '是' : '否' }}
+                        </el-tag>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="isPrimary" label="主键" width="100">
+                      <template #default="{ row }">
+                        <el-tag v-if="row.isPrimary" type="info">是</el-tag>
+                        <span v-else>-</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="defaultValue" label="默认值" width="150" />
+                    <el-table-column prop="fieldComment" label="注释" />
+                    <el-table-column label="操作" width="150" fixed="right">
+                      <template #default="{ row }">
+                        <el-button type="primary" link @click="handleEditField(row)">
+                          编辑
+                        </el-button>
+                        <el-popconfirm
+                          width="250"
+                          confirm-button-text="确定"
+                          cancel-button-text="取消"
+                          :title="`确定删除字段「${row.fieldName}」吗？`"
+                          @confirm="handleDeleteField(row)"
+                        >
+                          <template #reference>
+                            <el-button type="danger" link>删除</el-button>
+                          </template>
+                        </el-popconfirm>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                  <el-empty v-if="!fields.length" description="暂无字段信息" />
+                </div>
               </el-tab-pane>
 
               <!-- 统计信息 -->
@@ -445,30 +574,6 @@
                   </div>
                   <el-empty v-else description="暂无统计信息，点击刷新获取" />
                 </div>
-              </el-tab-pane>
-
-              <!-- 字段列表 -->
-              <el-tab-pane label="字段列表" name="fields">
-                <el-table :data="fields" border style="width: 100%">
-                  <el-table-column prop="fieldName" label="字段名" width="200" />
-                  <el-table-column prop="fieldType" label="类型" width="150" />
-                  <el-table-column prop="isNullable" label="可为空" width="100">
-                    <template #default="{ row }">
-                      <el-tag :type="row.isNullable ? 'success' : 'danger'">
-                        {{ row.isNullable ? '是' : '否' }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="isPrimary" label="主键" width="100">
-                    <template #default="{ row }">
-                      <el-tag v-if="row.isPrimary" type="info">是</el-tag>
-                      <span v-else>-</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="defaultValue" label="默认值" width="150" />
-                  <el-table-column prop="fieldComment" label="注释" />
-                </el-table>
-                <el-empty v-if="!fields.length" description="暂无字段信息" />
               </el-tab-pane>
 
               <!-- DDL -->
@@ -525,6 +630,47 @@
       </div>
     </div>
 
+    <!-- 字段编辑对话框 -->
+    <el-dialog
+      v-model="fieldDialogVisible"
+      :title="fieldDialogMode === 'add' ? '新增字段' : '编辑字段'"
+      width="600px"
+    >
+      <el-form
+        ref="fieldFormRef"
+        :model="fieldForm"
+        :rules="fieldFormRules"
+        label-width="100px"
+      >
+        <el-form-item label="字段名" prop="fieldName">
+          <el-input v-model="fieldForm.fieldName" placeholder="请输入字段名" />
+        </el-form-item>
+        <el-form-item label="字段类型" prop="fieldType">
+          <el-input v-model="fieldForm.fieldType" placeholder="如: VARCHAR(255), INT, DECIMAL(10,2)" />
+        </el-form-item>
+        <el-form-item label="字段注释" prop="fieldComment">
+          <el-input v-model="fieldForm.fieldComment" type="textarea" :rows="2" placeholder="请输入字段注释" />
+        </el-form-item>
+        <el-form-item label="可为空">
+          <el-switch v-model="fieldForm.isNullable" :active-value="1" :inactive-value="0" />
+        </el-form-item>
+        <el-form-item label="是否主键">
+          <el-switch v-model="fieldForm.isPrimary" :active-value="1" :inactive-value="0" />
+        </el-form-item>
+        <el-form-item label="默认值">
+          <el-input v-model="fieldForm.defaultValue" placeholder="可选" />
+        </el-form-item>
+        <el-form-item label="排序序号">
+          <el-input-number v-model="fieldForm.fieldOrder" :min="0" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="fieldDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleFieldSubmit" :loading="fieldSubmitting">
+          确定
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -555,6 +701,7 @@ const statisticsLoading = ref(false)
 const databases = ref([])
 const tablesByDatabase = ref({})
 const lineageCache = ref({})
+const lineage = ref({ upstreamTables: [], downstreamTables: [] })
 const activeDatabase = ref('')
 const searchKeyword = ref('')
 const selectedTable = ref(null)
@@ -565,11 +712,31 @@ const activeTab = ref('basic')
 const chartContainer = ref(null)
 let chartInstance = null
 
-const tableItemSize = 56
-
+// 表编辑相关
 const isEditing = ref(false)
 const editFormRef = ref(null)
 const editSubmitting = ref(false)
+
+// 字段编辑相关
+const fieldDialogVisible = ref(false)
+const fieldDialogMode = ref('add') // add or edit
+const fieldFormRef = ref(null)
+const fieldSubmitting = ref(false)
+const fieldForm = reactive({
+  id: null,
+  fieldName: '',
+  fieldType: '',
+  fieldComment: '',
+  isNullable: 1,
+  isPrimary: 0,
+  defaultValue: '',
+  fieldOrder: 0
+})
+
+const fieldFormRules = {
+  fieldName: [{ required: true, message: '请输入字段名', trigger: 'blur' }],
+  fieldType: [{ required: true, message: '请输入字段类型', trigger: 'blur' }]
+}
 
 const TABLE_NAME_PATTERN = /^[a-z0-9_]+$/
 
@@ -688,8 +855,8 @@ const loadTablesForDatabase = async (database) => {
 const loadLineageForTable = async (tableId) => {
   if (lineageCache.value[tableId]) return
   try {
-    const lineage = await tableApi.getLineage(tableId)
-    lineageCache.value[tableId] = lineage
+    const lineageData = await tableApi.getLineage(tableId)
+    lineageCache.value[tableId] = lineageData
   } catch (error) {
     console.error('加载血缘关系失败:', error)
   }
@@ -710,12 +877,6 @@ const getTablesForDatabase = (database) => {
 // 获取表数量
 const getTableCount = (database) => {
   return getTablesForDatabase(database).length
-}
-
-const getVirtualListHeight = (database) => {
-  const count = getTablesForDatabase(database).length
-  const visibleCount = Math.min(Math.max(count, 6), 18)
-  return visibleCount * tableItemSize
 }
 
 const normalizeSegment = (value) =>
@@ -892,14 +1053,14 @@ const handleEditSubmit = async () => {
 
 // 获取上游表数量
 const getUpstreamCount = (tableId) => {
-  const lineage = lineageCache.value[tableId]
-  return lineage?.upstreamTables?.length || 0
+  const lineageData = lineageCache.value[tableId]
+  return lineageData?.upstreamTables?.length || 0
 }
 
 // 获取下游表数量
 const getDownstreamCount = (tableId) => {
-  const lineage = lineageCache.value[tableId]
-  return lineage?.downstreamTables?.length || 0
+  const lineageData = lineageCache.value[tableId]
+  return lineageData?.downstreamTables?.length || 0
 }
 
 // 处理数据库点击
@@ -911,25 +1072,37 @@ const handleDatabaseClick = (database) => {
 
 // 处理表点击
 const handleTableClick = async (table) => {
-  selectedTable.value = table
+  // 如果是点击的不同数据库的表，需要先找到对应的表ID
+  let targetTable = table
+  if (typeof table.id === 'number') {
+    targetTable = table
+  } else {
+    // 如果是从血缘关系点击过来的，需要重新获取完整信息
+    const fullTable = await tableApi.getById(table.id)
+    targetTable = fullTable
+  }
+
+  selectedTable.value = targetTable
   activeTab.value = 'basic'
   isEditing.value = false
   if (editFormRef.value) {
     editFormRef.value.clearValidate()
   }
-  await loadTableDetail(table.id)
+  await loadTableDetail(targetTable.id)
 }
 
 // 加载表详情
 const loadTableDetail = async (tableId) => {
   detailLoading.value = true
   try {
-    const [tableInfo, fieldList] = await Promise.all([
+    const [tableInfo, fieldList, lineageData] = await Promise.all([
       tableApi.getById(tableId),
-      tableApi.getFields(tableId)
+      tableApi.getFields(tableId),
+      tableApi.getLineage(tableId)
     ])
     selectedTable.value = tableInfo
     fields.value = fieldList
+    lineage.value = lineageData
     await applyEditForm(tableInfo)
   } catch (error) {
     console.error('加载表详情失败:', error)
@@ -1059,6 +1232,87 @@ const handleDelete = async (id) => {
   }
 }
 
+// 字段管理相关方法
+const handleAddField = () => {
+  fieldDialogMode.value = 'add'
+  Object.assign(fieldForm, {
+    id: null,
+    fieldName: '',
+    fieldType: '',
+    fieldComment: '',
+    isNullable: 1,
+    isPrimary: 0,
+    defaultValue: '',
+    fieldOrder: fields.value.length
+  })
+  fieldDialogVisible.value = true
+  nextTick(() => {
+    if (fieldFormRef.value) {
+      fieldFormRef.value.clearValidate()
+    }
+  })
+}
+
+const handleEditField = (row) => {
+  fieldDialogMode.value = 'edit'
+  Object.assign(fieldForm, {
+    id: row.id,
+    fieldName: row.fieldName,
+    fieldType: row.fieldType,
+    fieldComment: row.fieldComment || '',
+    isNullable: row.isNullable || 0,
+    isPrimary: row.isPrimary || 0,
+    defaultValue: row.defaultValue || '',
+    fieldOrder: row.fieldOrder || 0
+  })
+  fieldDialogVisible.value = true
+  nextTick(() => {
+    if (fieldFormRef.value) {
+      fieldFormRef.value.clearValidate()
+    }
+  })
+}
+
+const handleFieldSubmit = async () => {
+  if (!fieldFormRef.value) return
+  try {
+    await fieldFormRef.value.validate()
+  } catch (error) {
+    return
+  }
+
+  fieldSubmitting.value = true
+  try {
+    if (fieldDialogMode.value === 'add') {
+      await tableApi.createField(selectedTable.value.id, fieldForm)
+      ElMessage.success('新增字段成功')
+    } else {
+      await tableApi.updateField(selectedTable.value.id, fieldForm.id, fieldForm)
+      ElMessage.success('更新字段成功')
+    }
+    fieldDialogVisible.value = false
+    // 重新加载字段列表
+    await loadTableDetail(selectedTable.value.id)
+  } catch (error) {
+    console.error('字段操作失败:', error)
+    ElMessage.error(error.message || '操作失败')
+  } finally {
+    fieldSubmitting.value = false
+  }
+}
+
+const handleDeleteField = async (row) => {
+  try {
+    await tableApi.deleteField(selectedTable.value.id, row.id)
+    ElMessage.success('删除字段成功')
+    // 重新加载字段列表
+    await loadTableDetail(selectedTable.value.id)
+  } catch (error) {
+    console.error('删除字段失败:', error)
+    ElMessage.error('删除字段失败')
+  }
+}
+
 // 获取层级标签类型
 const getLayerType = (layer) => {
   const types = {
@@ -1168,10 +1422,9 @@ onMounted(() => {
 
 .table-list {
   padding: 4px 0;
-}
-
-.table-virtual-list {
-  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .table-item {
@@ -1196,7 +1449,6 @@ onMounted(() => {
   background-color: #ecf5ff;
 }
 
-
 .table-info {
   display: flex;
   flex-direction: column;
@@ -1214,11 +1466,13 @@ onMounted(() => {
   color: #409eff;
 }
 
-
 .table-name {
   font-weight: 600;
   font-size: 13px;
   flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .layer-tag {
@@ -1245,31 +1499,6 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-/* 编辑区域 */
-.inline-edit-wrapper {
-  padding: 20px;
-  background-color: #f9fafc;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-}
-
-.edit-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.table-name-input-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-
-.table-name-input-group :deep(.el-input) {
-  flex: 1;
 }
 
 /* 右侧面板 */
@@ -1322,6 +1551,9 @@ onMounted(() => {
   overflow-y: auto;
 }
 
+/* 基本信息 */
+.basic-section,
+.fields-section,
 .statistics-section,
 .ddl-section,
 .preview-section,
@@ -1341,6 +1573,103 @@ onMounted(() => {
   font-size: 18px;
 }
 
+.info-cards {
+  margin-bottom: 24px;
+}
+
+/* 血缘关系 */
+.lineage-section {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid #ebeef5;
+}
+
+.lineage-section h3 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+}
+
+.lineage-card {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.lineage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.lineage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lineage-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.lineage-item:hover {
+  border-color: #409eff;
+  background-color: #ecf5ff;
+}
+
+.table-info-mini {
+  flex: 1;
+  overflow: hidden;
+}
+
+.table-info-mini .table-name {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-info-mini .table-desc {
+  font-size: 12px;
+  color: #909399;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 编辑区域 */
+.inline-edit-wrapper {
+  padding: 20px;
+  background-color: #f9fafc;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  margin-bottom: 24px;
+}
+
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.table-name-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.table-name-input-group :deep(.el-input) {
+  flex: 1;
+}
+
+/* 统计信息 */
 .stat-cards {
   margin-bottom: 24px;
 }

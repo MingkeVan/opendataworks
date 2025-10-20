@@ -33,6 +33,21 @@ export const tableApi = {
     return request.get(`/v1/tables/${id}/fields`)
   },
 
+  // 创建字段
+  createField(tableId, data) {
+    return request.post(`/v1/tables/${tableId}/fields`, data)
+  },
+
+  // 更新字段
+  updateField(tableId, fieldId, data) {
+    return request.put(`/v1/tables/${tableId}/fields/${fieldId}`, data)
+  },
+
+  // 删除字段
+  deleteField(tableId, fieldId) {
+    return request.delete(`/v1/tables/${tableId}/fields/${fieldId}`)
+  },
+
   // 获取表关联任务
   getTasks(id) {
     return request.get(`/v1/tables/${id}/tasks`)

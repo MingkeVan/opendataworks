@@ -224,6 +224,64 @@ public class DataTableService {
     }
 
     /**
+     * 创建字段
+     */
+    @Transactional
+    public DataField createField(DataField field) {
+        // 检查字段名是否已存在
+        DataField exists = dataFieldMapper.selectOne(
+            new LambdaQueryWrapper<DataField>()
+                .eq(DataField::getTableId, field.getTableId())
+                .eq(DataField::getFieldName, field.getFieldName())
+        );
+        if (exists != null) {
+            throw new RuntimeException("字段名已存在: " + field.getFieldName());
+        }
+
+        dataFieldMapper.insert(field);
+        log.info("Created field: {} for table: {}", field.getFieldName(), field.getTableId());
+        return field;
+    }
+
+    /**
+     * 更新字段
+     */
+    @Transactional
+    public DataField updateField(DataField field) {
+        DataField exists = dataFieldMapper.selectById(field.getId());
+        if (exists == null) {
+            throw new RuntimeException("字段不存在");
+        }
+
+        // 检查字段名是否重复
+        String newFieldName = field.getFieldName();
+        if (StringUtils.hasText(newFieldName) && !newFieldName.equals(exists.getFieldName())) {
+            DataField duplicate = dataFieldMapper.selectOne(
+                new LambdaQueryWrapper<DataField>()
+                    .eq(DataField::getTableId, field.getTableId())
+                    .eq(DataField::getFieldName, newFieldName)
+                    .ne(DataField::getId, field.getId())
+            );
+            if (duplicate != null) {
+                throw new RuntimeException("字段名已存在: " + newFieldName);
+            }
+        }
+
+        dataFieldMapper.updateById(field);
+        log.info("Updated field: {}", field.getFieldName());
+        return field;
+    }
+
+    /**
+     * 删除字段
+     */
+    @Transactional
+    public void deleteField(Long fieldId) {
+        dataFieldMapper.deleteById(fieldId);
+        log.info("Deleted field: {}", fieldId);
+    }
+
+    /**
      * 获取表的关联任务
      */
     public TableRelatedTasksResponse getRelatedTasks(Long tableId) {
