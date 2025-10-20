@@ -39,9 +39,32 @@ public class DataTableController {
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "20") int pageSize,
             @RequestParam(required = false) String layer,
-            @RequestParam(required = false) String keyword) {
-        Page<DataTable> page = dataTableService.list(pageNum, pageSize, layer, keyword);
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String sortField,
+            @RequestParam(required = false) String sortOrder) {
+        Page<DataTable> page = dataTableService.list(pageNum, pageSize, layer, keyword, sortField, sortOrder);
         return Result.success(PageResult.of(page.getTotal(), page.getRecords()));
+    }
+
+    /**
+     * 获取所有数据库列表（用于左侧导航）
+     */
+    @GetMapping("/databases")
+    public Result<List<String>> listDatabases() {
+        List<String> databases = dataTableService.listDatabases();
+        return Result.success(databases);
+    }
+
+    /**
+     * 根据数据库获取表列表（包含统计信息）
+     */
+    @GetMapping("/by-database")
+    public Result<List<DataTable>> listByDatabase(
+            @RequestParam String database,
+            @RequestParam(required = false) String sortField,
+            @RequestParam(required = false) String sortOrder) {
+        List<DataTable> tables = dataTableService.listByDatabase(database, sortField, sortOrder);
+        return Result.success(tables);
     }
 
     /**

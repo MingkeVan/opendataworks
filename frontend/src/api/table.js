@@ -11,6 +11,18 @@ export const tableApi = {
     return request.get('/v1/tables/all')
   },
 
+  // 获取所有数据库列表
+  listDatabases() {
+    return request.get('/v1/tables/databases')
+  },
+
+  // 根据数据库获取表列表
+  listByDatabase(database, sortField, sortOrder) {
+    return request.get('/v1/tables/by-database', {
+      params: { database, sortField, sortOrder }
+    })
+  },
+
   // 获取表详情
   getById(id) {
     return request.get(`/v1/tables/${id}`)

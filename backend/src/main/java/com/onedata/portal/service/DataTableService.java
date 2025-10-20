@@ -46,7 +46,7 @@ public class DataTableService {
     /**
      * 分页查询表列表
      */
-    public Page<DataTable> list(int pageNum, int pageSize, String layer, String keyword) {
+    public Page<DataTable> list(int pageNum, int pageSize, String layer, String keyword, String sortField, String sortOrder) {
         Page<DataTable> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<>();
 
@@ -58,8 +58,77 @@ public class DataTableService {
                     .or().like(DataTable::getTableComment, keyword));
         }
 
-        wrapper.orderByDesc(DataTable::getCreatedAt);
+        // 应用排序
+        applySorting(wrapper, sortField, sortOrder);
+
         return dataTableMapper.selectPage(page, wrapper);
+    }
+
+    /**
+     * 获取所有数据库列表
+     */
+    public List<String> listDatabases() {
+        List<DataTable> allTables = dataTableMapper.selectList(null);
+        return allTables.stream()
+            .map(DataTable::getDbName)
+            .filter(dbName -> dbName != null && !dbName.isEmpty())
+            .distinct()
+            .sorted()
+            .collect(Collectors.toList());
+    }
+
+    /**
+     * 根据数据库获取表列表
+     */
+    public List<DataTable> listByDatabase(String database, String sortField, String sortOrder) {
+        LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(DataTable::getDbName, database);
+
+        // 应用排序
+        applySorting(wrapper, sortField, sortOrder);
+
+        return dataTableMapper.selectList(wrapper);
+    }
+
+    /**
+     * 应用排序逻辑
+     */
+    private void applySorting(LambdaQueryWrapper<DataTable> wrapper, String sortField, String sortOrder) {
+        boolean isAsc = "asc".equalsIgnoreCase(sortOrder);
+
+        if (sortField == null || sortField.isEmpty()) {
+            wrapper.orderByDesc(DataTable::getCreatedAt);
+            return;
+        }
+
+        switch (sortField) {
+            case "tableName":
+                if (isAsc) wrapper.orderByAsc(DataTable::getTableName);
+                else wrapper.orderByDesc(DataTable::getTableName);
+                break;
+            case "createdAt":
+                if (isAsc) wrapper.orderByAsc(DataTable::getCreatedAt);
+                else wrapper.orderByDesc(DataTable::getCreatedAt);
+                break;
+            case "updatedAt":
+                if (isAsc) wrapper.orderByAsc(DataTable::getUpdatedAt);
+                else wrapper.orderByDesc(DataTable::getUpdatedAt);
+                break;
+            case "lastUpdated":
+                if (isAsc) wrapper.orderByAsc(DataTable::getLastUpdated);
+                else wrapper.orderByDesc(DataTable::getLastUpdated);
+                break;
+            case "rowCount":
+                if (isAsc) wrapper.orderByAsc(DataTable::getRowCount);
+                else wrapper.orderByDesc(DataTable::getRowCount);
+                break;
+            case "storageSize":
+                if (isAsc) wrapper.orderByAsc(DataTable::getStorageSize);
+                else wrapper.orderByDesc(DataTable::getStorageSize);
+                break;
+            default:
+                wrapper.orderByDesc(DataTable::getCreatedAt);
+        }
     }
 
     /**

@@ -9,8 +9,14 @@ const routes = [
       {
         path: '/tables',
         name: 'Tables',
-        component: () => import('@/views/tables/TableList.vue'),
+        component: () => import('@/views/tables/TableManagement.vue'),
         meta: { title: '表管理' }
+      },
+      {
+        path: '/tables/list',
+        name: 'TableList',
+        component: () => import('@/views/tables/TableList.vue'),
+        meta: { title: '表列表（旧版）' }
       },
       {
         path: '/tables/create',
