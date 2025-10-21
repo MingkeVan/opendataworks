@@ -65,7 +65,7 @@
       </div>
 
       <!-- 分隔线 -->
-      <el-divider style="margin: 16px 0" />
+      <el-divider style="margin: 12px 0" />
 
       <!-- 查询结果区域 -->
       <div class="result-section">
@@ -115,7 +115,7 @@
       </div>
 
       <!-- 分隔线 -->
-      <el-divider style="margin: 16px 0" />
+      <el-divider style="margin: 12px 0" />
 
       <!-- 查询历史区域 -->
       <div class="history-section">
@@ -481,7 +481,7 @@ function formatDate(value) {
 }
 
 :deep(.el-card__body) {
-  padding: 20px;
+  padding: 16px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -491,7 +491,7 @@ function formatDate(value) {
 /* 查询区域 - 紧凑布局 */
 .query-section {
   flex-shrink: 0;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .query-header {
@@ -572,7 +572,7 @@ function formatDate(value) {
 /* 结果区域 */
 .result-section {
   flex-shrink: 0;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .result-header {

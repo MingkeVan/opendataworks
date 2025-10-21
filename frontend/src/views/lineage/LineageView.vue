@@ -272,10 +272,20 @@ onBeforeUnmount(() => {
 <style scoped>
 .lineage-view {
   height: 100%;
+  padding: 6px;
+}
+
+.lineage-view :deep(.el-card) {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.lineage-view :deep(.el-card__body) {
+  padding: 16px;
 }
 
 .filter-card {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .chart-card {

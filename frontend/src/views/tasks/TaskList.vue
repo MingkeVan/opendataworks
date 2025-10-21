@@ -355,6 +355,16 @@ onMounted(() => {
 <style scoped>
 .task-list {
   height: 100%;
+  padding: 6px;
+}
+
+.task-list :deep(.el-card) {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.task-list :deep(.el-card__body) {
+  padding: 16px;
 }
 
 .toolbar {

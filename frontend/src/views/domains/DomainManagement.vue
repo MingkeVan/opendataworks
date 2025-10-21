@@ -318,15 +318,21 @@ onMounted(async () => {
 
 <style scoped>
 .domain-management {
-  padding-bottom: 40px;
+  padding: 6px;
 }
 
 .page-header {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .card {
-  margin-bottom: 20px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.card :deep(.el-card__body) {
+  padding: 16px;
 }
 
 .card-header {
