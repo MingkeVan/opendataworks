@@ -17,7 +17,7 @@ on:
         default: 'latest'
 
 env:
-  DOCKER_NAMESPACE: opendataworks
+  DOCKER_NAMESPACE: mikefan2019
 
 jobs:
   build-and-push:
