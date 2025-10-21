@@ -24,4 +24,8 @@ import { Monitor } from '@element-plus/icons-vue'
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
+
+.monitor-view :deep(.el-card__body) {
+  padding: 12px;
+}
 </style>
