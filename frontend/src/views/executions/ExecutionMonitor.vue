@@ -600,7 +600,14 @@ const formatDuration = (seconds) => {
 
 <style scoped>
 .execution-monitor {
-  padding: 20px;
+  padding: 6px;
+}
+
+.header-card,
+.filter-card,
+.table-card {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .card-header {
@@ -622,8 +629,14 @@ const formatDuration = (seconds) => {
   display: flex;
   align-items: center;
   padding: 20px;
-  background: #f5f7fa;
-  border-radius: 8px;
+  background: #f8fafc;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.12);
 }
 
 .stat-icon {
@@ -638,8 +651,8 @@ const formatDuration = (seconds) => {
 }
 
 .stat-icon.total {
-  background: #e6f7ff;
-  color: #1890ff;
+  background: #fff7e6;
+  color: #fa8c16;
 }
 
 .stat-icon.success {
@@ -653,8 +666,8 @@ const formatDuration = (seconds) => {
 }
 
 .stat-icon.duration {
-  background: #fff7e6;
-  color: #fa8c16;
+  background: #e6f7ff;
+  color: #1890ff;
 }
 
 .stat-info {
@@ -697,6 +710,7 @@ const formatDuration = (seconds) => {
 .quick-filters {
   display: flex;
   justify-content: flex-start;
+  margin-top: 10px;
 }
 
 .table-card {
@@ -708,7 +722,7 @@ const formatDuration = (seconds) => {
   overflow-y: auto;
   background: #1e1e1e;
   padding: 15px;
-  border-radius: 4px;
+  border-radius: 8px;
 }
 
 .log-content {
