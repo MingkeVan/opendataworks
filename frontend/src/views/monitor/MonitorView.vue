@@ -1,6 +1,6 @@
 <template>
   <div class="monitor-view">
-    <el-card shadow="never" class="monitor-card">
+    <el-card class="monitor-card">
       <div style="text-align: center; padding: 100px 0;">
         <el-icon :size="80" color="#909399"><Monitor /></el-icon>
         <h3>执行监控</h3>
