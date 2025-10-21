@@ -26,6 +26,6 @@ import { Monitor } from '@element-plus/icons-vue'
 }
 
 .monitor-view :deep(.el-card__body) {
-  padding: 12px;
+  padding: 16px;
 }
 </style>
