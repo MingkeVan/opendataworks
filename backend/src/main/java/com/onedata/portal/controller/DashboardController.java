@@ -6,6 +6,7 @@ import com.onedata.portal.dto.Result;
 import com.onedata.portal.entity.DataDomain;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.DataTask;
+import com.onedata.portal.entity.InspectionIssue;
 import com.onedata.portal.entity.TaskExecutionLog;
 import com.onedata.portal.mapper.DataDomainMapper;
 import com.onedata.portal.mapper.DataTableMapper;
@@ -102,12 +103,12 @@ public class DashboardController {
             Long openIssues = 0L;
             Long criticalIssues = 0L;
             try {
-                QueryWrapper<Object> openIssuesWrapper = new QueryWrapper<>();
+                QueryWrapper<InspectionIssue> openIssuesWrapper = new QueryWrapper<>();
                 openIssuesWrapper.eq("status", "open");
                 openIssues = inspectionIssueMapper.selectCount(openIssuesWrapper);
 
                 // 13. 统计严重问题数（critical级别且open状态）
-                QueryWrapper<Object> criticalIssuesWrapper = new QueryWrapper<>();
+                QueryWrapper<InspectionIssue> criticalIssuesWrapper = new QueryWrapper<>();
                 criticalIssuesWrapper.eq("status", "open")
                         .eq("severity", "critical");
                 criticalIssues = inspectionIssueMapper.selectCount(criticalIssuesWrapper);
