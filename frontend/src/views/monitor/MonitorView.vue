@@ -1,6 +1,6 @@
 <template>
   <div class="monitor-view">
-    <el-card>
+    <el-card shadow="never" class="monitor-card">
       <div style="text-align: center; padding: 100px 0;">
         <el-icon :size="80" color="#909399"><Monitor /></el-icon>
         <h3>执行监控</h3>
@@ -20,12 +20,12 @@ import { Monitor } from '@element-plus/icons-vue'
   padding: 6px;
 }
 
-.monitor-view :deep(.el-card) {
+.monitor-card {
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
-.monitor-view :deep(.el-card__body) {
+.monitor-card :deep(.el-card__body) {
   padding: 16px;
 }
 </style>
