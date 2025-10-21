@@ -564,7 +564,13 @@ const formatDuration = (seconds) => {
 
 <style scoped>
 .inspection-view {
-  padding: 20px;
+  padding: 6px;
+}
+
+.header-card,
+.records-card {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .card-header {
@@ -586,8 +592,14 @@ const formatDuration = (seconds) => {
   display: flex;
   align-items: center;
   padding: 20px;
-  background: #f5f7fa;
-  border-radius: 8px;
+  background: #f8fafc;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.12);
 }
 
 .stat-icon {
@@ -648,8 +660,8 @@ const formatDuration = (seconds) => {
 
 .mini-stat {
   padding: 10px;
-  background: #f5f7fa;
-  border-radius: 4px;
+  background: #f8fafc;
+  border-radius: 8px;
   text-align: center;
 }
 

@@ -469,7 +469,7 @@ function formatDate(value) {
 
 <style scoped>
 .data-query-page {
-  padding: 12px;
+  padding: 6px;
   height: calc(100vh - 80px);
   background-color: #f8fafc;
 }

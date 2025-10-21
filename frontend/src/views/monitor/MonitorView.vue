@@ -17,5 +17,11 @@ import { Monitor } from '@element-plus/icons-vue'
 <style scoped>
 .monitor-view {
   height: 100%;
+  padding: 6px;
+}
+
+.monitor-view :deep(.el-card) {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 </style>
