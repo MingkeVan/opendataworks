@@ -1,0 +1,49 @@
+# Build output
+target/
+build/
+out/
+*.class
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+*.swp
+*.swo
+*~
+
+# Maven
+.mvn/
+mvnw
+mvnw.cmd
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Environment
+.env
+application-local.yml
+application-local.properties
+
+# Test
+src/test/
+
+# Misc
+README.md
+CHANGELOG.md
+Dockerfile
