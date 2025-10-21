@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: opendataworks-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: onedata_portal
+      MYSQL_USER: onedata
+      MYSQL_PASSWORD: onedata123
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - opendataworks-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+
+  # 后端服务
+  backend:
+    image: opendataworks-backend:latest
+    container_name: opendataworks-backend
+    restart: always
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/onedata_portal?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false
+      SPRING_DATASOURCE_USERNAME: onedata
+      SPRING_DATASOURCE_PASSWORD: onedata123
+      DOLPHINSCHEDULER_SERVICE_URL: http://dolphin-service:8000
+      TZ: Asia/Shanghai
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      dolphin-service:
+        condition: service_started
+    networks:
+      - opendataworks-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    volumes:
+      - backend-logs:/app/logs
+
+  # DolphinScheduler 服务
+  dolphin-service:
+    image: opendataworks-dolphin-service:latest
+    container_name: opendataworks-dolphin-service
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+      # DolphinScheduler 配置（需要根据实际环境修改）
+      DOLPHIN_HOST: ${DOLPHIN_HOST:-localhost}
+      DOLPHIN_PORT: ${DOLPHIN_PORT:-12345}
+      DOLPHIN_USER: ${DOLPHIN_USER:-admin}
+      DOLPHIN_PASSWORD: ${DOLPHIN_PASSWORD:-dolphinscheduler123}
+      DOLPHIN_TENANT: ${DOLPHIN_TENANT:-default}
+    ports:
+      - "8000:8000"
+    networks:
+      - opendataworks-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - ./dolphinscheduler-service/.env:/app/.env:ro
+
+  # 前端服务
+  frontend:
+    image: opendataworks-frontend:latest
+    container_name: opendataworks-frontend
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - opendataworks-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  opendataworks-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
+    driver: local
+  backend-logs:
+    driver: local
