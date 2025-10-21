@@ -11,6 +11,10 @@
           mode="horizontal"
           class="menu"
         >
+          <el-menu-item index="/dashboard">
+            <el-icon><DataBoard /></el-icon>
+            <span>控制台</span>
+          </el-menu-item>
           <el-menu-item index="/tables">
             <el-icon><Grid /></el-icon>
             <span>表管理</span>
@@ -52,11 +56,14 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Grid, Management, Connection, Monitor, Collection, Warning, Search } from '@element-plus/icons-vue'
+import { DataBoard, Grid, Management, Connection, Monitor, Collection, Warning, Search } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => {
   const path = route.path
+  if (path.startsWith('/dashboard')) {
+    return '/dashboard'
+  }
   if (path.startsWith('/tables')) {
     return '/tables'
   }

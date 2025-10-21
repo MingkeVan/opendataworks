@@ -4,8 +4,14 @@ const routes = [
   {
     path: '/',
     component: () => import('@/views/Layout.vue'),
-    redirect: '/tables',
+    redirect: '/dashboard',
     children: [
+      {
+        path: '/dashboard',
+        name: 'Dashboard',
+        component: () => import('@/views/dashboard/Dashboard.vue'),
+        meta: { title: '控制台' }
+      },
       {
         path: '/tables',
         name: 'Tables',
