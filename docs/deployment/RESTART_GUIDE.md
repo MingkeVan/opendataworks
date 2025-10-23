@@ -166,7 +166,7 @@ python -m uvicorn dolphinscheduler_service.main:app --host 0.0.0.0 --port 5001 &
 
 1. ✅ 清理测试脚本（可选）:
 ```bash
-./cleanup-test-scripts.sh
+scripts/maintenance/cleanup-test-scripts.sh
 ```
 
 2. ✅ 提交代码（如果使用 Git）:

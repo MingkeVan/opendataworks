@@ -20,10 +20,10 @@ opendataworks/
 │   └── 03-sample_data.sql
 ├── deploy/docker-compose.prod.yml     # Docker Compose 配置文件
 ├── .env.example                # 环境变量配置示例
-├── load-images.sh              # 镜像加载脚本
-├── start.sh                    # 服务启动脚本
-├── stop.sh                     # 服务停止脚本
-└── restart.sh                  # 服务重启脚本
+├── scripts/deploy/load-images.sh   # 镜像加载脚本
+├── scripts/deploy/start.sh         # 服务启动脚本
+├── scripts/deploy/stop.sh          # 服务停止脚本
+└── scripts/deploy/restart.sh       # 服务重启脚本
 ```
 
 ## 🔧 系统要求

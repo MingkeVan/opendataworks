@@ -81,7 +81,7 @@ curl -X POST "http://localhost:8081/api/v1/workflows/$WORKFLOW_CODE/delete" \
 
 ```bash
 # 运行自动化测试脚本
-./test-workflow-lifecycle.sh
+scripts/test/test-workflow-lifecycle.sh
 ```
 
 脚本会自动:

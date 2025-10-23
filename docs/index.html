@@ -807,10 +807,10 @@ cd opendataworks
 
 #!/bin/bash
 # 初始化数据库（自定义 root 与应用密码）
-./init-database.sh -r &lt;mysql-root&gt; -p &lt;app-password&gt;
+scripts/dev/init-database.sh -r &lt;mysql-root&gt; -p &lt;app-password&gt;
 
 # 一键启动前后端与编排服务
-./quick-deploy.sh --with-doris=false
+scripts/deploy/quick-deploy.sh --with-doris=false
 
 # 浏览器访问
 # 前端:           http://localhost:3000
