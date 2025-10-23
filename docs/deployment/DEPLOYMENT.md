@@ -25,7 +25,7 @@ cd opendataworks
 docker-compose up -d
 
 # 3. 运行部署脚本
-./quick-deploy.sh
+scripts/deploy/quick-deploy.sh
 ```
 
 **脚本会自动完成**:
@@ -38,7 +38,7 @@ docker-compose up -d
 **部署选项**:
 ```bash
 # 跳过前端部署（仅部署后端服务）
-./quick-deploy.sh --skip-frontend
+scripts/deploy/quick-deploy.sh --skip-frontend
 ```
 
 ---
@@ -266,7 +266,7 @@ export default defineConfig({
 
 ```bash
 # 完整的工作流生命周期测试
-./test-workflow-lifecycle.sh
+scripts/test/test-workflow-lifecycle.sh
 
 # 或使用手动测试指南
 # 参考 docs/MANUAL_TEST_GUIDE.md
@@ -424,7 +424,7 @@ pkill -f "uvicorn.*dolphinscheduler"
 pkill -f "vite"
 
 # 然后重新运行
-./quick-deploy.sh
+scripts/deploy/quick-deploy.sh
 ```
 
 ---

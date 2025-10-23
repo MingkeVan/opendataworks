@@ -494,10 +494,10 @@ git clone https://github.com/MingkeVan/opendataworks.git
 cd opendataworks
 
 # 2. 初始化数据库
-./init-database.sh -r root密码 -p 应用密码
+scripts/dev/init-database.sh -r root密码 -p 应用密码
 
 # 3. 启动服务（使用自动化脚本）
-./quick-deploy.sh
+scripts/deploy/quick-deploy.sh
 
 # 访问应用
 # 前端: http://localhost:3000

@@ -337,13 +337,13 @@ cd opendataworks
 
 ```bash
 # 基本用法
-./init-database.sh -r root密码 -p 应用密码
+scripts/dev/init-database.sh -r root密码 -p 应用密码
 
 # 包含示例数据
-./init-database.sh -r root密码 -p 应用密码 -s
+scripts/dev/init-database.sh -r root密码 -p 应用密码 -s
 
 # 自定义配置
-./init-database.sh \
+scripts/dev/init-database.sh \
   -h localhost \
   -P 3306 \
   -d data_portal \
@@ -353,7 +353,7 @@ cd opendataworks
   -s
 
 # 查看所有选项
-./init-database.sh --help
+scripts/dev/init-database.sh --help
 ```
 
 **脚本功能**:
@@ -459,7 +459,7 @@ mysqldump -u root -p data_portal > data_portal_backup_$(date +%Y%m%d).sql
 
 # 删除数据库重建
 mysql -u root -p -e "DROP DATABASE data_portal;"
-./init-database.sh -r root密码 -p 应用密码
+scripts/dev/init-database.sh -r root密码 -p 应用密码
 ```
 
 #### 3. 启动 DolphinScheduler (可选)

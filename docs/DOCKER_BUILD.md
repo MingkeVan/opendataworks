@@ -85,27 +85,27 @@ BUILD_DOLPHIN=true
 3. **运行构建：**
 
 ```bash
-./build-quick.sh
+scripts/build/build-quick.sh
 ```
 
 ### 方法二：直接使用命令行参数
 
 ```bash
 # 基本用法
-./build-multiarch.sh \
+scripts/build/build-multiarch.sh \
   -u your-username \
   -p your-token \
   --push
 
 # 指定版本
-./build-multiarch.sh \
+scripts/build/build-multiarch.sh \
   -u your-username \
   -p your-token \
   -v v1.0.0 \
   --push
 
 # 只构建特定服务
-./build-multiarch.sh \
+scripts/build/build-multiarch.sh \
   -u your-username \
   -p your-token \
   --no-dolphin \
@@ -166,17 +166,17 @@ export VERSION=v1.0.0
 export DOCKER_NAMESPACE=mycompany
 
 # 使用环境变量构建
-./build-multiarch.sh -u user -p pass --push
+scripts/build/build-multiarch.sh -u user -p pass --push
 ```
 
 ### 仅构建本地镜像（不推送）
 
 ```bash
 # 仅支持单一平台
-./build-multiarch.sh --platform linux/amd64
+scripts/build/build-multiarch.sh --platform linux/amd64
 
 # 多平台必须使用 --push
-./build-multiarch.sh -u user -p pass --push
+scripts/build/build-multiarch.sh -u user -p pass --push
 ```
 
 ## 使用构建的镜像
@@ -247,7 +247,7 @@ docker run --privileged --rm tonistiigi/binfmt --install all
 docker buildx create --name multiarch --use --bootstrap
 
 # 重试构建
-./build-multiarch.sh -u user -p pass --push
+scripts/build/build-multiarch.sh -u user -p pass --push
 ```
 
 ### Q3: 推送镜像时认证失败
@@ -325,7 +325,7 @@ jobs:
 
       - name: Build and Push
         run: |
-          ./build-multiarch.sh \
+          scripts/build/build-multiarch.sh \
             -u ${{ secrets.DOCKER_USERNAME }} \
             -p ${{ secrets.DOCKER_TOKEN }} \
             -v ${GITHUB_REF#refs/tags/} \

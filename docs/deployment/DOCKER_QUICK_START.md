@@ -28,7 +28,7 @@ unzip opendataworks-source-*.zip
 cd opendataworks
 
 # 执行构建脚本（自动构建并导出所有镜像）
-scripts/build-images.sh
+scripts/build/build-images.sh
 ```
 
 构建完成后，会在 `docker-images/` 目录生成所有镜像 tar 包。
@@ -43,10 +43,10 @@ docker-images/              # 镜像 tar 包目录
 mysql-init/                 # MySQL 初始化脚本
 docker-compose.prod.yml     # Docker Compose 配置
 .env.example                # 环境变量配置示例
-load-images.sh              # 镜像加载脚本
-start.sh                    # 启动脚本
-stop.sh                     # 停止脚本
-restart.sh                  # 重启脚本
+scripts/deploy/load-images.sh   # 镜像加载脚本
+scripts/deploy/start.sh         # 启动脚本
+scripts/deploy/stop.sh          # 停止脚本
+scripts/deploy/restart.sh       # 重启脚本
 DOCKER_DEPLOYMENT.md        # 详细部署文档
 ```
 
