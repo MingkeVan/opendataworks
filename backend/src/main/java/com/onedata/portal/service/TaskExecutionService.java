@@ -27,6 +27,8 @@ public class TaskExecutionService {
 
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(TaskExecutionService.class);
 
+    private static final int DEFAULT_RECENT_EXECUTION_LIMIT = 10;
+
     private final TaskExecutionLogMapper executionLogMapper;
     private final DataTaskMapper dataTaskMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
@@ -67,10 +69,15 @@ public class TaskExecutionService {
      * 查询最近的执行记录 - 包含 DolphinScheduler 实时状态
      */
     public List<TaskExecutionLog> getRecentExecutions(Long taskId, Integer limit) {
+        int resolvedLimit = resolveRecentLimit(limit);
+
         LambdaQueryWrapper<TaskExecutionLog> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(TaskExecutionLog::getTaskId, taskId)
-                .orderByDesc(TaskExecutionLog::getStartTime)
-                .last("LIMIT " + limit);
+                .orderByDesc(TaskExecutionLog::getStartTime);
+
+        if (resolvedLimit > 0) {
+            wrapper.last("LIMIT " + resolvedLimit);
+        }
 
         List<TaskExecutionLog> logs = executionLogMapper.selectList(wrapper);
         logs.forEach(this::enrichWithDolphinData);
@@ -159,7 +166,7 @@ public class TaskExecutionService {
                         if (projectCode != null && workflowCode != null) {
                             String workflowDefUrl = dolphinSchedulerService.getWorkflowDefinitionUrl(workflowCode);
                             if (workflowDefUrl != null) {
-                                String baseUrl = workflowDefUrl.replaceAll("/workflow/definition/.*$", "");
+                                String baseUrl = workflowDefUrl.replaceAll("/workflow/definitions/.*$", "");
                                 String instanceUrl = String.format(
                                     "%s/workflow/instance/%d/%s",
                                     baseUrl, workflowCode, log.getExecutionId()
@@ -413,6 +420,13 @@ public class TaskExecutionService {
      */
     private boolean isTerminalStatus(String status) {
         return "success".equals(status) || "failed".equals(status) || "killed".equals(status);
+    }
+
+    private int resolveRecentLimit(Integer limit) {
+        if (limit == null || limit <= 0) {
+            return DEFAULT_RECENT_EXECUTION_LIMIT;
+        }
+        return limit;
     }
 
     /**
