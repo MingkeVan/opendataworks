@@ -7,6 +7,9 @@
 
 set -e  # 遇到错误立即退出
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -24,9 +27,9 @@ DB_ROOT_PASSWORD="${DB_ROOT_PASSWORD:-}"
 LOAD_SAMPLE_DATA="${LOAD_SAMPLE_DATA:-false}"
 
 # SQL 文件路径
-SCHEMA_SQL="backend/src/main/resources/schema.sql"
-SAMPLE_DATA_SQL="backend/src/main/resources/sample_data.sql"
-INSPECTION_SCHEMA_SQL="backend/src/main/resources/inspection_schema.sql"
+SCHEMA_SQL="$REPO_ROOT/backend/src/main/resources/schema.sql"
+SAMPLE_DATA_SQL="$REPO_ROOT/backend/src/main/resources/sample_data.sql"
+INSPECTION_SCHEMA_SQL="$REPO_ROOT/backend/src/main/resources/inspection_schema.sql"
 
 # 日志函数
 log_info() {

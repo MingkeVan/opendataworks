@@ -7,6 +7,9 @@
 
 set -e  # 遇到错误立即退出
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -101,7 +104,7 @@ check_dolphinscheduler() {
 deploy_backend() {
     log_info "部署后端服务..."
 
-    cd backend
+    pushd "$REPO_ROOT/backend" >/dev/null
 
     # 检查是否已编译
     if [ ! -d "build" ]; then
@@ -128,7 +131,7 @@ deploy_backend() {
            curl -sf http://localhost:8080/api/health > /dev/null 2>&1 || \
            grep -q "Started DataPortalApplication" /tmp/backend.log 2>/dev/null; then
             log_success "后端服务启动成功 (PID: $BACKEND_PID)"
-            cd ..
+            popd >/dev/null
             echo ""
             return 0
         fi
@@ -137,7 +140,7 @@ deploy_backend() {
 
     log_error "后端服务启动超时"
     log_info "查看日志: tail -f /tmp/backend.log"
-    cd ..
+    popd >/dev/null
     exit 1
 }
 
@@ -145,7 +148,7 @@ deploy_backend() {
 deploy_python_service() {
     log_info "部署 Python DolphinScheduler 服务..."
 
-    cd dolphinscheduler-service
+    pushd "$REPO_ROOT/dolphinscheduler-service" >/dev/null
 
     # 检查 Python 环境
     if [ ! -d "venv" ]; then
@@ -179,7 +182,7 @@ deploy_python_service() {
     for i in {1..20}; do
         if curl -sf http://localhost:5001/health > /dev/null 2>&1; then
             log_success "Python 服务启动成功 (PID: $PYTHON_PID)"
-            cd ..
+            popd >/dev/null
             echo ""
             return 0
         fi
@@ -188,7 +191,7 @@ deploy_python_service() {
 
     log_error "Python 服务启动超时"
     log_info "查看日志: tail -f /tmp/dolphin-service.log"
-    cd ..
+    popd >/dev/null
     exit 1
 }
 
@@ -202,7 +205,7 @@ deploy_frontend() {
 
     log_info "部署前端服务..."
 
-    cd frontend
+    pushd "$REPO_ROOT/frontend" >/dev/null
 
     # 安装依赖
     if [ ! -d "node_modules" ]; then
@@ -227,7 +230,7 @@ deploy_frontend() {
     for i in {1..20}; do
         if curl -sf http://localhost:3000 > /dev/null 2>&1; then
             log_success "前端服务启动成功 (PID: $FRONTEND_PID)"
-            cd ..
+            popd >/dev/null
             echo ""
             return 0
         fi
@@ -236,7 +239,7 @@ deploy_frontend() {
 
     log_warning "前端服务启动超时（这是正常的，前端可能需要更长时间）"
     log_info "查看日志: tail -f /tmp/frontend.log"
-    cd ..
+    popd >/dev/null
     echo ""
 }
 

@@ -6,6 +6,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 echo "========================================="
 echo "  OpenDataWorks 镜像加载脚本"
 echo "========================================="
@@ -26,12 +29,12 @@ fi
 echo ""
 
 # 镜像文件目录
-IMAGE_DIR="./docker-images"
+IMAGE_DIR="$REPO_ROOT/deploy/docker-images"
 
 # 检查镜像目录是否存在
 if [ ! -d "$IMAGE_DIR" ]; then
     echo "❌ 错误: 镜像目录 $IMAGE_DIR 不存在"
-    echo "请确保已将镜像文件传输到当前目录下的 docker-images/ 文件夹中"
+    echo "请确保已将镜像文件放在 deploy/docker-images/ 下"
     exit 1
 fi
 
@@ -91,6 +94,6 @@ $CONTAINER_CMD images | grep -E "opendataworks|mysql" | grep -E "latest|8.0"
 echo ""
 
 echo "📝 下一步："
-echo "  1. 复制 .env.example 为 .env 并根据实际环境配置"
-echo "  2. 运行 ./start.sh 启动服务"
+echo "  1. 复制 deploy/.env.example 为 deploy/.env 并根据实际环境配置"
+echo "  2. 运行 scripts/deploy/start.sh 启动服务"
 echo ""

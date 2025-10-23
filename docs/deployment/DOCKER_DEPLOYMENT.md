@@ -18,7 +18,7 @@ opendataworks/
 │   ├── 01-schema.sql
 │   ├── 02-inspection_schema.sql
 │   └── 03-sample_data.sql
-├── docker-compose.prod.yml     # Docker Compose 配置文件
+├── deploy/docker-compose.prod.yml     # Docker Compose 配置文件
 ├── .env.example                # 环境变量配置示例
 ├── load-images.sh              # 镜像加载脚本
 ├── start.sh                    # 服务启动脚本
@@ -90,7 +90,7 @@ scp -r opendataworks/ user@internal-server:/opt/
 
 ```bash
 cd /opt/opendataworks
-./load-images.sh
+scripts/deploy/load-images.sh
 ```
 
 脚本会自动加载以下镜像：
@@ -132,7 +132,7 @@ MYSQL_PASSWORD=onedata123
 执行启动脚本：
 
 ```bash
-./start.sh
+scripts/deploy/start.sh
 ```
 
 启动过程需要 1-2 分钟，脚本会：
@@ -174,36 +174,36 @@ MYSQL_PASSWORD=onedata123
 ### 查看服务状态
 
 ```bash
-docker-compose -f docker-compose.prod.yml ps
+docker-compose -f deploy/docker-compose.prod.yml ps
 ```
 
 ### 查看服务日志
 
 ```bash
 # 查看所有服务日志
-docker-compose -f docker-compose.prod.yml logs -f
+docker-compose -f deploy/docker-compose.prod.yml logs -f
 
 # 查看特定服务日志
-docker-compose -f docker-compose.prod.yml logs -f frontend
-docker-compose -f docker-compose.prod.yml logs -f backend
-docker-compose -f docker-compose.prod.yml logs -f dolphin-service
-docker-compose -f docker-compose.prod.yml logs -f mysql
+docker-compose -f deploy/docker-compose.prod.yml logs -f frontend
+docker-compose -f deploy/docker-compose.prod.yml logs -f backend
+docker-compose -f deploy/docker-compose.prod.yml logs -f dolphin-service
+docker-compose -f deploy/docker-compose.prod.yml logs -f mysql
 ```
 
 ### 停止服务
 
 ```bash
-./stop.sh
+scripts/deploy/stop.sh
 ```
 
 ### 重启服务
 
 ```bash
 # 重启所有服务
-./restart.sh
+scripts/deploy/restart.sh
 
 # 重启特定服务
-docker-compose -f docker-compose.prod.yml restart backend
+docker-compose -f deploy/docker-compose.prod.yml restart backend
 ```
 
 ### 进入容器
@@ -250,7 +250,7 @@ netstat -tunlp | grep -E "80|8080|8000|3306"
 
 2. 查看容器日志：
 ```bash
-docker-compose -f docker-compose.prod.yml logs backend
+docker-compose -f deploy/docker-compose.prod.yml logs backend
 ```
 
 3. 检查 Docker 资源：
@@ -264,10 +264,10 @@ docker stats
 
 ```bash
 # 停止并删除所有容器和数据卷
-docker-compose -f docker-compose.prod.yml down -v
+docker-compose -f deploy/docker-compose.prod.yml down -v
 
 # 重新启动
-./start.sh
+scripts/deploy/start.sh
 ```
 
 ### 后端无法连接数据库
@@ -296,7 +296,7 @@ docker exec opendataworks-backend ping -c 3 mysql
 编辑 backend 服务的环境变量：
 
 ```yaml
-# docker-compose.prod.yml
+# deploy/docker-compose.prod.yml
 services:
   backend:
     environment:
@@ -308,7 +308,7 @@ services:
 对于生产环境，可以调整 MySQL 配置：
 
 ```yaml
-# docker-compose.prod.yml
+# deploy/docker-compose.prod.yml
 services:
   mysql:
     command:
@@ -322,17 +322,17 @@ services:
 
 1. 停止服务：
 ```bash
-./stop.sh
+scripts/deploy/stop.sh
 ```
 
 2. 加载新镜像：
 ```bash
-./load-images.sh
+scripts/deploy/load-images.sh
 ```
 
 3. 重新启动：
 ```bash
-./start.sh
+scripts/deploy/start.sh
 ```
 
 ### 数据备份
@@ -351,8 +351,8 @@ docker run --rm -v opendataworks_mysql-data:/data -v $(pwd):/backup alpine tar c
 
 如遇到问题，请提供以下信息：
 
-1. 服务状态：`docker-compose -f docker-compose.prod.yml ps`
-2. 服务日志：`docker-compose -f docker-compose.prod.yml logs`
+1. 服务状态：`docker-compose -f deploy/docker-compose.prod.yml ps`
+2. 服务日志：`docker-compose -f deploy/docker-compose.prod.yml logs`
 3. 系统信息：`uname -a`, `docker version`, `docker-compose version`
 
 ---

@@ -28,7 +28,7 @@ unzip opendataworks-source-*.zip
 cd opendataworks
 
 # 执行构建脚本（自动构建并导出所有镜像）
-./build-images.sh
+scripts/build-images.sh
 ```
 
 构建完成后，会在 `docker-images/` 目录生成所有镜像 tar 包。
@@ -56,7 +56,7 @@ DOCKER_DEPLOYMENT.md        # 详细部署文档
 
 ```bash
 # 在内网服务器上执行
-./load-images.sh
+scripts/deploy/load-images.sh
 ```
 
 ### 步骤 2: 配置环境变量
@@ -82,7 +82,7 @@ DOLPHIN_PASSWORD=dolphinscheduler123        # 密码
 ### 步骤 3: 启动服务
 
 ```bash
-./start.sh
+scripts/deploy/start.sh
 ```
 
 启动后访问：
@@ -94,19 +94,19 @@ DOLPHIN_PASSWORD=dolphinscheduler123        # 密码
 
 ```bash
 # 启动服务
-./start.sh
+scripts/deploy/start.sh
 
 # 停止服务
-./stop.sh
+scripts/deploy/stop.sh
 
 # 重启服务
-./restart.sh
+scripts/deploy/restart.sh
 
 # 查看服务状态
-docker-compose -f docker-compose.prod.yml ps
+docker-compose -f deploy/docker-compose.prod.yml ps
 
 # 查看日志
-docker-compose -f docker-compose.prod.yml logs -f [service_name]
+docker-compose -f deploy/docker-compose.prod.yml logs -f [service_name]
 ```
 
 ## 🔐 默认账号
@@ -127,13 +127,13 @@ docker-compose -f docker-compose.prod.yml logs -f [service_name]
 # 检查端口占用
 netstat -tunlp | grep -E "80|8080|8000|3306"
 
-# 修改 docker-compose.prod.yml 中的端口映射
+# 修改 deploy/docker-compose.prod.yml 中的端口映射
 ```
 
 ### 服务启动失败
 ```bash
 # 查看日志
-docker-compose -f docker-compose.prod.yml logs backend
+docker-compose -f deploy/docker-compose.prod.yml logs backend
 
 # 检查配置
 cat .env
@@ -142,22 +142,22 @@ cat .env
 ### MySQL 初始化失败
 ```bash
 # 重新初始化（会删除所有数据）
-docker-compose -f docker-compose.prod.yml down -v
-./start.sh
+docker-compose -f deploy/docker-compose.prod.yml down -v
+scripts/deploy/start.sh
 ```
 
 ## 💡 注意事项
 
 1. **首次部署**：确保配置 .env 文件中的 DolphinScheduler 连接信息
-2. **端口冲突**：如果默认端口被占用，需要修改 docker-compose.prod.yml
+2. **端口冲突**：如果默认端口被占用，需要修改 deploy/docker-compose.prod.yml
 3. **数据备份**：升级前请备份 MySQL 数据
 4. **安全性**：生产环境请及时修改默认密码
 
 ## 📞 技术支持
 
 如遇问题，请提供：
-1. 服务状态：`docker-compose -f docker-compose.prod.yml ps`
-2. 服务日志：`docker-compose -f docker-compose.prod.yml logs`
+1. 服务状态：`docker-compose -f deploy/docker-compose.prod.yml ps`
+2. 服务日志：`docker-compose -f deploy/docker-compose.prod.yml logs`
 3. 系统信息：`uname -a`, `docker version`
 
 ---

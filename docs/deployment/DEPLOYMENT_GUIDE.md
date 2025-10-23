@@ -43,7 +43,7 @@ cd deployment-package
 #### 步骤 1: 加载 Docker 镜像
 ```bash
 chmod +x *.sh
-./load-images.sh
+scripts/deploy/load-images.sh
 ```
 这会加载以下镜像：
 - opendataworks-frontend:latest
@@ -68,7 +68,7 @@ DOLPHIN_TENANT=default
 
 #### 步骤 3: 启动服务
 ```bash
-./start.sh
+scripts/deploy/start.sh
 ```
 
 等待 1-2 分钟，服务启动完成后访问：
@@ -113,25 +113,25 @@ DOLPHIN_TENANT=default
 
 ### 服务管理
 ```bash
-./start.sh      # 启动所有服务
-./stop.sh       # 停止所有服务
-./restart.sh    # 重启所有服务
+scripts/deploy/start.sh      # 启动所有服务
+scripts/deploy/stop.sh       # 停止所有服务
+scripts/deploy/restart.sh    # 重启所有服务
 ```
 
 ### 查看服务状态
 ```bash
-docker-compose -f docker-compose.prod.yml ps
+docker-compose -f deploy/docker-compose.prod.yml ps
 ```
 
 ### 查看日志
 ```bash
 # 查看所有服务日志
-docker-compose -f docker-compose.prod.yml logs -f
+docker-compose -f deploy/docker-compose.prod.yml logs -f
 
 # 查看特定服务日志
-docker-compose -f docker-compose.prod.yml logs -f backend
-docker-compose -f docker-compose.prod.yml logs -f frontend
-docker-compose -f docker-compose.prod.yml logs -f mysql
+docker-compose -f deploy/docker-compose.prod.yml logs -f backend
+docker-compose -f deploy/docker-compose.prod.yml logs -f frontend
+docker-compose -f deploy/docker-compose.prod.yml logs -f mysql
 ```
 
 ### 进入容器
@@ -159,13 +159,13 @@ docker exec -it opendataworks-mysql mysql -uroot -proot123
 # 检查端口占用
 netstat -tunlp | grep -E "80|8080|8000|3306"
 
-# 解决方法：修改 docker-compose.prod.yml 中的端口映射
+# 解决方法：修改 deploy/docker-compose.prod.yml 中的端口映射
 ```
 
 ### 2. 服务启动失败
 ```bash
 # 查看具体错误
-docker-compose -f docker-compose.prod.yml logs backend
+docker-compose -f deploy/docker-compose.prod.yml logs backend
 
 # 检查配置
 cat .env
@@ -174,8 +174,8 @@ cat .env
 ### 3. MySQL 初始化失败
 ```bash
 # 完全重新初始化（会删除所有数据）
-docker-compose -f docker-compose.prod.yml down -v
-./start.sh
+docker-compose -f deploy/docker-compose.prod.yml down -v
+scripts/deploy/start.sh
 ```
 
 ### 4. 无法连接 DolphinScheduler
@@ -234,12 +234,12 @@ docker run --rm -v opendataworks_mysql-data:/data \
 
 1. **服务状态**
 ```bash
-docker-compose -f docker-compose.prod.yml ps
+docker-compose -f deploy/docker-compose.prod.yml ps
 ```
 
 2. **服务日志**
 ```bash
-docker-compose -f docker-compose.prod.yml logs
+docker-compose -f deploy/docker-compose.prod.yml logs
 ```
 
 3. **系统信息**

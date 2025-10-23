@@ -11,6 +11,10 @@ echo "  OpenDataWorks 多架构镜像构建脚本"
 echo "========================================="
 echo ""
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$REPO_ROOT"
+
 # 颜色定义
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -198,7 +202,7 @@ if [ "$BUILD_FRONTEND" = true ]; then
     echo "镜像: $FRONTEND_IMAGE:$VERSION"
     echo "平台: $PLATFORMS"
 
-    cd frontend
+    cd "$REPO_ROOT/frontend"
     if docker buildx build $BUILD_ARGS \
         -t $FRONTEND_IMAGE:$VERSION \
         -t $FRONTEND_IMAGE:latest \
@@ -209,7 +213,7 @@ if [ "$BUILD_FRONTEND" = true ]; then
     else
         echo -e "${RED}❌ 前端镜像构建失败${NC}"
     fi
-    cd ..
+    cd "$REPO_ROOT"
     ((TOTAL_BUILDS++))
     echo ""
 fi
@@ -220,7 +224,7 @@ if [ "$BUILD_BACKEND" = true ]; then
     echo "镜像: $BACKEND_IMAGE:$VERSION"
     echo "平台: $PLATFORMS"
 
-    cd backend
+    cd "$REPO_ROOT/backend"
     if docker buildx build $BUILD_ARGS \
         -t $BACKEND_IMAGE:$VERSION \
         -t $BACKEND_IMAGE:latest \
@@ -231,7 +235,7 @@ if [ "$BUILD_BACKEND" = true ]; then
     else
         echo -e "${RED}❌ 后端镜像构建失败${NC}"
     fi
-    cd ..
+    cd "$REPO_ROOT"
     ((TOTAL_BUILDS++))
     echo ""
 fi
@@ -242,7 +246,7 @@ if [ "$BUILD_DOLPHIN" = true ]; then
     echo "镜像: $DOLPHIN_SERVICE_IMAGE:$VERSION"
     echo "平台: $PLATFORMS"
 
-    cd dolphinscheduler-service
+    cd "$REPO_ROOT/dolphinscheduler-service"
     if docker buildx build $BUILD_ARGS \
         -t $DOLPHIN_SERVICE_IMAGE:$VERSION \
         -t $DOLPHIN_SERVICE_IMAGE:latest \
@@ -253,7 +257,7 @@ if [ "$BUILD_DOLPHIN" = true ]; then
     else
         echo -e "${RED}❌ DolphinScheduler 服务镜像构建失败${NC}"
     fi
-    cd ..
+    cd "$REPO_ROOT"
     ((TOTAL_BUILDS++))
     echo ""
 fi

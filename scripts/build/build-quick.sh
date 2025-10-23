@@ -4,14 +4,18 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 # 检查配置文件
-CONFIG_FILE="docker-build.env"
+CONFIG_FILE="${CONFIG_FILE:-$REPO_ROOT/deploy/docker-build.env}"
+EXAMPLE_FILE="$REPO_ROOT/deploy/docker-build.env.example"
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "❌ 配置文件不存在: $CONFIG_FILE"
     echo ""
     echo "请先创建配置文件:"
-    echo "  cp docker-build.env.example docker-build.env"
-    echo "  然后编辑 docker-build.env 填写 Docker Hub 凭证"
+    echo "  cp $EXAMPLE_FILE $CONFIG_FILE"
+    echo "  然后编辑配置文件填写 Docker Hub 凭证"
     echo ""
     exit 1
 fi
@@ -40,7 +44,7 @@ ARGS="-u $DOCKER_USERNAME -p $DOCKER_PASSWORD"
 
 # 执行构建
 echo "执行构建命令:"
-echo "./build-multiarch.sh $ARGS"
+echo "$SCRIPT_DIR/build-multiarch.sh $ARGS"
 echo ""
 
-./build-multiarch.sh $ARGS
+"$SCRIPT_DIR/build-multiarch.sh" $ARGS

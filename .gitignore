@@ -56,6 +56,10 @@ logs/
 .env.local
 .env.*.local
 
+# Deployment artifacts
+deploy/docker-images/*.tar
+artifacts/
+
 # Playwright MCP
 .playwright-mcp/
 

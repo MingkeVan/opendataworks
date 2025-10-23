@@ -5,6 +5,9 @@
 
 set -e  # 遇到错误立即退出
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -136,7 +139,7 @@ fi
 # 5. 运行集成测试
 echo -e "\n${YELLOW}[5/6] 运行集成测试...${NC}\n"
 
-cd "$(dirname "$0")/../backend"
+cd "$REPO_ROOT/backend"
 
 # 使用 Maven Wrapper 或 Maven
 if [ -f "./mvnw" ]; then

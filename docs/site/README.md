@@ -118,7 +118,7 @@ npx serve .
 
 - [GitHub Pages 设置指南](../GITHUB_PAGES_SETUP.md)
 - [项目文档](../../README.md)
-- [部署指南](../../DEPLOYMENT.md)
+- [部署指南](../../docs/deployment/DEPLOYMENT.md)
 
 ## 💡 设计灵感来源
 

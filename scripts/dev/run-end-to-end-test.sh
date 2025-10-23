@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 # 集成测试运行脚本
 # 该脚本会:
 # 1. 检查DolphinScheduler是否运行
@@ -19,7 +22,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # 配置
-PYTHON_SERVICE_DIR="./dolphinscheduler-service"
+PYTHON_SERVICE_DIR="$REPO_ROOT/dolphinscheduler-service"
 PYTHON_SERVICE_URL="http://localhost:8081"
 PYTHON_SERVICE_PID_FILE="/tmp/dolphinscheduler-service.pid"
 
@@ -44,11 +47,11 @@ check_python_deps() {
 
     if [ ! -d "$PYTHON_SERVICE_DIR/venv" ]; then
         echo -e "${YELLOW}创建Python虚拟环境...${NC}"
-        cd "$PYTHON_SERVICE_DIR"
+        pushd "$PYTHON_SERVICE_DIR" >/dev/null
         python3 -m venv venv
         source venv/bin/activate
         pip install -r requirements.txt
-        cd ..
+        popd >/dev/null
         echo -e "${GREEN}✓ Python依赖安装完成${NC}"
     else
         echo -e "${GREEN}✓ Python虚拟环境已存在${NC}"
@@ -76,12 +79,12 @@ start_python_service() {
     fi
 
     # 启动服务
-    cd "$PYTHON_SERVICE_DIR"
+    pushd "$PYTHON_SERVICE_DIR" >/dev/null
     source venv/bin/activate
     nohup uvicorn dolphinscheduler_service.main:app --host 0.0.0.0 --port 8081 > /tmp/dolphinscheduler-service.log 2>&1 &
     SERVICE_PID=$!
     echo $SERVICE_PID > "$PYTHON_SERVICE_PID_FILE"
-    cd ..
+    popd >/dev/null
 
     # 等待服务启动
     echo -e "${YELLOW}等待服务启动...${NC}"
@@ -102,7 +105,9 @@ start_python_service() {
 run_integration_test() {
     echo -e "\n${YELLOW}运行集成测试...${NC}"
 
-    if [ ! -f "integration-test.py" ]; then
+    local test_script="$REPO_ROOT/integration-test.py"
+
+    if [ ! -f "$test_script" ]; then
         echo -e "${RED}✗ 找不到integration-test.py${NC}"
         return 1
     fi
@@ -113,7 +118,7 @@ run_integration_test() {
         pip3 install requests
     fi
 
-    python3 integration-test.py --service-url "$PYTHON_SERVICE_URL"
+    python3 "$test_script" --service-url "$PYTHON_SERVICE_URL"
     TEST_RESULT=$?
 
     if [ $TEST_RESULT -eq 0 ]; then
