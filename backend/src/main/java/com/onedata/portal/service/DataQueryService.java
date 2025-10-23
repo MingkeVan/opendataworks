@@ -123,15 +123,33 @@ public class DataQueryService {
         return historyMapper.selectPage(page, wrapper);
     }
 
-    private void validateSql(String sql) {
+    void validateSql(String sql) {
         if (!StringUtils.hasText(sql)) {
             throw new RuntimeException("SQL 不能为空");
         }
+
         String trimmed = sql.trim();
-        String lowered = trimmed.toLowerCase(Locale.ROOT);
-        if (lowered.chars().filter(ch -> ch == ';').count() > 1) {
+        String sanitized = stripLiteralsAndComments(trimmed);
+        String sanitizedTrimmed = sanitized.trim();
+
+        if (!StringUtils.hasText(sanitizedTrimmed)) {
+            throw new RuntimeException("SQL 不能为空");
+        }
+
+        long semicolonCount = sanitized.chars().filter(ch -> ch == ';').count();
+        if (semicolonCount > 1) {
             throw new RuntimeException("仅支持单条 SQL 执行");
         }
+
+        int firstSemicolon = sanitizedTrimmed.indexOf(';');
+        if (firstSemicolon >= 0) {
+            String tail = sanitizedTrimmed.substring(firstSemicolon + 1).trim();
+            if (!tail.isEmpty()) {
+                throw new RuntimeException("仅支持单条 SQL 执行");
+            }
+        }
+
+        String lowered = sanitizedTrimmed.toLowerCase(Locale.ROOT);
         if (DANGEROUS_KEYWORDS.matcher(lowered).find()) {
             throw new RuntimeException("检测到危险 SQL 关键字，请检查后再执行");
         }
@@ -194,5 +212,84 @@ public class DataQueryService {
         }
         String compressed = sql.replaceAll("\\s+", " ").trim();
         return compressed.length() > 200 ? compressed.substring(0, 200) + "..." : compressed;
+    }
+
+    private String stripLiteralsAndComments(String sql) {
+        StringBuilder builder = new StringBuilder(sql.length());
+        boolean inSingleQuote = false;
+        boolean inDoubleQuote = false;
+        boolean inLineComment = false;
+        boolean inBlockComment = false;
+
+        for (int i = 0; i < sql.length(); i++) {
+            char current = sql.charAt(i);
+            char next = i + 1 < sql.length() ? sql.charAt(i + 1) : '\0';
+
+            if (inLineComment) {
+                if (current == '\n' || current == '\r') {
+                    inLineComment = false;
+                    builder.append(current);
+                }
+                continue;
+            }
+
+            if (inBlockComment) {
+                if (current == '*' && next == '/') {
+                    inBlockComment = false;
+                    i++;
+                }
+                continue;
+            }
+
+            if (inSingleQuote) {
+                if (current == '\'' && next == '\'') {
+                    i++;
+                    continue;
+                }
+                if (current == '\'') {
+                    inSingleQuote = false;
+                }
+                continue;
+            }
+
+            if (inDoubleQuote) {
+                if (current == '"' && next == '"') {
+                    i++;
+                    continue;
+                }
+                if (current == '"') {
+                    inDoubleQuote = false;
+                }
+                continue;
+            }
+
+            if (current == '-' && next == '-') {
+                inLineComment = true;
+                i++;
+                builder.append(' ');
+                continue;
+            }
+
+            if (current == '/' && next == '*') {
+                inBlockComment = true;
+                i++;
+                builder.append(' ');
+                continue;
+            }
+
+            if (current == '\'' || current == '"') {
+                if (current == '\'') {
+                    inSingleQuote = true;
+                } else {
+                    inDoubleQuote = true;
+                }
+                builder.append(' ');
+                continue;
+            }
+
+            builder.append(current);
+        }
+
+        return builder.toString();
     }
 }
