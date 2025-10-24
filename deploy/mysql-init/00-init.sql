@@ -7,9 +7,9 @@ CREATE DATABASE IF NOT EXISTS onedata_portal DEFAULT CHARACTER SET utf8mb4 COLLA
 USE onedata_portal;
 
 -- 导入主表结构和数据
-SOURCE /docker-entrypoint-initdb.d/schema.sql;
-SOURCE /docker-entrypoint-initdb.d/inspection_schema.sql;
-SOURCE /docker-entrypoint-initdb.d/sample_data.sql;
+SOURCE /docker-entrypoint-initdb.d/01-schema.sql;
+SOURCE /docker-entrypoint-initdb.d/02-inspection_schema.sql;
+SOURCE /docker-entrypoint-initdb.d/03-sample_data.sql;
 
 -- 创建应用用户
 CREATE USER IF NOT EXISTS 'onedata'@'%' IDENTIFIED BY 'onedata123';

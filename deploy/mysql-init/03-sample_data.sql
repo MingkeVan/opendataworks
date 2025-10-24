@@ -1,6 +1,6 @@
 SET NAMES utf8mb4;
 
-USE data_portal;
+USE onedata_portal;
 
 -- 确保业务域与数据域基础数据存在且编码正确
 INSERT INTO business_domain (domain_code, domain_name, description) VALUES

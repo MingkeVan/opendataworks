@@ -1,9 +1,51 @@
--- 创建数据库
+-- 使用已创建的数据库
 SET NAMES utf8mb4;
 
-CREATE DATABASE IF NOT EXISTS data_portal DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE onedata_portal;
 
-USE data_portal;
+-- 业务域配置表
+CREATE TABLE IF NOT EXISTS `business_domain` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `domain_code` VARCHAR(50) NOT NULL COMMENT '业务域代码',
+    `domain_name` VARCHAR(100) NOT NULL COMMENT '业务域名称',
+    `description` VARCHAR(500) DEFAULT NULL COMMENT '描述',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除标记',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_domain_code` (`domain_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='业务域配置表';
+
+-- 数据域配置表
+CREATE TABLE IF NOT EXISTS `data_domain` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `domain_code` VARCHAR(50) NOT NULL COMMENT '数据域代码',
+    `domain_name` VARCHAR(100) NOT NULL COMMENT '数据域名称',
+    `business_domain` VARCHAR(50) DEFAULT NULL COMMENT '所属业务域',
+    `description` VARCHAR(500) DEFAULT NULL COMMENT '描述',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除标记',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_domain_code` (`domain_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据域配置表';
+
+-- Doris集群配置表
+CREATE TABLE IF NOT EXISTS `doris_cluster` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `cluster_name` VARCHAR(100) NOT NULL COMMENT '集群名称',
+    `fe_host` VARCHAR(100) NOT NULL COMMENT 'FE Host',
+    `fe_port` INT NOT NULL DEFAULT 9030 COMMENT 'FE MySQL端口',
+    `username` VARCHAR(50) NOT NULL COMMENT '用户名',
+    `password` VARCHAR(200) NOT NULL COMMENT '密码',
+    `is_default` TINYINT DEFAULT 0 COMMENT '是否默认集群',
+    `status` VARCHAR(20) DEFAULT 'active' COMMENT '状态',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除标记',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_cluster_host_port` (`fe_host`, `fe_port`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Doris集群配置表';
 
 -- 数据表管理表
 CREATE TABLE IF NOT EXISTS `data_table` (
@@ -180,3 +222,18 @@ ON DUPLICATE KEY UPDATE
     `db_name` = VALUES(`db_name`),
     `owner` = VALUES(`owner`),
     `status` = VALUES(`status`);
+
+-- 表与任务关联关系表
+CREATE TABLE IF NOT EXISTS `table_task_relation` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `table_id` BIGINT NOT NULL COMMENT '表ID',
+    `task_id` BIGINT NOT NULL COMMENT '任务ID',
+    `relation_type` VARCHAR(20) NOT NULL COMMENT '关联类型(read-读取/write-写入)',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除标记',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_table_task` (`table_id`, `task_id`, `relation_type`),
+    KEY `idx_table_id` (`table_id`),
+    KEY `idx_task_id` (`task_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='表与任务关联关系表';
