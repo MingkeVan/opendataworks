@@ -118,6 +118,13 @@ export const tableApi = {
     return request.delete(`/v1/tables/${id}`)
   },
 
+  // 稽核/比对 Doris 元数据（只检查差异，不同步）
+  auditMetadata(clusterId = null) {
+    return request.post('/v1/tables/audit-metadata', null, {
+      params: { clusterId }
+    })
+  },
+
   // 同步 Doris 元数据（全量同步）
   syncMetadata(clusterId = null) {
     return request.post('/v1/tables/sync-metadata', null, {
