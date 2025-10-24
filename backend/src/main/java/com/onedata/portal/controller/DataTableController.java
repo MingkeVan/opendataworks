@@ -455,6 +455,7 @@ public class DataTableController {
             Map<String, Object> response = new java.util.HashMap<>();
             response.put("hasDifferences", result.hasDifferences());
             response.put("totalDifferences", result.getTotalDifferences());
+            response.put("statisticsSynced", result.getStatisticsSynced());
             response.put("differences", result.getTableDifferences());
             response.put("errors", result.getErrors());
             response.put("auditTime", LocalDateTime.now());
