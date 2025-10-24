@@ -377,4 +377,206 @@ public class DorisConnectionService {
         double tb = gb / 1024.0;
         return String.format("%.2f TB", tb);
     }
+
+    /**
+     * 获取所有数据库列表
+     */
+    public List<String> getAllDatabases(Long clusterId) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        List<String> databases = new ArrayList<>();
+
+        String sql = "SHOW DATABASES";
+
+        try (Connection connection = getConnection(cluster, null);
+             Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+                String dbName = rs.getString(1);
+                // 过滤掉系统数据库
+                if (!"information_schema".equals(dbName) && !"mysql".equals(dbName)) {
+                    databases.add(dbName);
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to get databases from cluster {}", cluster.getClusterName(), e);
+            throw new RuntimeException("获取数据库列表失败: " + e.getMessage(), e);
+        }
+
+        return databases;
+    }
+
+    /**
+     * 获取指定数据库的所有表
+     */
+    public List<Map<String, Object>> getTablesInDatabase(Long clusterId, String database) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        List<Map<String, Object>> tables = new ArrayList<>();
+
+        String sql = "SELECT TABLE_NAME, TABLE_COMMENT, CREATE_TIME, UPDATE_TIME, TABLE_ROWS, DATA_LENGTH " +
+                     "FROM information_schema.tables WHERE TABLE_SCHEMA = ?";
+
+        try (Connection connection = getConnection(cluster, null);
+             PreparedStatement stmt = connection.prepareStatement(sql)) {
+
+            stmt.setString(1, database);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    Map<String, Object> table = new HashMap<>();
+                    table.put("tableName", rs.getString("TABLE_NAME"));
+                    table.put("tableComment", rs.getString("TABLE_COMMENT"));
+                    table.put("createTime", rs.getTimestamp("CREATE_TIME"));
+                    table.put("updateTime", rs.getTimestamp("UPDATE_TIME"));
+                    table.put("tableRows", rs.getLong("TABLE_ROWS"));
+                    table.put("dataLength", rs.getLong("DATA_LENGTH"));
+                    tables.add(table);
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to get tables from database {}", database, e);
+            throw new RuntimeException("获取表列表失败: " + e.getMessage(), e);
+        }
+
+        return tables;
+    }
+
+    /**
+     * 获取指定表的所有列信息
+     */
+    public List<Map<String, Object>> getColumnsInTable(Long clusterId, String database, String tableName) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        List<Map<String, Object>> columns = new ArrayList<>();
+
+        String sql = "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, ORDINAL_POSITION, COLUMN_KEY " +
+                     "FROM information_schema.columns WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION";
+
+        try (Connection connection = getConnection(cluster, null);
+             PreparedStatement stmt = connection.prepareStatement(sql)) {
+
+            stmt.setString(1, database);
+            stmt.setString(2, tableName);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    Map<String, Object> column = new HashMap<>();
+                    column.put("columnName", rs.getString("COLUMN_NAME"));
+                    column.put("dataType", rs.getString("DATA_TYPE"));
+                    column.put("isNullable", "YES".equalsIgnoreCase(rs.getString("IS_NULLABLE")) ? 1 : 0);
+                    column.put("defaultValue", rs.getString("COLUMN_DEFAULT"));
+                    column.put("columnComment", rs.getString("COLUMN_COMMENT"));
+                    column.put("ordinalPosition", rs.getInt("ORDINAL_POSITION"));
+                    column.put("columnKey", rs.getString("COLUMN_KEY"));
+                    column.put("isPrimary", "PRI".equalsIgnoreCase(rs.getString("COLUMN_KEY")) ? 1 : 0);
+                    columns.add(column);
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to get columns from table {}.{}", database, tableName, e);
+            throw new RuntimeException("获取列信息失败: " + e.getMessage(), e);
+        }
+
+        return columns;
+    }
+
+    /**
+     * 获取表的详细建表信息（解析 SHOW CREATE TABLE）
+     */
+    public Map<String, Object> getTableCreateInfo(Long clusterId, String database, String tableName) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        Map<String, Object> info = new HashMap<>();
+
+        String showCreateSql = "SHOW CREATE TABLE `" + database + "`.`" + tableName + "`";
+
+        try (Connection connection = getConnection(cluster, null);
+             Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(showCreateSql)) {
+
+            if (rs.next()) {
+                String createTableSql = rs.getString(2);
+                info.put("createTableSql", createTableSql);
+
+                // 解析副本数
+                if (createTableSql.contains("\"replication_num\"")) {
+                    int start = createTableSql.indexOf("\"replication_num\" = \"") + 21;
+                    int end = createTableSql.indexOf("\"", start);
+                    if (start > 20 && end > start) {
+                        try {
+                            info.put("replicationNum", Integer.parseInt(createTableSql.substring(start, end)));
+                        } catch (NumberFormatException e) {
+                            log.warn("Failed to parse replication_num", e);
+                        }
+                    }
+                }
+
+                // 解析分桶数
+                if (createTableSql.contains("BUCKETS ")) {
+                    int start = createTableSql.indexOf("BUCKETS ") + 8;
+                    int end = start;
+                    while (end < createTableSql.length() && Character.isDigit(createTableSql.charAt(end))) {
+                        end++;
+                    }
+                    if (end > start) {
+                        try {
+                            info.put("bucketNum", Integer.parseInt(createTableSql.substring(start, end)));
+                        } catch (NumberFormatException e) {
+                            log.warn("Failed to parse bucket num", e);
+                        }
+                    }
+                }
+
+                // 解析分区字段
+                if (createTableSql.contains("PARTITION BY RANGE")) {
+                    int start = createTableSql.indexOf("PARTITION BY RANGE(") + 19;
+                    int end = createTableSql.indexOf(")", start);
+                    if (start > 18 && end > start) {
+                        String partitionField = createTableSql.substring(start, end).trim();
+                        info.put("partitionField", partitionField);
+                    }
+                }
+
+                // 解析分桶字段
+                if (createTableSql.contains("DISTRIBUTED BY HASH")) {
+                    int start = createTableSql.indexOf("DISTRIBUTED BY HASH(") + 20;
+                    int end = createTableSql.indexOf(")", start);
+                    if (start > 19 && end > start) {
+                        String distributionColumn = createTableSql.substring(start, end).trim();
+                        info.put("distributionColumn", distributionColumn);
+                    }
+                }
+
+                // 解析 Key 类型和列
+                if (createTableSql.contains("UNIQUE KEY")) {
+                    int start = createTableSql.indexOf("UNIQUE KEY(") + 11;
+                    int end = createTableSql.indexOf(")", start);
+                    if (start > 10 && end > start) {
+                        String keyColumns = createTableSql.substring(start, end).trim();
+                        info.put("keyColumns", keyColumns);
+                        info.put("tableModel", "UNIQUE");
+                    }
+                } else if (createTableSql.contains("AGGREGATE KEY")) {
+                    int start = createTableSql.indexOf("AGGREGATE KEY(") + 14;
+                    int end = createTableSql.indexOf(")", start);
+                    if (start > 13 && end > start) {
+                        String keyColumns = createTableSql.substring(start, end).trim();
+                        info.put("keyColumns", keyColumns);
+                        info.put("tableModel", "AGGREGATE");
+                    }
+                } else if (createTableSql.contains("DUPLICATE KEY")) {
+                    int start = createTableSql.indexOf("DUPLICATE KEY(") + 14;
+                    int end = createTableSql.indexOf(")", start);
+                    if (start > 13 && end > start) {
+                        String keyColumns = createTableSql.substring(start, end).trim();
+                        info.put("keyColumns", keyColumns);
+                        info.put("tableModel", "DUPLICATE");
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to get create info for table {}.{}", database, tableName, e);
+            throw new RuntimeException("获取建表信息失败: " + e.getMessage(), e);
+        }
+
+        return info;
+    }
 }

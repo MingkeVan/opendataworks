@@ -17,10 +17,30 @@
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
+            <el-button type="success" @click="syncDorisMetadata" :loading="syncLoading">
+              <el-icon><Refresh /></el-icon>
+              同步元数据
+            </el-button>
             <el-button type="primary" @click="goCreate">
               <el-icon><Plus /></el-icon>
               新建表
             </el-button>
+          </div>
+
+          <!-- 同步状态提示 -->
+          <div v-if="lastSyncInfo" class="sync-info">
+            <el-icon :color="lastSyncInfo.success ? '#67C23A' : '#F56C6C'">
+              <CircleCheck v-if="lastSyncInfo.success" />
+              <CircleClose v-else />
+            </el-icon>
+            <span class="sync-text">
+              最近同步: {{ lastSyncInfo.time }}
+              <template v-if="lastSyncInfo.stats">
+                (新增: {{ lastSyncInfo.stats.newTables }},
+                更新: {{ lastSyncInfo.stats.updatedTables }},
+                字段: +{{ lastSyncInfo.stats.newFields }} -{{ lastSyncInfo.stats.deletedFields }})
+              </template>
+            </span>
           </div>
 
           <!-- 排序选项 -->
@@ -748,7 +768,10 @@ import {
   List,
   Link,
   Connection,
-  FolderOpened
+  FolderOpened,
+  Refresh,
+  CircleCheck,
+  CircleClose
 } from '@element-plus/icons-vue'
 import { tableApi } from '@/api/table'
 import * as echarts from 'echarts'
@@ -786,6 +809,10 @@ let chartInstance = null
 const isEditing = ref(false)
 const editFormRef = ref(null)
 const editSubmitting = ref(false)
+
+// 元数据同步相关
+const syncLoading = ref(false)
+const lastSyncInfo = ref(null)
 
 // 字段管理计算属性
 const displayFields = computed(() => fields.value)
@@ -1316,6 +1343,51 @@ const goCreate = () => {
   router.push('/tables/create')
 }
 
+// 同步 Doris 元数据
+const syncDorisMetadata = async () => {
+  syncLoading.value = true
+  try {
+    const response = await tableApi.syncMetadata()
+
+    if (response.success) {
+      ElMessage.success('元数据同步成功！')
+    } else {
+      ElMessage.warning('元数据同步完成，但存在部分错误')
+    }
+
+    // 保存同步信息
+    lastSyncInfo.value = {
+      success: response.success,
+      time: new Date().toLocaleString(),
+      stats: {
+        newTables: response.newTables || 0,
+        updatedTables: response.updatedTables || 0,
+        newFields: response.newFields || 0,
+        updatedFields: response.updatedFields || 0,
+        deletedFields: response.deletedFields || 0
+      }
+    }
+
+    // 刷新表列表
+    await loadDatabases()
+
+    // 如果当前有选中的表，刷新表详情
+    if (selectedTable.value) {
+      await loadTableDetail(selectedTable.value.id)
+    }
+  } catch (error) {
+    console.error('同步元数据失败:', error)
+    ElMessage.error('同步元数据失败: ' + (error.message || '未知错误'))
+    lastSyncInfo.value = {
+      success: false,
+      time: new Date().toLocaleString(),
+      stats: null
+    }
+  } finally {
+    syncLoading.value = false
+  }
+}
+
 // 跳转到血缘关系页面
 const goLineage = () => {
   if (selectedTable.value) {
@@ -1573,6 +1645,22 @@ onMounted(() => {
 }
 
 .search-bar .search-input {
+  flex: 1;
+}
+
+.sync-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background-color: #f0f9ff;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #555;
+}
+
+.sync-info .sync-text {
   flex: 1;
 }
 
