@@ -24,6 +24,14 @@ public class Result<T> {
         return result;
     }
 
+    public static <T> Result<T> success(T data, String message) {
+        Result<T> result = new Result<>();
+        result.setCode(200);
+        result.setMessage(message);
+        result.setData(data);
+        return result;
+    }
+
     public static <T> Result<T> fail(String message) {
         Result<T> result = new Result<>();
         result.setCode(500);
