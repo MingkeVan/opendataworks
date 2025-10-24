@@ -14,6 +14,7 @@ import com.onedata.portal.service.DorisConnectionService;
 import com.onedata.portal.service.TableStatisticsCacheService;
 import com.onedata.portal.service.TableStatisticsHistoryService;
 import com.onedata.portal.service.DataExportService;
+import com.onedata.portal.service.DorisMetadataSyncService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -40,6 +41,7 @@ public class DataTableController {
     private final TableStatisticsCacheService cacheService;
     private final TableStatisticsHistoryService historyService;
     private final DataExportService dataExportService;
+    private final DorisMetadataSyncService dorisMetadataSyncService;
 
     /**
      * 分页查询表列表
@@ -438,6 +440,119 @@ public class DataTableController {
                     .body(data);
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * 手动触发 Doris 元数据同步（全量同步）
+     */
+    @PostMapping("/sync-metadata")
+    public Result<Map<String, Object>> syncAllMetadata(
+            @RequestParam(required = false) Long clusterId) {
+        try {
+            DorisMetadataSyncService.SyncResult result = dorisMetadataSyncService.syncAllMetadata(clusterId);
+
+            Map<String, Object> response = new java.util.HashMap<>();
+            response.put("success", result.getErrors().isEmpty());
+            response.put("newTables", result.getNewTables());
+            response.put("updatedTables", result.getUpdatedTables());
+            response.put("newFields", result.getNewFields());
+            response.put("updatedFields", result.getUpdatedFields());
+            response.put("deletedFields", result.getDeletedFields());
+            response.put("errors", result.getErrors());
+            response.put("syncTime", LocalDateTime.now());
+
+            if (result.getErrors().isEmpty()) {
+                return Result.success(response, "元数据同步成功");
+            } else {
+                return Result.success(response, "元数据同步完成，但存在部分错误");
+            }
+        } catch (Exception e) {
+            return Result.fail("元数据同步失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 手动触发指定数据库的元数据同步
+     */
+    @PostMapping("/sync-metadata/database/{database}")
+    public Result<Map<String, Object>> syncDatabaseMetadata(
+            @PathVariable String database,
+            @RequestParam(required = false) Long clusterId) {
+        try {
+            DorisMetadataSyncService.SyncResult result = dorisMetadataSyncService.syncDatabase(clusterId, database, null);
+
+            Map<String, Object> response = new java.util.HashMap<>();
+            response.put("success", result.getErrors().isEmpty());
+            response.put("database", database);
+            response.put("newTables", result.getNewTables());
+            response.put("updatedTables", result.getUpdatedTables());
+            response.put("newFields", result.getNewFields());
+            response.put("updatedFields", result.getUpdatedFields());
+            response.put("deletedFields", result.getDeletedFields());
+            response.put("errors", result.getErrors());
+            response.put("syncTime", LocalDateTime.now());
+
+            if (result.getErrors().isEmpty()) {
+                return Result.success(response, "数据库元数据同步成功");
+            } else {
+                return Result.success(response, "数据库元数据同步完成，但存在部分错误");
+            }
+        } catch (Exception e) {
+            return Result.fail("数据库元数据同步失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 手动触发指定表的元数据同步
+     */
+    @PostMapping("/{id}/sync-metadata")
+    public Result<Map<String, Object>> syncTableMetadata(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long clusterId) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return Result.fail("表不存在");
+        }
+
+        String database;
+        String actualTableName;
+
+        if (table.getDbName() != null && !table.getDbName().isEmpty()) {
+            database = table.getDbName();
+            actualTableName = table.getTableName().contains(".")
+                    ? table.getTableName().split("\\.", 2)[1]
+                    : table.getTableName();
+        } else if (table.getTableName().contains(".")) {
+            String[] parts = table.getTableName().split("\\.", 2);
+            database = parts[0];
+            actualTableName = parts[1];
+        } else {
+            return Result.fail("表未配置数据库名，请先设置 dbName 字段");
+        }
+
+        try {
+            DorisMetadataSyncService.SyncResult result = dorisMetadataSyncService.syncTable(clusterId, database, actualTableName);
+
+            Map<String, Object> response = new java.util.HashMap<>();
+            response.put("success", result.getErrors().isEmpty());
+            response.put("database", database);
+            response.put("tableName", actualTableName);
+            response.put("newTables", result.getNewTables());
+            response.put("updatedTables", result.getUpdatedTables());
+            response.put("newFields", result.getNewFields());
+            response.put("updatedFields", result.getUpdatedFields());
+            response.put("deletedFields", result.getDeletedFields());
+            response.put("errors", result.getErrors());
+            response.put("syncTime", LocalDateTime.now());
+
+            if (result.getErrors().isEmpty()) {
+                return Result.success(response, "表元数据同步成功");
+            } else {
+                return Result.success(response, "表元数据同步完成，但存在部分错误");
+            }
+        } catch (Exception e) {
+            return Result.fail("表元数据同步失败: " + e.getMessage());
         }
     }
 }

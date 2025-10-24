@@ -116,5 +116,26 @@ export const tableApi = {
   // 删除表
   delete(id) {
     return request.delete(`/v1/tables/${id}`)
+  },
+
+  // 同步 Doris 元数据（全量同步）
+  syncMetadata(clusterId = null) {
+    return request.post('/v1/tables/sync-metadata', null, {
+      params: { clusterId }
+    })
+  },
+
+  // 同步指定数据库的元数据
+  syncDatabaseMetadata(database, clusterId = null) {
+    return request.post(`/v1/tables/sync-metadata/database/${database}`, null, {
+      params: { clusterId }
+    })
+  },
+
+  // 同步指定表的元数据
+  syncTableMetadata(id, clusterId = null) {
+    return request.post(`/v1/tables/${id}/sync-metadata`, null, {
+      params: { clusterId }
+    })
   }
 }
