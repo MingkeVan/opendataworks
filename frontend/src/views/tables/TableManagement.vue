@@ -35,8 +35,11 @@
             </el-icon>
             <span class="audit-text">
               最近比对: {{ auditResult.time }}
+              <template v-if="auditResult.statisticsSynced > 0">
+                | 已自动同步 {{ auditResult.statisticsSynced }} 张表的统计信息
+              </template>
               <template v-if="auditResult.hasDifferences">
-                - 发现 {{ auditResult.totalDifferences }} 处差异
+                | 发现 {{ auditResult.totalDifferences }} 处结构差异
                 <el-button type="primary" size="small" @click="showDifferenceDialog" style="margin-left: 8px">
                   查看详情
                 </el-button>
@@ -45,7 +48,7 @@
                 </el-button>
               </template>
               <template v-else>
-                - 元数据一致
+                | 结构一致，无需同步
               </template>
             </span>
           </div>
@@ -1446,16 +1449,28 @@ const auditDorisMetadata = async () => {
       totalDifferences: response.totalDifferences,
       differences: response.differences,
       errors: response.errors,
+      statisticsSynced: response.statisticsSynced || 0,
       time: new Date().toLocaleString()
     }
 
+    // 构建提示消息
+    let message = ''
+    if (response.statisticsSynced > 0) {
+      message += `已自动同步 ${response.statisticsSynced} 张表的统计信息。`
+    }
+
     if (response.hasDifferences) {
+      message += `发现 ${response.totalDifferences} 处结构差异，请查看详情并确认是否同步。`
       ElMessage.warning({
-        message: `发现 ${response.totalDifferences} 处差异，请查看详情并确认是否同步`,
+        message: message,
         duration: 5000
       })
     } else {
-      ElMessage.success('元数据一致，无需同步')
+      message += '结构一致，无需同步。'
+      ElMessage.success({
+        message: message,
+        duration: 3000
+      })
     }
   } catch (error) {
     console.error('比对元数据失败:', error)

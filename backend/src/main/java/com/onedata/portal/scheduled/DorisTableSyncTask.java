@@ -34,7 +34,12 @@ public class DorisTableSyncTask {
             log.info("=== Scheduled Doris metadata audit task completed successfully ===");
             log.info("Audit result: {}", result);
 
-            // 如果发现差异，记录详细信息
+            // 记录统计信息同步情况
+            if (result.getStatisticsSynced() > 0) {
+                log.info("自动同步了 {} 张表的统计信息（行数、数据量、更新时间）", result.getStatisticsSynced());
+            }
+
+            // 如果发现结构差异，记录详细信息
             if (result.hasDifferences()) {
                 log.warn("发现 {} 处元数据差异，建议登录平台手动检查并同步！", result.getTotalDifferences());
 
@@ -57,7 +62,7 @@ public class DorisTableSyncTask {
                     }
                 }
             } else {
-                log.info("元数据稽核通过，平台与 Doris 保持一致");
+                log.info("元数据结构稽核通过，平台与 Doris 保持一致");
             }
 
             // 如果有错误，记录错误信息

@@ -69,6 +69,7 @@ public class DorisMetadataSyncService {
         private List<TableDifference> tableDifferences = new ArrayList<>();
         private List<String> errors = new ArrayList<>();
         private int totalDifferences = 0;
+        private int statisticsSynced = 0; // 自动同步的统计信息数量
 
         public void addTableDifference(TableDifference diff) {
             tableDifferences.add(diff);
@@ -79,16 +80,21 @@ public class DorisMetadataSyncService {
             errors.add(error);
         }
 
+        public void incrementStatisticsSynced() {
+            statisticsSynced++;
+        }
+
         public List<TableDifference> getTableDifferences() { return tableDifferences; }
         public List<String> getErrors() { return errors; }
         public int getTotalDifferences() { return totalDifferences; }
+        public int getStatisticsSynced() { return statisticsSynced; }
         public boolean hasDifferences() { return totalDifferences > 0; }
 
         @Override
         public String toString() {
             return String.format(
-                "AuditResult{totalDifferences=%d, errors=%d}",
-                totalDifferences, errors.size()
+                "AuditResult{totalDifferences=%d, statisticsSynced=%d, errors=%d}",
+                totalDifferences, statisticsSynced, errors.size()
             );
         }
     }
@@ -224,7 +230,13 @@ public class DorisMetadataSyncService {
 
                     result.addTableDifference(diff);
                 } else {
-                    // 已存在表：检查差异
+                    // 已存在表：自动同步统计信息 + 检查结构差异
+                    boolean statsSynced = syncTableStatistics(dorisTable, localTable);
+                    if (statsSynced) {
+                        result.incrementStatisticsSynced();
+                    }
+
+                    // 比对结构差异
                     TableDifference diff = compareTable(clusterId, database, tableName, dorisTable, localTable);
                     if (diff != null && (!diff.getChanges().isEmpty() || !diff.getFieldDifferences().isEmpty())) {
                         result.addTableDifference(diff);
@@ -249,7 +261,51 @@ public class DorisMetadataSyncService {
     }
 
     /**
-     * 比对单个表的差异
+     * 自动同步表的统计信息（行数、数据量、更新时间等）
+     * 这些信息是安全的，可以自动同步，不需要人工确认
+     */
+    private boolean syncTableStatistics(Map<String, Object> dorisTable, DataTable localTable) {
+        boolean updated = false;
+
+        try {
+            // 同步行数
+            Long tableRows = (Long) dorisTable.get("tableRows");
+            if (tableRows != null && !Objects.equals(tableRows, localTable.getRowCount())) {
+                localTable.setRowCount(tableRows);
+                updated = true;
+            }
+
+            // 同步数据大小
+            Long dataLength = (Long) dorisTable.get("dataLength");
+            if (dataLength != null && !Objects.equals(dataLength, localTable.getStorageSize())) {
+                localTable.setStorageSize(dataLength);
+                updated = true;
+            }
+
+            // 同步最后更新时间
+            Timestamp updateTime = (Timestamp) dorisTable.get("updateTime");
+            if (updateTime != null) {
+                LocalDateTime updateDateTime = updateTime.toLocalDateTime();
+                if (!Objects.equals(updateDateTime, localTable.getLastUpdated())) {
+                    localTable.setLastUpdated(updateDateTime);
+                    updated = true;
+                }
+            }
+
+            // 如果有更新，保存到数据库
+            if (updated) {
+                dataTableMapper.updateById(localTable);
+                log.debug("Auto-synced statistics for table: {}.{}", localTable.getDbName(), localTable.getTableName());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to sync statistics for table {}.{}", localTable.getDbName(), localTable.getTableName(), e);
+        }
+
+        return updated;
+    }
+
+    /**
+     * 比对单个表的结构差异（只比对结构，不比对统计信息）
      */
     private TableDifference compareTable(Long clusterId, String database, String tableName,
                                         Map<String, Object> dorisTable, DataTable localTable) {
