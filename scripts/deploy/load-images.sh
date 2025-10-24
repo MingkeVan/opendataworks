@@ -88,6 +88,42 @@ echo "  所有镜像加载完成！"
 echo "========================================="
 echo ""
 
+# 修复 localhost 前缀问题
+echo "🔧 修复镜像 localhost 前缀问题..."
+echo ""
+
+# 定义需要修复的镜像
+IMAGES=(
+    "opendataworks-frontend:latest"
+    "opendataworks-backend:latest"
+    "opendataworks-dolphin-service:latest"
+    "mysql:8.0"
+)
+
+# 修复每个镜像
+for image in "${IMAGES[@]}"; do
+    localhost_image="localhost/$image"
+    
+    # 检查是否存在 localhost 前缀的镜像
+    if $CONTAINER_CMD images --format "{{.Repository}}:{{.Tag}}" | grep -q "^$localhost_image$"; then
+        echo "  🔄 修复镜像标签: $localhost_image -> $image"
+        
+        # 重新标记为无前缀版本
+        $CONTAINER_CMD tag "$localhost_image" "$image"
+        
+        # 删除 localhost 前缀的镜像
+        $CONTAINER_CMD rmi "$localhost_image"
+        
+        echo "  ✅ 修复完成: $image"
+    fi
+done
+
+echo ""
+echo "========================================="
+echo "  镜像标签修复完成！"
+echo "========================================="
+echo ""
+
 # 显示已加载的镜像
 echo "📋 已加载的镜像列表："
 $CONTAINER_CMD images | grep -E "opendataworks|mysql" | grep -E "latest|8.0"
