@@ -63,6 +63,316 @@ public class DorisMetadataSyncService {
     }
 
     /**
+     * 稽核/比对结果
+     */
+    public static class AuditResult {
+        private List<TableDifference> tableDifferences = new ArrayList<>();
+        private List<String> errors = new ArrayList<>();
+        private int totalDifferences = 0;
+
+        public void addTableDifference(TableDifference diff) {
+            tableDifferences.add(diff);
+            totalDifferences++;
+        }
+
+        public void addError(String error) {
+            errors.add(error);
+        }
+
+        public List<TableDifference> getTableDifferences() { return tableDifferences; }
+        public List<String> getErrors() { return errors; }
+        public int getTotalDifferences() { return totalDifferences; }
+        public boolean hasDifferences() { return totalDifferences > 0; }
+
+        @Override
+        public String toString() {
+            return String.format(
+                "AuditResult{totalDifferences=%d, errors=%d}",
+                totalDifferences, errors.size()
+            );
+        }
+    }
+
+    /**
+     * 表差异信息
+     */
+    public static class TableDifference {
+        private String database;
+        private String tableName;
+        private DifferenceType type; // NEW, UPDATED, MISSING
+        private List<String> changes = new ArrayList<>();
+        private List<FieldDifference> fieldDifferences = new ArrayList<>();
+
+        public TableDifference(String database, String tableName, DifferenceType type) {
+            this.database = database;
+            this.tableName = tableName;
+            this.type = type;
+        }
+
+        public void addChange(String change) { changes.add(change); }
+        public void addFieldDifference(FieldDifference diff) { fieldDifferences.add(diff); }
+
+        public String getDatabase() { return database; }
+        public String getTableName() { return tableName; }
+        public DifferenceType getType() { return type; }
+        public List<String> getChanges() { return changes; }
+        public List<FieldDifference> getFieldDifferences() { return fieldDifferences; }
+    }
+
+    /**
+     * 字段差异信息
+     */
+    public static class FieldDifference {
+        private String fieldName;
+        private DifferenceType type; // NEW, UPDATED, REMOVED
+        private Map<String, Object> changes = new HashMap<>();
+
+        public FieldDifference(String fieldName, DifferenceType type) {
+            this.fieldName = fieldName;
+            this.type = type;
+        }
+
+        public void addChange(String field, Object oldValue, Object newValue) {
+            changes.put(field, Map.of("old", oldValue, "new", newValue));
+        }
+
+        public String getFieldName() { return fieldName; }
+        public DifferenceType getType() { return type; }
+        public Map<String, Object> getChanges() { return changes; }
+    }
+
+    /**
+     * 差异类型
+     */
+    public enum DifferenceType {
+        NEW,      // Doris 有但平台没有
+        UPDATED,  // 两边都有但信息不同
+        REMOVED   // 平台有但 Doris 没有（冗余）
+    }
+
+    /**
+     * 稽核指定集群的所有元数据（只比对不同步）
+     */
+    public AuditResult auditAllMetadata(Long clusterId) {
+        AuditResult result = new AuditResult();
+        log.info("Starting metadata audit for cluster: {}", clusterId);
+
+        try {
+            // 获取所有数据库
+            List<String> databases = dorisConnectionService.getAllDatabases(clusterId);
+            log.info("Found {} databases to audit", databases.size());
+
+            for (String database : databases) {
+                try {
+                    auditDatabase(clusterId, database, result);
+                } catch (Exception e) {
+                    log.error("Failed to audit database: {}", database, e);
+                    result.addError("稽核数据库 " + database + " 失败: " + e.getMessage());
+                }
+            }
+
+            log.info("Metadata audit completed: {}", result);
+        } catch (Exception e) {
+            log.error("Failed to audit metadata", e);
+            result.addError("稽核元数据失败: " + e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * 稽核指定数据库的元数据
+     */
+    public AuditResult auditDatabase(Long clusterId, String database, AuditResult result) {
+        if (result == null) {
+            result = new AuditResult();
+        }
+
+        log.info("Auditing database: {}", database);
+
+        // 获取 Doris 中的所有表
+        List<Map<String, Object>> dorisTables = dorisConnectionService.getTablesInDatabase(clusterId, database);
+
+        // 获取本地已存在的表
+        List<DataTable> localTables = dataTableMapper.selectList(
+            new LambdaQueryWrapper<DataTable>()
+                .eq(DataTable::getDbName, database)
+        );
+
+        Map<String, DataTable> localTableMap = localTables.stream()
+            .collect(Collectors.toMap(DataTable::getTableName, t -> t));
+
+        Set<String> dorisTableNames = new HashSet<>();
+
+        // 遍历 Doris 中的表，检查差异
+        for (Map<String, Object> dorisTable : dorisTables) {
+            String tableName = (String) dorisTable.get("tableName");
+            dorisTableNames.add(tableName);
+
+            try {
+                DataTable localTable = localTableMap.get(tableName);
+
+                if (localTable == null) {
+                    // 新表：Doris 有但平台没有
+                    TableDifference diff = new TableDifference(database, tableName, DifferenceType.NEW);
+                    diff.addChange("表在 Doris 中存在，但平台未记录");
+
+                    String tableComment = (String) dorisTable.get("tableComment");
+                    if (tableComment != null && !tableComment.isEmpty()) {
+                        diff.addChange("表注释: " + tableComment);
+                    }
+
+                    result.addTableDifference(diff);
+                } else {
+                    // 已存在表：检查差异
+                    TableDifference diff = compareTable(clusterId, database, tableName, dorisTable, localTable);
+                    if (diff != null && (!diff.getChanges().isEmpty() || !diff.getFieldDifferences().isEmpty())) {
+                        result.addTableDifference(diff);
+                    }
+                }
+            } catch (Exception e) {
+                log.error("Failed to audit table {}.{}", database, tableName, e);
+                result.addError("稽核表 " + database + "." + tableName + " 失败: " + e.getMessage());
+            }
+        }
+
+        // 检查平台有但 Doris 没有的表（冗余表）
+        for (DataTable localTable : localTables) {
+            if (!dorisTableNames.contains(localTable.getTableName())) {
+                TableDifference diff = new TableDifference(database, localTable.getTableName(), DifferenceType.REMOVED);
+                diff.addChange("表在平台中存在，但 Doris 中已删除");
+                result.addTableDifference(diff);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * 比对单个表的差异
+     */
+    private TableDifference compareTable(Long clusterId, String database, String tableName,
+                                        Map<String, Object> dorisTable, DataTable localTable) {
+        TableDifference diff = new TableDifference(database, tableName, DifferenceType.UPDATED);
+
+        try {
+            // 获取表的详细信息
+            Map<String, Object> tableCreateInfo = dorisConnectionService.getTableCreateInfo(clusterId, database, tableName);
+            List<Map<String, Object>> dorisColumns = dorisConnectionService.getColumnsInTable(clusterId, database, tableName);
+
+            // 比对表注释
+            String dorisComment = (String) dorisTable.get("tableComment");
+            if (!Objects.equals(dorisComment, localTable.getTableComment())) {
+                diff.addChange(String.format("表注释不同: 平台='%s', Doris='%s'",
+                    localTable.getTableComment(), dorisComment));
+            }
+
+            // 比对分桶数
+            if (tableCreateInfo.containsKey("bucketNum")) {
+                Integer dorisBucketNum = (Integer) tableCreateInfo.get("bucketNum");
+                if (!Objects.equals(dorisBucketNum, localTable.getBucketNum())) {
+                    diff.addChange(String.format("分桶数不同: 平台=%d, Doris=%d",
+                        localTable.getBucketNum(), dorisBucketNum));
+                }
+            }
+
+            // 比对副本数
+            if (tableCreateInfo.containsKey("replicationNum")) {
+                Integer dorisReplicationNum = (Integer) tableCreateInfo.get("replicationNum");
+                if (!Objects.equals(dorisReplicationNum, localTable.getReplicaNum())) {
+                    diff.addChange(String.format("副本数不同: 平台=%d, Doris=%d",
+                        localTable.getReplicaNum(), dorisReplicationNum));
+                }
+            }
+
+            // 比对分区字段
+            if (tableCreateInfo.containsKey("partitionField")) {
+                String dorisPartitionField = (String) tableCreateInfo.get("partitionField");
+                if (!Objects.equals(dorisPartitionField, localTable.getPartitionField())) {
+                    diff.addChange(String.format("分区字段不同: 平台='%s', Doris='%s'",
+                        localTable.getPartitionField(), dorisPartitionField));
+                }
+            }
+
+            // 比对字段差异
+            compareTableFields(localTable.getId(), dorisColumns, diff);
+
+        } catch (Exception e) {
+            log.error("Failed to compare table {}.{}", database, tableName, e);
+            diff.addChange("比对失败: " + e.getMessage());
+        }
+
+        return diff;
+    }
+
+    /**
+     * 比对表字段差异
+     */
+    private void compareTableFields(Long tableId, List<Map<String, Object>> dorisColumns, TableDifference tableDiff) {
+        // 获取本地字段
+        List<DataField> localFields = dataFieldMapper.selectList(
+            new LambdaQueryWrapper<DataField>()
+                .eq(DataField::getTableId, tableId)
+        );
+
+        Map<String, DataField> localFieldMap = localFields.stream()
+            .collect(Collectors.toMap(DataField::getFieldName, f -> f));
+
+        Set<String> dorisFieldNames = new HashSet<>();
+
+        // 遍历 Doris 中的字段
+        for (Map<String, Object> dorisColumn : dorisColumns) {
+            String fieldName = (String) dorisColumn.get("columnName");
+            dorisFieldNames.add(fieldName);
+
+            DataField localField = localFieldMap.get(fieldName);
+
+            if (localField == null) {
+                // 新字段
+                FieldDifference fieldDiff = new FieldDifference(fieldName, DifferenceType.NEW);
+                fieldDiff.addChange("type", null, dorisColumn.get("dataType"));
+                fieldDiff.addChange("comment", null, dorisColumn.get("columnComment"));
+                tableDiff.addFieldDifference(fieldDiff);
+            } else {
+                // 检查字段差异
+                FieldDifference fieldDiff = new FieldDifference(fieldName, DifferenceType.UPDATED);
+                boolean hasChanges = false;
+
+                String dorisType = (String) dorisColumn.get("dataType");
+                if (!Objects.equals(dorisType, localField.getFieldType())) {
+                    fieldDiff.addChange("type", localField.getFieldType(), dorisType);
+                    hasChanges = true;
+                }
+
+                String dorisComment = (String) dorisColumn.get("columnComment");
+                if (!Objects.equals(dorisComment, localField.getFieldComment())) {
+                    fieldDiff.addChange("comment", localField.getFieldComment(), dorisComment);
+                    hasChanges = true;
+                }
+
+                Integer dorisIsNullable = (Integer) dorisColumn.get("isNullable");
+                if (!Objects.equals(dorisIsNullable, localField.getIsNullable())) {
+                    fieldDiff.addChange("nullable", localField.getIsNullable(), dorisIsNullable);
+                    hasChanges = true;
+                }
+
+                if (hasChanges) {
+                    tableDiff.addFieldDifference(fieldDiff);
+                }
+            }
+        }
+
+        // 检查冗余字段
+        for (DataField localField : localFields) {
+            if (!dorisFieldNames.contains(localField.getFieldName())) {
+                FieldDifference fieldDiff = new FieldDifference(localField.getFieldName(), DifferenceType.REMOVED);
+                fieldDiff.addChange("status", "存在", "已删除");
+                tableDiff.addFieldDifference(fieldDiff);
+            }
+        }
+    }
+
+    /**
      * 同步指定集群的所有元数据
      */
     @Transactional(rollbackFor = Exception.class)

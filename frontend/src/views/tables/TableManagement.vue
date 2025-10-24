@@ -17,9 +17,9 @@
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
-            <el-button type="success" @click="syncDorisMetadata" :loading="syncLoading">
+            <el-button type="warning" @click="auditDorisMetadata" :loading="auditLoading">
               <el-icon><Refresh /></el-icon>
-              同步元数据
+              比对元数据
             </el-button>
             <el-button type="primary" @click="goCreate">
               <el-icon><Plus /></el-icon>
@@ -27,18 +27,25 @@
             </el-button>
           </div>
 
-          <!-- 同步状态提示 -->
-          <div v-if="lastSyncInfo" class="sync-info">
-            <el-icon :color="lastSyncInfo.success ? '#67C23A' : '#F56C6C'">
-              <CircleCheck v-if="lastSyncInfo.success" />
-              <CircleClose v-else />
+          <!-- 稽核/同步状态提示 -->
+          <div v-if="auditResult" class="audit-info">
+            <el-icon :color="auditResult.hasDifferences ? '#E6A23C' : '#67C23A'">
+              <Warning v-if="auditResult.hasDifferences" />
+              <CircleCheck v-else />
             </el-icon>
-            <span class="sync-text">
-              最近同步: {{ lastSyncInfo.time }}
-              <template v-if="lastSyncInfo.stats">
-                (新增: {{ lastSyncInfo.stats.newTables }},
-                更新: {{ lastSyncInfo.stats.updatedTables }},
-                字段: +{{ lastSyncInfo.stats.newFields }} -{{ lastSyncInfo.stats.deletedFields }})
+            <span class="audit-text">
+              最近比对: {{ auditResult.time }}
+              <template v-if="auditResult.hasDifferences">
+                - 发现 {{ auditResult.totalDifferences }} 处差异
+                <el-button type="primary" size="small" @click="showDifferenceDialog" style="margin-left: 8px">
+                  查看详情
+                </el-button>
+                <el-button type="success" size="small" @click="confirmSync" :loading="syncLoading" style="margin-left: 4px">
+                  确认同步
+                </el-button>
+              </template>
+              <template v-else>
+                - 元数据一致
               </template>
             </span>
           </div>
@@ -753,13 +760,95 @@
         </el-card>
       </div>
     </div>
+
+    <!-- 差异详情对话框 -->
+    <el-dialog
+      v-model="differenceDialogVisible"
+      title="元数据差异详情"
+      width="70%"
+      :close-on-click-modal="false"
+    >
+      <div v-if="auditResult && auditResult.differences" class="difference-container">
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        >
+          <template #title>
+            共发现 {{ auditResult.totalDifferences }} 处差异，请仔细检查后决定是否同步
+          </template>
+        </el-alert>
+
+        <el-collapse>
+          <el-collapse-item
+            v-for="(diff, index) in auditResult.differences"
+            :key="index"
+            :name="index"
+          >
+            <template #title>
+              <div class="diff-title">
+                <el-tag
+                  :type="diff.type === 'NEW' ? 'success' : diff.type === 'REMOVED' ? 'danger' : 'warning'"
+                  size="small"
+                >
+                  {{ diff.type === 'NEW' ? '新表' : diff.type === 'REMOVED' ? '已删除' : '已更新' }}
+                </el-tag>
+                <span class="table-name-diff">{{ diff.database }}.{{ diff.tableName }}</span>
+              </div>
+            </template>
+
+            <!-- 表级别的变更 -->
+            <div v-if="diff.changes && diff.changes.length > 0" class="changes-section">
+              <h4>表信息变更:</h4>
+              <ul>
+                <li v-for="(change, idx) in diff.changes" :key="idx">{{ change }}</li>
+              </ul>
+            </div>
+
+            <!-- 字段级别的变更 -->
+            <div v-if="diff.fieldDifferences && diff.fieldDifferences.length > 0" class="field-diff-section">
+              <h4>字段变更:</h4>
+              <el-table :data="diff.fieldDifferences" border size="small" style="margin-top: 8px">
+                <el-table-column prop="fieldName" label="字段名" width="200" />
+                <el-table-column prop="type" label="变更类型" width="120">
+                  <template #default="{ row }">
+                    <el-tag
+                      :type="row.type === 'NEW' ? 'success' : row.type === 'REMOVED' ? 'danger' : 'warning'"
+                      size="small"
+                    >
+                      {{ row.type === 'NEW' ? '新增' : row.type === 'REMOVED' ? '删除' : '更新' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="变更内容">
+                  <template #default="{ row }">
+                    <div v-for="(value, key) in row.changes" :key="key" class="field-change-item">
+                      <strong>{{ key }}:</strong>
+                      {{ value.old || 'null' }} → {{ value.new || 'null' }}
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+
+      <template #footer>
+        <el-button @click="differenceDialogVisible = false">关闭</el-button>
+        <el-button type="success" @click="confirmSyncFromDialog" :loading="syncLoading">
+          确认同步
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Search,
   Plus,
@@ -771,7 +860,8 @@ import {
   FolderOpened,
   Refresh,
   CircleCheck,
-  CircleClose
+  CircleClose,
+  Warning
 } from '@element-plus/icons-vue'
 import { tableApi } from '@/api/table'
 import * as echarts from 'echarts'
@@ -810,9 +900,11 @@ const isEditing = ref(false)
 const editFormRef = ref(null)
 const editSubmitting = ref(false)
 
-// 元数据同步相关
+// 元数据稽核和同步相关
+const auditLoading = ref(false)
 const syncLoading = ref(false)
-const lastSyncInfo = ref(null)
+const auditResult = ref(null)
+const differenceDialogVisible = ref(false)
 
 // 字段管理计算属性
 const displayFields = computed(() => fields.value)
@@ -1343,8 +1435,68 @@ const goCreate = () => {
   router.push('/tables/create')
 }
 
-// 同步 Doris 元数据
-const syncDorisMetadata = async () => {
+// 比对 Doris 元数据
+const auditDorisMetadata = async () => {
+  auditLoading.value = true
+  try {
+    const response = await tableApi.auditMetadata()
+
+    auditResult.value = {
+      hasDifferences: response.hasDifferences,
+      totalDifferences: response.totalDifferences,
+      differences: response.differences,
+      errors: response.errors,
+      time: new Date().toLocaleString()
+    }
+
+    if (response.hasDifferences) {
+      ElMessage.warning({
+        message: `发现 ${response.totalDifferences} 处差异，请查看详情并确认是否同步`,
+        duration: 5000
+      })
+    } else {
+      ElMessage.success('元数据一致，无需同步')
+    }
+  } catch (error) {
+    console.error('比对元数据失败:', error)
+    ElMessage.error('比对元数据失败: ' + (error.message || '未知错误'))
+  } finally {
+    auditLoading.value = false
+  }
+}
+
+// 显示差异详情弹窗
+const showDifferenceDialog = () => {
+  differenceDialogVisible.value = true
+}
+
+// 确认同步
+const confirmSync = async () => {
+  try {
+    await ElMessageBox.confirm(
+      `确认要同步 ${auditResult.value.totalDifferences} 处差异吗？`,
+      '确认同步',
+      {
+        confirmButtonText: '确认',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    await performSync()
+  } catch {
+    // 用户取消
+  }
+}
+
+// 从对话框确认同步
+const confirmSyncFromDialog = async () => {
+  differenceDialogVisible.value = false
+  await performSync()
+}
+
+// 执行同步
+const performSync = async () => {
   syncLoading.value = true
   try {
     const response = await tableApi.syncMetadata()
@@ -1355,18 +1507,8 @@ const syncDorisMetadata = async () => {
       ElMessage.warning('元数据同步完成，但存在部分错误')
     }
 
-    // 保存同步信息
-    lastSyncInfo.value = {
-      success: response.success,
-      time: new Date().toLocaleString(),
-      stats: {
-        newTables: response.newTables || 0,
-        updatedTables: response.updatedTables || 0,
-        newFields: response.newFields || 0,
-        updatedFields: response.updatedFields || 0,
-        deletedFields: response.deletedFields || 0
-      }
-    }
+    // 清空稽核结果
+    auditResult.value = null
 
     // 刷新表列表
     await loadDatabases()
@@ -1378,11 +1520,6 @@ const syncDorisMetadata = async () => {
   } catch (error) {
     console.error('同步元数据失败:', error)
     ElMessage.error('同步元数据失败: ' + (error.message || '未知错误'))
-    lastSyncInfo.value = {
-      success: false,
-      time: new Date().toLocaleString(),
-      stats: null
-    }
   } finally {
     syncLoading.value = false
   }
@@ -1661,6 +1798,22 @@ onMounted(() => {
 }
 
 .sync-info .sync-text {
+  flex: 1;
+}
+
+.audit-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background-color: #fef0e6;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #555;
+}
+
+.audit-info .audit-text {
   flex: 1;
 }
 
@@ -2061,5 +2214,68 @@ onMounted(() => {
 
 :deep(.el-tabs__content) {
   overflow-y: auto;
+}
+
+/* 差异详情对话框样式 */
+.difference-container {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.diff-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+}
+
+.table-name-diff {
+  color: #333;
+}
+
+.changes-section {
+  padding: 12px;
+  background-color: #f8fafc;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.changes-section h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: #666;
+}
+
+.changes-section ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.changes-section li {
+  margin: 4px 0;
+  color: #555;
+  font-size: 13px;
+}
+
+.field-diff-section {
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.field-diff-section h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: #666;
+}
+
+.field-change-item {
+  padding: 2px 0;
+  font-size: 13px;
+}
+
+.field-change-item strong {
+  color: #666;
+  font-weight: 600;
+  margin-right: 4px;
 }
 </style>

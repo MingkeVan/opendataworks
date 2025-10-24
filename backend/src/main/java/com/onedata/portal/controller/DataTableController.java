@@ -444,7 +444,34 @@ public class DataTableController {
     }
 
     /**
+     * 稽核/比对 Doris 元数据（只检查差异，不同步）
+     */
+    @PostMapping("/audit-metadata")
+    public Result<Map<String, Object>> auditAllMetadata(
+            @RequestParam(required = false) Long clusterId) {
+        try {
+            DorisMetadataSyncService.AuditResult result = dorisMetadataSyncService.auditAllMetadata(clusterId);
+
+            Map<String, Object> response = new java.util.HashMap<>();
+            response.put("hasDifferences", result.hasDifferences());
+            response.put("totalDifferences", result.getTotalDifferences());
+            response.put("differences", result.getTableDifferences());
+            response.put("errors", result.getErrors());
+            response.put("auditTime", LocalDateTime.now());
+
+            if (result.hasDifferences()) {
+                return Result.success(response, String.format("发现 %d 处差异，请确认后同步", result.getTotalDifferences()));
+            } else {
+                return Result.success(response, "元数据一致，无需同步");
+            }
+        } catch (Exception e) {
+            return Result.fail("元数据稽核失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 手动触发 Doris 元数据同步（全量同步）
+     * 建议先调用 audit-metadata 接口确认差异后再调用此接口
      */
     @PostMapping("/sync-metadata")
     public Result<Map<String, Object>> syncAllMetadata(
