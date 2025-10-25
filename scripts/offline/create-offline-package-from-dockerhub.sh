@@ -118,12 +118,18 @@ tar -C "$REPO_ROOT/deploy" --exclude='docker-images/*.tar' -cf - . | tar -C "$DE
 mkdir -p "$DEPLOY_IMAGE_DIR"
 rm -f "$DEPLOY_IMAGE_DIR/"*.tar 2>/dev/null || true
 
+if [[ -d "$REPO_ROOT/database/mysql" ]]; then
+    log "Copying database/mysql scripts"
+    mkdir -p "$PACKAGE_ROOT/database/mysql"
+    tar -C "$REPO_ROOT/database/mysql" -cf - . | tar -C "$PACKAGE_ROOT/database/mysql" -xf -
+fi
+
 mkdir -p "$SCRIPTS_PACKAGE_DIR"
 tar -C "$REPO_ROOT/scripts" -cf - deploy | tar -C "$SCRIPTS_PACKAGE_DIR" -xf -
 
 cp "$REPO_ROOT/deploy/offline/README_OFFLINE.md" "$PACKAGE_ROOT/README_OFFLINE.md"
-if [[ -f "$REPO_ROOT/docs/deployment/DOCKER_QUICK_START.md" ]]; then
-    cp "$REPO_ROOT/docs/deployment/DOCKER_QUICK_START.md" "$PACKAGE_ROOT/DOCKER_QUICK_START.md"
+if [[ -f "$REPO_ROOT/docs/handbook/operations-guide.md" ]]; then
+    cp "$REPO_ROOT/docs/handbook/operations-guide.md" "$PACKAGE_ROOT/OPERATIONS_GUIDE.md"
 fi
 
 declare -a MANIFEST_RAW=()

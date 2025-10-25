@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #############################################
-# OneData Works - 数据库初始化脚本
+# OpenDataWorks - 数据库初始化脚本
 # 用于自动化数据库创建、用户配置和数据导入
 #############################################
 
@@ -20,16 +20,16 @@ NC='\033[0m' # No Color
 # 默认配置
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-3306}"
-DB_NAME="${DB_NAME:-data_portal}"
+DB_NAME="${DB_NAME:-onedata_portal}"
 DB_USER="${DB_USER:-onedata}"
 DB_PASSWORD="${DB_PASSWORD:-}"
 DB_ROOT_PASSWORD="${DB_ROOT_PASSWORD:-}"
 LOAD_SAMPLE_DATA="${LOAD_SAMPLE_DATA:-false}"
 
 # SQL 文件路径
-SCHEMA_SQL="$REPO_ROOT/backend/src/main/resources/schema.sql"
-SAMPLE_DATA_SQL="$REPO_ROOT/backend/src/main/resources/sample_data.sql"
-INSPECTION_SCHEMA_SQL="$REPO_ROOT/backend/src/main/resources/inspection_schema.sql"
+SCHEMA_SQL="$REPO_ROOT/database/mysql/10-core-schema.sql"
+SAMPLE_DATA_SQL="$REPO_ROOT/database/mysql/30-sample-data.sql"
+INSPECTION_SCHEMA_SQL="$REPO_ROOT/database/mysql/20-inspection-schema.sql"
 
 # 日志函数
 log_info() {
@@ -52,7 +52,7 @@ log_error() {
 print_banner() {
     echo ""
     echo "==========================================="
-    echo "  OneData Works - 数据库初始化脚本"
+    echo "  OpenDataWorks - 数据库初始化脚本"
     echo "==========================================="
     echo ""
 }
@@ -66,7 +66,7 @@ show_usage() {
 选项:
   -h, --host HOST           MySQL 主机地址 (默认: localhost)
   -P, --port PORT           MySQL 端口 (默认: 3306)
-  -d, --database NAME       数据库名称 (默认: data_portal)
+  -d, --database NAME       数据库名称 (默认: onedata_portal)
   -u, --user USER           应用数据库用户名 (默认: onedata)
   -p, --password PASSWORD   应用数据库用户密码 (必需)
   -r, --root-password PWD   MySQL root 密码 (必需)
@@ -87,7 +87,7 @@ show_usage() {
   $0 -r root_password -p app_password
 
   # 自定义配置
-  $0 -h localhost -P 3306 -d data_portal -u onedata -p mypassword -r rootpwd -s
+  $0 -h localhost -P 3306 -d onedata_portal -u onedata -p mypassword -r rootpwd -s
 
   # 使用环境变量
   DB_ROOT_PASSWORD=rootpwd DB_PASSWORD=apppwd ./init-database.sh

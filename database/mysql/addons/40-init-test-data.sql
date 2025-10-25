@@ -3,7 +3,7 @@
 -- 用于测试表统计信息、DDL、数据预览、数据导出、数据查询等功能
 -- ================================================================================
 
-USE data_portal;
+USE onedata_portal;
 
 -- 1. 更新 Doris 集群配置，指向本地 MySQL（作为测试用）
 UPDATE doris_cluster
@@ -267,8 +267,8 @@ FROM doris_dwd.dwd_order
 WHERE order_date IS NOT NULL
 GROUP BY order_date;
 
--- 6. 更新 data_portal 库中的表信息，关联到测试数据库
-USE data_portal;
+-- 6. 更新 onedata_portal 库中的表信息，关联到测试数据库
+USE onedata_portal;
 
 -- 更新已有表的数据库名
 UPDATE data_table SET db_name = 'doris_ods' WHERE table_name LIKE 'ods_%';

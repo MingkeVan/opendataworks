@@ -1,3 +1,6 @@
+SET NAMES utf8mb4;
+USE onedata_portal;
+
 -- 巡检记录表
 CREATE TABLE IF NOT EXISTS inspection_record (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',

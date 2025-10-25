@@ -24,7 +24,7 @@
 - 用户名: `root`
 - 密码: `root`
 
-**集群配置** (data_portal.doris_cluster):
+**集群配置** (onedata_portal.doris_cluster):
 ```sql
 UPDATE doris_cluster SET
     cluster_name = 'MySQL测试集群',

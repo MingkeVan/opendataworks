@@ -1,4 +1,4 @@
-# OneData 数据中台前端
+# OpenDataWorks 数据中台前端
 
 基于 Vue 3 + Element Plus 的数据中台管理界面。
 

@@ -70,7 +70,7 @@ dolphin:
 
 确保测试数据库已创建：
 ```sql
-CREATE DATABASE IF NOT EXISTS data_portal
+CREATE DATABASE IF NOT EXISTS onedata_portal
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 ```

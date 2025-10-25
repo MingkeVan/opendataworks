@@ -2,8 +2,9 @@
 
 使用 `scripts/offline/create-offline-package-from-dockerhub.sh` 脚本时，会基于当前仓库生成一个可在无外网环境导入的压缩包。最终离线包包含：
 
-- `deploy/`：Docker Compose、环境变量模板以及数据库初始化脚本
+- `deploy/`：Docker Compose 与环境变量模板
 - `deploy/docker-images/`：脚本拉取并保存的镜像 tar 包
+- `database/mysql/`：数据库初始化脚本 (bootstrap/schema/sample/addons)
 - `scripts/deploy/`：启动、停止、加载镜像等运维脚本
 - `README_OFFLINE.md`：离线环境操作指南
 

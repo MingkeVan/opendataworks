@@ -27,7 +27,4 @@
    - 停止服务：`scripts/deploy/stop.sh`
    - 重启服务：`scripts/deploy/restart.sh`
 
-相关文档请参考仓库中的 `docs/deployment/`：
-- `DOCKER_QUICK_START.md`
-- `DOCKER_DEPLOYMENT.md`
-- `DEPLOYMENT_GUIDE.md`
+更多部署细节可参考仓库 `docs/handbook/operations-guide.md` 与 `docs/handbook/testing-guide.md`。

@@ -1,6 +1,6 @@
 # GitHub Pages Configuration
 theme: jekyll-theme-cayman
-title: OneData Works
+title: OpenDataWorks
 description: 一站式数据任务管理与数据血缘可视化平台
 show_downloads: true
 google_analytics: # 可以添加 Google Analytics ID

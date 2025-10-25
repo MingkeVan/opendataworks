@@ -1,6 +1,6 @@
-# OneData Works 项目主页
+# OpenDataWorks 项目主页
 
-本目录包含 OneData Works 项目的官方主页，通过 GitHub Pages 托管。
+本目录包含 OpenDataWorks 项目的官方主页，通过 GitHub Pages 托管。
 
 ## 📁 文件说明
 
@@ -76,7 +76,7 @@ npx serve .
 
 ```html
 <!-- 修改标题 -->
-<h1>OneData Works</h1>
+<h1>OpenDataWorks</h1>
 
 <!-- 修改描述 -->
 <p>一站式数据任务管理与数据血缘可视化平台</p>
@@ -116,9 +116,9 @@ npx serve .
 
 ## 📚 相关文档
 
-- [GitHub Pages 设置指南](../GITHUB_PAGES_SETUP.md)
+- [GitHub Pages 设置指南](GITHUB_PAGES_SETUP.md)
 - [项目文档](../../README.md)
-- [部署指南](../../docs/deployment/DEPLOYMENT.md)
+- [部署指南](../handbook/operations-guide.md)
 
 ## 💡 设计灵感来源
 

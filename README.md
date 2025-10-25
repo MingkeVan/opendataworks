@@ -24,11 +24,13 @@ opendataworks 是一个面向大数据平台的统一数据门户系统,旨在�
 
 ## 📁 仓库结构
 
-- `deploy/`：集中存放 Docker Compose、环境变量模板以及数据库初始化脚本
+- `deploy/`：集中存放 Docker Compose 与环境变量模板
 - `deploy/offline/`：离线部署包模板（被 `scripts/offline/create-offline-package-from-dockerhub.sh` 使用）
 - `scripts/`：本地开发、部署、测试相关脚本（含 Docker 构建、离线打包、启动/停止等）
-- `docs/deployment/`：部署与运维文档集合
+- `database/mysql/`：数据库引导、核心 schema、巡检、示例与测试数据脚本
+- `docs/handbook/`：产品/架构/开发/运维/测试手册及专题
 - `docs/reports/`：历史修复与测试报告
+- `docs/site/`：GitHub Pages 站点源码与部署说明
 - `artifacts/archives/`：下载或生成的归档文件归置目录
 
 ### 🎯 项目目标
@@ -262,9 +264,16 @@ opendataworks/
 │   │   │   └── DataPortalApplication.java
 │   │   └── resources/
 │   │       ├── application.yml      # 应用配置
-│   │       ├── schema.sql           # 数据库建表脚本
 │   │       └── mapper/              # MyBatis XML
 │   └── pom.xml
+│
+├── database/
+│   └── mysql/                       # 数据库脚本 (bootstrap/schema/sample/addons)
+│       ├── 00-bootstrap.sql
+│       ├── 10-core-schema.sql
+│       ├── 20-inspection-schema.sql
+│       ├── 30-sample-data.sql
+│       └── addons/40-init-test-data.sql
 │
 ├── frontend/                         # Vue 前端应用
 │   ├── src/
@@ -295,11 +304,11 @@ opendataworks/
 │   ├── requirements.txt
 │   └── README.md
 │
-├── docs/                             # 文档
+├── docs/
 │   ├── README.md                    # 文档索引
-│   ├── features/                    # 功能特性文档
-│   ├── guides/                      # 使用指南
-│   └── design/                      # 设计文档
+│   ├── handbook/                    # 产品/架构/开发/运维/测试手册
+│   ├── reports/                     # 测试与修复报告
+│   └── site/                        # GitHub Pages 站点源码
 │
 ├── README.md                         # 本文档
 ├── LICENSE                           # 开源协议
@@ -346,7 +355,7 @@ scripts/dev/init-database.sh -r root密码 -p 应用密码 -s
 scripts/dev/init-database.sh \
   -h localhost \
   -P 3306 \
-  -d data_portal \
+  -d onedata_portal \
   -u onedata \
   -p 应用密码 \
   -r root密码 \
@@ -372,7 +381,7 @@ scripts/dev/init-database.sh --help
 ```bash
 # 1. 创建数据库
 mysql -u root -p << EOF
-CREATE DATABASE data_portal
+CREATE DATABASE onedata_portal
   DEFAULT CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 EOF
@@ -380,30 +389,30 @@ EOF
 # 2. 创建应用用户（推荐，避免使用 root）
 mysql -u root -p << EOF
 CREATE USER 'onedata'@'localhost' IDENTIFIED BY 'your_password';
-GRANT ALL PRIVILEGES ON data_portal.* TO 'onedata'@'localhost';
+GRANT ALL PRIVILEGES ON onedata_portal.* TO 'onedata'@'localhost';
 
 -- 如需远程访问，添加远程用户
 CREATE USER 'onedata'@'%' IDENTIFIED BY 'your_password';
-GRANT ALL PRIVILEGES ON data_portal.* TO 'onedata'@'%';
+GRANT ALL PRIVILEGES ON onedata_portal.* TO 'onedata'@'%';
 
 FLUSH PRIVILEGES;
 EOF
 
 # 3. 执行建表脚本（核心表结构）
-mysql -u root -p data_portal < backend/src/main/resources/schema.sql
+mysql -u root -p onedata_portal < database/mysql/10-core-schema.sql
 
 # 4. 执行巡检模块脚本（可选）
-mysql -u root -p data_portal < backend/src/main/resources/inspection_schema.sql
+mysql -u root -p onedata_portal < database/mysql/20-inspection-schema.sql
 
 # 5. 加载示例数据（可选，用于测试）
-mysql -u root -p data_portal < backend/src/main/resources/sample_data.sql
+mysql -u root -p onedata_portal < database/mysql/30-sample-data.sql
 ```
 
 ##### 验证数据库初始化
 
 ```bash
 # 检查数据库是否创建成功
-mysql -u onedata -p data_portal -e "SHOW TABLES;"
+mysql -u onedata -p onedata_portal -e "SHOW TABLES;"
 
 # 预期输出应包含以下表：
 # - data_table（数据表元信息）
@@ -416,7 +425,7 @@ mysql -u onedata -p data_portal -e "SHOW TABLES;"
 # - inspection_rule（巡检规则，可选）
 
 # 查看表数量
-mysql -u onedata -p data_portal -e "SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = 'data_portal';"
+mysql -u onedata -p onedata_portal -e "SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = 'onedata_portal';"
 ```
 
 ##### 数据库迁移（如果需要）
@@ -425,11 +434,11 @@ mysql -u onedata -p data_portal -e "SELECT COUNT(*) as table_count FROM informat
 
 ```bash
 # 查看当前数据库版本
-mysql -u onedata -p data_portal -e "SELECT * FROM schema_version LIMIT 1;"
+mysql -u onedata -p onedata_portal -e "SELECT * FROM schema_version LIMIT 1;"
 
 # 执行增量迁移脚本
-mysql -u onedata -p data_portal < backend/src/main/resources/db/migration/V2__add_table_features.sql
-mysql -u onedata -p data_portal < backend/src/main/resources/db/migration/V3__add_statistics_history.sql
+mysql -u onedata -p onedata_portal < backend/src/main/resources/db/migration/V2__add_table_features.sql
+mysql -u onedata -p onedata_portal < backend/src/main/resources/db/migration/V3__add_statistics_history.sql
 ```
 
 ##### 常见问题排查
@@ -437,10 +446,10 @@ mysql -u onedata -p data_portal < backend/src/main/resources/db/migration/V3__ad
 **问题1：字符集错误**
 ```bash
 # 检查数据库字符集
-mysql -u root -p -e "SELECT default_character_set_name, default_collation_name FROM information_schema.schemata WHERE schema_name = 'data_portal';"
+mysql -u root -p -e "SELECT default_character_set_name, default_collation_name FROM information_schema.schemata WHERE schema_name = 'onedata_portal';"
 
 # 如果字符集不正确，修改
-mysql -u root -p -e "ALTER DATABASE data_portal CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+mysql -u root -p -e "ALTER DATABASE onedata_portal CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 ```
 
 **问题2：权限不足**
@@ -449,16 +458,16 @@ mysql -u root -p -e "ALTER DATABASE data_portal CHARACTER SET utf8mb4 COLLATE ut
 mysql -u root -p -e "SHOW GRANTS FOR 'onedata'@'localhost';"
 
 # 重新授权
-mysql -u root -p -e "GRANT ALL PRIVILEGES ON data_portal.* TO 'onedata'@'localhost'; FLUSH PRIVILEGES;"
+mysql -u root -p -e "GRANT ALL PRIVILEGES ON onedata_portal.* TO 'onedata'@'localhost'; FLUSH PRIVILEGES;"
 ```
 
 **问题3：表已存在**
 ```bash
 # 备份现有数据
-mysqldump -u root -p data_portal > data_portal_backup_$(date +%Y%m%d).sql
+mysqldump -u root -p onedata_portal > onedata_portal_backup_$(date +%Y%m%d).sql
 
 # 删除数据库重建
-mysql -u root -p -e "DROP DATABASE data_portal;"
+mysql -u root -p -e "DROP DATABASE onedata_portal;"
 scripts/dev/init-database.sh -r root密码 -p 应用密码
 ```
 
@@ -497,7 +506,7 @@ vim src/main/resources/application.yml
 # 配置数据库连接
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/data_portal
+    url: jdbc:mysql://localhost:3306/onedata_portal
     username: root
     password: your_password
 
@@ -638,7 +647,7 @@ spring:
   # 数据库配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/data_portal?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    url: jdbc:mysql://localhost:3306/onedata_portal?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: root
     password: root
 
@@ -750,7 +759,7 @@ export default defineConfig({
 | duration_seconds | INT | 执行时长(秒) |
 | error_message | TEXT | 错误信息 |
 
-详细建表脚本参见: `backend/src/main/resources/schema.sql`
+详细建表脚本参见: `database/mysql/10-core-schema.sql`
 
 ---
 
@@ -760,9 +769,10 @@ export default defineConfig({
 
 详细的技术文档请查看 [docs/](docs/) 目录:
 
-- **[功能特性文档](docs/features/)** - 各功能模块的详细设计和实现
-- **[使用指南](docs/guides/)** - 快速开始、集成测试等操作指南
-- **[设计文档](docs/design/)** - 系统设计、需求分析等架构文档
+- **[手册 (handbook)](docs/handbook/)** - 产品概览、架构设计、数据模型、开发/运维/测试指南与专题文档
+- **[特性专题](docs/handbook/features/)** - Doris 统计增强、任务状态、图表实现等专项说明
+- **[报告 (reports)](docs/reports/)** - 测试报告、修复记录、工作流问题复盘
+- **[站点 (site)](docs/site/)** - GitHub Pages 主页源码与部署指南
 
 ### API 接口文档
 
@@ -855,7 +865,7 @@ mvn clean package -DskipTests
 
 # 运行
 java -jar target/data-portal-1.0.0.jar \
-  --spring.datasource.url=jdbc:mysql://your-db-host:3306/data_portal \
+  --spring.datasource.url=jdbc:mysql://your-db-host:3306/onedata_portal \
   --spring.datasource.username=your-username \
   --spring.datasource.password=your-password \
   --dolphin.service-url=http://your-dolphin-service:5001
@@ -949,9 +959,9 @@ services:
     image: mysql:8.0
     environment:
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: data_portal
+      MYSQL_DATABASE: onedata_portal
     volumes:
-      - ./backend/src/main/resources/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - ./database/mysql:/docker-entrypoint-initdb.d:ro
 
   backend:
     build: ./backend
