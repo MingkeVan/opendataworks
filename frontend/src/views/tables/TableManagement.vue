@@ -1694,32 +1694,19 @@ const formatNumber = (num) => {
 
 // 格式化行数（简化显示）
 const formatRowCount = (rowCount) => {
-  if (!rowCount) return ''
+  if (rowCount === null || rowCount === undefined) return '-'
+  if (rowCount === 0) return '0'
   if (rowCount < 1000) return rowCount.toString()
   if (rowCount < 1000000) return (rowCount / 1000).toFixed(1) + 'K'
   if (rowCount < 1000000000) return (rowCount / 1000000).toFixed(1) + 'M'
   return (rowCount / 1000000000).toFixed(1) + 'B'
 }
-
-// 根据表名生成假的数据量（用于展示效果）
-const generateFakeRowCount = (tableName) => {
-  // 使用表名生成一个稳定的哈希值
-  let hash = 0
-  for (let i = 0; i < tableName.length; i++) {
-    const char = tableName.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
-    hash = hash & hash // Convert to 32bit integer
-  }
-  // 将哈希值转换为 1000 到 10000000 之间的数字
-  const absHash = Math.abs(hash)
-  const minCount = 1000
-  const maxCount = 10000000
-  return minCount + (absHash % (maxCount - minCount))
-}
-
-// 获取表的数据量（真实数据或假数据）
+// 获取表的数据量（真实数据）
 const getTableRowCount = (table) => {
-  return table.rowCount || generateFakeRowCount(table.tableName)
+  if (!table || table.rowCount === null || table.rowCount === undefined) {
+    return 0
+  }
+  return Number(table.rowCount) || 0
 }
 
 // 计算表的数据量进度条宽度
@@ -1732,7 +1719,9 @@ const getTableProgressWidth = (database, table) => {
 
   // 找出该数据库中最大的数据量
   const maxRowCount = Math.max(...tables.map(t => getTableRowCount(t)))
-  if (maxRowCount === 0) return '0%'
+  if (!Number.isFinite(maxRowCount) || maxRowCount <= 0) {
+    return '0%'
+  }
 
   // 计算百分比，最小10%以保证有基本可见度
   const percentage = Math.max(10, (currentRowCount / maxRowCount) * 100)
