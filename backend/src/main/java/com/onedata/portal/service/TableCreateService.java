@@ -58,7 +58,9 @@ public class TableCreateService {
 
         ensureTableNotExists(components.getTableName());
 
-        String ddl = buildCreateDdl(components.getTableName(), request);
+        String ddl = StringUtils.hasText(request.getDorisDdl())
+            ? request.getDorisDdl().trim()
+            : buildCreateDdl(components.getTableName(), request);
 
         DataTable dataTable = buildDataTableEntity(request, components, ddl);
         dataTableMapper.insert(dataTable);

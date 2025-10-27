@@ -243,13 +243,20 @@
         <el-skeleton v-if="preview.loading" :rows="4" animated />
         <template v-else>
           <el-alert v-if="previewError" :title="previewError" type="warning" show-icon class="preview-alert" />
+          <el-alert
+            v-else-if="ddlEdited"
+            title="DDL 已手动修改，请确保语法与 Doris 兼容"
+            type="info"
+            show-icon
+            class="preview-alert"
+          />
           <el-input
             v-model="preview.dorisDdl"
             type="textarea"
             :rows="12"
-            readonly
             class="ddl-preview"
-            placeholder="待生成 Doris 建表语句"
+            placeholder="可在此处校验并修改 Doris 建表语句"
+            @input="onDdlInput"
           />
         </template>
 
@@ -302,6 +309,7 @@ const preview = reactive({
   dorisDdl: '',
   loading: false
 })
+const ddlEdited = ref(false)
 
 const layerOptions = [
   { label: 'ODS - 原始数据层', value: 'ODS' },
@@ -451,6 +459,7 @@ const refreshPreview = async () => {
   previewError.value = ''
   if (!canPreview()) {
     preview.dorisDdl = ''
+    ddlEdited.value = false
     return
   }
   preview.loading = true
@@ -458,6 +467,7 @@ const refreshPreview = async () => {
     const payload = buildRequestPayload()
     const result = await tableDesignerApi.preview(payload)
     preview.tableName = result.tableName
+    ddlEdited.value = false
     preview.dorisDdl = result.dorisDdl
   } catch (error) {
     console.error('生成预览失败', error)
@@ -485,6 +495,7 @@ const buildRequestPayload = () => ({
   keyColumns: form.keyColumns,
   dorisClusterId: form.dorisClusterId,
   syncToDoris: form.syncToDoris,
+  dorisDdl: preview.dorisDdl,
   columns: form.columns.map(column => ({
     columnName: column.columnName,
     dataType: column.dataType,
@@ -517,6 +528,10 @@ const handleSubmit = async () => {
     ElMessage.warning('请完善字段定义和 Doris 配置后再创建')
     return
   }
+  if (!preview.dorisDdl || !preview.dorisDdl.trim()) {
+    ElMessage.warning('请先生成并确认 Doris 建表语句')
+    return
+  }
   submitting.value = true
   try {
     const payload = buildRequestPayload()
@@ -538,6 +553,10 @@ watch(
     schedulePreview()
   }
 )
+
+const onDdlInput = () => {
+  ddlEdited.value = true
+}
 
 watch(
   () => form.columns.map(col => col.columnName),

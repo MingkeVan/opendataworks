@@ -44,5 +44,7 @@ public class TableCreateRequest {
 
     private Boolean syncToDoris;
 
+    private String dorisDdl;
+
     private List<TableColumnRequest> columns;
 }
