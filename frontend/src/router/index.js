@@ -83,6 +83,12 @@ const routes = [
         name: 'Inspection',
         component: () => import('@/views/inspection/InspectionView.vue'),
         meta: { title: '数据巡检' }
+      },
+      {
+        path: '/settings/doris-clusters',
+        name: 'DorisClusterManagement',
+        component: () => import('@/views/settings/DorisClusterManagement.vue'),
+        meta: { title: 'Doris 集群管理' }
       }
     ]
   }

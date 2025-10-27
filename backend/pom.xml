@@ -13,9 +13,9 @@
     </parent>
 
     <groupId>com.onedata</groupId>
-    <artifactId>data-portal</artifactId>
+    <artifactId>opendataworks-backend</artifactId>
     <version>1.0.0</version>
-    <name>Data Portal</name>
+    <name>OpenDataWorks Backend</name>
     <description>统一数据中台门户系统</description>
 
     <properties>

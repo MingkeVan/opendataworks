@@ -15,7 +15,7 @@
 │ Spring Boot 后端 (backend/)             │
 │  - 元数据 API、校验规则、调度编排       │
 │  - 集成 MyBatis-Plus、WebFlux           │
-│  - 数据库: onedata_portal (MySQL 8)     │
+│  - 数据库: opendataworks (MySQL 8)     │
 └───────────────┬────────────────────────┘
                 │ 内部 HTTP
 ┌───────────────▼────────────────────────┐

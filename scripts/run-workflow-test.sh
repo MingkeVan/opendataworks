@@ -16,7 +16,7 @@ echo "================================================"
 
 # 清理旧的测试数据
 echo -e "\n🧹 清理旧测试数据..."
-mysql -h 127.0.0.1 -P 3306 -u root -proot onedata_portal -e "
+mysql -h 127.0.0.1 -P 3306 -u opendataworks -popendataworks123 opendataworks -e "
 DELETE FROM data_lineage WHERE task_id IN (SELECT id FROM data_task WHERE task_code LIKE 'test_task_%' OR task_code LIKE 'sample_%');
 DELETE FROM data_task WHERE task_code LIKE 'test_task_%' OR task_code LIKE 'sample_%';
 DELETE FROM data_table WHERE table_name LIKE 'test_table_%';

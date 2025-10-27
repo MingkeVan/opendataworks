@@ -19,7 +19,7 @@ echo ""
 echo "=== 步骤 2: 调用删除 API ==="
 DELETE_RESULT=$(curl -s -X POST "http://localhost:8081/api/v1/workflows/$TEMP_WORKFLOW_CODE/delete" \
   -H "Content-Type: application/json" \
-  -d '{"projectName": "data-portal"}')
+  -d '{"projectName": "opendataworks"}')
 echo "删除结果: $DELETE_RESULT"
 
 echo ""

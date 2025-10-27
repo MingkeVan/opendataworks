@@ -3,13 +3,13 @@
 -- 用于测试表统计信息、DDL、数据预览、数据导出、数据查询等功能
 -- ================================================================================
 
-USE onedata_portal;
+USE opendataworks;
 
 -- 1. 更新 Doris 集群配置，指向本地 MySQL（作为测试用）
 UPDATE doris_cluster
 SET
     cluster_name = 'MySQL测试集群',
-    fe_host = 'data-portal-mysql',  -- Docker 容器名
+    fe_host = 'opendataworks-mysql',  -- Docker 容器名
     fe_port = 3306,                  -- MySQL 端口
     username = 'root',
     password = 'root',
@@ -267,8 +267,8 @@ FROM doris_dwd.dwd_order
 WHERE order_date IS NOT NULL
 GROUP BY order_date;
 
--- 6. 更新 onedata_portal 库中的表信息，关联到测试数据库
-USE onedata_portal;
+-- 6. 更新 opendataworks 库中的表信息，关联到测试数据库
+USE opendataworks;
 
 -- 更新已有表的数据库名
 UPDATE data_table SET db_name = 'doris_ods' WHERE table_name LIKE 'ods_%';

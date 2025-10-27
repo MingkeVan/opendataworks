@@ -14,7 +14,7 @@ echo "Token: ${TOKEN:0:20}..."
 echo ""
 echo "[2] 获取项目代码..."
 PROJECT_CODE=$(curl -s "http://localhost:12345/dolphinscheduler/projects/list?token=$TOKEN&pageSize=100" \
-  | jq -r '.data.totalList[] | select(.name=="data-portal") | .code')
+  | jq -r '.data.totalList[] | select(.name=="opendataworks") | .code')
 echo "Project Code: $PROJECT_CODE"
 
 # 3. 查看初始工作流列表
@@ -90,7 +90,7 @@ if [ -n "$TEMP_WORKFLOW" ]; then
     echo "[8] 测试删除临时工作流..."
     DELETE_RESULT=$(curl -s -X POST "http://localhost:8081/api/v1/workflows/$TEMP_CODE/delete" \
       -H "Content-Type: application/json" \
-      -d "{\"projectName\": \"data-portal\"}" | jq '.')
+      -d "{\"projectName\": \"opendataworks\"}" | jq '.')
     echo "删除结果: $DELETE_RESULT"
 
     # 9. 等待删除完成

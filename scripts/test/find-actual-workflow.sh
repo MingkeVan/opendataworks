@@ -11,7 +11,7 @@ PROJECT_CODES=$(echo "$PROJECTS" | jq -r '.data.totalList[]? | .code' 2>/dev/nul
 
 if [ -z "$PROJECT_CODES" ]; then
     echo "⚠️  无法获取项目列表，尝试已知项目..."
-    PROJECT_CODES="19385942554176"  # data-portal project code from earlier
+    PROJECT_CODES="19385942554176"  # opendataworks project code from earlier
 fi
 
 for PROJECT_CODE in $PROJECT_CODES; do

@@ -21,7 +21,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class DorisConnectionService {
 
-    private static final String JDBC_TEMPLATE = "jdbc:mysql://%s:%d/%s?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true";
+    private static final String JDBC_TEMPLATE = "jdbc:mysql://%s:%d/%s?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true";
     private static final String DEFAULT_DB = "information_schema";
 
     private final DorisClusterMapper dorisClusterMapper;
@@ -74,7 +74,9 @@ public class DorisConnectionService {
         String targetDb = StringUtils.hasText(database) ? database : DEFAULT_DB;
         String url = String.format(JDBC_TEMPLATE, cluster.getFeHost(), cluster.getFePort(), targetDb);
         String password = cluster.getPassword() == null ? "" : cluster.getPassword();
-        return DriverManager.getConnection(url, cluster.getUsername(), password);
+        Connection connection = DriverManager.getConnection(url, cluster.getUsername(), password);
+        applySessionCharset(connection);
+        return connection;
     }
 
     private DorisCluster resolveCluster(Long clusterId) {
@@ -96,6 +98,19 @@ public class DorisConnectionService {
             }
         }
         return cluster;
+    }
+
+    private void applySessionCharset(Connection connection) {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("SET NAMES utf8mb4");
+        } catch (SQLException primaryEx) {
+            log.warn("Doris does not support utf8mb4 charset, fallback to utf8. reason={}", primaryEx.getMessage());
+            try (Statement fallback = connection.createStatement()) {
+                fallback.execute("SET NAMES utf8");
+            } catch (SQLException secondaryEx) {
+                log.warn("Failed to set Doris session charset to utf8. reason={}", secondaryEx.getMessage());
+            }
+        }
     }
 
     private String abbreviate(String sql) {

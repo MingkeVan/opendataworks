@@ -30,10 +30,10 @@ OpenDataWorks 是一个统一的数据资产门户，聚合了数据表建模、
 
 | 概念 | 说明 | 备注 |
 | --- | --- | --- |
-| **数据门户 (Portal)** | Spring Boot + Vue3 主应用，保存所有表/任务元数据 | repo: `onedata-works` |
+| **数据门户 (Portal)** | Spring Boot + Vue3 主应用，保存所有表/任务元数据 | repo: `opendataworks` |
 | **DolphinScheduler Service** | FastAPI 适配层，屏蔽不同版本 API 差异 | 路径 `dolphinscheduler-service/` |
 | **Dinky Gateway** | 预留的流任务接口，将在 Phase 2 解锁 | 目录 `dinky/` (上游源码) |
-| **OpenDataWorks DB** | 统一数据库 `onedata_portal`，默认账号 `onedata/onedata123` | 初始化脚本见 `database/mysql` |
+| **OpenDataWorks DB** | 统一数据库 `opendataworks`，默认账号 `opendataworks/opendataworks123` | 初始化脚本见 `database/mysql` |
 | **业务域** | 组织视角 (tech、crm、trade …) | 写入 `business_domain` 表 |
 | **数据域** | 数据主题视角 (ops、user …) | 与业务域多对一关联 |
 | **数据分层** | ODS/DWD/DIM/DWS/ADS | 决定命名、统计周期、指标粒度 |

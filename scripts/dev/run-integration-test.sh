@@ -112,9 +112,9 @@ DELETE FROM data_table WHERE table_name LIKE 'test_table_%';
 # 从配置文件读取数据库连接信息
 DB_HOST=${DB_HOST:-localhost}
 DB_PORT=${DB_PORT:-3306}
-DB_NAME=${DB_NAME:-onedata_portal}
-DB_USER=${DB_USER:-root}
-DB_PASS=${DB_PASS:-}
+DB_NAME=${DB_NAME:-opendataworks}
+DB_USER=${DB_USER:-opendataworks}
+DB_PASS=${DB_PASS:-opendataworks123}
 
 if [ -n "$DB_PASS" ]; then
     mysql -h $DB_HOST -P $DB_PORT -u $DB_USER -p$DB_PASS $DB_NAME -e "$CLEANUP_SQL" 2>/dev/null || true
@@ -173,7 +173,7 @@ if [ $TEST_RESULT -eq 0 ]; then
 
     echo -e "${BLUE}验证方式：${NC}"
     echo -e "  1. 登录 DolphinScheduler UI: ${YELLOW}http://localhost:12345/dolphinscheduler${NC}"
-    echo -e "  2. 查看工作流定义 -> onedata-unified-workflow"
+    echo -e "  2. 查看工作流定义 -> opendataworks-default-workflow"
     echo -e "  3. 查看 DAG 图，应该有4个任务节点和依赖关系\n"
 
 else

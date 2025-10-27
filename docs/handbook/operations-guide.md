@@ -24,8 +24,8 @@ scripts/build/build-multiarch.sh --namespace your-registry
 - MySQL 卷：`mysql-data`
 - 后端日志卷：`backend-logs`
 - 环境变量重点：
-  - `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE=onedata_portal`, `MYSQL_USER=onedata`
-  - `SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/onedata_portal`
+  - `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE=opendataworks`, `MYSQL_USER=opendataworks`
+  - `SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/opendataworks`
   - `DOLPHIN_*` 放在 `.env` 或 Compose env 中
 - 需要扩展端口（如前端 80 → 8081）时，直接修改 `ports`。
 
@@ -39,8 +39,8 @@ scripts/build/build-multiarch.sh --namespace your-registry
 
 ### 后端
 
-1. 将 `backend/build/libs/data-portal-*.jar` 拷贝至 `/opt/onedata-works/backend/`。
-2. 创建 systemd 服务 `/etc/systemd/system/onedata-backend.service`：
+1. 将 `backend/build/libs/opendataworks-backend-*.jar` 拷贝至 `/opt/opendataworks/backend/`。
+2. 创建 systemd 服务 `/etc/systemd/system/opendataworks-backend.service`：
 
 ```ini
 [Unit]
@@ -48,33 +48,33 @@ Description=OpenDataWorks Backend
 After=network.target
 
 [Service]
-User=onedata
-WorkingDirectory=/opt/onedata-works/backend
-ExecStart=/usr/bin/java -jar data-portal.jar
+User=opendataworks
+WorkingDirectory=/opt/opendataworks/backend
+ExecStart=/usr/bin/java -jar opendataworks-backend.jar
 Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-3. `sudo systemctl daemon-reload && sudo systemctl enable --now onedata-backend`。
+3. `sudo systemctl daemon-reload && sudo systemctl enable --now opendataworks-backend`。
 
 ### Python Service
 
-类似，创建 `onedata-dolphin.service`，`WorkingDirectory=/opt/onedata-works/dolphinscheduler-service`，`ExecStart=/opt/.../venv/bin/gunicorn -c gunicorn_conf.py dolphinscheduler_service.main:app`。
+类似，创建 `opendataworks-dolphin.service`，`WorkingDirectory=/opt/opendataworks/dolphinscheduler-service`，`ExecStart=/opt/.../venv/bin/gunicorn -c gunicorn_conf.py dolphinscheduler_service.main:app`。
 
 ### 前端
 
-1. `npm run build` 产物复制到 `/opt/onedata-works/frontend/dist`。
+1. `npm run build` 产物复制到 `/opt/opendataworks/frontend/dist`。
 2. 使用 Nginx 反向代理：
 
 ```nginx
 server {
     listen 80;
-    server_name data-portal.example.com;
+    server_name opendataworks.example.com;
 
     location / {
-        root /opt/onedata-works/frontend/dist;
+        root /opt/opendataworks/frontend/dist;
         try_files $uri $uri/ /index.html;
     }
 
@@ -96,7 +96,7 @@ server {
 ## 滚动/重启
 
 - Docker：`docker compose restart backend` / `logs -f backend`。
-- systemd：`sudo systemctl restart onedata-backend`。
+- systemd：`sudo systemctl restart opendataworks-backend`。
 - 数据库迁移后，可运行 `scripts/dev/init-database.sh`（仅开发环境）或在生产环境执行 Flyway 脚本。
 
 ## 镜像构建与大小控制
@@ -112,6 +112,6 @@ server {
 3. **启动后**：
    - `curl http://<host>:8080/api/actuator/health`
    - `curl http://<host>:5001/health`
-   - `mysql -u onedata -ponedata123 -h <db> onedata_portal -e "SHOW TABLES"`
+   - `mysql -u opendataworks -popendataworks123 -h <db> opendataworks -e "SHOW TABLES"`
    - 前端页面是否可打开/登录
 4. **巡检**：定期查看 `inspection_issue`、`task_execution_log`，配合 [testing-guide.md](testing-guide.md) 的脚本回归关键流程。

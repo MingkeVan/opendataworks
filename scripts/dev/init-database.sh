@@ -20,8 +20,8 @@ NC='\033[0m' # No Color
 # 默认配置
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-3306}"
-DB_NAME="${DB_NAME:-onedata_portal}"
-DB_USER="${DB_USER:-onedata}"
+DB_NAME="${DB_NAME:-opendataworks}"
+DB_USER="${DB_USER:-opendataworks}"
 DB_PASSWORD="${DB_PASSWORD:-}"
 DB_ROOT_PASSWORD="${DB_ROOT_PASSWORD:-}"
 LOAD_SAMPLE_DATA="${LOAD_SAMPLE_DATA:-false}"
@@ -66,8 +66,8 @@ show_usage() {
 选项:
   -h, --host HOST           MySQL 主机地址 (默认: localhost)
   -P, --port PORT           MySQL 端口 (默认: 3306)
-  -d, --database NAME       数据库名称 (默认: onedata_portal)
-  -u, --user USER           应用数据库用户名 (默认: onedata)
+  -d, --database NAME       数据库名称 (默认: opendataworks)
+  -u, --user USER           应用数据库用户名 (默认: opendataworks)
   -p, --password PASSWORD   应用数据库用户密码 (必需)
   -r, --root-password PWD   MySQL root 密码 (必需)
   -s, --sample-data         加载示例数据
@@ -87,7 +87,7 @@ show_usage() {
   $0 -r root_password -p app_password
 
   # 自定义配置
-  $0 -h localhost -P 3306 -d onedata_portal -u onedata -p mypassword -r rootpwd -s
+  $0 -h localhost -P 3306 -d opendataworks -u opendataworks -p mypassword -r rootpwd -s
 
   # 使用环境变量
   DB_ROOT_PASSWORD=rootpwd DB_PASSWORD=apppwd ./init-database.sh

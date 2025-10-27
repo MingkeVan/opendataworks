@@ -19,11 +19,11 @@
 cd scripts/dev
 
 # 2. 填写 root/admin 密码并执行
-DB_ROOT_PASSWORD=root DB_PASSWORD=onedata123 \
+DB_ROOT_PASSWORD=root DB_PASSWORD=opendataworks123 \
 ./init-database.sh -s
 ```
 
-- 脚本会创建 `onedata_portal`、`onedata` 用户、核心表以及示例数据。
+- 脚本会创建 `opendataworks` 数据库、`opendataworks` 用户、核心表以及示例数据。
 - 需要生成大量演示数据时，执行 `mysql < database/mysql/addons/40-init-test-data.sql`。
 
 ## 第二步：启动后端 (Spring Boot)
@@ -35,7 +35,7 @@ cd backend
 ```
 
 - 默认端口 `8080`，上下文路径 `/api`。
-- 配置文件 `application.yml` 中的 `spring.datasource.url` 已指向 `onedata_portal`。
+- 配置文件 `application.yml` 中的 `spring.datasource.url` 已指向 `opendataworks`。
 - 开启调试日志：`./mvnw spring-boot:run -Dspring-boot.run.arguments="--logging.level.com.onedata.portal=DEBUG"`。
 
 ## 第三步：启动 DolphinScheduler 适配层 (Python)
@@ -74,7 +74,7 @@ npm run dev -- --host 0.0.0.0 --port 5173
 
 | 问题 | 排查方式 |
 | --- | --- |
-| “Access denied for user 'onedata'” | 确认 init 脚本执行成功；`mysql -uonedata -ponedata123 onedata_portal -e "SHOW TABLES;"` |
+| “Access denied for user 'opendataworks'” | 确认 init 脚本执行成功；`mysql -uopendataworks -popendataworks123 opendataworks -e "SHOW TABLES;"` |
 | 调度接口 500 | 检查 Python service 日志；确认 `.env` 的 Token/Project/Worker Group 正确 |
 | 前端跨域 | 调整 `frontend/.env.development` 的 `VITE_API_BASE`，或在 backend 开启 CORS |
 | 示例数据缺失 | 重新运行 init script 并确认 `LOAD_SAMPLE_DATA=true` |

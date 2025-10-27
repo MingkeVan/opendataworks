@@ -1,7 +1,7 @@
 -- 使用已创建的数据库
 SET NAMES utf8mb4;
 
-USE onedata_portal;
+USE opendataworks;
 
 -- 业务域配置表
 CREATE TABLE IF NOT EXISTS `business_domain` (

@@ -1,5 +1,5 @@
 SET NAMES utf8mb4;
-USE onedata_portal;
+USE opendataworks;
 
 -- 巡检记录表
 CREATE TABLE IF NOT EXISTS inspection_record (

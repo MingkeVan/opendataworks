@@ -4,9 +4,9 @@
 
 ## 数据库基线
 
-- **库名**: `onedata_portal`
+- **库名**: `opendataworks`
 - **编码**: `utf8mb4` / `utf8mb4_unicode_ci`
-- **默认账号**: `onedata/onedata123`
+- **默认账号**: `opendataworks/opendataworks123`
 - **脚本目录**: [`database/mysql`](../../database/mysql)
 
 | 脚本 | 作用 | 自动执行 | 备注 |
@@ -72,5 +72,5 @@
 
 1. **修改核心 schema**：优先编辑 `database/mysql/10-core-schema.sql` 并同步新增 Flyway/V* 脚本，确保 CI/CD 可自动升级。
 2. **新增巡检/示例数据**：修改相应脚本 (`20-`/`30-`)；若只影响已有环境，可新增增量 SQL 并在 README 中说明。
-3. **测试数据**：需要大批量数据时执行 `addons/40-init-test-data.sql`，执行前确保 `onedata_portal` 与 `doris_*` 库可写。
+3. **测试数据**：需要大批量数据时执行 `addons/40-init-test-data.sql`，执行前确保 `opendataworks` 与 `doris_*` 库可写。
 4. **文档同步**：任何字段命名变更请同步更新本文件与 [operations-guide.md](operations-guide.md) 中的数据库段落。

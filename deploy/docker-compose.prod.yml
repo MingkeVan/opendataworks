@@ -8,9 +8,9 @@ services:
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: root123
-      MYSQL_DATABASE: onedata_portal
-      MYSQL_USER: onedata
-      MYSQL_PASSWORD: onedata123
+      MYSQL_DATABASE: opendataworks
+      MYSQL_USER: opendataworks
+      MYSQL_PASSWORD: opendataworks123
       TZ: Asia/Shanghai
     ports:
       - "3306:3306"
@@ -36,9 +36,9 @@ services:
     restart: always
     environment:
       SPRING_PROFILES_ACTIVE: prod
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/onedata_portal?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false
-      SPRING_DATASOURCE_USERNAME: onedata
-      SPRING_DATASOURCE_PASSWORD: onedata123
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/opendataworks?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false
+      SPRING_DATASOURCE_USERNAME: opendataworks
+      SPRING_DATASOURCE_PASSWORD: opendataworks123
       DOLPHINSCHEDULER_SERVICE_URL: http://dolphin-service:8000
       TZ: Asia/Shanghai
     ports:

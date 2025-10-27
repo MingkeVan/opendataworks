@@ -18,13 +18,13 @@
 ### 1. 数据库配置
 
 **Docker 容器**:
-- 容器名: `data-portal-mysql`
+- 容器名: `opendataworks-mysql`
 - 镜像: `mysql:8.0`
 - 端口: `3306`
 - 用户名: `root`
 - 密码: `root`
 
-**集群配置** (onedata_portal.doris_cluster):
+**集群配置** (opendataworks.doris_cluster):
 ```sql
 UPDATE doris_cluster SET
     cluster_name = 'MySQL测试集群',

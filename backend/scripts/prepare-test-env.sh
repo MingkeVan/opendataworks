@@ -13,8 +13,8 @@ echo ""
 DOLPHIN_URL="http://localhost:12345/dolphinscheduler"
 USERNAME="admin"
 PASSWORD="dolphinscheduler123"
-PROJECT_NAME="data-portal-test"
-WORKFLOW_NAME="data-portal-test-workflow"
+PROJECT_NAME="opendataworks-test"
+WORKFLOW_NAME="opendataworks-test-workflow"
 
 echo "1. 检查DolphinScheduler服务..."
 if curl -s -f "$DOLPHIN_URL/login" > /dev/null; then

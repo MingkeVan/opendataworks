@@ -57,7 +57,7 @@ class IntegrationTest:
 
         sync_payload = {
             "workflowName": "integration-test-workflow",
-            "projectName": "data-portal",
+            "projectName": "opendataworks",
             "tenantCode": "default",
             "executionType": "PARALLEL",
             "workerGroup": "default",
@@ -119,7 +119,7 @@ class IntegrationTest:
 
         payload = {
             "workflowName": workflow_name,
-            "projectName": "data-portal",
+            "projectName": "opendataworks",
             "tenantCode": "default",
             "executionType": "PARALLEL",
             "workerGroup": "default",
@@ -241,7 +241,7 @@ class IntegrationTest:
 
         payload = {
             "workflowName": "integration-test-workflow",
-            "projectName": "data-portal",
+            "projectName": "opendataworks",
             "tenantCode": "default",
             "executionType": "PARALLEL",
             "workerGroup": "default",
@@ -286,7 +286,7 @@ class IntegrationTest:
             return False
 
         payload = {
-            "projectName": "data-portal",
+            "projectName": "opendataworks",
             "workflowName": "integration-test-workflow",
             "releaseState": "ONLINE"
         }
@@ -324,7 +324,7 @@ class IntegrationTest:
             return False
 
         payload = {
-            "projectName": "data-portal",
+            "projectName": "opendataworks",
             "workflowName": "integration-test-workflow",
             "workerGroup": "default"
         }
@@ -365,7 +365,7 @@ class IntegrationTest:
             return False
 
         payload = {
-            "projectName": "data-portal",
+            "projectName": "opendataworks",
             "workflowName": "integration-test-workflow",
             "releaseState": "OFFLINE"
         }

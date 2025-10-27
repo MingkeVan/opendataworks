@@ -43,6 +43,10 @@
             <el-icon><Warning /></el-icon>
             <span>数据巡检</span>
           </el-menu-item>
+          <el-menu-item index="/settings/doris-clusters">
+            <el-icon><Setting /></el-icon>
+            <span>Doris 集群</span>
+          </el-menu-item>
         </el-menu>
       </div>
     </el-header>
@@ -56,7 +60,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { DataBoard, Grid, Management, Connection, Monitor, Collection, Warning, Search } from '@element-plus/icons-vue'
+import { DataBoard, Grid, Management, Connection, Monitor, Collection, Warning, Search, Setting } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => {
@@ -84,6 +88,9 @@ const activeMenu = computed(() => {
   }
   if (path.startsWith('/inspection')) {
     return '/inspection'
+  }
+  if (path.startsWith('/settings')) {
+    return '/settings/doris-clusters'
   }
   return path
 })

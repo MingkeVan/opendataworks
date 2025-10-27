@@ -11,7 +11,7 @@
 
 ```
 ┌─────────────────────────┐
-│ data-portal backend     │
+│ opendataworks backend   │
 │ (Spring Boot, Java)     │
 └────────────┬────────────┘
              │ REST (JSON)
@@ -77,7 +77,7 @@
 | `PYDS_USER_NAME`                 | `admin`          | DolphinScheduler 用户名                |
 | `PYDS_USER_PASSWORD`             | `dolphinscheduler123` | DolphinScheduler 密码             |
 | `PYDS_USER_TENANT`              | `default`        | 默认租户                               |
-| `PYDS_WORKFLOW_PROJECT`          | `data-portal`    | 默认项目名称，与 Java 端配置对齐       |
+| `PYDS_WORKFLOW_PROJECT`          | `opendataworks`  | 默认项目名称，与 Java 端配置对齐       |
 | `LOG_LEVEL`                      | `INFO`           | 服务日志级别                           |
 
 支持通过 `.env` 文件覆盖上述配置。

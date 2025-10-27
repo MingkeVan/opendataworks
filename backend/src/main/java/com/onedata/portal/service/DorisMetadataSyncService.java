@@ -27,6 +27,7 @@ public class DorisMetadataSyncService {
     private final DorisConnectionService dorisConnectionService;
     private final DataTableMapper dataTableMapper;
     private final DataFieldMapper dataFieldMapper;
+    private static final Set<String> IGNORED_DATABASES = new HashSet<>(Arrays.asList("performance_schema", "sys"));
 
     /**
      * 同步结果
@@ -139,7 +140,10 @@ public class DorisMetadataSyncService {
         }
 
         public void addChange(String field, Object oldValue, Object newValue) {
-            changes.put(field, Map.of("old", oldValue, "new", newValue));
+            Map<String, Object> diff = new HashMap<>(2);
+            diff.put("old", oldValue);
+            diff.put("new", newValue);
+            changes.put(field, diff);
         }
 
         public String getFieldName() { return fieldName; }
@@ -165,8 +169,10 @@ public class DorisMetadataSyncService {
 
         try {
             // 获取所有数据库
-            List<String> databases = dorisConnectionService.getAllDatabases(clusterId);
-            log.info("Found {} databases to audit", databases.size());
+            List<String> databases = dorisConnectionService.getAllDatabases(clusterId).stream()
+                .filter(db -> !IGNORED_DATABASES.contains(db))
+                .collect(Collectors.toList());
+            log.info("Found {} databases to audit (filtered)", databases.size());
 
             for (String database : databases) {
                 try {
@@ -180,7 +186,7 @@ public class DorisMetadataSyncService {
             log.info("Metadata audit completed: {}", result);
         } catch (Exception e) {
             log.error("Failed to audit metadata", e);
-            result.addError("稽核元数据失败: " + e.getMessage());
+            throw new RuntimeException("Failed to audit metadata: " + e.getMessage(), e);
         }
 
         return result;
@@ -438,7 +444,9 @@ public class DorisMetadataSyncService {
 
         try {
             // 获取所有数据库
-            List<String> databases = dorisConnectionService.getAllDatabases(clusterId);
+            List<String> databases = dorisConnectionService.getAllDatabases(clusterId).stream()
+                .filter(db -> !IGNORED_DATABASES.contains(db))
+                .collect(Collectors.toList());
             log.info("Found {} databases to sync", databases.size());
 
             for (String database : databases) {

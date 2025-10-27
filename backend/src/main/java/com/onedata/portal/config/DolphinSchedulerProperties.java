@@ -19,10 +19,10 @@ public class DolphinSchedulerProperties {
     private String webuiUrl;
 
     /** DolphinScheduler project name managed by the Python service. */
-    private String projectName = "data-portal";
+    private String projectName = "opendataworks";
 
     /** Unified workflow name that aggregates data portal tasks. */
-    private String workflowName = "data-portal-pipeline";
+    private String workflowName = "opendataworks-default-workflow";
 
     /** Default tenant code forwarded to the dolphinscheduler-service. */
     private String tenantCode = "default";

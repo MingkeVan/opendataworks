@@ -355,8 +355,8 @@ scripts/dev/init-database.sh -r root密码 -p 应用密码 -s
 scripts/dev/init-database.sh \
   -h localhost \
   -P 3306 \
-  -d onedata_portal \
-  -u onedata \
+  -d opendataworks \
+  -u opendataworks \
   -p 应用密码 \
   -r root密码 \
   -s
@@ -381,38 +381,38 @@ scripts/dev/init-database.sh --help
 ```bash
 # 1. 创建数据库
 mysql -u root -p << EOF
-CREATE DATABASE onedata_portal
+CREATE DATABASE opendataworks
   DEFAULT CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 EOF
 
 # 2. 创建应用用户（推荐，避免使用 root）
 mysql -u root -p << EOF
-CREATE USER 'onedata'@'localhost' IDENTIFIED BY 'your_password';
-GRANT ALL PRIVILEGES ON onedata_portal.* TO 'onedata'@'localhost';
+CREATE USER 'opendataworks'@'localhost' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON opendataworks.* TO 'opendataworks'@'localhost';
 
 -- 如需远程访问，添加远程用户
-CREATE USER 'onedata'@'%' IDENTIFIED BY 'your_password';
-GRANT ALL PRIVILEGES ON onedata_portal.* TO 'onedata'@'%';
+CREATE USER 'opendataworks'@'%' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON opendataworks.* TO 'opendataworks'@'%';
 
 FLUSH PRIVILEGES;
 EOF
 
 # 3. 执行建表脚本（核心表结构）
-mysql -u root -p onedata_portal < database/mysql/10-core-schema.sql
+mysql -u root -p opendataworks < database/mysql/10-core-schema.sql
 
 # 4. 执行巡检模块脚本（可选）
-mysql -u root -p onedata_portal < database/mysql/20-inspection-schema.sql
+mysql -u root -p opendataworks < database/mysql/20-inspection-schema.sql
 
 # 5. 加载示例数据（可选，用于测试）
-mysql -u root -p onedata_portal < database/mysql/30-sample-data.sql
+mysql -u root -p opendataworks < database/mysql/30-sample-data.sql
 ```
 
 ##### 验证数据库初始化
 
 ```bash
 # 检查数据库是否创建成功
-mysql -u onedata -p onedata_portal -e "SHOW TABLES;"
+mysql -u opendataworks -p opendataworks -e "SHOW TABLES;"
 
 # 预期输出应包含以下表：
 # - data_table（数据表元信息）
@@ -425,7 +425,7 @@ mysql -u onedata -p onedata_portal -e "SHOW TABLES;"
 # - inspection_rule（巡检规则，可选）
 
 # 查看表数量
-mysql -u onedata -p onedata_portal -e "SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = 'onedata_portal';"
+mysql -u opendataworks -p opendataworks -e "SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = 'opendataworks';"
 ```
 
 ##### 数据库迁移（如果需要）
@@ -434,11 +434,11 @@ mysql -u onedata -p onedata_portal -e "SELECT COUNT(*) as table_count FROM infor
 
 ```bash
 # 查看当前数据库版本
-mysql -u onedata -p onedata_portal -e "SELECT * FROM schema_version LIMIT 1;"
+mysql -u opendataworks -p opendataworks -e "SELECT * FROM schema_version LIMIT 1;"
 
 # 执行增量迁移脚本
-mysql -u onedata -p onedata_portal < backend/src/main/resources/db/migration/V2__add_table_features.sql
-mysql -u onedata -p onedata_portal < backend/src/main/resources/db/migration/V3__add_statistics_history.sql
+mysql -u opendataworks -p opendataworks < backend/src/main/resources/db/migration/V2__add_table_features.sql
+mysql -u opendataworks -p opendataworks < backend/src/main/resources/db/migration/V3__add_statistics_history.sql
 ```
 
 ##### 常见问题排查
@@ -446,28 +446,28 @@ mysql -u onedata -p onedata_portal < backend/src/main/resources/db/migration/V3_
 **问题1：字符集错误**
 ```bash
 # 检查数据库字符集
-mysql -u root -p -e "SELECT default_character_set_name, default_collation_name FROM information_schema.schemata WHERE schema_name = 'onedata_portal';"
+mysql -u root -p -e "SELECT default_character_set_name, default_collation_name FROM information_schema.schemata WHERE schema_name = 'opendataworks';"
 
 # 如果字符集不正确，修改
-mysql -u root -p -e "ALTER DATABASE onedata_portal CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+mysql -u root -p -e "ALTER DATABASE opendataworks CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 ```
 
 **问题2：权限不足**
 ```bash
 # 检查用户权限
-mysql -u root -p -e "SHOW GRANTS FOR 'onedata'@'localhost';"
+mysql -u root -p -e "SHOW GRANTS FOR 'opendataworks'@'localhost';"
 
 # 重新授权
-mysql -u root -p -e "GRANT ALL PRIVILEGES ON onedata_portal.* TO 'onedata'@'localhost'; FLUSH PRIVILEGES;"
+mysql -u root -p -e "GRANT ALL PRIVILEGES ON opendataworks.* TO 'opendataworks'@'localhost'; FLUSH PRIVILEGES;"
 ```
 
 **问题3：表已存在**
 ```bash
 # 备份现有数据
-mysqldump -u root -p onedata_portal > onedata_portal_backup_$(date +%Y%m%d).sql
+mysqldump -u root -p opendataworks > opendataworks_backup_$(date +%Y%m%d).sql
 
 # 删除数据库重建
-mysql -u root -p -e "DROP DATABASE onedata_portal;"
+mysql -u root -p -e "DROP DATABASE opendataworks;"
 scripts/dev/init-database.sh -r root密码 -p 应用密码
 ```
 
@@ -506,7 +506,7 @@ vim src/main/resources/application.yml
 # 配置数据库连接
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/onedata_portal
+    url: jdbc:mysql://localhost:3306/opendataworks
     username: root
     password: your_password
 
@@ -642,14 +642,14 @@ server:
 
 spring:
   application:
-    name: data-portal
+    name: opendataworks
 
   # 数据库配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/onedata_portal?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
-    username: root
-    password: root
+    url: jdbc:mysql://localhost:3306/opendataworks?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: opendataworks
+    password: opendataworks123
 
   # Jackson 配置
   jackson:
@@ -667,8 +667,8 @@ mybatis-plus:
 # DolphinScheduler 配置
 dolphin:
   service-url: http://localhost:5001      # Python 服务地址
-  project-name: test-project               # 项目名称 (自动查询 project-code)
-  workflow-name: data-portal-workflow      # 统一工作流名称
+  project-name: opendataworks              # 项目名称 (自动查询 project-code)
+  workflow-name: opendataworks-default-workflow  # 统一工作流名称
   tenant-code: default                     # 租户代码
   worker-group: default                    # Worker 组
   execution-type: PARALLEL                 # 执行类型
@@ -861,11 +861,11 @@ npm test
 cd backend
 mvn clean package -DskipTests
 
-# 生成 JAR 文件: target/data-portal-1.0.0.jar
+# 生成 JAR 文件: target/opendataworks-backend-1.0.0.jar
 
 # 运行
-java -jar target/data-portal-1.0.0.jar \
-  --spring.datasource.url=jdbc:mysql://your-db-host:3306/onedata_portal \
+java -jar target/opendataworks-backend-1.0.0.jar \
+  --spring.datasource.url=jdbc:mysql://your-db-host:3306/opendataworks \
   --spring.datasource.username=your-username \
   --spring.datasource.password=your-password \
   --dolphin.service-url=http://your-dolphin-service:5001
@@ -908,13 +908,13 @@ server {
 
 ```ini
 [Unit]
-Description=opendataworks Backend
+Description=OpenDataWorks Backend
 After=network.target
 
 [Service]
 Type=simple
 User=opendataworks
-ExecStart=/usr/bin/java -jar /opt/opendataworks/data-portal-1.0.0.jar
+ExecStart=/usr/bin/java -jar /opt/opendataworks/opendataworks-backend-1.0.0.jar
 Restart=on-failure
 
 [Install]
@@ -959,7 +959,7 @@ services:
     image: mysql:8.0
     environment:
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: onedata_portal
+      MYSQL_DATABASE: opendataworks
     volumes:
       - ./database/mysql:/docker-entrypoint-initdb.d:ro
 

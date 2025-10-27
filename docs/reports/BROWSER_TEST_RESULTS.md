@@ -76,7 +76,7 @@ try:
 ```bash
 curl -X POST "http://localhost:5001/api/v1/workflows/19386043855840/delete" \
   -H "Content-Type: application/json" \
-  -d '{"projectName": "data-portal"}'
+  -d '{"projectName": "opendataworks"}'
 ```
 **Result:** `{"success": true, "code": "OK", "message": "ok", "data": {"workflowCode": 19386043855840, "deleted": true}}`
 
@@ -84,7 +84,7 @@ curl -X POST "http://localhost:5001/api/v1/workflows/19386043855840/delete" \
 ```bash
 curl -X POST "http://localhost:5001/api/v1/workflows/19385942554208/delete" \
   -H "Content-Type: application/json" \
-  -d '{"projectName": "data-portal"}'
+  -d '{"projectName": "opendataworks"}'
 ```
 **Result:** `{"success": true, "code": "OK", "message": "ok", "data": {"workflowCode": 19385942554208, "deleted": true}}`
 

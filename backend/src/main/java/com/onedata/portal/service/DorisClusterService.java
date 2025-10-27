@@ -45,7 +45,7 @@ public class DorisClusterService {
      */
     @Transactional
     public DorisCluster create(DorisCluster cluster) {
-        validate(cluster);
+        validate(cluster, true);
         handleDefaultFlag(cluster, null);
         dorisClusterMapper.insert(cluster);
         log.info("Created Doris cluster: {}", cluster.getClusterName());
@@ -61,7 +61,10 @@ public class DorisClusterService {
         if (exists == null) {
             throw new RuntimeException("Doris 集群不存在");
         }
-        validate(cluster);
+        if (!StringUtils.hasText(cluster.getPassword())) {
+            cluster.setPassword(exists.getPassword());
+        }
+        validate(cluster, false);
         cluster.setId(id);
         handleDefaultFlag(cluster, id);
         dorisClusterMapper.updateById(cluster);
@@ -95,7 +98,7 @@ public class DorisClusterService {
         log.info("Set default Doris cluster: {}", id);
     }
 
-    private void validate(DorisCluster cluster) {
+    private void validate(DorisCluster cluster, boolean requirePassword) {
         if (cluster == null) {
             throw new IllegalArgumentException("Doris 集群不能为空");
         }
@@ -110,6 +113,9 @@ public class DorisClusterService {
         }
         if (!StringUtils.hasText(cluster.getUsername())) {
             throw new RuntimeException("用户名不能为空");
+        }
+        if (requirePassword && !StringUtils.hasText(cluster.getPassword())) {
+            throw new RuntimeException("密码不能为空");
         }
         if (cluster.getIsDefault() == null) {
             cluster.setIsDefault(0);

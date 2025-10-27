@@ -162,7 +162,7 @@ tail -f /tmp/dolphin-service.log
 ```bash
 curl -X POST "http://localhost:5001/api/v1/workflows/{actualCode}/delete" \
   -H "Content-Type: application/json" \
-  -d '{"projectName": "data-portal"}'
+  -d '{"projectName": "opendataworks"}'
 ```
 4. 应该返回成功
 
