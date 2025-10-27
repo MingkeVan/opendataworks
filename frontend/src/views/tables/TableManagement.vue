@@ -130,6 +130,9 @@
                           <span class="row-count" :title="`数据量: ${formatNumber(getTableRowCount(item))} 行`">
                             {{ formatRowCount(getTableRowCount(item)) }}
                           </span>
+                          <span class="storage-size" :title="`存储大小: ${formatStorageSize(getTableStorageSize(item))}`">
+                            {{ formatStorageSize(getTableStorageSize(item)) }}
+                          </span>
                           <span v-if="getUpstreamCount(item.id) > 0" class="lineage-count upstream" :title="`上游表: ${getUpstreamCount(item.id)} 个`">
                             ↑{{ getUpstreamCount(item.id) }}
                           </span>
