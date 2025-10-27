@@ -1704,12 +1704,33 @@ const formatRowCount = (rowCount) => {
   if (rowCount < 1000000000) return (rowCount / 1000000).toFixed(1) + 'M'
   return (rowCount / 1000000000).toFixed(1) + 'B'
 }
+
+const formatStorageSize = (size) => {
+  if (size === null || size === undefined) return '-'
+  if (size === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  let value = size
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex++
+  }
+  return value >= 10 ? `${value.toFixed(0)} ${units[unitIndex]}` : `${value.toFixed(1)} ${units[unitIndex]}`
+}
+
 // 获取表的数据量（真实数据）
 const getTableRowCount = (table) => {
   if (!table || table.rowCount === null || table.rowCount === undefined) {
     return 0
   }
   return Number(table.rowCount) || 0
+}
+
+const getTableStorageSize = (table) => {
+  if (!table || table.storageSize === null || table.storageSize === undefined) {
+    return 0
+  }
+  return Number(table.storageSize) || 0
 }
 
 // 计算表的数据量进度条宽度
