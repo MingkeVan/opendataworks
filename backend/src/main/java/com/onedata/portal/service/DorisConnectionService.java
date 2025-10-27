@@ -13,6 +13,7 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.*;
 
+
 /**
  * Doris 连接服务
  */
@@ -98,6 +99,132 @@ public class DorisConnectionService {
             }
         }
         return cluster;
+    }
+
+    public Optional<TableRuntimeStats> getTableRuntimeStats(Long clusterId, String database, String tableName) {
+        DorisCluster cluster = resolveCluster(clusterId);
+
+        try (Connection connection = getConnection(cluster, null)) {
+            Optional<TableRuntimeStats> stats = queryTableStats(connection, database, tableName);
+            if (stats.isPresent()) {
+                return stats;
+            }
+            return queryTableStatsFallback(connection, database, tableName);
+        } catch (SQLException e) {
+            log.warn("Failed to fetch runtime stats for {}.{}, reason={}", database, tableName, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private Optional<TableRuntimeStats> queryTableStats(Connection connection, String database, String tableName) {
+        String sql = String.format("SHOW TABLE STATS `%s`.`%s`", database, tableName);
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) {
+                Map<String, Object> row = extractRow(rs);
+                TableRuntimeStats stats = new TableRuntimeStats();
+                stats.setRowCount(getLong(row, "RowCount", "row_count", "rows"));
+                stats.setDataSize(getLong(row, "DataSize", "data_size"));
+                stats.setLastUpdate(toTimestamp(row, "UpdateTime", "update_time", "LastAnalyzeTime", "last_update_time"));
+                return Optional.of(stats);
+            }
+        } catch (SQLException e) {
+            log.debug("SHOW TABLE STATS not available for {}.{}, fallback to information_schema.table_stats", database, tableName);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<TableRuntimeStats> queryTableStatsFallback(Connection connection, String database, String tableName) {
+        String sql = "SELECT row_count, data_size, update_time FROM information_schema.table_stats WHERE table_schema = ? AND table_name = ?";
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            stmt.setString(1, database);
+            stmt.setString(2, tableName);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    TableRuntimeStats stats = new TableRuntimeStats();
+                    stats.setRowCount(rs.getLong("row_count"));
+                    stats.setDataSize(rs.getLong("data_size"));
+                    stats.setLastUpdate(rs.getTimestamp("update_time"));
+                    return Optional.of(stats);
+                }
+            }
+        } catch (SQLException e) {
+            log.debug("information_schema.table_stats not accessible for {}.{}, reason={}", database, tableName, e.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    private Map<String, Object> extractRow(ResultSet rs) throws SQLException {
+        Map<String, Object> row = new HashMap<>();
+        ResultSetMetaData metaData = rs.getMetaData();
+        for (int i = 1; i <= metaData.getColumnCount(); i++) {
+            String label = metaData.getColumnLabel(i);
+            if (!StringUtils.hasText(label)) {
+                label = metaData.getColumnName(i);
+            }
+            row.put(label.toLowerCase(Locale.ROOT), rs.getObject(i));
+        }
+        return row;
+    }
+
+    private Long getLong(Map<String, Object> row, String... keys) {
+        for (String key : keys) {
+            Object value = row.get(key.toLowerCase(Locale.ROOT));
+            if (value instanceof Number) {
+                return ((Number) value).longValue();
+            }
+        }
+        return null;
+    }
+
+    private Timestamp toTimestamp(Map<String, Object> row, String... keys) {
+        for (String key : keys) {
+            Object value = row.get(key.toLowerCase(Locale.ROOT));
+            if (value instanceof Timestamp) {
+                return (Timestamp) value;
+            }
+            if (value instanceof java.util.Date) {
+                return new Timestamp(((java.util.Date) value).getTime());
+            }
+            if (value instanceof String) {
+                try {
+                    return Timestamp.valueOf((String) value);
+                } catch (IllegalArgumentException ignore) {
+                    // ignore malformed timestamp
+                }
+            }
+        }
+        return null;
+    }
+
+    public static class TableRuntimeStats {
+        private Long rowCount;
+        private Long dataSize;
+        private Timestamp lastUpdate;
+
+        public Long getRowCount() {
+            return rowCount;
+        }
+
+        public void setRowCount(Long rowCount) {
+            this.rowCount = rowCount;
+        }
+
+        public Long getDataSize() {
+            return dataSize;
+        }
+
+        public void setDataSize(Long dataSize) {
+            this.dataSize = dataSize;
+        }
+
+        public Timestamp getLastUpdate() {
+            return lastUpdate;
+        }
+
+        public void setLastUpdate(Timestamp lastUpdate) {
+            this.lastUpdate = lastUpdate;
+        }
     }
 
     private void applySessionCharset(Connection connection) {

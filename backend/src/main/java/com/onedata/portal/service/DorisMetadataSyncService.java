@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
@@ -237,7 +238,7 @@ public class DorisMetadataSyncService {
                     result.addTableDifference(diff);
                 } else {
                     // 已存在表：自动同步统计信息 + 检查结构差异
-                    boolean statsSynced = syncTableStatistics(dorisTable, localTable);
+                    boolean statsSynced = syncTableStatistics(clusterId, dorisTable, localTable);
                     if (statsSynced) {
                         result.incrementStatisticsSynced();
                     }
@@ -270,31 +271,58 @@ public class DorisMetadataSyncService {
      * 自动同步表的统计信息（行数、数据量、更新时间等）
      * 这些信息是安全的，可以自动同步，不需要人工确认
      */
-    private boolean syncTableStatistics(Map<String, Object> dorisTable, DataTable localTable) {
+    private boolean syncTableStatistics(Long clusterId, Map<String, Object> dorisTable, DataTable localTable) {
         boolean updated = false;
 
         try {
-            // 同步行数
-            Long tableRows = (Long) dorisTable.get("tableRows");
-            if (tableRows != null && !Objects.equals(tableRows, localTable.getRowCount())) {
-                localTable.setRowCount(tableRows);
-                updated = true;
+            // 优先使用 runtime stats（SHOW TABLE STATS / information_schema.table_stats）
+            DorisConnectionService.TableRuntimeStats runtimeStats = null;
+            if (StringUtils.hasText(localTable.getDbName())) {
+                runtimeStats = dorisConnectionService
+                    .getTableRuntimeStats(clusterId, localTable.getDbName(), localTable.getTableName())
+                    .orElse(null);
             }
 
-            // 同步数据大小
-            Long dataLength = (Long) dorisTable.get("dataLength");
-            if (dataLength != null && !Objects.equals(dataLength, localTable.getStorageSize())) {
-                localTable.setStorageSize(dataLength);
-                updated = true;
-            }
-
-            // 同步最后更新时间
-            Timestamp updateTime = (Timestamp) dorisTable.get("updateTime");
-            if (updateTime != null) {
-                LocalDateTime updateDateTime = updateTime.toLocalDateTime();
-                if (!Objects.equals(updateDateTime, localTable.getLastUpdated())) {
-                    localTable.setLastUpdated(updateDateTime);
+            if (runtimeStats != null) {
+                if (runtimeStats.getRowCount() != null && !Objects.equals(runtimeStats.getRowCount(), localTable.getRowCount())) {
+                    localTable.setRowCount(runtimeStats.getRowCount());
                     updated = true;
+                }
+
+                if (runtimeStats.getDataSize() != null && !Objects.equals(runtimeStats.getDataSize(), localTable.getStorageSize())) {
+                    localTable.setStorageSize(runtimeStats.getDataSize());
+                    updated = true;
+                }
+
+                Timestamp lastUpdate = runtimeStats.getLastUpdate();
+                if (lastUpdate != null) {
+                    LocalDateTime updateDateTime = lastUpdate.toLocalDateTime();
+                    if (!Objects.equals(updateDateTime, localTable.getLastUpdated())) {
+                        localTable.setLastUpdated(updateDateTime);
+                        updated = true;
+                    }
+                }
+            } else {
+                // 后备：使用 information_schema.tables 中的粗略统计
+                Long tableRows = (Long) dorisTable.get("tableRows");
+                if (tableRows != null && !Objects.equals(tableRows, localTable.getRowCount())) {
+                    localTable.setRowCount(tableRows);
+                    updated = true;
+                }
+
+                Long dataLength = (Long) dorisTable.get("dataLength");
+                if (dataLength != null && !Objects.equals(dataLength, localTable.getStorageSize())) {
+                    localTable.setStorageSize(dataLength);
+                    updated = true;
+                }
+
+                Timestamp updateTime = (Timestamp) dorisTable.get("updateTime");
+                if (updateTime != null) {
+                    LocalDateTime updateDateTime = updateTime.toLocalDateTime();
+                    if (!Objects.equals(updateDateTime, localTable.getLastUpdated())) {
+                        localTable.setLastUpdated(updateDateTime);
+                        updated = true;
+                    }
                 }
             }
 
