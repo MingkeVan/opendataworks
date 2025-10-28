@@ -12,7 +12,7 @@ Usage: scripts/offline/create-offline-package-from-dockerhub.sh [options]
 
 Options:
   --registry <registry>     Remote registry host (default: docker.io)
-  --namespace <namespace>   Docker Hub namespace for opendataworks images (default: mingkevan)
+  --namespace <namespace>   Docker Hub namespace for opendataworks images (default: mikefan2019)
   --tag <tag>               Image tag to pull (default: latest)
   --output <path>           Output tar.gz path (default: ./opendataworks-deployment-<timestamp>.tar.gz)
   --platform <platform>     Optional pull platform (e.g. linux/amd64)
@@ -130,6 +130,20 @@ tar -C "$REPO_ROOT/scripts" -cf - deploy | tar -C "$SCRIPTS_PACKAGE_DIR" -xf -
 cp "$REPO_ROOT/deploy/offline/README_OFFLINE.md" "$PACKAGE_ROOT/README_OFFLINE.md"
 if [[ -f "$REPO_ROOT/docs/handbook/operations-guide.md" ]]; then
     cp "$REPO_ROOT/docs/handbook/operations-guide.md" "$PACKAGE_ROOT/OPERATIONS_GUIDE.md"
+fi
+if [[ -f "$REPO_ROOT/docs/handbook/testing-guide.md" ]]; then
+    cp "$REPO_ROOT/docs/handbook/testing-guide.md" "$PACKAGE_ROOT/TESTING_GUIDE.md"
+fi
+
+DOLPHIN_ENV_SOURCE="$REPO_ROOT/dolphinscheduler-service/.env"
+if [[ -f "$DOLPHIN_ENV_SOURCE" ]]; then
+    log "Copying dolphinscheduler-service configuration"
+    mkdir -p "$PACKAGE_ROOT/dolphinscheduler-service"
+    cp "$DOLPHIN_ENV_SOURCE" "$PACKAGE_ROOT/dolphinscheduler-service/.env"
+    mkdir -p "$DEPLOY_PACKAGE_DIR/dolphinscheduler-service"
+    cp "$DOLPHIN_ENV_SOURCE" "$DEPLOY_PACKAGE_DIR/dolphinscheduler-service/.env"
+else
+    die "dolphinscheduler-service .env not found at $DOLPHIN_ENV_SOURCE"
 fi
 
 declare -a MANIFEST_RAW=()
