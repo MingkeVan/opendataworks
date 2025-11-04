@@ -540,6 +540,28 @@ npm run dev
 
 打开浏览器访问: `http://localhost:5173`
 
+### 开发环境一键启动（Docker Compose）
+
+如果希望一次性在本机拉起完整的前端、后端、Python 服务和 MySQL，可直接使用 `deploy/docker-compose.dev.yml`：
+
+```bash
+# 1. 准备环境变量
+cp deploy/.env.example deploy/.env        # 按需修改数据库与 DolphinScheduler 配置
+
+# 2. 启动完整开发栈
+docker compose -f deploy/docker-compose.dev.yml up -d
+
+# 3. 查看运行状态
+docker compose -f deploy/docker-compose.dev.yml ps
+
+# 4. 停止并清理
+docker compose -f deploy/docker-compose.dev.yml down
+```
+
+> 提示  
+> - 该 Compose 文件使用 `mikefan2019/opendataworks-*` 镜像，若需自建镜像，请先执行 `scripts/build/build-images.sh` 并按需修改 `image` 字段。  
+> - 如果遇到 `proxy already running`，说明之前的 Compose 实例未完全退出，先执行 `docker compose -f deploy/docker-compose.dev.yml down` 或重启 Docker 再尝试。
+
 ### Docker 快速部署 (推荐)
 
 ```bash
