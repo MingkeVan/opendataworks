@@ -205,3 +205,18 @@ class ListInstancesResponse(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+
+class DatasourceItem(BaseModel):
+    id: Optional[int] = None
+    name: str
+    type: Optional[str] = None
+    db_name: Optional[str] = Field(default=None, alias="dbName")
+    description: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+
+class ListDatasourcesResponse(BaseModel):
+    datasources: List[DatasourceItem] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)

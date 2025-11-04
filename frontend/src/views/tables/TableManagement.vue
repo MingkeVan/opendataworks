@@ -414,7 +414,50 @@
                                   查看完整血缘
                                 </el-button>
                               </div>
-                            </template>
+                          </template>
+                            <div class="task-entry">
+                              <div class="task-entry-header">
+                                <span>写入任务 ({{ relatedTasks.writeTasks.length }})</span>
+                                <el-button type="primary" size="small" plain @click.stop="goCreateRelatedTask('write')">
+                                  <el-icon><Plus /></el-icon>
+                                  新增写入任务
+                                </el-button>
+                              </div>
+                              <div v-if="relatedTasks.writeTasks.length" class="task-entry-list">
+                                <div
+                                  v-for="task in relatedTasks.writeTasks"
+                                  :key="task.id"
+                                  class="task-entry-item"
+                                >
+                                  <div class="task-entry-title">
+                                    <el-link type="primary" @click.stop="goTaskDetail(task.id)">
+                                      {{ task.taskName || '-' }}
+                                    </el-link>
+                                    <el-tag
+                                      v-if="task.status"
+                                      size="small"
+                                      :type="taskStatusTag(task.status)"
+                                    >
+                                      {{ task.status }}
+                                    </el-tag>
+                                  </div>
+                                  <div class="task-entry-meta">
+                                    <span>引擎: {{ task.engine || '-' }}</span>
+                                    <span v-if="task.taskCode">编码: {{ task.taskCode }}</span>
+                                  </div>
+                                  <div class="task-entry-meta">
+                                    <span>最近执行: {{ task.lastExecuted ? formatDateTime(task.lastExecuted) : '未执行' }}</span>
+                                    <span v-if="task.lastExecutionStatus">状态: {{ task.lastExecutionStatus }}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <el-empty
+                                v-else
+                                description="暂无写入任务"
+                                :image-size="50"
+                              />
+                            </div>
+                            <div class="lineage-divider"></div>
                             <div v-if="lineage.upstreamTables?.length" class="lineage-list">
                               <div
                                 v-for="table in lineage.upstreamTables"
@@ -445,6 +488,49 @@
                                 </el-button>
                               </div>
                             </template>
+                            <div class="task-entry">
+                              <div class="task-entry-header">
+                                <span>读取任务 ({{ relatedTasks.readTasks.length }})</span>
+                                <el-button type="primary" size="small" plain @click.stop="goCreateRelatedTask('read')">
+                                  <el-icon><Plus /></el-icon>
+                                  新增读取任务
+                                </el-button>
+                              </div>
+                              <div v-if="relatedTasks.readTasks.length" class="task-entry-list">
+                                <div
+                                  v-for="task in relatedTasks.readTasks"
+                                  :key="task.id"
+                                  class="task-entry-item"
+                                >
+                                  <div class="task-entry-title">
+                                    <el-link type="primary" @click.stop="goTaskDetail(task.id)">
+                                      {{ task.taskName || '-' }}
+                                    </el-link>
+                                    <el-tag
+                                      v-if="task.status"
+                                      size="small"
+                                      :type="taskStatusTag(task.status)"
+                                    >
+                                      {{ task.status }}
+                                    </el-tag>
+                                  </div>
+                                  <div class="task-entry-meta">
+                                    <span>引擎: {{ task.engine || '-' }}</span>
+                                    <span v-if="task.taskCode">编码: {{ task.taskCode }}</span>
+                                  </div>
+                                  <div class="task-entry-meta">
+                                    <span>最近执行: {{ task.lastExecuted ? formatDateTime(task.lastExecuted) : '未执行' }}</span>
+                                    <span v-if="task.lastExecutionStatus">状态: {{ task.lastExecutionStatus }}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <el-empty
+                                v-else
+                                description="暂无读取任务"
+                                :image-size="50"
+                              />
+                            </div>
+                            <div class="lineage-divider"></div>
                             <div v-if="lineage.downstreamTables?.length" class="lineage-list">
                               <div
                                 v-for="table in lineage.downstreamTables"
@@ -852,8 +938,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, onMounted, computed, nextTick, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Search,
@@ -875,6 +961,7 @@ import { businessDomainApi, dataDomainApi } from '@/api/domain'
 import { tableDesignerApi } from '@/api/tableDesigner'
 
 const router = useRouter()
+const route = useRoute()
 
 const loading = ref(false)
 const detailLoading = ref(false)
@@ -900,6 +987,25 @@ const previewLimit = ref(100)
 const activeTab = ref('basic')
 const chartContainer = ref(null)
 let chartInstance = null
+
+const createEmptyTaskState = () => ({
+  writeTasks: [],
+  readTasks: []
+})
+const relatedTasks = ref(createEmptyTaskState())
+
+const suppressRouteSync = ref(false)
+
+const assignRelatedTasks = (data) => {
+  if (!data) {
+    relatedTasks.value = createEmptyTaskState()
+    return
+  }
+  relatedTasks.value = {
+    writeTasks: Array.isArray(data.writeTasks) ? data.writeTasks : [],
+    readTasks: Array.isArray(data.readTasks) ? data.readTasks : []
+  }
+}
 
 // 表编辑相关
 const isEditing = ref(false)
@@ -1274,25 +1380,70 @@ const handleTableClick = async (table) => {
   // 切换表时清空DDL和预览数据
   tableDdl.value = ''
   previewData.value = []
+  if (String(route.query.tableId || '') !== String(targetTable.id)) {
+    suppressRouteSync.value = true
+    router.replace({
+      path: route.path,
+      query: {
+        ...route.query,
+        tableId: targetTable.id
+      }
+    })
+      .catch(() => {})
+      .finally(() => {
+        suppressRouteSync.value = false
+      })
+  }
   await loadTableDetail(targetTable.id)
 }
 
+const syncSelectionFromRoute = async () => {
+  const tableIdParam = route.query.tableId
+  if (!tableIdParam) return
+
+  const numericId = Number(tableIdParam)
+  if (!Number.isFinite(numericId)) return
+  if (selectedTable.value && selectedTable.value.id === numericId) {
+    return
+  }
+
+  try {
+    const tableInfo = await tableApi.getById(numericId)
+    if (tableInfo?.dbName) {
+      if (!databases.value.includes(tableInfo.dbName)) {
+        databases.value.push(tableInfo.dbName)
+      }
+      activeDatabase.value = tableInfo.dbName
+      if (!tablesByDatabase.value[tableInfo.dbName]) {
+        await loadTablesForDatabase(tableInfo.dbName)
+      }
+    }
+    await loadTableDetail(numericId, tableInfo)
+  } catch (error) {
+    console.error('根据路由加载表失败:', error)
+  }
+}
+
 // 加载表详情
-const loadTableDetail = async (tableId) => {
+const loadTableDetail = async (tableId, tableInfoOverride = null) => {
   detailLoading.value = true
   try {
-    const [tableInfo, fieldList, lineageData] = await Promise.all([
-      tableApi.getById(tableId),
+    const tableInfoPromise = tableInfoOverride ? Promise.resolve(tableInfoOverride) : tableApi.getById(tableId)
+    const [tableInfo, fieldList, lineageData, tasksData] = await Promise.all([
+      tableInfoPromise,
       tableApi.getFields(tableId),
-      tableApi.getLineage(tableId)
+      tableApi.getLineage(tableId),
+      tableApi.getTasks(tableId)
     ])
     selectedTable.value = tableInfo
     fields.value = fieldList
     lineage.value = lineageData
+    assignRelatedTasks(tasksData)
     await applyEditForm(tableInfo)
   } catch (error) {
     console.error('加载表详情失败:', error)
     ElMessage.error('加载表详情失败')
+    assignRelatedTasks(null)
   } finally {
     detailLoading.value = false
   }
@@ -1553,6 +1704,24 @@ const goLineage = () => {
   }
 }
 
+// 新增关联任务
+const goCreateRelatedTask = (relation) => {
+  if (!selectedTable.value) return
+  router.push({
+    path: '/tasks/create',
+    query: {
+      relation,
+      tableId: selectedTable.value.id,
+      redirect: route.fullPath
+    }
+  })
+}
+
+const goTaskDetail = (taskId) => {
+  if (!taskId) return
+  router.push(`/tasks/${taskId}/edit`)
+}
+
 // 删除表
 const handleDelete = async (id) => {
   try {
@@ -1689,6 +1858,21 @@ const getLayerType = (layer) => {
   return types[layer] || ''
 }
 
+const taskStatusTag = (status) => {
+  if (!status) return ''
+  switch (status) {
+    case 'published':
+    case 'running':
+      return 'success'
+    case 'paused':
+      return 'warning'
+    case 'failed':
+      return 'danger'
+    default:
+      return ''
+  }
+}
+
 // 格式化数字
 const formatNumber = (num) => {
   if (num === null || num === undefined) return '-'
@@ -1763,9 +1947,23 @@ const formatDateTime = (dateTime) => {
   }
 }
 
-onMounted(() => {
-  loadDatabases()
-  loadBusinessDomainOptions()
+watch(
+  () => route.query.tableId,
+  async (newValue, oldValue) => {
+    if (suppressRouteSync.value) {
+      return
+    }
+    if (newValue === oldValue || !newValue) {
+      return
+    }
+    await syncSelectionFromRoute()
+  }
+)
+
+onMounted(async () => {
+  await loadDatabases()
+  await loadBusinessDomainOptions()
+  await syncSelectionFromRoute()
 })
 </script>
 
@@ -2096,6 +2294,66 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.task-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.task-entry-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.task-entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-entry-item {
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background-color: #f8fafc;
+  transition: border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.task-entry-item:hover {
+  border-color: #667eea;
+  background-color: #f0f4ff;
+}
+
+.task-entry-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.task-entry-title .el-link {
+  font-weight: 600;
+}
+
+.task-entry-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.lineage-divider {
+  height: 1px;
+  background-color: #e5e7eb;
+  margin: 8px 0 12px 0;
 }
 
 .lineage-list {

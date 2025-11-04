@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import math
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional, List
+
+import requests
 
 from pydolphinscheduler.constants import TaskFlag, TaskPriority
 from pydolphinscheduler.core.workflow import Workflow
@@ -27,6 +29,8 @@ from .models import (
     StartWorkflowResponse,
     SyncWorkflowRequest,
     SyncWorkflowResponse,
+    DatasourceItem,
+    ListDatasourcesResponse,
     TaskDefinitionPayload,
     TaskRelationPayload,
 )
@@ -41,6 +45,67 @@ class DolphinSchedulerServiceCore:
         self.settings = settings
         # Cache of workflow definitions for release operations
         self._workflow_cache: Dict[int, SyncWorkflowRequest] = {}
+
+    def _get_project_code(self, project_name: Optional[str] = None) -> Optional[int]:
+        """
+        Resolve DolphinScheduler project code by project name using the Java gateway.
+        """
+        from pydolphinscheduler.java_gateway import gateway
+
+        target_project = project_name or self.settings.workflow_project
+        user_name = self.settings.user_name
+
+        try:
+            project_info = gateway.query_project_by_name(user_name, target_project)
+            if project_info is None:
+                logger.error(
+                    "DolphinScheduler project not found via gateway: user=%s project=%s",
+                    user_name,
+                    target_project,
+                )
+                return None
+            project_code = int(project_info.getCode())
+            return project_code
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error(
+                "Failed to query project code: user=%s project=%s error=%s",
+                user_name,
+                target_project,
+                exc,
+            )
+            return None
+
+    def _login_and_get_token(self) -> Optional[str]:
+        """
+        Authenticate against DolphinScheduler REST API and obtain session token.
+        """
+        api_base = self.settings.api_base_url.rstrip("/")
+        login_url = f"{api_base}/login"
+        payload = {
+            "userName": self.settings.user_name,
+            "userPassword": self.settings.user_password,
+        }
+
+        try:
+            response = requests.post(login_url, data=payload, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("Failed to authenticate with DolphinScheduler API: %s", exc)
+            return None
+
+        if not data.get("success"):
+            logger.error(
+                "DolphinScheduler API login failed: %s",
+                data.get("msg") or data.get("message"),
+            )
+            return None
+
+        token = (data.get("data") or {}).get("sessionId")
+        if not token:
+            logger.error("DolphinScheduler API login did not return sessionId")
+            return None
+        return token
 
     def ensure_workflow(self, request: EnsureWorkflowRequest) -> EnsureWorkflowResponse:
         """
@@ -57,6 +122,82 @@ class DolphinSchedulerServiceCore:
         )
         # Return a placeholder code, actual code will be assigned in sync_workflow
         return EnsureWorkflowResponse(workflowCode=0, created=False)
+
+    def list_datasources(
+        self,
+        ds_type: Optional[str] = None,
+        keyword: Optional[str] = None,
+        page_size: int = 100,
+    ) -> ListDatasourcesResponse:
+        """
+        Query DolphinScheduler REST API for available datasources.
+        """
+        token = self._login_and_get_token()
+        if not token:
+            raise ValueError("Failed to authenticate with DolphinScheduler API")
+
+        project_code = self._get_project_code()
+        if not project_code:
+            raise ValueError("Failed to resolve DolphinScheduler project code")
+
+        api_base = self.settings.api_base_url.rstrip("/")
+        list_url = f"{api_base}/projects/{project_code}/datasources"
+
+        params = {
+            "token": token,
+            "pageNo": 1,
+            "pageSize": max(1, page_size),
+        }
+        if keyword:
+            params["searchVal"] = keyword
+
+        try:
+            response = requests.get(list_url, params=params, timeout=10)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("Failed to query datasources from DolphinScheduler API: %s", exc)
+            raise ValueError("Failed to query datasources from DolphinScheduler") from exc
+
+        if not payload.get("success"):
+            message = payload.get("msg") or payload.get("message") or "unknown error"
+            logger.error("DolphinScheduler API responded with error: %s", message)
+            raise ValueError(f"DolphinScheduler API error: {message}")
+
+        data = payload.get("data") or {}
+        raw_list = (
+            data.get("totalList")
+            or data.get("list")
+            or data.get("datasources")
+            or []
+        )
+
+        normalized_type = ds_type.lower() if ds_type else None
+        items: List[DatasourceItem] = []
+
+        for row in raw_list:
+            if not isinstance(row, dict):
+                continue
+            name = row.get("name") or row.get("datasourceName")
+            if not name:
+                continue
+            dtype = row.get("type") or row.get("datasourceType")
+            if normalized_type:
+                if not dtype:
+                    continue
+                if dtype.lower() != normalized_type:
+                    continue
+
+            item = DatasourceItem(
+                id=row.get("id"),
+                name=name,
+                type=dtype,
+                db_name=row.get("database") or row.get("dbName") or row.get("dbname"),
+                description=row.get("note") or row.get("description"),
+            )
+            items.append(item)
+
+        return ListDatasourcesResponse(datasources=items)
 
     def sync_workflow(
         self, workflow_code: int, request: SyncWorkflowRequest
@@ -665,4 +806,3 @@ class DolphinSchedulerServiceCore:
                     del self._workflow_cache[workflow_code]
             except:
                 pass
-

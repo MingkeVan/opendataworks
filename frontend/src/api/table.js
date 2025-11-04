@@ -58,6 +58,11 @@ export const tableApi = {
     return request.get(`/v1/tables/${id}/lineage`)
   },
 
+  // 搜索表下拉选项
+  searchOptions(params) {
+    return request.get('/v1/tables/options', { params })
+  },
+
   // 获取表统计信息
   getStatistics(id, clusterId = null, forceRefresh = false) {
     return request.get(`/v1/tables/${id}/statistics`, {

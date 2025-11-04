@@ -49,5 +49,10 @@ export const taskApi = {
   // 获取任务血缘关系
   getTaskLineage(id) {
     return request.get(`/v1/tasks/${id}/lineage`)
+  },
+
+  // 获取 Dolphin 数据源列表
+  fetchDatasources(params = {}) {
+    return request.get('/v1/dolphin/datasources', { params })
   }
 }

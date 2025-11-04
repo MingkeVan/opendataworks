@@ -3,6 +3,7 @@ package com.onedata.portal.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.onedata.portal.dto.TableLineageItem;
+import com.onedata.portal.dto.TableOption;
 import com.onedata.portal.dto.TableRelatedLineageResponse;
 import com.onedata.portal.dto.TableRelatedTasksResponse;
 import com.onedata.portal.dto.TableTaskInfo;
@@ -210,6 +211,49 @@ public class DataTableService {
                 .eq(DataTable::getStatus, "active")
                 .orderByAsc(DataTable::getLayer, DataTable::getTableName)
         );
+    }
+
+    /**
+     * 远程搜索表选项
+     */
+    public List<TableOption> searchTableOptions(String keyword, Integer limit, String layer, String dbName) {
+        if (!StringUtils.hasText(keyword)) {
+            return Collections.emptyList();
+        }
+
+        String trimmed = keyword.trim();
+        int pageSize = (limit != null && limit > 0) ? Math.min(limit, 100) : 50;
+
+        LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<>();
+        wrapper.and(w -> w.like(DataTable::getTableName, trimmed)
+            .or().like(DataTable::getTableComment, trimmed));
+
+        if (StringUtils.hasText(layer)) {
+            wrapper.eq(DataTable::getLayer, layer.trim());
+        }
+
+        if (StringUtils.hasText(dbName)) {
+            wrapper.eq(DataTable::getDbName, dbName.trim());
+        }
+
+        wrapper.orderByAsc(DataTable::getTableName);
+
+        Page<DataTable> page = new Page<>(1, pageSize);
+        Page<DataTable> result = dataTableMapper.selectPage(page, wrapper);
+
+        return result.getRecords().stream()
+            .map(this::toTableOption)
+            .collect(Collectors.toList());
+    }
+
+    private TableOption toTableOption(DataTable table) {
+        TableOption option = new TableOption();
+        option.setId(table.getId());
+        option.setTableName(table.getTableName());
+        option.setTableComment(table.getTableComment());
+        option.setLayer(table.getLayer());
+        option.setDbName(table.getDbName());
+        return option;
     }
 
     /**

@@ -4,11 +4,14 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.config.DolphinSchedulerProperties;
+import com.onedata.portal.dto.DolphinDatasourceOption;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.util.StringUtils;
+import org.springframework.web.util.UriComponentsBuilder;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
@@ -383,6 +386,67 @@ public class DolphinSchedulerService {
         }
         String sanitised = sql.replace("\r\n", "\n");
         return "#!/bin/bash\nset -euo pipefail\ncat <<'SQL'\n" + sanitised + "\nSQL\n";
+    }
+
+    /**
+     * Retrieve datasource options from dolphinscheduler-service.
+     */
+    public List<DolphinDatasourceOption> listDatasources(String type, String keyword) {
+        UriComponentsBuilder builder = UriComponentsBuilder.fromPath("/api/v1/dolphin/datasources");
+        if (StringUtils.hasText(type)) {
+            builder.queryParam("type", type);
+        }
+        if (StringUtils.hasText(keyword)) {
+            builder.queryParam("keyword", keyword);
+        }
+
+        try {
+            JsonNode data = getJson(builder.toUriString());
+            JsonNode items = data.path("datasources");
+            if (items.isMissingNode() || !items.isArray()) {
+                items = data.path("items");
+            }
+
+            List<DolphinDatasourceOption> result = new ArrayList<>();
+            if (items.isArray()) {
+                for (JsonNode node : items) {
+                    String name = node.path("name").asText(null);
+                    if (!StringUtils.hasText(name)) {
+                        continue;
+                    }
+                    DolphinDatasourceOption option = new DolphinDatasourceOption();
+                    if (node.hasNonNull("id")) {
+                        option.setId(node.path("id").asLong());
+                    }
+                    option.setName(name);
+                    option.setType(node.path("type").asText(null));
+                    option.setDbName(node.path("dbName").asText(null));
+                    option.setDescription(node.path("description").asText(null));
+                    result.add(option);
+                }
+            }
+            return result;
+        } catch (Exception ex) {
+            log.warn("Failed to load datasources from dolphinscheduler-service: {}", ex.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    private JsonNode getJson(String path) {
+        return getJson(path, DEFAULT_TIMEOUT);
+    }
+
+    private JsonNode getJson(String path, Duration timeout) {
+        try {
+            Mono<String> responseMono = serviceClient.get()
+                .uri(path)
+                .retrieve()
+                .bodyToMono(String.class);
+            String raw = responseMono.block(timeout);
+            return extractDataNode(path, raw);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to call dolphinscheduler-service GET " + path, e);
+        }
     }
 
     private JsonNode postJson(String path, Map<String, ?> body) {

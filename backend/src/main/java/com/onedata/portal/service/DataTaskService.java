@@ -3,6 +3,7 @@ package com.onedata.portal.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.onedata.portal.dto.DolphinDatasourceOption;
 import com.onedata.portal.dto.TaskExecutionStatus;
 import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataTable;
@@ -63,6 +64,13 @@ public class DataTaskService {
      */
     public DataTask getById(Long id) {
         return dataTaskMapper.selectById(id);
+    }
+
+    /**
+     * 获取 DolphinScheduler 数据源选项
+     */
+    public List<DolphinDatasourceOption> listDatasourceOptions(String type, String keyword) {
+        return dolphinSchedulerService.listDatasources(type, keyword);
     }
 
     /**

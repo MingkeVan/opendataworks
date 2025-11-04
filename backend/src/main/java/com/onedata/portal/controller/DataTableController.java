@@ -3,6 +3,7 @@ package com.onedata.portal.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
+import com.onedata.portal.dto.TableOption;
 import com.onedata.portal.dto.TableRelatedLineageResponse;
 import com.onedata.portal.dto.TableRelatedTasksResponse;
 import com.onedata.portal.dto.TableStatistics;
@@ -85,6 +86,19 @@ public class DataTableController {
     @GetMapping("/all")
     public Result<List<DataTable>> listAll() {
         return Result.success(dataTableService.listAll());
+    }
+
+    /**
+     * 搜索用于下拉的表选项
+     */
+    @GetMapping("/options")
+    public Result<List<TableOption>> searchTableOptions(
+        @RequestParam String keyword,
+        @RequestParam(required = false) Integer limit,
+        @RequestParam(required = false) String layer,
+        @RequestParam(required = false) String dbName
+    ) {
+        return Result.success(dataTableService.searchTableOptions(keyword, limit, layer, dbName));
     }
 
     /**

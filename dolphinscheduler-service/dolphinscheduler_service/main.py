@@ -130,6 +130,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         return await run(task)
 
+    @app.get("/api/v1/dolphin/datasources")
+    async def list_datasources(
+        type: str | None = None,
+        keyword: str | None = None,
+    ) -> dict:
+        logger.debug("list_datasources type=%s keyword=%s", type, keyword)
+
+        def task():
+            result = service.list_datasources(ds_type=type, keyword=keyword)
+            return success(result.model_dump(by_alias=True))
+
+        return await run(task)
+
     @app.post("/api/v1/workflows/{workflow_code}/instances/get")
     async def get_workflow_instance(
         workflow_code: int,
