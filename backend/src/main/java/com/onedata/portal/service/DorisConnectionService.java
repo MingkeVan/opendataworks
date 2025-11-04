@@ -1,6 +1,7 @@
 package com.onedata.portal.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.onedata.portal.config.DorisJdbcProperties;
 import com.onedata.portal.dto.TableStatistics;
 import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.mapper.DorisClusterMapper;
@@ -22,22 +23,28 @@ import java.util.*;
 @RequiredArgsConstructor
 public class DorisConnectionService {
 
-    private static final String JDBC_TEMPLATE = "jdbc:mysql://%s:%d/%s?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true";
-    private static final String DEFAULT_DB = "information_schema";
-
     private final DorisClusterMapper dorisClusterMapper;
+    private final DorisJdbcProperties dorisJdbcProperties;
 
     /**
      * 执行 SQL (主要用于创建表等 DDL)
      */
     public void execute(Long clusterId, String sql) {
+        execute(clusterId, null, sql);
+    }
+
+    /**
+     * 在指定数据库中执行 SQL
+     */
+    public void execute(Long clusterId, String database, String sql) {
         DorisCluster cluster = resolveCluster(clusterId);
-        try (Connection connection = getConnection(cluster, null);
+        String targetDb = StringUtils.hasText(database) ? database : dorisJdbcProperties.getDefaultDatabase();
+        try (Connection connection = getConnection(cluster, database);
              Statement statement = connection.createStatement()) {
-            log.info("Executing SQL on Doris cluster {}: {}", cluster.getClusterName(), abbreviate(sql));
+            log.info("Executing SQL on Doris cluster {} (db={}): {}", cluster.getClusterName(), targetDb, abbreviate(sql));
             statement.execute(sql);
         } catch (SQLException e) {
-            log.error("Failed to execute SQL on Doris cluster {}", cluster.getClusterName(), e);
+            log.error("Failed to execute SQL on Doris cluster {} (db={})", cluster.getClusterName(), targetDb, e);
             throw new RuntimeException("执行 Doris SQL 失败: " + e.getMessage(), e);
         }
     }
@@ -72,12 +79,20 @@ public class DorisConnectionService {
     }
 
     private Connection getConnection(DorisCluster cluster, String database) throws SQLException {
-        String targetDb = StringUtils.hasText(database) ? database : DEFAULT_DB;
-        String url = String.format(JDBC_TEMPLATE, cluster.getFeHost(), cluster.getFePort(), targetDb);
+        String targetDb = StringUtils.hasText(database) ? database : dorisJdbcProperties.getDefaultDatabase();
+        String url = buildJdbcUrl(cluster, targetDb);
         String password = cluster.getPassword() == null ? "" : cluster.getPassword();
         Connection connection = DriverManager.getConnection(url, cluster.getUsername(), password);
         applySessionCharset(connection);
         return connection;
+    }
+
+    private String buildJdbcUrl(DorisCluster cluster, String database) {
+        String template = dorisJdbcProperties.getUrlTemplate();
+        if (!StringUtils.hasText(template)) {
+            throw new IllegalStateException("doris.jdbc.url-template 未配置，请在 application.yml 或环境变量中指定");
+        }
+        return String.format(template, cluster.getFeHost(), cluster.getFePort(), database);
     }
 
     private DorisCluster resolveCluster(Long clusterId) {
@@ -228,14 +243,26 @@ public class DorisConnectionService {
     }
 
     private void applySessionCharset(Connection connection) {
+        if (!dorisJdbcProperties.isSessionCharsetEnabled()) {
+            return;
+        }
+        String primaryCharset = dorisJdbcProperties.getSessionCharset();
+        if (!StringUtils.hasText(primaryCharset)) {
+            return;
+        }
         try (Statement stmt = connection.createStatement()) {
-            stmt.execute("SET NAMES utf8mb4");
+            stmt.execute("SET NAMES " + primaryCharset);
         } catch (SQLException primaryEx) {
-            log.warn("Doris does not support utf8mb4 charset, fallback to utf8. reason={}", primaryEx.getMessage());
+            String fallbackCharset = dorisJdbcProperties.getSessionCharsetFallback();
+            if (!StringUtils.hasText(fallbackCharset) || fallbackCharset.equalsIgnoreCase(primaryCharset)) {
+                log.warn("Failed to set Doris session charset to {}. reason={}", primaryCharset, primaryEx.getMessage());
+                return;
+            }
+            log.warn("Doris does not support {} charset, fallback to {}. reason={}", primaryCharset, fallbackCharset, primaryEx.getMessage());
             try (Statement fallback = connection.createStatement()) {
-                fallback.execute("SET NAMES utf8");
+                fallback.execute("SET NAMES " + fallbackCharset);
             } catch (SQLException secondaryEx) {
-                log.warn("Failed to set Doris session charset to utf8. reason={}", secondaryEx.getMessage());
+                log.warn("Failed to set Doris session charset to {}. reason={}", fallbackCharset, secondaryEx.getMessage());
             }
         }
     }

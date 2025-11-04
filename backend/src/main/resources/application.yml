@@ -17,6 +17,14 @@ spring:
     serialization:
       write-dates-as-timestamps: false
 
+doris:
+  jdbc:
+    url-template: jdbc:mysql://%s:%d/%s?useUnicode=true&characterEncoding=UTF-8&useTimezone=true&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=5000&socketTimeout=60000
+    default-database: information_schema
+    session-charset-enabled: true
+    session-charset: utf8mb4
+    session-charset-fallback: utf8
+
 # MyBatis Plus 配置
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml

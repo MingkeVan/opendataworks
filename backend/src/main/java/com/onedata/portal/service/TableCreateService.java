@@ -68,7 +68,7 @@ public class TableCreateService {
         persistColumns(dataTable.getId(), request);
 
         if (!Boolean.FALSE.equals(request.getSyncToDoris())) {
-            dorisConnectionService.execute(request.getDorisClusterId(), ddl);
+            dorisConnectionService.execute(request.getDorisClusterId(), request.getDbName(), ddl);
             dataTable.setIsSynced(1);
             dataTable.setSyncTime(LocalDateTime.now());
         }
@@ -133,7 +133,6 @@ public class TableCreateService {
         table.setBucketNum(request.getBucketNum() != null ? request.getBucketNum() : 10);
         table.setReplicaNum(request.getReplicaNum() != null ? request.getReplicaNum() : 3);
         table.setPartitionField(request.getPartitionColumn());
-        table.setPartitionColumn(request.getPartitionColumn());
         table.setDistributionColumn(joinColumns(request.getDistributionColumns()));
         table.setKeyColumns(joinColumns(request.getKeyColumns()));
         table.setDorisDdl(ddl);

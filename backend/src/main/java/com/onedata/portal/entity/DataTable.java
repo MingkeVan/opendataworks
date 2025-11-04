@@ -46,8 +46,6 @@ public class DataTable {
 
     private String partitionField;
 
-    private String partitionColumn;
-
     private String distributionColumn;
 
     private String keyColumns;

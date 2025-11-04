@@ -144,7 +144,7 @@ SET business_domain = 'tech',
     END,
     bucket_num = 10,
     replica_num = 1,
-    partition_column = CASE layer
+    partition_field = CASE layer
         WHEN 'ODS' THEN 'created_time'
         WHEN 'DWD' THEN 'order_dt'
         WHEN 'DWS' THEN 'stat_date'
