@@ -135,6 +135,25 @@ if [[ -f "$REPO_ROOT/docs/handbook/testing-guide.md" ]]; then
     cp "$REPO_ROOT/docs/handbook/testing-guide.md" "$PACKAGE_ROOT/TESTING_GUIDE.md"
 fi
 
+# 包含根目录 .env 或 .env.example，供 docker-compose 使用
+ROOT_ENV_FILE="$REPO_ROOT/.env"
+ROOT_ENV_EXAMPLE="$REPO_ROOT/.env.example"
+
+if [[ -f "$ROOT_ENV_FILE" ]]; then
+    log "Copying repository .env to deploy/.env"
+    cp "$ROOT_ENV_FILE" "$DEPLOY_PACKAGE_DIR/.env"
+    if [[ -f "$ROOT_ENV_EXAMPLE" ]]; then
+        log "Copying .env.example alongside deploy/.env"
+        cp "$ROOT_ENV_EXAMPLE" "$DEPLOY_PACKAGE_DIR/.env.example"
+    fi
+elif [[ -f "$ROOT_ENV_EXAMPLE" ]]; then
+    log "No .env found, copying .env.example as deploy/.env"
+    cp "$ROOT_ENV_EXAMPLE" "$DEPLOY_PACKAGE_DIR/.env"
+    cp "$ROOT_ENV_EXAMPLE" "$DEPLOY_PACKAGE_DIR/.env.example"
+else
+    log "WARNING: neither .env nor .env.example found at repository root; docker compose env will be missing"
+fi
+
 DOLPHIN_ENV_SOURCE="$REPO_ROOT/dolphinscheduler-service/.env"
 if [[ -f "$DOLPHIN_ENV_SOURCE" ]]; then
     log "Copying dolphinscheduler-service configuration"
