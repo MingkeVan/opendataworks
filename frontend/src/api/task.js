@@ -46,6 +46,11 @@ export const taskApi = {
     return request.get(`/v1/tasks/${id}/execution-status`)
   },
 
+  // 获取 DolphinScheduler WebUI 配置
+  getDolphinWebuiConfig() {
+    return request.get('/v1/tasks/config/dolphin-webui')
+  },
+
   // 获取任务血缘关系
   getTaskLineage(id) {
     return request.get(`/v1/tasks/${id}/lineage`)

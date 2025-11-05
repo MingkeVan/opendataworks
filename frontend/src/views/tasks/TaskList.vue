@@ -133,6 +133,8 @@ const filters = reactive({
   status: ''
 })
 
+const dolphinWebuiUrl = ref('')
+
 const loadData = async () => {
   loading.value = true
   try {
@@ -170,6 +172,20 @@ const loadExecutionStatuses = async () => {
   })
 
   await Promise.all(promises)
+}
+
+const loadDolphinConfig = async () => {
+  try {
+    const config = await taskApi.getDolphinWebuiConfig()
+    if (config?.webuiUrl) {
+      dolphinWebuiUrl.value = config.webuiUrl.replace(/\/+$/, '')
+    } else {
+      dolphinWebuiUrl.value = ''
+    }
+  } catch (error) {
+    console.error('加载 DolphinScheduler 配置失败:', error)
+    dolphinWebuiUrl.value = ''
+  }
 }
 
 const handlePublish = async (id) => {
@@ -338,16 +354,25 @@ const formatTime = (timeStr) => {
 const openDolphinWorkflow = (row) => {
   if (row.executionStatus && row.executionStatus.dolphinWorkflowUrl) {
     window.open(row.executionStatus.dolphinWorkflowUrl, '_blank')
+    return
+  }
+  if (dolphinWebuiUrl.value) {
+    window.open(dolphinWebuiUrl.value, '_blank')
   }
 }
 
 const openDolphinTask = (row) => {
   if (row.executionStatus && row.executionStatus.dolphinTaskUrl) {
     window.open(row.executionStatus.dolphinTaskUrl, '_blank')
+    return
+  }
+  if (dolphinWebuiUrl.value) {
+    window.open(dolphinWebuiUrl.value, '_blank')
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadDolphinConfig()
   loadData()
 })
 </script>

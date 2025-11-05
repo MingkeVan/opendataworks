@@ -240,7 +240,8 @@ public class DolphinSchedulerService {
         if (workflowCode == null) {
             return null;
         }
-        if (properties.getWebuiUrl() == null || properties.getWebuiUrl().isEmpty()) {
+        String baseUrl = getWebuiBaseUrl();
+        if (baseUrl == null || baseUrl.isEmpty()) {
             log.warn("dolphin.webui-url is not configured, cannot generate workflow URL");
             return null;
         }
@@ -250,7 +251,7 @@ public class DolphinSchedulerService {
             return null;
         }
         return String.format("%s/ui/projects/%d/workflow/definitions/%d",
-            properties.getWebuiUrl(), projectCode, workflowCode);
+            baseUrl, projectCode, workflowCode);
     }
 
     /**
@@ -261,7 +262,8 @@ public class DolphinSchedulerService {
         if (taskCode == null) {
             return null;
         }
-        if (properties.getWebuiUrl() == null || properties.getWebuiUrl().isEmpty()) {
+        String baseUrl = getWebuiBaseUrl();
+        if (baseUrl == null || baseUrl.isEmpty()) {
             log.warn("dolphin.webui-url is not configured, cannot generate task URL");
             return null;
         }
@@ -271,7 +273,18 @@ public class DolphinSchedulerService {
             return null;
         }
         return String.format("%s/ui/projects/%d/task/definitions/%d",
-            properties.getWebuiUrl(), projectCode, taskCode);
+            baseUrl, projectCode, taskCode);
+    }
+
+    /**
+     * Return the configured DolphinScheduler Web UI base URL without trailing slashes.
+     */
+    public String getWebuiBaseUrl() {
+        String webuiUrl = properties.getWebuiUrl();
+        if (!StringUtils.hasText(webuiUrl)) {
+            return null;
+        }
+        return webuiUrl.replaceAll("/+$", "");
     }
 
     /**

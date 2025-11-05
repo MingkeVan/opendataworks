@@ -6,12 +6,15 @@ import com.onedata.portal.dto.Result;
 import com.onedata.portal.dto.TaskExecutionStatus;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.service.DataTaskService;
+import com.onedata.portal.service.DolphinSchedulerService;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 任务管理 Controller
@@ -22,6 +25,7 @@ import java.util.List;
 public class DataTaskController {
 
     private final DataTaskService dataTaskService;
+    private final DolphinSchedulerService dolphinSchedulerService;
 
     /**
      * 分页查询任务列表
@@ -114,6 +118,15 @@ public class DataTaskController {
     public Result<TaskExecutionStatus> getExecutionStatus(@PathVariable Long id) {
         TaskExecutionStatus status = dataTaskService.getLatestExecutionStatus(id);
         return Result.success(status);
+    }
+
+    /**
+     * 获取 DolphinScheduler Web UI 配置
+     */
+    @GetMapping("/config/dolphin-webui")
+    public Result<Map<String, String>> getDolphinWebuiConfig() {
+        String webuiUrl = dolphinSchedulerService.getWebuiBaseUrl();
+        return Result.success(Collections.singletonMap("webuiUrl", webuiUrl));
     }
 
     /**
