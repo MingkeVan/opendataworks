@@ -62,11 +62,11 @@ services:
     env_file:
       - ../.env
     ports:
-      - "8000:8000"
+      - "8000:${DS_SERVICE_PORT:-8000}"
     networks:
       - opendataworks-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:${DS_SERVICE_PORT:-8000}/health"]
       interval: 30s
       timeout: 10s
       retries: 3

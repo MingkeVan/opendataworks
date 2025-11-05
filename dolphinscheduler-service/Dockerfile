@@ -24,4 +24,4 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 EXPOSE 8000
 
 # 启动服务
-CMD ["uvicorn", "dolphinscheduler_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "dolphinscheduler_service.main"]

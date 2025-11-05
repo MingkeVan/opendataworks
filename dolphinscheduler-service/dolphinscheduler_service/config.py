@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     meta: ServiceMeta = Field(default_factory=ServiceMeta)
     service_host: str = Field(default="0.0.0.0", alias="DS_SERVICE_HOST")
-    service_port: int = Field(default=8081, alias="DS_SERVICE_PORT")
+    service_port: int = Field(default=8000, alias="DS_SERVICE_PORT")
 
     api_base_url: str = Field(
         default="http://localhost:12345/dolphinscheduler", alias="DS_API_BASE_URL"

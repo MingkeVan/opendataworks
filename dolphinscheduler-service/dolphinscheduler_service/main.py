@@ -4,6 +4,7 @@ import logging
 from typing import Callable, Optional, TypeVar
 
 import anyio
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -217,3 +218,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
 settings = get_settings()
 app = create_app(settings=settings)
+
+
+def run() -> None:
+    """Start Uvicorn with settings-defined host/port."""
+    uvicorn.run(
+        app,
+        host=settings.service_host,
+        port=settings.service_port,
+        log_level=settings.log_level.lower(),
+    )
+
+
+if __name__ == "__main__":
+    run()
