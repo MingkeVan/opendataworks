@@ -14,7 +14,9 @@ class ApiResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     @staticmethod
-    def ok(data: Dict[str, Any] | None = None, message: str = "ok") -> "ApiResponse":
+    def ok(
+        data: Optional[Dict[str, Any]] = None, message: str = "ok"
+    ) -> "ApiResponse":
         return ApiResponse(success=True, code="OK", message=message, data=data or {})
 
     @staticmethod

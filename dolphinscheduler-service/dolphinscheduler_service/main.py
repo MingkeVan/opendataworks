@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, TypeVar
+from typing import Callable, Optional, TypeVar
 
 import anyio
 from fastapi import FastAPI
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Optional[Settings] = None) -> FastAPI:
     settings = settings or get_settings()
     service = DolphinSchedulerServiceCore(settings)
 
@@ -45,7 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    def success(data: dict | None = None, message: str = "ok"):
+    def success(data: Optional[dict] = None, message: str = "ok"):
         return ApiResponse.ok(data=data, message=message).model_dump()
 
     async def run(blocking_fn: Callable[[], T]) -> T:
@@ -132,8 +132,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/dolphin/datasources")
     async def list_datasources(
-        type: str | None = None,
-        keyword: str | None = None,
+        type: Optional[str] = None,
+        keyword: Optional[str] = None,
     ) -> dict:
         logger.debug("list_datasources type=%s keyword=%s", type, keyword)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-from typing import Dict, Iterable, Optional, List
+from typing import Dict, Iterable, Optional, List, Union
 
 import requests
 
@@ -136,23 +136,25 @@ class DolphinSchedulerServiceCore:
         if not token:
             raise ValueError("Failed to authenticate with DolphinScheduler API")
 
-        project_code = self._get_project_code()
-        if not project_code:
-            raise ValueError("Failed to resolve DolphinScheduler project code")
-
         api_base = self.settings.api_base_url.rstrip("/")
-        list_url = f"{api_base}/projects/{project_code}/datasources"
+        list_url = f"{api_base}/datasources"
 
         params = {
-            "token": token,
             "pageNo": 1,
             "pageSize": max(1, page_size),
         }
         if keyword:
             params["searchVal"] = keyword
+        if ds_type:
+            params["type"] = ds_type.upper()
 
         try:
-            response = requests.get(list_url, params=params, timeout=10)
+            response = requests.get(
+                list_url,
+                params=params,
+                cookies={"sessionId": token},
+                timeout=10,
+            )
             response.raise_for_status()
             payload = response.json()
         except Exception as exc:  # pylint: disable=broad-except
@@ -240,7 +242,7 @@ class DolphinSchedulerServiceCore:
                 len(request.relations),
             )
 
-        tasks_map: Dict[int, Shell | Sql] = {}
+        tasks_map: Dict[int, Union[Shell, Sql]] = {}
         for payload in request.tasks:
             task = self._build_task(workflow, payload)
             tasks_map[payload.code] = task
@@ -444,7 +446,7 @@ class DolphinSchedulerServiceCore:
 
     def _build_task(
         self, workflow: Workflow, payload: TaskDefinitionPayload
-    ) -> Shell | Sql:
+    ) -> Union[Shell, Sql]:
         task_params = self._parse_task_params(payload.task_params)
         timeout_minutes = self._to_minutes(payload.timeout)
         task_priority = payload.task_priority or TaskPriority.MEDIUM
@@ -494,7 +496,7 @@ class DolphinSchedulerServiceCore:
         return task
 
     def _link_tasks(
-        self, tasks_map: Dict[int, Shell | Sql], relation: TaskRelationPayload
+        self, tasks_map: Dict[int, Union[Shell, Sql]], relation: TaskRelationPayload
     ) -> None:
         # Handle root tasks (preTaskCode=0 means no upstream dependency)
         if relation.pre_task_code == 0:
