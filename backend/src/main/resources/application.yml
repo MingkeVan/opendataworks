@@ -41,7 +41,7 @@ mybatis-plus:
 
 # DolphinScheduler 配置
 dolphin:
-  service-url: http://localhost:5001
+  service-url: ${DOLPHIN_SERVICE_URL:http://localhost:5001}
   webui-url: http://localhost:12345/dolphinscheduler
   project-name: opendataworks
   workflow-name: opendataworks-default-workflow
