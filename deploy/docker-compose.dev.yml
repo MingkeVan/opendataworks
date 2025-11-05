@@ -34,13 +34,8 @@ services:
     image: mikefan2019/opendataworks-backend:latest
     container_name: opendataworks-backend
     restart: always
-    environment:
-      SPRING_PROFILES_ACTIVE: prod
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/opendataworks?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false
-      SPRING_DATASOURCE_USERNAME: opendataworks
-      SPRING_DATASOURCE_PASSWORD: opendataworks123
-      DOLPHINSCHEDULER_SERVICE_URL: http://dolphin-service:8000
-      TZ: Asia/Shanghai
+    env_file:
+      - ../.env
     ports:
       - "8080:8080"
     depends_on:
@@ -64,14 +59,8 @@ services:
     image: mikefan2019/opendataworks-dolphin-service:latest
     container_name: opendataworks-dolphin-service
     restart: always
-    environment:
-      TZ: Asia/Shanghai
-      # DolphinScheduler 配置（需要根据实际环境修改）
-      DOLPHIN_HOST: ${DOLPHIN_HOST:-localhost}
-      DOLPHIN_PORT: ${DOLPHIN_PORT:-12345}
-      DOLPHIN_USER: ${DOLPHIN_USER:-admin}
-      DOLPHIN_PASSWORD: ${DOLPHIN_PASSWORD:-dolphinscheduler123}
-      DOLPHIN_TENANT: ${DOLPHIN_TENANT:-default}
+    env_file:
+      - ../.env
     ports:
       - "8000:8000"
     networks:
@@ -81,16 +70,14 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    volumes:
-      - ./dolphinscheduler-service/.env:/app/.env:ro
 
   # 前端服务
   frontend:
     image: mikefan2019/opendataworks-frontend:latest
     container_name: opendataworks-frontend
     restart: always
-    environment:
-      TZ: Asia/Shanghai
+    env_file:
+      - ../.env
     ports:
       - "8081:80"
     depends_on:
