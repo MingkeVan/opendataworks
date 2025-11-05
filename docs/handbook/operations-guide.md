@@ -115,3 +115,4 @@ server {
    - `mysql -u opendataworks -popendataworks123 -h <db> opendataworks -e "SHOW TABLES"`
    - 前端页面是否可打开/登录
 4. **巡检**：定期查看 `inspection_issue`、`task_execution_log`，配合 [testing-guide.md](testing-guide.md) 的脚本回归关键流程。
+

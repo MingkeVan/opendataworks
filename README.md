@@ -1105,6 +1105,26 @@ services:
 - 检查 `dolphin.project-name` 配置是否正确
 - 查看 Python 服务日志: `tail -f dolphinscheduler-service/service.log`
 
+### 6. Python Dolphin 服务无法连接到 Java Gateway 25333 端口
+
+**问题**: `dolphinscheduler-service` 日志出现 `GatewayError`/`ConnectRefusedError`，提示无法连接 `25333` 端口。
+
+**解决方案**:
+1. **确认 Python 服务配置**：检查 `.env` 或环境变量中的 `PYDS_JAVA_GATEWAY_ADDRESS`、`PYDS_JAVA_GATEWAY_PORT` 是否指向 DolphinScheduler API Server（默认 `25333`）。
+2. **开启 Python Gateway**：在 DolphinScheduler API Server 节点的 `api-server/conf/application.yaml`（离线安装路径 `${DOLPHINSCHEDULER_HOME}/api-server/conf/application.yaml`）下，将 `python-gateway.enabled` 设为 `true`，并根据需要调整 `address`、`port`、`token`：
+
+   ```yaml
+   python-gateway:
+     enabled: true
+     address: 0.0.0.0
+     port: 25333
+     token: "<可选：如启用需要同步配置 PYDS_JAVA_GATEWAY_AUTH_TOKEN>"
+   ```
+
+   修改后重启 `dolphinscheduler-api` 服务（Docker 部署 `docker compose restart dolphinscheduler-api`，Systemd 部署 `systemctl restart dolphinscheduler-api`）。
+3. **验证端口开放**：在 DolphinScheduler 服务器上执行 `ss -lntp | grep 25333`（或 `netstat -tunlp | grep 25333`），确认端口监听；在 `dolphinscheduler-service` 服务器上执行 `nc -zv <api-server-host> 25333`，验证网络连通性。
+4. **启用 Token 保护（可选）**：若启用了 `python-gateway.token`，在 `dolphinscheduler-service` 的 `.env` 中追加 `PYDS_JAVA_GATEWAY_AUTH_TOKEN=<相同的 token>` 并重启服务。
+
 ---
 
 ## 📄 许可证
