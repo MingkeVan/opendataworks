@@ -8,10 +8,12 @@ import com.onedata.portal.dto.TaskExecutionStatus;
 import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.DataTask;
+import com.onedata.portal.entity.TableTaskRelation;
 import com.onedata.portal.entity.TaskExecutionLog;
 import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
+import com.onedata.portal.mapper.TableTaskRelationMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -21,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -38,6 +41,7 @@ public class DataTaskService {
     private final DataTaskMapper dataTaskMapper;
     private final DataLineageMapper dataLineageMapper;
     private final TaskExecutionLogMapper executionLogMapper;
+    private final TableTaskRelationMapper tableTaskRelationMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
     private final DataTableService dataTableService;
 
@@ -118,6 +122,9 @@ public class DataTaskService {
             }
         }
 
+        // 维护表与任务的关联关系
+        saveTableTaskRelations(task.getId(), inputTableIds, outputTableIds);
+
         return task;
     }
 
@@ -141,6 +148,8 @@ public class DataTaskService {
                 .eq(DataLineage::getTaskId, task.getId())
         );
 
+        clearTableTaskRelations(task.getId());
+
         // 创建新的输入血缘关系
         if (inputTableIds != null) {
             for (Long tableId : inputTableIds) {
@@ -162,6 +171,8 @@ public class DataTaskService {
                 dataLineageMapper.insert(lineage);
             }
         }
+
+        saveTableTaskRelations(task.getId(), inputTableIds, outputTableIds);
 
         return task;
     }
@@ -576,8 +587,52 @@ public class DataTaskService {
                 .eq(DataLineage::getTaskId, id)
         );
 
+        clearTableTaskRelations(id);
+
         dataTaskMapper.deleteById(id);
         log.info("Deleted task: {}", id);
+    }
+
+    private void saveTableTaskRelations(Long taskId, List<Long> inputTableIds, List<Long> outputTableIds) {
+        if (taskId == null) {
+            return;
+        }
+
+        if (inputTableIds != null) {
+            LinkedHashSet<Long> uniqueInputs = inputTableIds.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+            for (Long tableId : uniqueInputs) {
+                TableTaskRelation relation = new TableTaskRelation();
+                relation.setTaskId(taskId);
+                relation.setTableId(tableId);
+                relation.setRelationType("read");
+                tableTaskRelationMapper.insert(relation);
+            }
+        }
+
+        if (outputTableIds != null) {
+            LinkedHashSet<Long> uniqueOutputs = outputTableIds.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+            for (Long tableId : uniqueOutputs) {
+                TableTaskRelation relation = new TableTaskRelation();
+                relation.setTaskId(taskId);
+                relation.setTableId(tableId);
+                relation.setRelationType("write");
+                tableTaskRelationMapper.insert(relation);
+            }
+        }
+    }
+
+    private void clearTableTaskRelations(Long taskId) {
+        if (taskId == null) {
+            return;
+        }
+        tableTaskRelationMapper.delete(
+            new LambdaQueryWrapper<TableTaskRelation>()
+                .eq(TableTaskRelation::getTaskId, taskId)
+        );
     }
 
     /**
