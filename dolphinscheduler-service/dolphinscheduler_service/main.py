@@ -5,7 +5,7 @@ from typing import Callable, Optional, TypeVar
 
 import anyio
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import Settings, get_settings
@@ -157,6 +157,35 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         def task():
             result = service.get_workflow_instance(workflow_code, payload)
+            return success(result.model_dump(by_alias=True))
+
+        return await run(task)
+
+    @app.post("/api/v1/workflows/{workflow_code}/instances/{instance_id}")
+    async def get_workflow_instance_by_path(
+        workflow_code: int,
+        instance_id: str,
+        payload: Optional[GetInstanceRequest] = None,
+    ) -> dict:
+        try:
+            resolved_instance_id = int(instance_id)
+        except ValueError as exc:  # pragma: no cover - explicit validation
+            raise HTTPException(status_code=400, detail="instanceId must be an integer") from exc
+
+        logger.debug(
+            "get_workflow_instance_by_path workflow_code=%s instance_id=%s payload=%s",
+            workflow_code,
+            instance_id,
+            payload.model_dump(by_alias=True) if payload else None,
+        )
+
+        def task():
+            request_payload = payload or GetInstanceRequest(projectName=settings.workflow_project)
+            if request_payload.project_name is None:
+                request_payload.project_name = settings.workflow_project
+            if request_payload.instance_id is None:
+                request_payload.instance_id = resolved_instance_id
+            result = service.get_workflow_instance(workflow_code, request_payload)
             return success(result.model_dump(by_alias=True))
 
         return await run(task)

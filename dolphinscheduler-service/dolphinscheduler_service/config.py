@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     user_queue: str = Field(default="queuePythonGateway", alias="PYDS_WORKFLOW_QUEUE")
 
     workflow_project: str = Field(default="opendataworks", alias="PYDS_WORKFLOW_PROJECT")
+    workflow_name: Optional[str] = Field(default=None, alias="PYDS_WORKFLOW_NAME")
     workflow_worker_group: str = Field(
         default="default", alias="PYDS_WORKFLOW_WORKER_GROUP"
     )

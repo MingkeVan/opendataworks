@@ -1,6 +1,7 @@
 # External Source Code - DO NOT COMMIT
 dinky/
 dolphinscheduler/
+dolphinscheduler-sdk-python/
 
 # Maven
 backend/target/

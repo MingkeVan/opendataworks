@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import math
-from typing import Dict, Iterable, Optional, List, Union
+import time
+from datetime import datetime
+from typing import Dict, Iterable, Optional, List, Union, Any
 
 import requests
 
@@ -106,6 +108,321 @@ class DolphinSchedulerServiceCore:
             logger.error("DolphinScheduler API login did not return sessionId")
             return None
         return token
+
+    def _perform_api_get(
+        self,
+        url: str,
+        params: Optional[Dict[str, object]],
+        token: str,
+        timeout: int = 2,
+    ) -> Optional[dict]:
+        query_params = dict(params or {})
+        query_params.setdefault("sessionId", token)
+        try:
+            response = requests.get(
+                url,
+                params=query_params,
+                cookies={"sessionId": token},
+                headers={"sessionId": token},
+                timeout=timeout,
+            )
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("GET %s failed: %s", url, exc)
+            return None
+
+        if not self._is_api_success(payload):
+            logger.debug(
+                "DolphinScheduler API reported failure for %s: code=%s msg=%s",
+                url,
+                payload.get("code"),
+                payload.get("msg") or payload.get("message"),
+            )
+            return None
+
+        return payload
+
+    @staticmethod
+    def _is_api_success(payload: Optional[dict]) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        success_flag = payload.get("success")
+        if success_flag is False:
+            return False
+        code = payload.get("code")
+        if code not in (None, 0):
+            return False
+        return True
+
+    def _fetch_latest_instance_id(
+        self,
+        project_name: str,
+        workflow_code: int,
+        workflow_name: str,
+        max_attempts: int = 2,
+        poll_interval: float = 1.0,
+        min_instance_id: Optional[int] = None,
+    ) -> Optional[str]:
+        """
+        Poll DolphinScheduler REST API for the newest workflow instance ID.
+        """
+        project_code = self._get_project_code(project_name)
+        if project_code is None:
+            logger.warning(
+                "Cannot resolve project code for project=%s when querying instances",
+                project_name,
+            )
+            return None
+
+        token = self._login_and_get_token()
+        if not token:
+            logger.warning("Cannot obtain DolphinScheduler session token to list instances")
+            return None
+
+        api_base = self.settings.api_base_url.rstrip("/")
+        list_endpoints = [
+            f"{api_base}/projects/{project_code}/workflow-instances",
+            f"{api_base}/projects/{project_code}/process-instances",
+        ]
+
+        params = {
+            "pageNo": 1,
+            "pageSize": 10,
+            # Support both legacy(process) and new (workflow) parameter names
+            "workflowDefinitionCode": workflow_code,
+            "processDefinitionCode": workflow_code,
+        }
+        if workflow_name:
+            params["searchVal"] = workflow_name
+
+        for attempt in range(1, max_attempts + 1):
+            for list_url in list_endpoints:
+                payload = self._perform_api_get(list_url, params, token)
+                if payload is None:
+                    continue
+
+                data = payload.get("data") or {}
+                raw_instances = self._extract_instance_payload(data)
+
+                instance_id = self._extract_instance_id(
+                    raw_instances,
+                    workflow_code,
+                    workflow_name,
+                    min_instance_id=min_instance_id,
+                )
+                if instance_id:
+                    return instance_id
+
+            if attempt < max_attempts:
+                time.sleep(poll_interval)
+
+        logger.warning(
+            "Unable to find newly created instance for workflow %s after %s attempts",
+            workflow_code,
+            max_attempts,
+        )
+        return None
+
+    @staticmethod
+    def _extract_instance_payload(data: object) -> List[dict]:
+        if isinstance(data, list):
+            return [row for row in data if isinstance(row, dict)]
+
+        if isinstance(data, dict):
+            raw_instances = (
+                data.get("totalList")
+                or data.get("records")
+                or data.get("processInstanceList")
+                or data.get("list")
+                or data.get("items")
+                or []
+            )
+            if isinstance(raw_instances, list):
+                return [row for row in raw_instances if isinstance(row, dict)]
+
+        return []
+
+    def _fetch_instance_detail(
+        self,
+        project_code: int,
+        instance_id: int,
+        token: str,
+    ) -> Optional[dict]:
+        api_base = self.settings.api_base_url.rstrip("/")
+        endpoints = [
+            f"{api_base}/projects/{project_code}/workflow-instances/{instance_id}",
+            f"{api_base}/projects/{project_code}/process-instances/{instance_id}",
+        ]
+
+        for url in endpoints:
+            payload = self._perform_api_get(url, params=None, token=token)
+            if payload is None:
+                continue
+
+            data = payload.get("data")
+            if isinstance(data, dict) and data:
+                return data
+            if isinstance(data, list) and data:
+                first = data[0]
+                if isinstance(first, dict):
+                    return first
+
+        return None
+
+    @staticmethod
+    def _extract_instance_id(
+        instances: Iterable[dict],
+        workflow_code: int,
+        workflow_name: str,
+        min_instance_id: Optional[int] = None,
+    ) -> Optional[str]:
+        """
+        Find the latest instance in the list that belongs to the workflow and return its ID.
+        """
+        latest_identifier: Optional[str] = None
+        latest_numeric: Optional[int] = None
+        latest_start: Optional[str] = None
+
+        for row in instances:
+            if not isinstance(row, dict):
+                continue
+
+            code = (
+                row.get("processDefinitionCode")
+                or row.get("workflowDefinitionCode")
+                or row.get("processDefinitionId")
+            )
+            name = (
+                row.get("processDefinitionName")
+                or row.get("workflowName")
+                or row.get("name")
+            )
+
+            if code is not None and int(code) != int(workflow_code):
+                continue
+            if code is None and name and workflow_name and name != workflow_name:
+                continue
+
+            raw_identifier = row.get("id") or row.get("processInstanceId")
+            if raw_identifier is None:
+                continue
+
+            identifier = str(raw_identifier)
+            numeric_id = None
+            try:
+                numeric_id = int(raw_identifier)
+            except (TypeError, ValueError):
+                pass
+
+            if (
+                min_instance_id is not None
+                and numeric_id is not None
+                and numeric_id <= min_instance_id
+            ):
+                continue
+
+            start_time = str(row.get("startTime") or "")
+
+            if latest_identifier is None:
+                latest_identifier = identifier
+                latest_numeric = numeric_id
+                latest_start = start_time
+                continue
+
+            if numeric_id is not None and (latest_numeric is None or numeric_id > latest_numeric):
+                latest_identifier = identifier
+                latest_numeric = numeric_id
+                latest_start = start_time
+                continue
+
+            if start_time and (not latest_start or start_time > latest_start):
+                latest_identifier = identifier
+                latest_start = start_time
+
+        return latest_identifier
+
+    @staticmethod
+    def _parse_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):  # pylint: disable=broad-except
+            return None
+
+    def _map_instance_detail(
+        self,
+        raw: Dict[str, Any],
+        fallback_workflow_code: int,
+        fallback_workflow_name: str,
+    ) -> Dict[str, Any]:
+        instance_id = raw.get("id") or raw.get("processInstanceId")
+        if instance_id is None:
+            raise ValueError("Instance detail missing id field")
+
+        workflow_code = self._parse_int(
+            raw.get("workflowDefinitionCode") or raw.get("processDefinitionCode")
+        ) or fallback_workflow_code
+
+        workflow_name = (
+            raw.get("workflowDefinitionName")
+            or raw.get("workflowName")
+            or raw.get("processDefinitionName")
+            or raw.get("name")
+            or fallback_workflow_name
+        )
+
+        state = raw.get("state") or raw.get("stateType") or raw.get("status")
+        start_time = self._normalize_timestamp(raw.get("startTime") or raw.get("start_time"))
+        end_time = self._normalize_timestamp(raw.get("endTime") or raw.get("end_time"))
+        duration_value = raw.get("duration")
+        if not isinstance(duration_value, (int, float)):
+            duration_value = self._parse_int(duration_value)
+
+        run_times = self._parse_int(raw.get("runTimes") or raw.get("run_times")) or 0
+        host = raw.get("host")
+        command_type = raw.get("commandType") or raw.get("command_type")
+
+        return {
+            "instanceId": int(instance_id),
+            "workflowCode": workflow_code,
+            "workflowName": workflow_name,
+            "state": state or "UNKNOWN",
+            "startTime": start_time,
+            "endTime": end_time,
+            "duration": int(duration_value) if duration_value is not None else None,
+            "runTimes": run_times,
+            "host": host,
+            "commandType": command_type,
+        }
+
+    @staticmethod
+    def _normalize_timestamp(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            try:
+                dt = datetime.fromtimestamp(value / (1000 if value > 1e12 else 1))
+                return dt.strftime("%Y-%m-%dT%H:%M:%S")
+            except (OverflowError, OSError, ValueError):  # pylint: disable=broad-except
+                return None
+        if not isinstance(value, str):
+            return None
+        candidate = value.strip()
+        if not candidate:
+            return None
+        if "T" in candidate:
+            return candidate
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
+            try:
+                dt = datetime.strptime(candidate, fmt)
+                return dt.strftime("%Y-%m-%dT%H:%M:%S")
+            except ValueError:
+                continue
+        return candidate
 
     def ensure_workflow(self, request: EnsureWorkflowRequest) -> EnsureWorkflowResponse:
         """
@@ -365,8 +682,36 @@ class DolphinSchedulerServiceCore:
             workflow_code,
             user_name,
         )
+        baseline_instance = self._fetch_latest_instance_id(
+            project_name,
+            workflow_code,
+            workflow_name,
+            max_attempts=1,
+            poll_interval=0.5,
+        )
+        baseline_numeric = self._parse_int(baseline_instance)
+
         workflow.start()
-        return StartWorkflowResponse(instanceId=None, message="submitted")
+        instance_id = self._fetch_latest_instance_id(
+            project_name,
+            workflow_code,
+            workflow_name,
+            max_attempts=8,
+            poll_interval=1.5,
+            min_instance_id=baseline_numeric,
+        )
+
+        if instance_id:
+            logger.info(
+                "Workflow execution started with instanceId=%s for workflow_code=%s",
+                instance_id,
+                workflow_code,
+            )
+            message = "submitted"
+        else:
+            message = "submitted but instanceId not available"
+
+        return StartWorkflowResponse(instanceId=instance_id, message=message)
 
     def query_project(self, request: QueryProjectRequest) -> QueryProjectResponse:
         """
@@ -547,47 +892,38 @@ class DolphinSchedulerServiceCore:
         Returns:
             Instance information including state, start/end time, duration
         """
-        from pydolphinscheduler.java_gateway import gateway
+        project_name = request.project_name or self.settings.workflow_project
+        workflow_name = self._ensure_workflow_name(
+            request.workflow_name or self.settings.workflow_name or self.settings.workflow_project
+        )
 
-        project_name = request.project_name
-        user_name = request.user or self.settings.user_name
-        workflow_name = request.workflow_name or self.settings.workflow_name
+        if request.instance_id is None:
+            raise ValueError("instanceId is required to query workflow instance status")
 
         logger.info(
             "Getting workflow instance: workflow_code=%s project=%s workflow=%s instance_id=%s",
             workflow_code,
             project_name,
             workflow_name,
-            request.instance_id
+            request.instance_id,
         )
 
-        try:
-            # Query workflow instances from DolphinScheduler
-            # Note: The actual API call depends on pydolphinscheduler SDK capabilities
-            # This is a placeholder implementation
+        project_code = self._get_project_code(project_name)
+        if project_code is None:
+            raise ValueError(f"Failed to resolve project {project_name} in DolphinScheduler")
 
-            instance_info = {
-                "instanceId": request.instance_id or 0,
-                "workflowCode": workflow_code,
-                "workflowName": workflow_name,
-                "state": "RUNNING_EXECUTION",
-                "startTime": None,
-                "endTime": None,
-                "duration": None,
-                "runTimes": 1,
-                "host": None,
-                "commandType": "START_PROCESS"
-            }
+        token = self._login_and_get_token()
+        if not token:
+            raise ValueError("Failed to authenticate with DolphinScheduler API")
 
-            return GetInstanceResponse(**instance_info)
-
-        except Exception as e:
-            logger.error(
-                "Failed to get workflow instance: workflow_code=%s error=%s",
-                workflow_code,
-                str(e)
+        detail = self._fetch_instance_detail(project_code, int(request.instance_id), token)
+        if detail is None:
+            raise ValueError(
+                f"Workflow instance {request.instance_id} not found in project {project_name}"
             )
-            raise ValueError(f"Failed to get workflow instance: {str(e)}") from e
+
+        parsed = self._map_instance_detail(detail, workflow_code, workflow_name)
+        return GetInstanceResponse(**parsed)
 
     def list_workflow_instances(
         self, workflow_code: int, request: ListInstancesRequest
@@ -602,38 +938,89 @@ class DolphinSchedulerServiceCore:
         Returns:
             Paginated list of workflow instances
         """
-        from pydolphinscheduler.java_gateway import gateway
-
-        project_name = request.project_name
-        user_name = request.user or self.settings.user_name
-        workflow_name = request.workflow_name or self.settings.workflow_name
+        project_name = request.project_name or self.settings.workflow_project
+        workflow_name = self._ensure_workflow_name(
+            request.workflow_name or self.settings.workflow_name or self.settings.workflow_project
+        )
 
         logger.info(
             "Listing workflow instances: workflow_code=%s project=%s page=%s size=%s",
             workflow_code,
             project_name,
             request.page_num,
-            request.page_size
+            request.page_size,
         )
 
-        try:
-            # Placeholder implementation
-            instances = []
+        project_code = self._get_project_code(project_name)
+        if project_code is None:
+            raise ValueError(f"Failed to resolve project {project_name} in DolphinScheduler")
 
-            return ListInstancesResponse(
-                total=len(instances),
-                pageNum=request.page_num,
-                pageSize=request.page_size,
-                instances=instances
-            )
+        token = self._login_and_get_token()
+        if not token:
+            raise ValueError("Failed to authenticate with DolphinScheduler API")
 
-        except Exception as e:
-            logger.error(
-                "Failed to list workflow instances: workflow_code=%s error=%s",
-                workflow_code,
-                str(e)
-            )
-            raise ValueError(f"Failed to list workflow instances: {str(e)}") from e
+        params: Dict[str, Any] = {
+            "pageNo": max(1, request.page_num),
+            "pageSize": max(1, request.page_size),
+            "workflowDefinitionCode": workflow_code,
+            "processDefinitionCode": workflow_code,
+        }
+        if request.state:
+            params["stateType"] = request.state.upper()
+        if request.workflow_name:
+            params["searchVal"] = request.workflow_name
+        if request.start_date:
+            params["startDate"] = request.start_date
+        if request.end_date:
+            params["endDate"] = request.end_date
+        if request.user:
+            params["executorName"] = request.user
+
+        api_base = self.settings.api_base_url.rstrip("/")
+        endpoints = [
+            f"{api_base}/projects/{project_code}/workflow-instances",
+            f"{api_base}/projects/{project_code}/process-instances",
+        ]
+
+        payload = None
+        for url in endpoints:
+            payload = self._perform_api_get(url, params, token)
+            if payload:
+                break
+
+        if not payload:
+            raise ValueError("Failed to query workflow instances from DolphinScheduler API")
+
+        data = payload.get("data") or {}
+        raw_instances = self._extract_instance_payload(data)
+        normalized_instances = [
+            self._map_instance_detail(row, workflow_code, workflow_name)
+            for row in raw_instances
+        ]
+
+        total = (
+            self._parse_int(data.get("total"))
+            or self._parse_int(data.get("totalCount"))
+            or self._parse_int(data.get("totalNum"))
+            or len(normalized_instances)
+        )
+        page_num = (
+            self._parse_int(data.get("pageNo"))
+            or self._parse_int(data.get("currPage"))
+            or request.page_num
+        )
+        page_size = (
+            self._parse_int(data.get("pageSize"))
+            or self._parse_int(data.get("size"))
+            or request.page_size
+        )
+
+        return ListInstancesResponse(
+            total=total,
+            pageNum=page_num,
+            pageSize=page_size,
+            instances=normalized_instances,
+        )
 
     def get_instance_log(
         self, workflow_code: int, request: GetInstanceLogRequest
