@@ -329,6 +329,11 @@ public class DataTaskService {
         log.info("开始同步工作流到 DolphinScheduler: workflowCode={}, taskCount={}",
             workflowCode, definitions.size());
         try {
+            if (workflowCode > 0) {
+                log.info("将现有工作流置为 OFFLINE 后再同步: workflowCode={}", workflowCode);
+                dolphinSchedulerService.setWorkflowReleaseState(workflowCode, "OFFLINE");
+            }
+
             long actualWorkflowCode = dolphinSchedulerService.syncWorkflow(
                 workflowCode,
                 dolphinSchedulerService.getWorkflowName(),
@@ -581,6 +586,18 @@ public class DataTaskService {
      */
     @Transactional
     public void delete(Long id) {
+        DataTask task = dataTaskMapper.selectById(id);
+        if (task == null) {
+            log.warn("Attempted to delete non-existent task: {}", id);
+            return;
+        }
+
+        Long workflowCode = task.getDolphinProcessCode();
+        if (workflowCode != null) {
+            log.info("Deleting task {}: taking workflow {} OFFLINE before cleanup", id, workflowCode);
+            dolphinSchedulerService.setWorkflowReleaseState(workflowCode, "OFFLINE");
+        }
+
         // 删除血缘关系
         dataLineageMapper.delete(
             new LambdaQueryWrapper<DataLineage>()
@@ -591,6 +608,21 @@ public class DataTaskService {
 
         dataTaskMapper.deleteById(id);
         log.info("Deleted task: {}", id);
+
+        if (workflowCode != null) {
+            List<DataTask> remainingDolphinTasks = dataTaskMapper.selectList(
+                new LambdaQueryWrapper<DataTask>()
+                    .eq(DataTask::getEngine, "dolphin")
+            );
+            if (remainingDolphinTasks.isEmpty()) {
+                log.info("No Dolphin tasks remain, deleting workflow {}", workflowCode);
+                dolphinSchedulerService.deleteWorkflow(workflowCode);
+            } else {
+                Long republishTaskId = remainingDolphinTasks.get(0).getId();
+                log.info("Re-synchronising workflow {} after task deletion using task {}", workflowCode, republishTaskId);
+                publish(republishTaskId);
+            }
+        }
     }
 
     private void saveTableTaskRelations(Long taskId, List<Long> inputTableIds, List<Long> outputTableIds) {
@@ -629,10 +661,8 @@ public class DataTaskService {
         if (taskId == null) {
             return;
         }
-        tableTaskRelationMapper.delete(
-            new LambdaQueryWrapper<TableTaskRelation>()
-                .eq(TableTaskRelation::getTaskId, taskId)
-        );
+        // 使用物理删除以避免逻辑删除记录命中唯一索引(uk_table_task)
+        tableTaskRelationMapper.hardDeleteByTaskId(taskId);
     }
 
     /**
