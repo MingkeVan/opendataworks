@@ -1,14 +1,18 @@
 import logging
 import os
 from functools import lru_cache
+from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
 
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = BASE_DIR / ".env"
+
+load_dotenv(ENV_FILE)
 
 
 class ServiceMeta(BaseModel):
@@ -21,7 +25,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables or `.env` files."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(ENV_FILE),
         env_prefix="",
         case_sensitive=False,
         extra="ignore",
@@ -78,10 +82,25 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     def configure_logging(self) -> None:
-        logging.basicConfig(
-            level=self.log_level.upper(),
-            format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        )
+        """Configure package-level logging so uvicorn launches can still see our logs."""
+        level = self.log_level.upper()
+        formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+
+        root_logger = logging.getLogger()
+        root_logger.setLevel(level)
+        if not root_logger.handlers:
+            root_handler = logging.StreamHandler()
+            root_handler.setFormatter(formatter)
+            root_logger.addHandler(root_handler)
+
+        package_logger = logging.getLogger("dolphinscheduler_service")
+        package_logger.setLevel(level)
+        package_logger.propagate = False
+
+        if not package_logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(formatter)
+            package_logger.addHandler(handler)
 
     def configure_sdk_environment(self) -> None:
         """Apply environment variables and runtime configuration for `apache-dolphinscheduler`."""

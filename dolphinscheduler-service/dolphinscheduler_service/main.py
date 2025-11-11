@@ -46,8 +46,20 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.on_event("startup")
+    async def _refresh_logging() -> None:
+        # Uvicorn reconfigures logging after importing the app; run again so our loggers keep handlers.
+        settings.configure_logging()
+
     def success(data: Optional[dict] = None, message: str = "ok"):
         return ApiResponse.ok(data=data, message=message).model_dump()
+
+    def wrap_errors(fn: Callable[[], T]) -> T:
+        try:
+            return fn()
+        except ValueError as exc:
+            logger.error("Request failed: %s", exc)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     async def run(blocking_fn: Callable[[], T]) -> T:
         return await anyio.to_thread.run_sync(blocking_fn)
@@ -80,7 +92,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
 
         def task():
-            result = service.sync_workflow(workflow_code, payload)
+            result = wrap_errors(lambda: service.sync_workflow(workflow_code, payload))
             return success(result.model_dump(by_alias=True))
 
         return await run(task)
@@ -97,7 +109,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
 
         def task():
-            service.release_workflow(workflow_code, payload)
+            wrap_errors(lambda: service.release_workflow(workflow_code, payload))
             return success({"workflowCode": workflow_code})
 
         return await run(task)
@@ -114,7 +126,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
 
         def task():
-            result = service.start_workflow(workflow_code, payload)
+            result = wrap_errors(lambda: service.start_workflow(workflow_code, payload))
             return success(result.model_dump(by_alias=True))
 
         return await run(task)
@@ -161,6 +173,40 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         return await run(task)
 
+    @app.post("/api/v1/workflows/{workflow_code}/instances/list")
+    async def list_workflow_instances(
+        workflow_code: int,
+        payload: ListInstancesRequest,
+    ) -> dict:
+        logger.debug(
+            "list_workflow_instances workflow_code=%s payload=%s",
+            workflow_code,
+            payload.model_dump(by_alias=True),
+        )
+
+        def task():
+            result = wrap_errors(lambda: service.list_workflow_instances(workflow_code, payload))
+            return success(result.model_dump(by_alias=True))
+
+        return await run(task)
+
+    @app.post("/api/v1/workflows/{workflow_code}/instances/log")
+    async def get_instance_log(
+        workflow_code: int,
+        payload: GetInstanceLogRequest,
+    ) -> dict:
+        logger.debug(
+            "get_instance_log workflow_code=%s payload=%s",
+            workflow_code,
+            payload.model_dump(by_alias=True),
+        )
+
+        def task():
+            result = service.get_instance_log(workflow_code, payload)
+            return success(result.model_dump(by_alias=True))
+
+        return await run(task)
+
     @app.post("/api/v1/workflows/{workflow_code}/instances/{instance_id}")
     async def get_workflow_instance_by_path(
         workflow_code: int,
@@ -186,40 +232,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             if request_payload.instance_id is None:
                 request_payload.instance_id = resolved_instance_id
             result = service.get_workflow_instance(workflow_code, request_payload)
-            return success(result.model_dump(by_alias=True))
-
-        return await run(task)
-
-    @app.post("/api/v1/workflows/{workflow_code}/instances/list")
-    async def list_workflow_instances(
-        workflow_code: int,
-        payload: ListInstancesRequest,
-    ) -> dict:
-        logger.debug(
-            "list_workflow_instances workflow_code=%s payload=%s",
-            workflow_code,
-            payload.model_dump(by_alias=True),
-        )
-
-        def task():
-            result = service.list_workflow_instances(workflow_code, payload)
-            return success(result.model_dump(by_alias=True))
-
-        return await run(task)
-
-    @app.post("/api/v1/workflows/{workflow_code}/instances/log")
-    async def get_instance_log(
-        workflow_code: int,
-        payload: GetInstanceLogRequest,
-    ) -> dict:
-        logger.debug(
-            "get_instance_log workflow_code=%s payload=%s",
-            workflow_code,
-            payload.model_dump(by_alias=True),
-        )
-
-        def task():
-            result = service.get_instance_log(workflow_code, payload)
             return success(result.model_dump(by_alias=True))
 
         return await run(task)

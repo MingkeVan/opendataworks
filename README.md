@@ -690,7 +690,6 @@ mybatis-plus:
 dolphin:
   service-url: http://localhost:5001      # Python 服务地址
   project-name: opendataworks              # 项目名称 (自动查询 project-code)
-  workflow-name: opendataworks-default-workflow  # 统一工作流名称
   tenant-code: default                     # 租户代码
   worker-group: default                    # Worker 组
   execution-type: PARALLEL                 # 执行类型
@@ -817,11 +816,12 @@ GET    /api/v1/tasks/{id}          # 获取任务详情
 POST   /api/v1/tasks               # 创建任务
 PUT    /api/v1/tasks/{id}          # 更新任务
 DELETE /api/v1/tasks/{id}          # 删除任务
-POST   /api/v1/tasks/{id}/publish  # 发布任务
 POST   /api/v1/tasks/{id}/execute  # 执行单任务
 POST   /api/v1/tasks/{id}/execute-workflow  # 执行工作流
 GET    /api/v1/tasks/{id}/execution-status  # 查询执行状态
 ```
+
+> 注：任务发布已迁移至工作流管理接口，请使用 `/api/v1/workflows/{id}/publish` 触发部署/上线/下线操作。
 
 #### 血缘关系 API
 

@@ -65,4 +65,16 @@ public class DataTask {
 
     @TableLogic
     private Integer deleted;
+
+    @TableField(exist = false)
+    private Long workflowId;
+
+    @TableField(exist = false)
+    private String workflowName;
+
+    @TableField(exist = false)
+    private Integer upstreamTaskCount;
+
+    @TableField(exist = false)
+    private Integer downstreamTaskCount;
 }

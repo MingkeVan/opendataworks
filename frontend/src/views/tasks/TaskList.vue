@@ -12,13 +12,57 @@
             <el-option label="已发布" value="published" />
             <el-option label="运行中" value="running" />
           </el-select>
-          <el-button type="primary" @click="loadData">查询</el-button>
+          <el-select
+            v-model="filters.workflowId"
+            placeholder="所属工作流"
+            clearable
+            filterable
+            :loading="workflowOptionsLoading"
+            style="width: 180px; margin-right: 10px"
+          >
+            <el-option
+              v-for="workflow in workflowOptions"
+              :key="workflow.id"
+              :label="workflow.workflowName"
+              :value="workflow.id"
+            />
+          </el-select>
+          <el-input
+            v-model.trim="filters.upstreamTaskId"
+            placeholder="上游任务ID"
+            clearable
+            style="width: 150px; margin-right: 10px"
+          />
+          <el-input
+            v-model.trim="filters.downstreamTaskId"
+            placeholder="下游任务ID"
+            clearable
+            style="width: 150px; margin-right: 10px"
+          />
+          <el-button type="primary" @click="handleFilter">查询</el-button>
+          <el-button @click="resetFilters">重置</el-button>
         </div>
         <el-button type="primary" @click="$router.push('/tasks/create')">
           <el-icon><Plus /></el-icon>
           新建任务
         </el-button>
       </div>
+
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="publish-tip"
+        title="任务发布已迁移至工作流管理"
+      >
+        <template #default>
+          请在
+          <router-link to="/workflows">
+            工作流管理
+          </router-link>
+          页面审核 DAG 并执行发布，确保流程一致。
+        </template>
+      </el-alert>
 
       <el-table :data="tableData" style="width: 100%; margin-top: 20px" v-loading="loading">
         <el-table-column prop="taskName" label="任务名称" width="200" />
@@ -69,25 +113,33 @@
             <el-tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="workflowName" label="所属工作流" width="180">
+          <template #default="{ row }">
+            <span v-if="row.workflowName">{{ row.workflowName }}</span>
+            <span v-else class="text-gray">未关联</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="上游任务数" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" effect="plain" v-if="row.upstreamTaskCount !== undefined && row.upstreamTaskCount !== null">
+              {{ row.upstreamTaskCount }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="下游任务数" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" effect="plain" v-if="row.downstreamTaskCount !== undefined && row.downstreamTaskCount !== null">
+              {{ row.downstreamTaskCount }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="owner" label="负责人" width="120" />
-        <el-table-column label="操作" width="400" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="$router.push(`/tasks/${row.id}/edit`)">编辑</el-button>
-            <el-button link type="success" @click="handlePublish(row.id)" v-if="row.status === 'draft'">发布</el-button>
-            <el-popconfirm
-              title="确定要重新发布到DolphinScheduler吗？这将覆盖现有配置。"
-              @confirm="handleRepublish(row.id)"
-              v-if="row.status === 'published'"
-            >
-              <template #reference>
-                <el-button link type="warning">重新发布</el-button>
-              </template>
-            </el-popconfirm>
             <el-button link type="warning" @click="handleExecuteTask(row.id)" v-if="row.status === 'published'">执行任务</el-button>
-            <el-button link type="primary" @click="handleExecuteWorkflow(row.id)" v-if="row.status === 'published'">执行工作流</el-button>
-            <el-button link type="info" @click="openDolphinWorkflow(row)" v-if="row.executionStatus && row.executionStatus.dolphinWorkflowUrl">
-              查看工作流
-            </el-button>
             <el-button link type="info" @click="openDolphinTask(row)" v-if="row.executionStatus && row.executionStatus.dolphinTaskUrl">
               查看任务
             </el-button>
@@ -119,6 +171,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { taskApi } from '@/api/task'
+import { workflowApi } from '@/api/workflow'
 
 const loading = ref(false)
 const tableData = ref([])
@@ -130,10 +183,15 @@ const pagination = reactive({
 
 const filters = reactive({
   taskType: '',
-  status: ''
+  status: '',
+  workflowId: null,
+  upstreamTaskId: '',
+  downstreamTaskId: ''
 })
 
 const dolphinWebuiUrl = ref('')
+const workflowOptions = ref([])
+const workflowOptionsLoading = ref(false)
 
 const loadData = async () => {
   loading.value = true
@@ -141,7 +199,7 @@ const loadData = async () => {
     const res = await taskApi.list({
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize,
-      ...filters
+      ...buildListFilters()
     })
     tableData.value = res.records
     pagination.total = res.total
@@ -174,6 +232,37 @@ const loadExecutionStatuses = async () => {
   await Promise.all(promises)
 }
 
+const buildListFilters = () => {
+  const params = {}
+  if (filters.taskType) {
+    params.taskType = filters.taskType
+  }
+  if (filters.status) {
+    params.status = filters.status
+  }
+  const workflowId = parseNumericFilter(filters.workflowId)
+  if (workflowId) {
+    params.workflowId = workflowId
+  }
+  const upstreamId = parseNumericFilter(filters.upstreamTaskId)
+  if (upstreamId) {
+    params.upstreamTaskId = upstreamId
+  }
+  const downstreamId = parseNumericFilter(filters.downstreamTaskId)
+  if (downstreamId) {
+    params.downstreamTaskId = downstreamId
+  }
+  return params
+}
+
+const parseNumericFilter = (value) => {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+  const num = Number(value)
+  return Number.isFinite(num) ? num : null
+}
+
 const loadDolphinConfig = async () => {
   try {
     const config = await taskApi.getDolphinWebuiConfig()
@@ -188,65 +277,39 @@ const loadDolphinConfig = async () => {
   }
 }
 
-const handlePublish = async (id) => {
+const loadWorkflowOptions = async () => {
+  workflowOptionsLoading.value = true
   try {
-    await taskApi.publish(id)
-    ElMessage.success('发布成功')
-    loadData()
-  } catch (error) {
-    console.error('发布失败:', error)
-
-    // 从后端响应中提取错误信息
-    const errorMessage = error.response?.data?.message || error.message || '发布失败，请稍后重试'
-
-    ElMessage.error({
-      message: errorMessage,
-      duration: 6000,
-      showClose: true
+    const res = await workflowApi.list({
+      pageNum: 1,
+      pageSize: 200
     })
+    workflowOptions.value = res.records || []
+  } catch (error) {
+    console.error('加载工作流选项失败:', error)
+  } finally {
+    workflowOptionsLoading.value = false
   }
 }
 
-const handleRepublish = async (id) => {
-  try {
-    await taskApi.publish(id)
-    ElMessage.success('重新发布成功')
-    loadData()
-  } catch (error) {
-    console.error('重新发布失败:', error)
+const handleFilter = () => {
+  pagination.pageNum = 1
+  loadData()
+}
 
-    // 从后端响应中提取错误信息
-    const errorMessage = error.response?.data?.message || error.message || '重新发布失败，请稍后重试'
-
-    ElMessage.error({
-      message: errorMessage,
-      duration: 6000,
-      showClose: true
-    })
-  }
+const resetFilters = () => {
+  filters.taskType = ''
+  filters.status = ''
+  filters.workflowId = null
+  filters.upstreamTaskId = ''
+  filters.downstreamTaskId = ''
+  handleFilter()
 }
 
 const handleExecuteTask = async (id) => {
   try {
     await taskApi.execute(id)
     ElMessage.success('单任务执行已触发')
-    // 刷新执行状态
-    setTimeout(() => loadData(), 1000)
-  } catch (error) {
-    console.error('执行失败:', error)
-    const errorMessage = error.response?.data?.message || error.message || '执行失败，请稍后重试'
-    ElMessage.error({
-      message: errorMessage,
-      duration: 6000,
-      showClose: true
-    })
-  }
-}
-
-const handleExecuteWorkflow = async (id) => {
-  try {
-    await taskApi.executeWorkflow(id)
-    ElMessage.success('工作流执行已触发')
     // 刷新执行状态
     setTimeout(() => loadData(), 1000)
   } catch (error) {
@@ -351,16 +414,6 @@ const formatTime = (timeStr) => {
   }
 }
 
-const openDolphinWorkflow = (row) => {
-  if (row.executionStatus && row.executionStatus.dolphinWorkflowUrl) {
-    window.open(row.executionStatus.dolphinWorkflowUrl, '_blank')
-    return
-  }
-  if (dolphinWebuiUrl.value) {
-    window.open(dolphinWebuiUrl.value, '_blank')
-  }
-}
-
 const openDolphinTask = (row) => {
   if (row.executionStatus && row.executionStatus.dolphinTaskUrl) {
     window.open(row.executionStatus.dolphinTaskUrl, '_blank')
@@ -372,7 +425,7 @@ const openDolphinTask = (row) => {
 }
 
 onMounted(async () => {
-  await loadDolphinConfig()
+  await Promise.all([loadDolphinConfig(), loadWorkflowOptions()])
   loadData()
 })
 </script>
@@ -415,5 +468,9 @@ onMounted(async () => {
 
 .text-gray {
   color: #909399;
+}
+
+.publish-tip {
+  margin-top: 16px;
 }
 </style>

@@ -173,7 +173,7 @@ if [ $TEST_RESULT -eq 0 ]; then
 
     echo -e "${BLUE}验证方式：${NC}"
     echo -e "  1. 登录 DolphinScheduler UI: ${YELLOW}http://localhost:12345/dolphinscheduler${NC}"
-    echo -e "  2. 查看工作流定义 -> opendataworks-default-workflow"
+    echo -e "  2. 查看工作流定义 -> 确认最新创建的工作流"
     echo -e "  3. 查看 DAG 图，应该有4个任务节点和依赖关系\n"
 
 else

@@ -131,19 +131,51 @@ class DolphinSchedulerServiceCore:
             response.raise_for_status()
             payload = response.json()
         except Exception as exc:  # pylint: disable=broad-except
-            logger.debug("GET %s failed: %s", url, exc)
+            logger.error("GET %s failed: %s", url, exc, exc_info=True)
             return None
 
         if not self._is_api_success(payload):
-            logger.debug(
-                "DolphinScheduler API reported failure for %s: code=%s msg=%s",
-                url,
-                payload.get("code"),
-                payload.get("msg") or payload.get("message"),
+            message = payload.get("msg") or payload.get("message") or "unknown error"
+            code = payload.get("code")
+            raise ValueError(
+                f"DolphinScheduler API error (code={code}) at {url}: {message}"
             )
-            return None
 
         return payload
+
+    def _perform_api_post(
+        self,
+        url: str,
+        data: Dict[str, Any],
+        token: str,
+        timeout: int = 5,
+    ) -> Optional[dict]:
+        payload = dict(data)
+        payload.setdefault("sessionId", token)
+        try:
+            response = requests.post(
+                url,
+                data=payload,
+                cookies={"sessionId": token},
+                headers={"sessionId": token},
+                timeout=timeout,
+            )
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            json_payload = response.json()
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("POST %s failed: %s", url, exc)
+            raise ValueError(f"Failed to call DolphinScheduler API {url}: {exc}") from exc
+
+        if not self._is_api_success(json_payload):
+            message = json_payload.get("msg") or json_payload.get("message") or "unknown error"
+            code = json_payload.get("code")
+            raise ValueError(
+                f"DolphinScheduler API error (code={code}) at {url}: {message}"
+            )
+
+        return json_payload
 
     @staticmethod
     def _is_api_success(payload: Optional[dict]) -> bool:
@@ -183,27 +215,19 @@ class DolphinSchedulerServiceCore:
             return None
 
         api_base = self.settings.api_base_url.rstrip("/")
-        list_endpoints = [
-            f"{api_base}/projects/{project_code}/workflow-instances",
-            f"{api_base}/projects/{project_code}/process-instances",
-        ]
-
+        list_url = f"{api_base}/projects/{project_code}/process-instances"
         params = {
             "pageNo": 1,
             "pageSize": 10,
-            # Support both legacy(process) and new (workflow) parameter names
-            "workflowDefinitionCode": workflow_code,
+            "processDefineCode": workflow_code,
             "processDefinitionCode": workflow_code,
         }
         if workflow_name:
             params["searchVal"] = workflow_name
 
         for attempt in range(1, max_attempts + 1):
-            for list_url in list_endpoints:
-                payload = self._perform_api_get(list_url, params, token)
-                if payload is None:
-                    continue
-
+            payload = self._perform_api_get(list_url, params, token)
+            if payload:
                 data = payload.get("data") or {}
                 raw_instances = self._extract_instance_payload(data)
 
@@ -252,24 +276,17 @@ class DolphinSchedulerServiceCore:
         token: str,
     ) -> Optional[dict]:
         api_base = self.settings.api_base_url.rstrip("/")
-        endpoints = [
-            f"{api_base}/projects/{project_code}/workflow-instances/{instance_id}",
-            f"{api_base}/projects/{project_code}/process-instances/{instance_id}",
-        ]
-
-        for url in endpoints:
-            payload = self._perform_api_get(url, params=None, token=token)
-            if payload is None:
-                continue
-
-            data = payload.get("data")
-            if isinstance(data, dict) and data:
-                return data
-            if isinstance(data, list) and data:
-                first = data[0]
-                if isinstance(first, dict):
-                    return first
-
+        url = f"{api_base}/projects/{project_code}/process-instances/{instance_id}"
+        payload = self._perform_api_get(url, params=None, token=token)
+        if not payload:
+            return None
+        data = payload.get("data")
+        if isinstance(data, dict) and data:
+            return data
+        if isinstance(data, list) and data:
+            first = data[0]
+            if isinstance(first, dict):
+                return first
         return None
 
     @staticmethod
@@ -584,134 +601,96 @@ class DolphinSchedulerServiceCore:
         self, workflow_code: int, request: ReleaseWorkflowRequest
     ) -> None:
         """
-        Update workflow release state by resubmitting with new release_state.
-
-        Note: pydolphinscheduler doesn't provide a standalone release API.
-        We update release state by resubmitting the workflow definition with
-        the new release_state, using the cached workflow definition from sync.
+        Update workflow release state by calling DolphinScheduler REST API.
         """
         desired_state = request.release_state.upper()
         if desired_state not in {"ONLINE", "OFFLINE"}:
             raise ValueError("releaseState must be ONLINE or OFFLINE")
 
-        # Get cached workflow definition
-        if workflow_code not in self._workflow_cache:
-            raise ValueError(
-                f"Workflow {workflow_code} not found in cache. "
-                "Please sync the workflow first before releasing it."
-            )
+        project_name = request.project_name or self.settings.workflow_project
+        project_code = self._get_project_code(project_name)
+        if project_code is None:
+            raise ValueError(f"Failed to resolve project {project_name}")
 
-        cached_request = self._workflow_cache[workflow_code]
+        token = self._login_and_get_token()
+        if not token:
+            raise ValueError("Failed to authenticate with DolphinScheduler API")
+
+        api_base = self.settings.api_base_url.rstrip("/")
+        payload = {"releaseState": desired_state}
+        release_url = (
+            f"{api_base}/projects/{project_code}/process-definition/{workflow_code}/release"
+        )
+        self._perform_api_post(release_url, payload, token)
+
+        if workflow_code in self._workflow_cache:
+            cached_request = self._workflow_cache[workflow_code]
+            cached_request.release_state = desired_state  # type: ignore[attr-defined]
 
         logger.info(
-            "Updating workflow %s (code=%s) release state to %s",
-            cached_request.workflow_name,
+            "Workflow %s release state updated to %s via REST API",
             workflow_code,
             desired_state,
         )
-
-        # Resync the workflow with the new release state
-        updated_request = SyncWorkflowRequest(
-            workflow_name=cached_request.workflow_name,
-            project_name=cached_request.project_name,
-            description=cached_request.description,
-            user=cached_request.user,
-            worker_group=cached_request.worker_group,
-            execution_type=cached_request.execution_type,
-            release_state=desired_state,
-            tasks=cached_request.tasks,
-            relations=cached_request.relations,
-            locations=cached_request.locations,
-        )
-
-        # Resubmit with new release state
-        self.sync_workflow(workflow_code, updated_request)
 
     def start_workflow(
         self, workflow_code: int, request: StartWorkflowRequest
     ) -> StartWorkflowResponse:
         """
-        Start a workflow execution by workflow code.
-
-        This method queries the workflow info from DolphinScheduler and starts it,
-        without needing to rebuild the entire workflow definition from cache.
+        Start a workflow execution by workflow code using PyDolphinScheduler SDK.
         """
         from pydolphinscheduler.java_gateway import gateway
 
-        workflow_name = self._ensure_workflow_name(request.workflow_name)
+        workflow_name = self._ensure_workflow_name(
+            request.workflow_name or self.settings.workflow_name or self.settings.workflow_project
+        )
         project_name = request.project_name or self.settings.workflow_project
         user_name = request.user or self.settings.user_name
+        worker_group = request.worker_group or self.settings.workflow_worker_group
 
-        # Query workflow info from DolphinScheduler to verify it exists
         try:
             workflow_info = gateway.get_workflow_info(user_name, project_name, workflow_name)
-            actual_code = workflow_info.get('code')
+            actual_code = workflow_info.get("code")
             if actual_code != workflow_code:
                 logger.warning(
                     "Workflow code mismatch: requested=%s, actual=%s",
                     workflow_code,
-                    actual_code
+                    actual_code,
                 )
-        except Exception as e:
+        except Exception as exc:  # pylint: disable=broad-except
             logger.error(
                 "Failed to query workflow info: workflow=%s project=%s user=%s error=%s",
                 workflow_name,
                 project_name,
                 user_name,
-                str(e)
+                exc,
             )
             raise ValueError(
                 f"Workflow {workflow_name} not found in DolphinScheduler project {project_name}"
-            ) from e
+            ) from exc
 
-        # Create a minimal workflow object just for starting the execution
-        # No need to rebuild tasks - DolphinScheduler already has the workflow definition
         workflow = Workflow(
             name=workflow_name,
             project=project_name,
             user=user_name,
+            worker_group=worker_group,
             release_state="online",
         )
         workflow._workflow_code = workflow_code  # type: ignore[attr-defined]
         workflow.user.tenant = self.settings.user_tenant
 
         logger.info(
-            "Starting workflow execution: project=%s workflow=%s code=%s user=%s",
+            "Starting workflow execution via SDK: project=%s workflow=%s code=%s",
             project_name,
             workflow_name,
             workflow_code,
-            user_name,
         )
-        baseline_instance = self._fetch_latest_instance_id(
-            project_name,
-            workflow_code,
-            workflow_name,
-            max_attempts=1,
-            poll_interval=0.5,
-        )
-        baseline_numeric = self._parse_int(baseline_instance)
 
         workflow.start()
-        instance_id = self._fetch_latest_instance_id(
-            project_name,
-            workflow_code,
-            workflow_name,
-            max_attempts=8,
-            poll_interval=1.5,
-            min_instance_id=baseline_numeric,
+        logger.info(
+            "Workflow execution submitted via SDK for workflow_code=%s", workflow_code
         )
-
-        if instance_id:
-            logger.info(
-                "Workflow execution started with instanceId=%s for workflow_code=%s",
-                instance_id,
-                workflow_code,
-            )
-            message = "submitted"
-        else:
-            message = "submitted but instanceId not available"
-
-        return StartWorkflowResponse(instanceId=instance_id, message=message)
+        return StartWorkflowResponse(instanceId=None, message="submitted")
 
     def query_project(self, request: QueryProjectRequest) -> QueryProjectResponse:
         """
@@ -962,7 +941,7 @@ class DolphinSchedulerServiceCore:
         params: Dict[str, Any] = {
             "pageNo": max(1, request.page_num),
             "pageSize": max(1, request.page_size),
-            "workflowDefinitionCode": workflow_code,
+            "processDefineCode": workflow_code,
             "processDefinitionCode": workflow_code,
         }
         if request.state:
@@ -977,19 +956,23 @@ class DolphinSchedulerServiceCore:
             params["executorName"] = request.user
 
         api_base = self.settings.api_base_url.rstrip("/")
-        endpoints = [
-            f"{api_base}/projects/{project_code}/workflow-instances",
-            f"{api_base}/projects/{project_code}/process-instances",
-        ]
-
-        payload = None
-        for url in endpoints:
+        url = f"{api_base}/projects/{project_code}/process-instances"
+        try:
             payload = self._perform_api_get(url, params, token)
-            if payload:
-                break
+        except ValueError as exc:
+            logger.error(
+                "Failed to query workflow instances: project=%s workflow=%s params=%s error=%s",
+                project_name,
+                workflow_code,
+                params,
+                exc,
+            )
+            raise
 
         if not payload:
-            raise ValueError("Failed to query workflow instances from DolphinScheduler API")
+            raise ValueError(
+                f"Failed to query workflow instances from DolphinScheduler API at {url}"
+            )
 
         data = payload.get("data") or {}
         raw_instances = self._extract_instance_payload(data)

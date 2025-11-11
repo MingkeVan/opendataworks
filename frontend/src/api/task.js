@@ -21,11 +21,6 @@ export const taskApi = {
     return request.put(`/v1/tasks/${id}`, data)
   },
 
-  // 发布任务
-  publish(id) {
-    return request.post(`/v1/tasks/${id}/publish`)
-  },
-
   // 执行任务（单任务测试执行）
   execute(id) {
     return request.post(`/v1/tasks/${id}/execute`)

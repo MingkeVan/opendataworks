@@ -60,6 +60,7 @@ logs/
 # Deployment artifacts
 deploy/docker-images/*.tar
 artifacts/
+*.tar.gz
 
 # Playwright MCP
 .playwright-mcp/

@@ -10,7 +10,6 @@ spring:
 dolphin:
   service-url: http://localhost:5001
   project-name: opendataworks
-  workflow-name: opendataworks-default-workflow
   tenant-code: default
   worker-group: default
   execution-type: PARALLEL

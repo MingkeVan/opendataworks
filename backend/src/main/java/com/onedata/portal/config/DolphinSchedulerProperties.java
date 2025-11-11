@@ -18,11 +18,17 @@ public class DolphinSchedulerProperties {
     /** DolphinScheduler Web UI base URL, for example: http://localhost:12345/dolphinscheduler */
     private String webuiUrl;
 
+    /** DolphinScheduler OpenAPI base URL, default to Web UI host */
+    private String openapiUrl;
+
+    /** DolphinScheduler API token */
+    private String token;
+
     /** DolphinScheduler project name managed by the Python service. */
     private String projectName = "opendataworks";
 
-    /** Unified workflow name that aggregates data portal tasks. */
-    private String workflowName = "opendataworks-default-workflow";
+    /** DolphinScheduler project code (if known) */
+    private Long projectCode;
 
     /** Default tenant code forwarded to the dolphinscheduler-service. */
     private String tenantCode = "default";

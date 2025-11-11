@@ -81,7 +81,6 @@ dolphin:
   service-url: http://localhost:8081
   project-name: opendataworks-test
   workflow-code: <FROM_UI_OR_API>
-  workflow-name: opendataworks-test-workflow
   tenant-code: default
   worker-group: default
   execution-type: PARALLEL

@@ -35,8 +35,12 @@ public class DataTaskController {
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "20") int pageSize,
             @RequestParam(required = false) String taskType,
-            @RequestParam(required = false) String status) {
-        Page<DataTask> page = dataTaskService.list(pageNum, pageSize, taskType, status);
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Long workflowId,
+            @RequestParam(required = false) Long upstreamTaskId,
+            @RequestParam(required = false) Long downstreamTaskId) {
+        Page<DataTask> page = dataTaskService.list(pageNum, pageSize, taskType, status,
+            workflowId, upstreamTaskId, downstreamTaskId);
         return Result.success(PageResult.of(page.getTotal(), page.getRecords()));
     }
 
@@ -80,8 +84,10 @@ public class DataTaskController {
      */
     @PostMapping("/{id}/publish")
     public Result<Void> publish(@PathVariable Long id) {
-        dataTaskService.publish(id);
-        return Result.success();
+        return Result.fail(
+            400,
+            "任务发布入口已迁移，请前往“工作流管理”页面执行发布操作"
+        );
     }
 
     /**

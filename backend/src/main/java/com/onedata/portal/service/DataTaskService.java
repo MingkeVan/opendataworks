@@ -1,6 +1,7 @@
 package com.onedata.portal.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.onedata.portal.dto.DolphinDatasourceOption;
@@ -8,12 +9,16 @@ import com.onedata.portal.dto.TaskExecutionStatus;
 import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.DataTask;
+import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.TableTaskRelation;
 import com.onedata.portal.entity.TaskExecutionLog;
+import com.onedata.portal.entity.WorkflowTaskRelation;
 import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
+import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
+import com.onedata.portal.mapper.DataWorkflowMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -29,6 +34,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
 
 /**
  * 任务服务
@@ -42,13 +49,21 @@ public class DataTaskService {
     private final DataLineageMapper dataLineageMapper;
     private final TaskExecutionLogMapper executionLogMapper;
     private final TableTaskRelationMapper tableTaskRelationMapper;
+    private final WorkflowTaskRelationMapper workflowTaskRelationMapper;
+    private final DataWorkflowMapper dataWorkflowMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
     private final DataTableService dataTableService;
 
     /**
      * 分页查询任务列表
      */
-    public Page<DataTask> list(int pageNum, int pageSize, String taskType, String status) {
+    public Page<DataTask> list(int pageNum,
+                               int pageSize,
+                               String taskType,
+                               String status,
+                               Long workflowId,
+                               Long upstreamTaskId,
+                               Long downstreamTaskId) {
         Page<DataTask> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<DataTask> wrapper = new LambdaQueryWrapper<>();
 
@@ -59,8 +74,35 @@ public class DataTaskService {
             wrapper.eq(DataTask::getStatus, status);
         }
 
+        if (workflowId != null) {
+            wrapper.inSql(DataTask::getId,
+                "SELECT task_id FROM workflow_task_relation WHERE workflow_id = " + workflowId);
+        }
+
+        if (upstreamTaskId != null) {
+            wrapper.inSql(DataTask::getId,
+                "SELECT DISTINCT t_read.task_id " +
+                    "FROM table_task_relation t_read " +
+                    "JOIN table_task_relation t_write ON t_read.table_id = t_write.table_id " +
+                    "WHERE t_write.task_id = " + upstreamTaskId +
+                    " AND t_write.relation_type = 'write' " +
+                    " AND t_read.relation_type = 'read'");
+        }
+
+        if (downstreamTaskId != null) {
+            wrapper.inSql(DataTask::getId,
+                "SELECT DISTINCT t_write.task_id " +
+                    "FROM table_task_relation t_write " +
+                    "JOIN table_task_relation t_read ON t_write.table_id = t_read.table_id " +
+                    "WHERE t_read.task_id = " + downstreamTaskId +
+                    " AND t_write.relation_type = 'write' " +
+                    " AND t_read.relation_type = 'read'");
+        }
+
         wrapper.orderByDesc(DataTask::getCreatedAt);
-        return dataTaskMapper.selectPage(page, wrapper);
+        Page<DataTask> result = dataTaskMapper.selectPage(page, wrapper);
+        enrichWorkflowMetadata(result.getRecords());
+        return result;
     }
 
     /**
@@ -334,9 +376,11 @@ public class DataTaskService {
                 dolphinSchedulerService.setWorkflowReleaseState(workflowCode, "OFFLINE");
             }
 
+            String workflowName = resolveWorkflowDisplayName(target);
+
             long actualWorkflowCode = dolphinSchedulerService.syncWorkflow(
                 workflowCode,
-                dolphinSchedulerService.getWorkflowName(),
+                workflowName,
                 definitions,
                 relations,
                 locations
@@ -508,7 +552,11 @@ public class DataTaskService {
         executionLogMapper.insert(executionLog);
 
         // 执行临时工作流
-        String executionId = dolphinSchedulerService.startProcessInstance(actualWorkflowCode);
+        String executionId = dolphinSchedulerService.startProcessInstance(
+            actualWorkflowCode,
+            null,
+            tempWorkflowName
+        );
         executionLog.setExecutionId(executionId);
         executionLog.setStatus("running");
         executionLogMapper.updateById(executionLog);
@@ -563,7 +611,11 @@ public class DataTaskService {
         executionLogMapper.insert(executionLog);
 
         // 执行统一工作流
-        String executionId = dolphinSchedulerService.startProcessInstance(task.getDolphinProcessCode());
+        String executionId = dolphinSchedulerService.startProcessInstance(
+            task.getDolphinProcessCode(),
+            null,
+            resolveWorkflowDisplayName(task)
+        );
         executionLog.setExecutionId(executionId);
         executionLog.setStatus("running");
         executionLogMapper.updateById(executionLog);
@@ -665,6 +717,22 @@ public class DataTaskService {
         tableTaskRelationMapper.hardDeleteByTaskId(taskId);
     }
 
+    private String resolveWorkflowDisplayName(DataTask task) {
+        if (task == null) {
+            return "legacy-workflow";
+        }
+        if (StringUtils.hasText(task.getWorkflowName())) {
+            return task.getWorkflowName();
+        }
+        if (StringUtils.hasText(task.getTaskName())) {
+            return "task-" + task.getTaskName();
+        }
+        if (task.getId() != null) {
+            return "task-workflow-" + task.getId();
+        }
+        return "legacy-workflow";
+    }
+
     /**
      * 获取任务的最近一次执行状态
      */
@@ -686,7 +754,7 @@ public class DataTaskService {
         status.setTaskId(taskId);
         status.setDolphinWorkflowCode(task.getDolphinProcessCode());
         status.setDolphinTaskCode(task.getDolphinTaskCode());
-        status.setDolphinProjectName(dolphinSchedulerService.getWorkflowName());
+        status.setDolphinProjectName(resolveWorkflowDisplayName(task));
 
         if (latestLog != null) {
             status.setExecutionId(latestLog.getExecutionId());
@@ -806,5 +874,49 @@ public class DataTaskService {
             inputTableIds,
             outputTableIds
         );
+    }
+
+    private void enrichWorkflowMetadata(List<DataTask> tasks) {
+        if (CollectionUtils.isEmpty(tasks)) {
+            return;
+        }
+        List<Long> taskIds = tasks.stream()
+            .map(DataTask::getId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toList());
+        if (taskIds.isEmpty()) {
+            return;
+        }
+        List<WorkflowTaskRelation> relations = workflowTaskRelationMapper.selectList(
+            Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                .in(WorkflowTaskRelation::getTaskId, taskIds)
+        );
+        if (relations.isEmpty()) {
+            return;
+        }
+        Map<Long, WorkflowTaskRelation> relationMap = relations.stream()
+            .collect(Collectors.toMap(WorkflowTaskRelation::getTaskId, r -> r));
+        List<Long> workflowIds = relations.stream()
+            .map(WorkflowTaskRelation::getWorkflowId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+        Map<Long, DataWorkflow> workflowMap = workflowIds.isEmpty()
+            ? Collections.emptyMap()
+            : dataWorkflowMapper.selectBatchIds(workflowIds).stream()
+                .collect(Collectors.toMap(DataWorkflow::getId, w -> w));
+        for (DataTask task : tasks) {
+            WorkflowTaskRelation relation = relationMap.get(task.getId());
+            if (relation == null) {
+                continue;
+            }
+            task.setWorkflowId(relation.getWorkflowId());
+            task.setUpstreamTaskCount(relation.getUpstreamTaskCount());
+            task.setDownstreamTaskCount(relation.getDownstreamTaskCount());
+            DataWorkflow workflow = workflowMap.get(relation.getWorkflowId());
+            if (workflow != null) {
+                task.setWorkflowName(workflow.getWorkflowName());
+            }
+        }
     }
 }

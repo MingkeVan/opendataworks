@@ -35,6 +35,7 @@ class DolphinSchedulerServiceIntegrationTest {
 
     private DolphinSchedulerService service;
     private DolphinSchedulerProperties properties;
+    private static final String TEST_WORKFLOW_NAME = "java-integration-test";
 
     @BeforeEach
     void setUp() {
@@ -42,7 +43,6 @@ class DolphinSchedulerServiceIntegrationTest {
         properties = new DolphinSchedulerProperties();
         properties.setServiceUrl("http://localhost:5001");
         properties.setProjectName("test-project");
-        properties.setWorkflowName("java-integration-test");
         properties.setTenantCode("default");
         properties.setWorkerGroup("default");
         properties.setExecutionType("PARALLEL");
@@ -56,7 +56,7 @@ class DolphinSchedulerServiceIntegrationTest {
         System.out.println("Starting DolphinScheduler Integration Test");
         System.out.println("Service URL: " + properties.getServiceUrl());
         System.out.println("Project: " + properties.getProjectName());
-        System.out.println("Workflow: " + properties.getWorkflowName());
+        System.out.println("Workflow: " + TEST_WORKFLOW_NAME);
         System.out.println("============================================================");
     }
 
@@ -119,7 +119,7 @@ class DolphinSchedulerServiceIntegrationTest {
         System.out.println("\nStep 4: Syncing workflow with Python service...");
         service.syncWorkflow(
             0,  // workflowCode = 0 means create new
-            properties.getWorkflowName(),
+            TEST_WORKFLOW_NAME,
             tasks,
             relations,
             locations

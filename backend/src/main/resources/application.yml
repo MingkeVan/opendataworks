@@ -43,8 +43,10 @@ mybatis-plus:
 dolphin:
   service-url: ${DOLPHIN_SERVICE_URL:http://localhost:5001}
   webui-url: http://localhost:12345/dolphinscheduler
+  openapi-url: ${DOLPHIN_OPENAPI_URL:http://localhost:12345/dolphinscheduler}
+  token: ${DOLPHIN_TOKEN:dev-token}
   project-name: opendataworks
-  workflow-name: opendataworks-default-workflow
+  project-code: ${DOLPHIN_PROJECT_CODE:0}
   tenant-code: default
   worker-group: default
   execution-type: PARALLEL

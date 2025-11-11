@@ -94,7 +94,6 @@ dolphin:
   service-url: http://localhost:5001
   web-url: http://localhost:12345/dolphinscheduler  # 新增
   project-name: test-project
-  workflow-name: opendataworks-default-workflow
 ```
 
 **文件**: `backend/src/main/java/com/onedata/portal/config/DolphinSchedulerProperties.java`

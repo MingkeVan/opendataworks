@@ -1,5 +1,6 @@
 package com.onedata.portal.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.entity.DataTask;
@@ -44,41 +45,35 @@ class TaskExecutionServiceTest {
 
     @Test
     void getRecentExecutionsUsesDefaultLimitWhenNull() {
-        when(executionLogMapper.selectList(any())).thenReturn(Collections.emptyList());
+        mockSelectPage(Collections.emptyList());
 
         service.getRecentExecutions(1L, null);
 
-        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<TaskExecutionLog>> captor =
-            ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
-        verify(executionLogMapper).selectList(captor.capture());
-
-        assertEquals("LIMIT 10", captor.getValue().getLastSql());
+        ArgumentCaptor<Page<TaskExecutionLog>> pageCaptor = ArgumentCaptor.forClass(Page.class);
+        verify(executionLogMapper).selectPage(pageCaptor.capture(), any());
+        assertEquals(10L, pageCaptor.getValue().getSize());
     }
 
     @Test
     void getRecentExecutionsFallbacksToDefaultLimitWhenNonPositive() {
-        when(executionLogMapper.selectList(any())).thenReturn(Collections.emptyList());
+        mockSelectPage(Collections.emptyList());
 
         service.getRecentExecutions(1L, -5);
 
-        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<TaskExecutionLog>> captor =
-            ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
-        verify(executionLogMapper).selectList(captor.capture());
-
-        assertEquals("LIMIT 10", captor.getValue().getLastSql());
+        ArgumentCaptor<Page<TaskExecutionLog>> pageCaptor = ArgumentCaptor.forClass(Page.class);
+        verify(executionLogMapper).selectPage(pageCaptor.capture(), any());
+        assertEquals(10L, pageCaptor.getValue().getSize());
     }
 
     @Test
     void getRecentExecutionsHonorsPositiveLimit() {
-        when(executionLogMapper.selectList(any())).thenReturn(Collections.emptyList());
+        mockSelectPage(Collections.emptyList());
 
         service.getRecentExecutions(1L, 5);
 
-        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<TaskExecutionLog>> captor =
-            ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
-        verify(executionLogMapper).selectList(captor.capture());
-
-        assertEquals("LIMIT 5", captor.getValue().getLastSql());
+        ArgumentCaptor<Page<TaskExecutionLog>> pageCaptor = ArgumentCaptor.forClass(Page.class);
+        verify(executionLogMapper).selectPage(pageCaptor.capture(), any());
+        assertEquals(5L, pageCaptor.getValue().getSize());
     }
 
     @Test
@@ -89,7 +84,7 @@ class TaskExecutionServiceTest {
         log.setExecutionId("exec-1");
         log.setStatus("running");
 
-        when(executionLogMapper.selectList(any())).thenReturn(Collections.singletonList(log));
+        mockSelectPage(Collections.singletonList(log));
 
         DataTask task = new DataTask();
         task.setId(200L);
@@ -97,11 +92,11 @@ class TaskExecutionServiceTest {
         task.setDolphinTaskCode(400L);
         when(dataTaskMapper.selectById(200L)).thenReturn(task);
 
-        when(dolphinSchedulerService.getWorkflowName()).thenReturn("workflow");
-        when(dolphinSchedulerService.getTaskDefinitionUrl(400L)).thenReturn("http://host/ui/projects/1/task/definitions/400");
+        when(dolphinSchedulerService.getTaskDefinitionUrl(400L)).thenReturn("http://host/ui/projects/1/task/instances?taskCode=400&projectName=opendataworks");
         when(dolphinSchedulerService.getProjectCode()).thenReturn(1L);
         when(dolphinSchedulerService.getWorkflowDefinitionUrl(300L))
             .thenReturn("http://host/ui/projects/1/workflow/definitions/300");
+        task.setWorkflowName("workflow");
 
         ObjectMapper mapper = new ObjectMapper();
         JsonNode instanceDetail = mapper.readTree("{" +
@@ -122,7 +117,17 @@ class TaskExecutionServiceTest {
         TaskExecutionLog enriched = result.get(0);
         assertEquals("http://host/ui/projects/1/workflow/instance/300/exec-1", enriched.getWorkflowInstanceUrl());
         verify(dolphinSchedulerService).getWorkflowInstanceStatus(300L, "exec-1");
-        verify(executionLogMapper).selectList(any());
+        verify(executionLogMapper).selectPage(any(), any());
         verify(executionLogMapper).updateById(any());
+    }
+
+    @SuppressWarnings("unchecked")
+    private void mockSelectPage(List<TaskExecutionLog> records) {
+        when(executionLogMapper.selectPage(any(Page.class), any())).thenAnswer(invocation -> {
+            Page<TaskExecutionLog> page = invocation.getArgument(0);
+            page.setRecords(records);
+            page.setTotal(records.size());
+            return page;
+        });
     }
 }

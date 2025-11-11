@@ -11,6 +11,7 @@ import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -73,13 +74,11 @@ public class TaskExecutionService {
 
         LambdaQueryWrapper<TaskExecutionLog> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(TaskExecutionLog::getTaskId, taskId)
-                .orderByDesc(TaskExecutionLog::getStartTime);
+            .orderByDesc(TaskExecutionLog::getStartTime);
 
-        if (resolvedLimit > 0) {
-            wrapper.last("LIMIT " + resolvedLimit);
-        }
-
-        List<TaskExecutionLog> logs = executionLogMapper.selectList(wrapper);
+        Page<TaskExecutionLog> page = new Page<>(1, resolvedLimit);
+        IPage<TaskExecutionLog> result = executionLogMapper.selectPage(page, wrapper);
+        List<TaskExecutionLog> logs = result.getRecords();
         logs.forEach(this::enrichWithDolphinData);
         return logs;
     }
@@ -97,7 +96,7 @@ public class TaskExecutionService {
                 Long taskCode = task.getDolphinTaskCode();
 
                 log.setWorkflowCode(workflowCode);
-                log.setWorkflowName(dolphinSchedulerService.getWorkflowName());
+                log.setWorkflowName(resolveWorkflowName(task));
                 log.setTaskCode(taskCode);
 
                 // 2. 生成 DolphinScheduler WebUI 链接
@@ -455,5 +454,21 @@ public class TaskExecutionService {
                 })
                 .sorted(Comparator.comparing(m -> (String) m.get("date")))
                 .collect(Collectors.toList());
+    }
+
+    private String resolveWorkflowName(DataTask task) {
+        if (task == null) {
+            return null;
+        }
+        if (StringUtils.hasText(task.getWorkflowName())) {
+            return task.getWorkflowName();
+        }
+        if (StringUtils.hasText(task.getTaskName())) {
+            return "task-" + task.getTaskName();
+        }
+        if (task.getId() != null) {
+            return "task-workflow-" + task.getId();
+        }
+        return null;
     }
 }

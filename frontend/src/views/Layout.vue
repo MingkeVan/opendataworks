@@ -27,9 +27,9 @@
             <el-icon><Collection /></el-icon>
             <span>域管理</span>
           </el-menu-item>
-          <el-menu-item index="/tasks">
-            <el-icon><Management /></el-icon>
-            <span>任务管理</span>
+          <el-menu-item index="/workflows">
+            <el-icon><Share /></el-icon>
+            <span>工作流管理</span>
           </el-menu-item>
           <el-menu-item index="/lineage">
             <el-icon><Connection /></el-icon>
@@ -60,7 +60,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { DataBoard, Grid, Management, Connection, Monitor, Collection, Warning, Search, Setting } from '@element-plus/icons-vue'
+import { DataBoard, Grid, Connection, Monitor, Collection, Warning, Search, Setting, Share } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => {
@@ -77,8 +77,8 @@ const activeMenu = computed(() => {
   if (path.startsWith('/domains')) {
     return '/domains'
   }
-  if (path.startsWith('/tasks')) {
-    return '/tasks'
+  if (path.startsWith('/workflows') || path.startsWith('/tasks')) {
+    return '/workflows'
   }
   if (path.startsWith('/lineage')) {
     return '/lineage'

@@ -49,10 +49,14 @@ const routes = [
         meta: { title: '域管理' }
       },
       {
+        path: '/workflows',
+        name: 'Workflows',
+        component: () => import('@/views/workflows/WorkflowManagement.vue'),
+        meta: { title: '工作流管理' }
+      },
+      {
         path: '/tasks',
-        name: 'Tasks',
-        component: () => import('@/views/tasks/TaskList.vue'),
-        meta: { title: '任务管理' }
+        redirect: { path: '/workflows', query: { tab: 'tasks' } }
       },
       {
         path: '/tasks/create',
