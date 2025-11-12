@@ -94,6 +94,7 @@ public class WorkflowPublishService {
     private void applyWorkflowStatus(DataWorkflow workflow, WorkflowPublishRecord record) {
         switch (record.getOperation()) {
             case "deploy":
+                workflow.setStatus("offline");
                 workflow.setPublishStatus("published");
                 workflow.setLastPublishedVersionId(record.getVersionId());
                 break;

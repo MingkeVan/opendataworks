@@ -11,6 +11,7 @@ import com.onedata.portal.dto.workflow.WorkflowDetailResponse;
 import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
 import com.onedata.portal.dto.workflow.WorkflowQueryRequest;
 import com.onedata.portal.dto.workflow.WorkflowTaskBinding;
+import com.onedata.portal.dto.workflow.WorkflowTopologyResult;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.WorkflowInstanceCache;
@@ -33,12 +34,15 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -65,6 +69,7 @@ public class WorkflowService {
     private final DolphinSchedulerService dolphinSchedulerService;
     private final DataTaskMapper dataTaskMapper;
     private final TableTaskRelationMapper tableTaskRelationMapper;
+    private final WorkflowTopologyService workflowTopologyService;
 
     public Page<DataWorkflow> list(WorkflowQueryRequest request) {
         LambdaQueryWrapper<DataWorkflow> wrapper = Wrappers.lambdaQuery();
@@ -114,11 +119,15 @@ public class WorkflowService {
     public DataWorkflow createWorkflow(WorkflowDefinitionRequest request) {
         DataWorkflow workflow = new DataWorkflow();
         LocalDateTime now = LocalDateTime.now();
+        List<WorkflowTaskBinding> taskBindings = normalizeTaskBindings(request.getTasks());
+        request.setTasks(taskBindings);
+        List<Long> taskIdsInOrder = collectTaskIds(taskBindings);
+        WorkflowTopologyResult topology = workflowTopologyService.buildTopology(taskIdsInOrder);
         workflow.setWorkflowName(request.getWorkflowName());
         workflow.setDescription(request.getDescription());
         workflow.setDefinitionJson(defaultJson(request.getDefinitionJson()));
-        workflow.setEntryTaskIds(toJson(extractTaskIds(request.getTasks(), true)));
-        workflow.setExitTaskIds(toJson(extractTaskIds(request.getTasks(), false)));
+        workflow.setEntryTaskIds(toJson(orderTaskIds(topology.getEntryTaskIds(), taskIdsInOrder)));
+        workflow.setExitTaskIds(toJson(orderTaskIds(topology.getExitTaskIds(), taskIdsInOrder)));
         workflow.setStatus("draft");
         workflow.setPublishStatus("never");
         workflow.setProjectCode(resolveProjectCode(request.getProjectCode()));
@@ -128,7 +137,7 @@ public class WorkflowService {
         workflow.setUpdatedAt(now);
         dataWorkflowMapper.insert(workflow);
 
-        persistTaskRelations(workflow.getId(), request.getTasks(), null);
+        persistTaskRelations(workflow.getId(), taskBindings, null, topology);
 
         WorkflowVersion version = snapshotWorkflow(workflow, request);
         workflow.setCurrentVersionId(version.getId());
@@ -161,11 +170,15 @@ public class WorkflowService {
         if (workflow == null) {
             throw new IllegalArgumentException("Workflow not found: " + workflowId);
         }
+        List<WorkflowTaskBinding> taskBindings = normalizeTaskBindings(request.getTasks());
+        request.setTasks(taskBindings);
+        List<Long> taskIdsInOrder = collectTaskIds(taskBindings);
+        WorkflowTopologyResult topology = workflowTopologyService.buildTopology(taskIdsInOrder);
         workflow.setWorkflowName(request.getWorkflowName());
         workflow.setDescription(request.getDescription());
         workflow.setDefinitionJson(defaultJson(request.getDefinitionJson()));
-        workflow.setEntryTaskIds(toJson(extractTaskIds(request.getTasks(), true)));
-        workflow.setExitTaskIds(toJson(extractTaskIds(request.getTasks(), false)));
+        workflow.setEntryTaskIds(toJson(orderTaskIds(topology.getEntryTaskIds(), taskIdsInOrder)));
+        workflow.setExitTaskIds(toJson(orderTaskIds(topology.getExitTaskIds(), taskIdsInOrder)));
         workflow.setUpdatedBy(request.getOperator());
         workflow.setUpdatedAt(LocalDateTime.now());
         if (workflow.getProjectCode() == null || workflow.getProjectCode() == 0) {
@@ -173,7 +186,7 @@ public class WorkflowService {
         }
         dataWorkflowMapper.updateById(workflow);
 
-        persistTaskRelations(workflowId, request.getTasks(), workflow.getCurrentVersionId());
+        persistTaskRelations(workflowId, taskBindings, workflow.getCurrentVersionId(), topology);
 
         WorkflowVersion version = snapshotWorkflow(workflow, request);
         workflow.setCurrentVersionId(version.getId());
@@ -211,7 +224,8 @@ public class WorkflowService {
 
     private void persistTaskRelations(Long workflowId,
                                       List<WorkflowTaskBinding> tasks,
-                                      Long previousVersionId) {
+                                      Long previousVersionId,
+                                      WorkflowTopologyResult topology) {
         workflowTaskRelationMapper.delete(
             Wrappers.<WorkflowTaskRelation>lambdaQuery()
                 .eq(WorkflowTaskRelation::getWorkflowId, workflowId)
@@ -219,6 +233,12 @@ public class WorkflowService {
         if (CollectionUtils.isEmpty(tasks)) {
             return;
         }
+        Set<Long> entrySet = topology != null && topology.getEntryTaskIds() != null
+            ? topology.getEntryTaskIds()
+            : Collections.emptySet();
+        Set<Long> exitSet = topology != null && topology.getExitTaskIds() != null
+            ? topology.getExitTaskIds()
+            : Collections.emptySet();
         for (WorkflowTaskBinding binding : tasks) {
             if (binding.getTaskId() == null) {
                 continue;
@@ -227,8 +247,8 @@ public class WorkflowService {
             WorkflowTaskRelation relation = new WorkflowTaskRelation();
             relation.setWorkflowId(workflowId);
             relation.setTaskId(binding.getTaskId());
-            relation.setIsEntry(Boolean.TRUE.equals(binding.getEntry()));
-            relation.setIsExit(Boolean.TRUE.equals(binding.getExit()));
+            relation.setIsEntry(entrySet.contains(binding.getTaskId()));
+            relation.setIsExit(exitSet.contains(binding.getTaskId()));
             relation.setNodeAttrs(toJson(binding.getNodeAttrs()));
             relation.setVersionId(previousVersionId);
             relation.setUpstreamTaskCount(tableTaskRelationMapper.countUpstreamTasks(binding.getTaskId()));
@@ -237,15 +257,42 @@ public class WorkflowService {
         }
     }
 
-    private List<Long> extractTaskIds(List<WorkflowTaskBinding> tasks, boolean entry) {
+    private List<Long> orderTaskIds(Set<Long> sourceIds, List<Long> taskOrder) {
+        if (CollectionUtils.isEmpty(sourceIds) || CollectionUtils.isEmpty(taskOrder)) {
+            return CollectionUtils.isEmpty(sourceIds) ? Collections.emptyList() : new ArrayList<>(sourceIds);
+        }
+        List<Long> ordered = new ArrayList<>();
+        taskOrder.forEach(taskId -> {
+            if (sourceIds.contains(taskId)) {
+                ordered.add(taskId);
+            }
+        });
+        if (ordered.size() < sourceIds.size()) {
+            sourceIds.stream()
+                .filter(id -> !ordered.contains(id))
+                .forEach(ordered::add);
+        }
+        return ordered;
+    }
+
+    private List<Long> collectTaskIds(List<WorkflowTaskBinding> tasks) {
         if (CollectionUtils.isEmpty(tasks)) {
             return Collections.emptyList();
         }
-        return tasks.stream()
-            .filter(t -> entry ? Boolean.TRUE.equals(t.getEntry()) : Boolean.TRUE.equals(t.getExit()))
-            .map(WorkflowTaskBinding::getTaskId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toList());
+        LinkedHashSet<Long> ordered = new LinkedHashSet<>();
+        for (WorkflowTaskBinding task : tasks) {
+            if (task != null && task.getTaskId() != null) {
+                ordered.add(task.getTaskId());
+            }
+        }
+        return new ArrayList<>(ordered);
+    }
+
+    private List<WorkflowTaskBinding> normalizeTaskBindings(List<WorkflowTaskBinding> tasks) {
+        if (CollectionUtils.isEmpty(tasks)) {
+            return Collections.emptyList();
+        }
+        return tasks;
     }
 
     private String toJson(Object value) {

@@ -166,7 +166,8 @@ public class WorkflowDeployService {
         }
 
         long workflowCode = workflow.getWorkflowCode() == null ? 0L : workflow.getWorkflowCode();
-        if (workflowCode > 0) {
+        boolean existingWorkflow = workflowCode > 0;
+        if (existingWorkflow) {
             log.info("Workflow {} already exists, switch OFFLINE before redeploy", workflowCode);
             dolphinSchedulerService.setWorkflowReleaseState(workflowCode, "OFFLINE");
         }
@@ -194,6 +195,7 @@ public class WorkflowDeployService {
             .workflowCode(deployedCode)
             .projectCode(projectCode)
             .taskCount(orderedTasks.size())
+            .existingWorkflow(existingWorkflow)
             .build();
     }
 
@@ -309,12 +311,14 @@ public class WorkflowDeployService {
         private final Long workflowCode;
         private final Long projectCode;
         private final Integer taskCount;
+        private final Boolean existingWorkflow;
 
         @Builder
-        public DeploymentResult(Long workflowCode, Long projectCode, Integer taskCount) {
+        public DeploymentResult(Long workflowCode, Long projectCode, Integer taskCount, Boolean existingWorkflow) {
             this.workflowCode = workflowCode;
             this.projectCode = projectCode;
             this.taskCount = taskCount;
+            this.existingWorkflow = existingWorkflow;
         }
     }
 

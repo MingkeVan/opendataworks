@@ -152,6 +152,13 @@
             >
               Dolphin
             </el-button>
+            <el-button
+              link
+              type="primary"
+              @click="openEditDrawer(row)"
+            >
+              编辑
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -187,7 +194,17 @@
           <section class="detail-section">
             <div class="section-header">
               <span>基本信息</span>
-              <el-button text size="small" @click="refreshDetail">刷新</el-button>
+              <div class="section-actions">
+                <el-button
+                  v-if="workflowDetail?.workflow?.id"
+                  text
+                  size="small"
+                  @click="handleDetailEdit"
+                >
+                  编辑
+                </el-button>
+                <el-button text size="small" @click="refreshDetail">刷新</el-button>
+              </div>
             </div>
             <el-descriptions :column="2" border class="detail-descriptions">
               <el-descriptions-item label="状态">
@@ -312,13 +329,15 @@
 
     <WorkflowCreateDrawer
       v-model="createDrawerVisible"
+      :workflow-id="editingWorkflowId"
       @created="handleCreateSuccess"
+      @updated="handleUpdateSuccess"
     />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import { Search, Link, Plus } from '@element-plus/icons-vue'
@@ -351,6 +370,7 @@ const dolphinWebuiUrl = ref('')
 const pendingApprovalFlags = reactive({})
 const currentWorkflow = ref(null)
 const createDrawerVisible = ref(false)
+const editingWorkflowId = ref(null)
 const actionLoading = reactive({})
 
 const loadWorkflows = async () => {
@@ -384,13 +404,32 @@ const handleReset = () => {
 }
 
 const openCreateDrawer = () => {
+  editingWorkflowId.value = null
   createDrawerVisible.value = true
 }
 
-const handleCreateSuccess = () => {
+const openEditDrawer = (workflow) => {
+  if (!workflow?.id) return
+  editingWorkflowId.value = workflow.id
+  createDrawerVisible.value = true
+}
+
+const closeWorkflowDrawer = () => {
   createDrawerVisible.value = false
+}
+
+const handleCreateSuccess = () => {
+  closeWorkflowDrawer()
   pagination.pageNum = 1
   loadWorkflows()
+}
+
+const handleUpdateSuccess = (workflowId) => {
+  closeWorkflowDrawer()
+  loadWorkflows()
+  if (detailDrawerVisible.value && workflowDetail.value?.workflow?.id === workflowId) {
+    fetchWorkflowDetail(workflowId)
+  }
 }
 
 const handleSizeChange = (size) => {
@@ -430,6 +469,12 @@ const refreshDetail = () => {
   if (id) {
     fetchWorkflowDetail(id)
   }
+}
+
+const handleDetailEdit = () => {
+  const workflow = workflowDetail.value?.workflow
+  if (!workflow?.id) return
+  openEditDrawer(workflow)
 }
 
 const syncPendingFlag = (workflowId, records) => {
@@ -507,6 +552,12 @@ const openRowInstance = (row) => {
   }
   window.open(url, '_blank')
 }
+
+watch(createDrawerVisible, (visible) => {
+  if (!visible) {
+    editingWorkflowId.value = null
+  }
+})
 
 const formatDateTime = (value) => {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'
@@ -910,6 +961,12 @@ onMounted(() => {
   align-items: center;
   margin-bottom: 12px;
   font-weight: 600;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .detail-descriptions {

@@ -1,11 +1,11 @@
 <template>
   <el-drawer
     v-model="visibleProxy"
-    title="新建工作流"
+    :title="drawerTitle"
     size="40%"
     destroy-on-close
   >
-    <div class="drawer-body">
+    <div class="drawer-body" v-loading="drawerLoading">
       <el-form
         ref="formRef"
         :model="form"
@@ -50,7 +50,8 @@
       </el-form>
 
       <el-alert
-        title="可通过入口/出口标记优化 DAG 展示"
+        title="入口/出口由系统根据血缘自动识别"
+        description="保存后平台会根据任务读写关系计算 DAG 入口和出口节点，无需手动标记。"
         type="info"
         :closable="false"
         show-icon
@@ -72,39 +73,17 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="入口">
-          <template #default="{ row }">
-            <el-switch
-              v-if="taskBindings[row.id]"
-              v-model="taskBindings[row.id].entry"
-              :inline-prompt="true"
-              active-text="入口"
-              inactive-text="否"
-            />
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="出口">
-          <template #default="{ row }">
-            <el-switch
-              v-if="taskBindings[row.id]"
-              v-model="taskBindings[row.id].exit"
-              :inline-prompt="true"
-              active-text="出口"
-              inactive-text="否"
-            />
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
       </el-table>
 
-      <el-empty v-else description="请选择任务后配置入口/出口" class="task-empty" />
+      <el-empty v-else description="请选择任务后查看列表" class="task-empty" />
     </div>
 
     <template #footer>
       <div class="drawer-footer">
         <el-button @click="closeDrawer">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleSubmit">创建工作流</el-button>
+        <el-button type="primary" :loading="submitting" @click="handleSubmit">
+          {{ isEditMode ? '保存修改' : '创建工作流' }}
+        </el-button>
       </div>
     </template>
   </el-drawer>
@@ -120,10 +99,14 @@ const props = defineProps({
   modelValue: {
     type: Boolean,
     default: false
+  },
+  workflowId: {
+    type: Number,
+    default: null
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'created'])
+const emit = defineEmits(['update:modelValue', 'created', 'updated'])
 
 const visibleProxy = computed({
   get() {
@@ -136,9 +119,15 @@ const visibleProxy = computed({
 
 const formRef = ref(null)
 const submitting = ref(false)
+const drawerLoading = ref(false)
 const tasksLoading = ref(false)
 const taskOptions = ref([])
-const taskBindings = reactive({})
+const workflowNumericId = computed(() => {
+  const id = Number(props.workflowId)
+  return Number.isFinite(id) ? id : null
+})
+const isEditMode = computed(() => workflowNumericId.value !== null)
+const drawerTitle = computed(() => (isEditMode.value ? '编辑工作流' : '新建工作流'))
 
 const form = reactive({
   workflowName: '',
@@ -158,28 +147,6 @@ const selectedTaskDetails = computed(() =>
 )
 
 watch(
-  () => form.selectedTaskIds.slice(),
-  (ids) => {
-    // ensure binding exists for new ids
-    ids.forEach((id) => {
-      if (!taskBindings[id]) {
-        taskBindings[id] = {
-          entry: ids.length === 1,
-          exit: false
-        }
-      }
-    })
-    // remove bindings for deselected ids
-    Object.keys(taskBindings).forEach((key) => {
-      const numericKey = Number(key)
-      if (!ids.includes(numericKey)) {
-        delete taskBindings[key]
-      }
-    })
-  }
-)
-
-watch(
   () => props.modelValue,
   (visible) => {
     if (visible) {
@@ -189,9 +156,18 @@ watch(
 )
 
 const initialize = async () => {
+  drawerLoading.value = true
   resetForm()
-  if (!taskOptions.value.length) {
-    await loadTaskOptions()
+  try {
+    if (!taskOptions.value.length) {
+      await loadTaskOptions()
+    }
+    const targetId = workflowNumericId.value
+    if (isEditMode.value && targetId !== null) {
+      await loadWorkflowForEdit(targetId)
+    }
+  } finally {
+    drawerLoading.value = false
   }
 }
 
@@ -199,7 +175,6 @@ const resetForm = () => {
   form.workflowName = ''
   form.description = ''
   form.selectedTaskIds = []
-  Object.keys(taskBindings).forEach((key) => delete taskBindings[key])
   formRef.value?.clearValidate()
 }
 
@@ -225,15 +200,68 @@ const loadTaskOptions = async () => {
   }
 }
 
+const ensureTaskOptionsLoaded = async (taskIds = []) => {
+  const normalizedIds = taskIds
+    .map((id) => Number(id))
+    .filter((id) => Number.isFinite(id))
+  const missingIds = normalizedIds.filter(
+    (id) => !taskOptions.value.some((task) => task.id === id)
+  )
+  if (!missingIds.length) {
+    return
+  }
+  try {
+    const tasks = await Promise.all(
+      missingIds.map((id) =>
+        taskApi
+          .getById(id)
+          .then((task) => task)
+          .catch((error) => {
+            console.error(`加载任务 ${id} 失败`, error)
+            return null
+          })
+      )
+    )
+    tasks
+      .filter(Boolean)
+      .forEach((task) => {
+        if (!taskOptions.value.some((option) => option.id === task.id)) {
+          taskOptions.value.push(task)
+        }
+      })
+  } catch (error) {
+    console.error('补充任务选项失败', error)
+  }
+}
+
+const loadWorkflowForEdit = async (workflowId) => {
+  try {
+    const detail = await workflowApi.detail(workflowId)
+    if (!detail?.workflow) {
+      ElMessage.error('未找到工作流详情')
+      return
+    }
+    form.workflowName = detail.workflow.workflowName || ''
+    form.description = detail.workflow.description || ''
+    const relations = Array.isArray(detail.taskRelations) ? detail.taskRelations : []
+    const taskIds = relations
+      .map((relation) => Number(relation.taskId))
+      .filter((id) => Number.isFinite(id))
+    form.selectedTaskIds = taskIds
+    await ensureTaskOptionsLoaded(taskIds)
+  } catch (error) {
+    console.error('加载工作流详情失败', error)
+    ElMessage.error('加载工作流详情失败，请稍后重试')
+  }
+}
+
 const closeDrawer = () => {
   visibleProxy.value = false
 }
 
 const buildTaskPayload = () =>
   form.selectedTaskIds.map((taskId) => ({
-    taskId,
-    entry: Boolean(taskBindings[taskId]?.entry),
-    exit: Boolean(taskBindings[taskId]?.exit)
+    taskId
   }))
 
 const handleSubmit = async () => {
@@ -247,13 +275,21 @@ const handleSubmit = async () => {
       tasks: buildTaskPayload(),
       operator: 'portal-ui'
     }
-    await workflowApi.create(payload)
-    ElMessage.success('工作流创建成功')
-    emit('created')
+    const targetId = workflowNumericId.value
+    if (isEditMode.value && targetId !== null) {
+      await workflowApi.update(targetId, payload)
+      ElMessage.success('工作流更新成功')
+      emit('updated', targetId)
+    } else {
+      await workflowApi.create(payload)
+      ElMessage.success('工作流创建成功')
+      emit('created')
+    }
     closeDrawer()
   } catch (error) {
     console.error('创建工作流失败', error)
-    const message = error.response?.data?.message || error.message || '创建工作流失败'
+    const fallback = isEditMode.value ? '更新工作流失败' : '创建工作流失败'
+    const message = error.response?.data?.message || error.message || fallback
     ElMessage.error(message)
   } finally {
     submitting.value = false
