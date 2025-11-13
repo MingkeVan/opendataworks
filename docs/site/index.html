@@ -80,10 +80,24 @@
         }
 
         .logo {
-            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            font-size: 1.4rem;
             font-weight: 700;
             color: var(--primary-color);
             text-decoration: none;
+        }
+
+        .logo picture {
+            display: inline-flex;
+            width: 42px;
+            height: 42px;
+        }
+
+        .logo img {
+            width: 100%;
+            height: 100%;
         }
 
         .nav-links {
@@ -382,7 +396,13 @@
     <!-- Header -->
     <header>
         <nav>
-            <a href="#" class="logo">🚀 OpenDataWorks</a>
+            <a href="#" class="logo">
+                <picture>
+                    <source srcset="assets/icons/opendataworks-icon-dark.svg" media="(prefers-color-scheme: dark)">
+                    <img src="assets/icons/opendataworks-icon-light.svg" alt="OpenDataWorks 图标">
+                </picture>
+                <span>OpenDataWorks</span>
+            </a>
             <ul class="nav-links">
                 <li><a href="#features">功能特性</a></li>
                 <li><a href="#quickstart">快速开始</a></li>
