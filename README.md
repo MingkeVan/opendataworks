@@ -1,5 +1,12 @@
 # opendataworks
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="frontend/public/opendataworks-icon-dark.svg">
+    <img src="frontend/public/opendataworks-icon-light.svg" alt="OpenDataWorks 图标" width="180">
+  </picture>
+</p>
+
 <div align="center">
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -21,6 +28,14 @@
 ## 📖 项目简介
 
 opendataworks 是一个面向大数据平台的统一数据门户系统,旨在为企业提供一站式的数据资产管理、任务调度编排和血缘关系追踪解决方案。
+
+### 🎨 品牌图标
+
+- `frontend/public/opendataworks-icon-light.svg`：适用于浅色背景,README/浅色 favicon 默认使用
+- `frontend/public/opendataworks-icon-dark.svg`：适用于深色模式,前端与站点在 `prefers-color-scheme: dark` 下自动切换
+- `frontend/public/opendataworks-icon-light-fav.svg` / `...-dark-fav.svg`：同款但放大 35%, 专供浏览器标签/快捷方式, 避免首页展示过大
+- `frontend/public/opendataworks-icon.ico`：包含 16~256px 多尺寸,兼容传统浏览器/Windows 快捷方式
+- `docs/site/assets/icons/`：为 GitHub Pages 版本同步存放的同款资源,便于独立部署
 
 ## 📁 仓库结构
 

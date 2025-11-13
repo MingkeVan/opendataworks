@@ -3,6 +3,10 @@
     <el-header height="60px">
       <div class="header-wrapper">
         <div class="logo">
+          <picture class="logo-icon">
+            <source srcset="/opendataworks-icon-dark.svg" media="(prefers-color-scheme: dark)">
+            <img src="/opendataworks-icon-light.svg" alt="OpenDataWorks 图标">
+          </picture>
           <h2>数据门户</h2>
         </div>
         <el-menu
@@ -125,6 +129,18 @@ const activeMenu = computed(() => {
   justify-content: center;
   background: rgba(0, 0, 0, 0.1);
   backdrop-filter: blur(10px);
+}
+
+.logo-icon {
+  width: 44px;
+  height: 44px;
+  margin-right: 12px;
+  display: inline-flex;
+}
+
+.logo-icon img {
+  width: 100%;
+  height: 100%;
 }
 
 .logo h2 {
