@@ -7,7 +7,10 @@ import com.onedata.portal.service.DorisConnectionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.web.bind.annotation.*;
+
 import java.util.List;
+import java.util.Map;
 
 /**
  * Doris 集群管理 Controller
@@ -55,5 +58,15 @@ public class DorisClusterController {
     @PostMapping("/{id}/test")
     public Result<Boolean> testConnection(@PathVariable Long id) {
         return Result.success(dorisConnectionService.testConnection(id));
+    }
+
+    @GetMapping("/{id}/databases")
+    public Result<List<String>> listDatabases(@PathVariable Long id) {
+        return Result.success(dorisConnectionService.getAllDatabases(id));
+    }
+
+    @GetMapping("/{id}/databases/{database}/tables")
+    public Result<List<Map<String, Object>>> listTables(@PathVariable Long id, @PathVariable String database) {
+        return Result.success(dorisConnectionService.getTablesInDatabase(id, database));
     }
 }

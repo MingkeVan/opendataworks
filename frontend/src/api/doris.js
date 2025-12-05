@@ -27,5 +27,13 @@ export const dorisClusterApi = {
 
   testConnection(id) {
     return request.post(`/v1/doris-clusters/${id}/test`)
+  },
+
+  getDatabases(id) {
+    return request.get(`/v1/doris-clusters/${id}/databases`)
+  },
+
+  getTables(id, dbName) {
+    return request.get(`/v1/doris-clusters/${id}/databases/${dbName}/tables`)
   }
 }
