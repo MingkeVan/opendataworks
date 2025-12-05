@@ -18,7 +18,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="关键词">
-          <el-input v-model="filters.keyword" placeholder="表名/描述" clearable style="width: 220px" />
+          <el-input v-model="filters.keyword" placeholder="表名/描述" clearable style="width: 220px" @keyup.enter="handleSearch" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleSearch">
@@ -31,11 +31,42 @@
     </el-card>
 
     <el-card shadow="never" class="chart-card">
+      <template #header>
+        <div class="card-header">
+          <span>数据血缘关系图</span>
+          <div class="graph-controls">
+            <el-radio-group v-model="currentLayout" size="small" @change="handleLayoutChange">
+              <el-radio-button label="dagre">层级图 (Dagre)</el-radio-button>
+              <el-radio-button label="force">网状图 (Force)</el-radio-button>
+              <el-radio-button label="indented">树状图 (Vertical)</el-radio-button>
+            </el-radio-group>
+          </div>
+        </div>
+      </template>
       <div class="chart-container" ref="chartRef" v-loading="loading"></div>
       <div class="empty" v-if="!loading && (!graphData || graphData.nodes.length === 0)">
         <el-empty description="暂无血缘数据，请调整筛选条件" />
       </div>
     </el-card>
+
+    <el-dialog v-model="dialogVisible" title="表详情" width="500px">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="表名">{{ currentNode?.name }}</el-descriptions-item>
+        <el-descriptions-item label="层级">{{ currentNode?.layer }}</el-descriptions-item>
+        <el-descriptions-item label="业务域">{{ currentNode?.businessDomain || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="数据域">{{ currentNode?.dataDomain || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="上游节点数">{{ currentNode?.inDegree || 0 }}</el-descriptions-item>
+        <el-descriptions-item label="下游节点数">{{ currentNode?.outDegree || 0 }}</el-descriptions-item>
+      </el-descriptions>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="dialogVisible = false">关闭</el-button>
+          <el-button type="primary" @click="goToTableDetail">
+            查看详情
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -43,9 +74,10 @@
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
 import { lineageApi } from '@/api/lineage'
 import { businessDomainApi, dataDomainApi } from '@/api/domain'
+import { LineageGraph } from './LineageGraph'
+import { ElNotification } from 'element-plus'
 
 const chartRef = ref(null)
 const loading = ref(false)
@@ -54,6 +86,9 @@ const businessDomains = ref([])
 const dataDomains = ref([])
 const route = useRoute()
 const router = useRouter()
+const currentLayout = ref('dagre')
+const dialogVisible = ref(false)
+const currentNode = ref(null)
 
 const filters = reactive({
   layer: '',
@@ -70,7 +105,7 @@ const layerOptions = [
   { label: 'ADS', value: 'ADS' }
 ]
 
-let chartInstance = null
+let lineageGraph = null
 const focusTable = ref(route.query.focus || '')
 
 const buildParams = () => {
@@ -100,6 +135,11 @@ const handleBusinessChange = async () => {
 }
 
 const handleSearch = () => {
+  // If we have data, try client-side search first for highlighting
+  if (lineageGraph && graphData.value) {
+     lineageGraph.searchNode(filters.keyword.trim());
+  }
+  // Also reload data to ensure filtering if backend supports it
   loadData()
 }
 
@@ -109,14 +149,46 @@ const handleReset = () => {
   filters.dataDomain = ''
   filters.keyword = ''
   focusTable.value = ''
+  currentLayout.value = 'dagre'
   router.replace({ query: {} })
   loadData()
+}
+
+const handleLayoutChange = (val) => {
+  if (lineageGraph) {
+    lineageGraph.changeLayout(val)
+  }
 }
 
 const loadData = async () => {
   loading.value = true
   try {
-    graphData.value = await lineageApi.getLineageGraph(buildParams())
+    const res = await lineageApi.getLineageGraph(buildParams())
+    if (!res || !res.nodes || res.nodes.length === 0) {
+        graphData.value = null
+    } else {
+        const nodes = (res?.nodes || []).map(node => ({
+        ...node,
+        // Ensure required fields
+        id: node.id || node.name, 
+        label: node.name,
+        // Map properties for custom rendering
+        layer: node.layer,
+        inDegree: node.inDegree || 0,
+        outDegree: node.outDegree || 0,
+        style: {
+            stroke: getLayerColor(node.layer)
+        }
+        }));
+        
+        const edges = (res?.edges || []).map(edge => ({
+        source: edge.source,
+        target: edge.target,
+        }));
+
+        graphData.value = { nodes, edges }
+    }
+    
     await nextTick()
     renderChart()
   } catch (error) {
@@ -126,130 +198,77 @@ const loadData = async () => {
   }
 }
 
-const renderChart = () => {
-  if (!chartRef.value) {
-    return
-  }
-
-  if (chartInstance) {
-    chartInstance.dispose()
-  }
-
-  chartInstance = echarts.init(chartRef.value)
-
-  const layerColors = {
+const getLayerColor = (layer) => {
+    const colors = {
     ODS: '#409EFF',
     DWD: '#67C23A',
     DIM: '#E6A23C',
     DWS: '#F56C6C',
     ADS: '#909399'
   }
-
-  const nodes = (graphData.value?.nodes || []).map((node) => ({
-    id: node.id,
-    name: node.name,
-    category: node.layer,
-    businessDomain: node.businessDomain,
-    dataDomain: node.dataDomain,
-    itemStyle: {
-      color: layerColors[node.layer] || '#409EFF'
-    },
-    label: {
-      show: true
-    }
-  }))
-
-  const links = (graphData.value?.edges || []).map(edge => ({
-    source: edge.source,
-    target: edge.target
-  }))
-
-  const categories = layerOptions.map(item => ({ name: item.value }))
-
-  const option = {
-    title: {
-      text: '数据血缘关系图',
-      left: 'center'
-    },
-    tooltip: {
-      formatter: (params) => {
-        if (params.dataType === 'node') {
-          const { name, category, businessDomain, dataDomain } = params.data
-          const lines = [
-            `表名: ${name}`,
-            `层级: ${category}`
-          ]
-          if (businessDomain) lines.push(`业务域: ${businessDomain}`)
-          if (dataDomain) lines.push(`数据域: ${dataDomain}`)
-          return lines.join('<br/>')
-        }
-        return ''
-      }
-    },
-    legend: [{
-      data: categories.map(c => c.name),
-      orient: 'vertical',
-      left: 'left'
-    }],
-    series: [{
-      type: 'graph',
-      layout: 'force',
-      data: nodes,
-      links,
-      categories,
-      roam: true,
-      label: {
-        position: 'right',
-        formatter: '{b}'
-      },
-      force: {
-        repulsion: 500,
-        edgeLength: 150
-      },
-      emphasis: {
-        focus: 'adjacency',
-        lineStyle: {
-          width: 5
-        }
-      }
-    }]
-  }
-
-  chartInstance.setOption(option)
-  highlightFocus()
+  return colors[layer] || '#409EFF';
 }
 
-const highlightFocus = () => {
-  if (!chartInstance || !focusTable.value || !graphData.value?.nodes?.length) {
-    return
+const renderChart = () => {
+  if (!chartRef.value) return
+
+  if (!lineageGraph) {
+    lineageGraph = new LineageGraph(chartRef.value)
+    lineageGraph.init({
+        layout: {
+            type: currentLayout.value,
+             rankdir: 'LR',
+             nodesep: 30,
+             ranksep: 80,
+        }
+    })
+    // Bind cycle detection callback
+    // Bind cycle detection callback
+    lineageGraph.onCycleDetected = (cycles) => {
+        ElNotification({
+            title: '循环依赖提醒',
+            message: `检测到 ${cycles.length} 处循环依赖，已用红色虚线标出`,
+            type: 'warning',
+            duration: 0
+        })
+    }
+    
+    // Bind node click callback
+    lineageGraph.onNodeClick = (nodeModel) => {
+        currentNode.value = nodeModel
+        dialogVisible.value = true
+    }
   }
 
-  const index = graphData.value.nodes.findIndex(node => node.name === focusTable.value)
-  if (index === -1) {
-    return
+  lineageGraph.render(graphData.value)
+  
+  // Handle initial focus
+  if (focusTable.value) {
+      lineageGraph.focusNode(focusTable.value); // Assuming ID is name or passed correctly
   }
+}
 
-  chartInstance.dispatchAction({
-    type: 'focusNodeAdjacency',
-    seriesIndex: 0,
-    dataIndex: index
-  })
-  chartInstance.dispatchAction({
-    type: 'showTip',
-    seriesIndex: 0,
-    dataIndex: index
-  })
+const goToTableDetail = () => {
+  if (currentNode.value) {
+    router.push({
+      path: '/tables',
+      query: { tableName: currentNode.value.name }
+    })
+    dialogVisible.value = false
+  }
 }
 
 const handleResize = () => {
-  chartInstance?.resize()
+  lineageGraph?.handleResize()
 }
 
 watch(
   () => route.query.focus,
   (focus) => {
     focusTable.value = focus || ''
-    nextTick(() => highlightFocus())
+    nextTick(() => {
+        if(lineageGraph) lineageGraph.focusNode(focusTable.value)
+    })
   }
 )
 
@@ -257,14 +276,15 @@ onMounted(async () => {
   await loadBusinessDomains()
   await loadDataDomains()
   await loadData()
-  window.addEventListener('resize', handleResize)
+  // No need for window resize listener here as LineageGraph handles it if initialized,
+  // but it's good practice to manage lifecycle here if we want more control.
+  // LineageGraph handles it internally.
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', handleResize)
-  if (chartInstance) {
-    chartInstance.dispose()
-    chartInstance = null
+  if (lineageGraph) {
+    lineageGraph.destroy()
+    lineageGraph = null
   }
 })
 </script>
@@ -290,11 +310,20 @@ onBeforeUnmount(() => {
 
 .chart-card {
   min-height: 500px;
+  display: flex;
+  flex-direction: column;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .chart-container {
   width: 100%;
   height: calc(100vh - 260px);
+  background: #fdfdfd; 
 }
 
 .empty {
