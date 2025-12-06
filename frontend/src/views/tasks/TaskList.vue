@@ -69,7 +69,7 @@
         <el-table-column prop="taskCode" label="任务编码" width="150" />
         <el-table-column prop="taskType" label="类型" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.taskType === 'batch' ? '' : 'success'">
+            <el-tag :type="row.taskType === 'batch' ? 'primary' : 'success'">
               {{ row.taskType === 'batch' ? '批任务' : '流任务' }}
             </el-tag>
           </template>
@@ -323,10 +323,10 @@ const getStatusType = (status) => {
     draft: 'info',
     published: 'success',
     running: 'warning',
-    paused: '',
+    paused: 'info',
     failed: 'danger'
   }
-  return types[status] || ''
+  return types[status] || 'info'
 }
 
 const getNodeTypeColor = (nodeType) => {

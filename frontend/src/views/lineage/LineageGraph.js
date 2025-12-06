@@ -199,8 +199,9 @@ export class LineageGraph {
         });
 
         // Resize handler
+        this.resizeHandler = this.handleResize.bind(this);
         if (typeof window !== 'undefined') {
-            window.addEventListener('resize', this.handleResize.bind(this));
+            window.addEventListener('resize', this.resizeHandler);
         }
     }
 
@@ -367,7 +368,7 @@ export class LineageGraph {
             this.graph.destroy();
         }
         if (typeof window !== 'undefined') {
-            window.removeEventListener('resize', this.handleResize.bind(this));
+            window.removeEventListener('resize', this.resizeHandler);
         }
     }
 }
