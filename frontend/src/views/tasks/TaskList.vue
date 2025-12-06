@@ -204,32 +204,11 @@ const loadData = async () => {
     tableData.value = res.records
     pagination.total = res.total
 
-    // 加载每个任务的执行状态
-    await loadExecutionStatuses()
   } catch (error) {
     console.error('加载数据失败:', error)
   } finally {
     loading.value = false
   }
-}
-
-const loadExecutionStatuses = async () => {
-  if (!tableData.value || tableData.value.length === 0) {
-    return
-  }
-
-  // 并行加载所有任务的执行状态
-  const promises = tableData.value.map(async (task) => {
-    try {
-      const status = await taskApi.getExecutionStatus(task.id)
-      task.executionStatus = status
-    } catch (error) {
-      console.error(`加载任务 ${task.id} 执行状态失败:`, error)
-      task.executionStatus = null
-    }
-  })
-
-  await Promise.all(promises)
 }
 
 const buildListFilters = () => {

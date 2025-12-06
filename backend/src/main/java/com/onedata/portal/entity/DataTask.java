@@ -77,4 +77,7 @@ public class DataTask {
 
     @TableField(exist = false)
     private Integer downstreamTaskCount;
+
+    @TableField(exist = false)
+    private com.onedata.portal.dto.TaskExecutionStatus executionStatus;
 }

@@ -36,7 +36,10 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class DataQueryService {
 
-    private static final Pattern DANGEROUS_KEYWORDS = Pattern.compile("\\b(delete|drop|alter)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DANGEROUS_KEYWORDS = Pattern.compile(
+        "\\b(insert|update|delete|drop|alter|truncate|create|replace|merge|call|grant|revoke|set|use|load|copy|into)\\b",
+        Pattern.CASE_INSENSITIVE
+    );
     private static final Pattern ALLOWED_START = Pattern.compile("^(select|with|show|describe|explain)\\b", Pattern.CASE_INSENSITIVE);
     private static final int MAX_LIMIT = 1000;
     private static final int DEFAULT_LIMIT = 200;
@@ -151,7 +154,7 @@ public class DataQueryService {
 
         String lowered = sanitizedTrimmed.toLowerCase(Locale.ROOT);
         if (DANGEROUS_KEYWORDS.matcher(lowered).find()) {
-            throw new RuntimeException("检测到危险 SQL 关键字，请检查后再执行");
+            throw new RuntimeException("检测到写入或危险 SQL 关键字，请检查后再执行");
         }
         if (!ALLOWED_START.matcher(lowered).find()) {
             throw new RuntimeException("仅支持 SELECT/SHOW/DESCRIBE/EXPLAIN 等只读 SQL");
