@@ -31,9 +31,7 @@ jobs:
           - name: backend
             context: ./backend
             dockerfile: ./backend/Dockerfile
-          - name: dolphin-service
-            context: ./dolphinscheduler-service
-            dockerfile: ./dolphinscheduler-service/Dockerfile
+
 
     steps:
       - name: Checkout code
@@ -94,7 +92,7 @@ jobs:
           echo "### Images pushed to Docker Hub:" >> $GITHUB_STEP_SUMMARY
           echo "- \`${{ env.DOCKER_NAMESPACE }}/opendataworks-frontend\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`${{ env.DOCKER_NAMESPACE }}/opendataworks-backend\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.DOCKER_NAMESPACE }}/opendataworks-dolphin-service\`" >> $GITHUB_STEP_SUMMARY
+
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Platforms supported:" >> $GITHUB_STEP_SUMMARY
           echo "- linux/amd64 (x86_64)" >> $GITHUB_STEP_SUMMARY
@@ -104,5 +102,5 @@ jobs:
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ env.DOCKER_NAMESPACE }}/opendataworks-frontend:latest" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ env.DOCKER_NAMESPACE }}/opendataworks-backend:latest" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.DOCKER_NAMESPACE }}/opendataworks-dolphin-service:latest" >> $GITHUB_STEP_SUMMARY
+
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
