@@ -29,7 +29,6 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * 前置条件：
  * - DolphinScheduler 服务运行中
- * - dolphinscheduler-service (Python) 运行中
  * - 数据库已初始化
  */
 @SpringBootTest

@@ -881,11 +881,9 @@ cd backend
 mvn clean install -DskipTests
 mvn spring-boot:run
 
-# 启动 DolphinScheduler 服务
-cd ../dolphinscheduler-service
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 9000</pre>
+# 确保 DolphinScheduler OpenAPI 可访问
+# export DOLPHIN_URL=http://localhost:12345/dolphinscheduler
+# export DOLPHIN_TOKEN=<your-token></pre>
                         </div>
                     </div>
                 </div>

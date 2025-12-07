@@ -6,10 +6,12 @@ spring:
     password: opendataworks123
     driver-class-name: com.mysql.cj.jdbc.Driver
 
-# DolphinScheduler配置（使用本地Python服务）
+# DolphinScheduler配置（直接调用 OpenAPI）
 dolphin:
-  service-url: http://localhost:5001
-  project-name: opendataworks
+  url: ${DOLPHIN_URL:http://localhost:12345/dolphinscheduler}
+  token: ${DOLPHIN_TOKEN:changeme}
+  project-name: ${DOLPHIN_PROJECT_NAME:opendataworks}
+  project-code: ${DOLPHIN_PROJECT_CODE:0}
   tenant-code: default
   worker-group: default
   execution-type: PARALLEL

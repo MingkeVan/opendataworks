@@ -31,7 +31,7 @@ OpenDataWorks 是一个统一的数据资产门户，聚合了数据表建模、
 | 概念 | 说明 | 备注 |
 | --- | --- | --- |
 | **数据门户 (Portal)** | Spring Boot + Vue3 主应用，保存所有表/任务元数据 | repo: `opendataworks` |
-| **DolphinScheduler Service** | FastAPI 适配层，屏蔽不同版本 API 差异 | 路径 `dolphinscheduler-service/` |
+| **DolphinScheduler (OpenAPI)** | 调度引擎，由 Java 后端直接调用 OpenAPI 完成工作流管理 | 外部部署的 DolphinScheduler 集群 |
 | **Dinky Gateway** | 预留的流任务接口，将在 Phase 2 解锁 | 目录 `dinky/` (上游源码) |
 | **OpenDataWorks DB** | 统一数据库 `opendataworks`，默认账号 `opendataworks/opendataworks123` | 初始化脚本见 `database/mysql` |
 | **业务域** | 组织视角 (tech、crm、trade …) | 写入 `business_domain` 表 |
@@ -42,6 +42,6 @@ OpenDataWorks 是一个统一的数据资产门户，聚合了数据表建模、
 
 1. **了解故事线**：阅读本文件 + [architecture.md](architecture.md)。
 2. **初始化数据库**：执行 `scripts/dev/init-database.sh`（可一键建库/授权/导入示例数据）。
-3. **启动三端服务**：按照 [development-guide.md](development-guide.md) 依次启动后端、Python 适配层、前端。
+3. **启动服务**：按照 [development-guide.md](development-guide.md) 依次启动后端、前端（DolphinScheduler 需要单独部署或指向现有集群）。
 4. **加载演示案例**：登录前端使用 `admin/admin123`（示例账号）体验表-任务-血缘的全链条。
 5. **扩展/定制**：参考 [operations-guide.md](operations-guide.md) 建立自己的部署方式，再查看 [features](features/) 下的专题文档做二次开发。

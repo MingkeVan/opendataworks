@@ -1,5 +1,7 @@
 # DolphinScheduler Python 服务下线可行性评估
 
+> 说明：Java 后端已完成对 DolphinScheduler OpenAPI 的切换，Python `dolphinscheduler-service` 已从仓库移除，本评估文档仅保留历史记录。
+
 ## 计划
 - 理清现有 Python dolphinscheduler-service 提供的能力以及依赖（Java Gateway、REST）。
 - 查找 Java 后端现状（已通过 HTTP 代理到 Python 服务）与字段契合度。

@@ -62,9 +62,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(WebClientResponseException.class)
     @ResponseStatus(HttpStatus.BAD_GATEWAY)
     public Result<Void> handleWebClientResponseException(WebClientResponseException e) {
-        log.error("Failed to call dolphinscheduler-service: status={}, body={}",
+        log.error("Failed to call DolphinScheduler: status={}, body={}",
             e.getStatusCode(), e.getResponseBodyAsString(), e);
-        return Result.fail("调用 DolphinScheduler 服务失败: " + e.getMessage());
+        return Result.fail("调用 DolphinScheduler OpenAPI 失败: " + e.getMessage());
     }
 
     /**

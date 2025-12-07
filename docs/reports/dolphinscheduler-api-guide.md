@@ -1,6 +1,8 @@
 # Apache DolphinScheduler 官方 API 与 PyDolphinScheduler 用法速览
 
 > 适用版本：基于 `apache/dolphinscheduler` `dev` 分支控制器定义与 `apache/dolphinscheduler-sdk-python` 主干文档整理。涉及路径均来自官方仓库，便于进一步查阅。
+>
+> 注：OpenDataWorks 已改为由 Java 后端直接调用 DolphinScheduler OpenAPI，Python SDK 与中间服务已从仓库移除，本文档仅供历史参考。
 
 ## 1. 认证与访问入口
 

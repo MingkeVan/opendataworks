@@ -53,7 +53,7 @@
    - 功能：代理 DolphinScheduler API，返回可用数据源列表。
    - 参数：`type`（可选，默认过滤 DORIS）。
    - 响应字段：`[{id, name, type, dbName, description}]`。
-   - 需增加调用 Dolphin REST 或 Python 服务逻辑，建议增加缓存（5-10 分钟）。
+   - 需增加调用 DolphinScheduler REST 逻辑，建议增加缓存（5-10 分钟）。
 
 2. `GET /v1/tables/options`
    - 功能：用于远程搜索表；可复用现有 `tableApi.list` 的轻量版。

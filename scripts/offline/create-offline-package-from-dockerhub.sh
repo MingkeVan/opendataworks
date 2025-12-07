@@ -154,17 +154,6 @@ else
     log "WARNING: neither .env nor .env.example found at repository root; docker compose env will be missing"
 fi
 
-DOLPHIN_ENV_SOURCE="$REPO_ROOT/dolphinscheduler-service/.env"
-if [[ -f "$DOLPHIN_ENV_SOURCE" ]]; then
-    log "Copying dolphinscheduler-service configuration"
-    mkdir -p "$PACKAGE_ROOT/dolphinscheduler-service"
-    cp "$DOLPHIN_ENV_SOURCE" "$PACKAGE_ROOT/dolphinscheduler-service/.env"
-    mkdir -p "$DEPLOY_PACKAGE_DIR/dolphinscheduler-service"
-    cp "$DOLPHIN_ENV_SOURCE" "$DEPLOY_PACKAGE_DIR/dolphinscheduler-service/.env"
-else
-    die "dolphinscheduler-service .env not found at $DOLPHIN_ENV_SOURCE"
-fi
-
 declare -a MANIFEST_RAW=()
 
 pull_image() {
@@ -210,7 +199,6 @@ OP_TAG="$PARSER_TAG"
 MAIN_IMAGES=(
     "opendataworks-frontend.tar|${PARSER_REGISTRY}/${PARSER_NAMESPACE}/opendataworks-frontend:${OP_TAG}|opendataworks-frontend:${OP_TAG}"
     "opendataworks-backend.tar|${PARSER_REGISTRY}/${PARSER_NAMESPACE}/opendataworks-backend:${OP_TAG}|opendataworks-backend:${OP_TAG}"
-    "opendataworks-dolphin-service.tar|${PARSER_REGISTRY}/${PARSER_NAMESPACE}/opendataworks-dolphin-service:${OP_TAG}|opendataworks-dolphin-service:${OP_TAG}"
 )
 
 EXTRA_IMAGES=(

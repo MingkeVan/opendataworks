@@ -36,13 +36,12 @@ services:
     restart: always
     env_file:
       - ./.env
+    # DolphinScheduler 不包含在本 Compose 中，请在 .env 中设置 DOLPHIN_URL/DOLPHIN_TOKEN
     ports:
       - "8080:8080"
     depends_on:
       mysql:
         condition: service_healthy
-      dolphin-service:
-        condition: service_started
     networks:
       - opendataworks-network
     healthcheck:
@@ -53,23 +52,6 @@ services:
       start_period: 60s
     volumes:
       - backend-logs:/app/logs
-
-  # DolphinScheduler 服务
-  dolphin-service:
-    image: opendataworks-dolphin-service:latest
-    container_name: opendataworks-dolphin-service
-    restart: always
-    env_file:
-      - ./.env
-    ports:
-      - "8000:${DS_SERVICE_PORT:-8000}"
-    networks:
-      - opendataworks-network
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:${DS_SERVICE_PORT:-8000}/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   # 前端服务
   frontend:

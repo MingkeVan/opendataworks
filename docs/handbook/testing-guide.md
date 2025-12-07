@@ -7,7 +7,7 @@
 | 层级 | 覆盖内容 | 入口 |
 | --- | --- | --- |
 | 单元/服务测试 | Mapper、Service、调度编排 | `./mvnw test`，可通过 `-Dtest=TaskExecutionWorkflowTest` 定点 |
-| 集成测试 | 真正调用 DolphinService、MySQL | `scripts/run-workflow-test.sh` + `backend/src/test/java/...` |
+| 集成测试 | 真正调用 DolphinScheduler OpenAPI、MySQL | `scripts/run-workflow-test.sh` + `backend/src/test/java/...` |
 | 手工回归 | 浏览器操作、工作流生命周期、异常场景 | 本指南 “手工测试剧本” |
 | 前端冒烟 | 关键页面渲染、交互 | `docs/reports/BROWSER_TEST_RESULTS.md` 中列出的脚本 |
 
@@ -21,12 +21,15 @@
    curl -X POST http://localhost:8080/api/tasks/1/execute
    ```
 3. 回到 DolphinScheduler → Workflow Definition 页面，确认多出 `test-task-<timestamp>`。
-4. 手动删除：
+4. 手动删除（OpenAPI 示例）：
    ```bash
+   DOLPHIN_URL=${DOLPHIN_URL:-http://localhost:12345/dolphinscheduler}
+   DOLPHIN_TOKEN=${DOLPHIN_TOKEN:-changeme}
+   PROJECT_CODE=<from_dolphinscheduler_ui>
    WORKFLOW_CODE=123456789
-   curl -X POST "http://localhost:5001/workflows/$WORKFLOW_CODE/delete" \
-        -H "Content-Type: application/json" \
-        -d '{"projectName": "opendataworks"}'
+
+   curl -X DELETE "$DOLPHIN_URL/projects/$PROJECT_CODE/process-definition/$WORKFLOW_CODE" \
+        -H "token: $DOLPHIN_TOKEN"
    ```
 5. 刷新页面确认工作流数量恢复；Portal 侧 `task_execution_log` 存在执行记录，`data_lineage` 不残留孤儿记录。
 
@@ -78,9 +81,10 @@ scripts/dev/run-integration-test.sh
 
 ```yaml
 dolphin:
-  service-url: http://localhost:8081
+  url: http://localhost:12345/dolphinscheduler
+  token: <DOLPHINSCHEDULER_TOKEN>
   project-name: opendataworks-test
-  workflow-code: <FROM_UI_OR_API>
+  project-code: <FROM_UI_OR_API>
   tenant-code: default
   worker-group: default
   execution-type: PARALLEL
@@ -106,7 +110,7 @@ logging:
 ### 常见问题速查
 | 症状 | 排查步骤 |
 | --- | --- |
-| `Connection refused` | 检查服务端口、`service-url` |
+| `Connection refused` | 检查服务端口、`dolphin.url` 与 Token |
 | 登录失败 | 确认账号 `admin/dolphinscheduler123`，必要时重置密码 |
 | `工作流不存在` | 校验 `workflow-code`、`project-code`，确认已在 UI 创建 |
 | `权限不足` | 确认使用 admin 或具备权限的租户 |

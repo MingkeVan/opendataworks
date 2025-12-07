@@ -9,7 +9,7 @@
 | 产品与规划 | 愿景、价值、版本节奏、术语对齐 | [overview.md](overview.md) |
 | 架构与组件 | 系统边界、服务拆分、DolphinScheduler/Dinky 集成、运行态观察 | [architecture.md](architecture.md) |
 | 数据模型 & SQL | 命名规范、核心表说明、初始化/种子/测试 SQL、变更策略 | [data-model-and-sql.md](data-model-and-sql.md) |
-| 开发指南 | 环境要求、数据库初始化脚本、前后端 & Python 服务一键启动、调试排查 | [development-guide.md](development-guide.md) |
+| 开发指南 | 环境要求、数据库初始化脚本、前后端一键启动、调试排查 | [development-guide.md](development-guide.md) |
 | 运维部署 | Docker Compose、离线包、系统服务 (systemd) 、镜像构建、配置清单 | [operations-guide.md](operations-guide.md) |
 | 测试与质量 | 手工验证脚本、工作流生命周期回归、SQL 支持矩阵、浏览器测试、缺陷追踪 | [testing-guide.md](testing-guide.md) |
 | 特性专题 | Doris 统计增强、任务执行状态、表单优化、图表实现等专题说明 | [features/](features) |

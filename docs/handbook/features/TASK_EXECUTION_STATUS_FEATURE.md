@@ -16,8 +16,8 @@
    - 点击后在新标签页打开 DolphinScheduler Web UI
    - 直接定位到对应的工作流定义页面
 
-3. ✅ **通过 Python 服务获取实时状态**
-   - 所有与 DolphinScheduler 的交互都通过 Python 服务
+3. ✅ **通过 OpenAPI 获取实时状态**
+   - Java 后端直接调用 DolphinScheduler OpenAPI
    - 支持获取工作流实例的实时状态
    - 自动映射 DolphinScheduler 状态到本地状态
 
@@ -31,7 +31,7 @@
 
 ```java
 /**
- * Get workflow instance status via dolphinscheduler-service.
+ * Get workflow instance status via DolphinScheduler OpenAPI.
  */
 public JsonNode getWorkflowInstanceStatus(Long workflowCode, String instanceId)
 
@@ -69,7 +69,7 @@ public TaskExecutionStatus getLatestExecutionStatus(Long taskId)
 
 功能：
 - 从数据库获取最近一次执行记录
-- 通过 Python 服务获取 DolphinScheduler 实时状态
+- 通过 DolphinScheduler OpenAPI 获取实时状态
 - 生成 DolphinScheduler Web UI 跳转链接
 - 状态映射（DolphinScheduler 状态 → 本地状态）
 
@@ -91,16 +91,10 @@ public Result<TaskExecutionStatus> getExecutionStatus(@PathVariable Long id)
 
 ```yaml
 dolphin:
-  service-url: http://localhost:5001
-  web-url: http://localhost:12345/dolphinscheduler  # 新增
-  project-name: test-project
-```
-
-**文件**: `backend/src/main/java/com/onedata/portal/config/DolphinSchedulerProperties.java`
-
-```java
-/** DolphinScheduler Web UI base URL for generating jump links. */
-private String webUrl = "http://localhost:12345/dolphinscheduler";
+  url: http://localhost:12345/dolphinscheduler
+  token: your-dolphinscheduler-token
+  project-name: opendataworks
+  project-code: 0
 ```
 
 ### 前端实现
@@ -200,11 +194,8 @@ const formatTime = (timeStr) => {
     ↓
     ├─→ 从数据库查询最近执行记录 (task_execution_log)
     │
-    └─→ 通过 DolphinSchedulerService 调用 Python 服务
-        ↓ HTTP POST: /api/v1/workflows/{workflowCode}/instances/{instanceId}
-        ↓
-    Python 服务 (dolphinscheduler-service)
-        ↓ 调用 DolphinScheduler SDK
+    └─→ 通过 DolphinSchedulerService 调用 Dolphin OpenAPI 客户端
+        ↓ REST: /projects/{projectCode}/process-instances/{instanceId}
         ↓
     返回工作流实例状态
 ```
@@ -225,14 +216,9 @@ http://localhost:12345/dolphinscheduler/projects/test-project/workflow/definitio
 
 ## 使用指南
 
-### 1. 配置 DolphinScheduler Web URL
+### 1. 配置 DolphinScheduler OpenAPI
 
-在 `application.yml` 中配置：
-
-```yaml
-dolphin:
-  web-url: http://your-dolphinscheduler-host:port/dolphinscheduler
-```
+在 `application.yml` 中配置 `dolphin.url`、`dolphin.token`、`project-name` 等字段，确保后端能够访问 DolphinScheduler。
 
 ### 2. 查看任务执行状态
 
@@ -251,10 +237,9 @@ dolphin:
 
 ## 注意事项
 
-1. **Python 服务依赖**
-   - 所有 DolphinScheduler 交互都通过 Python 服务
-   - 确保 Python 服务 (`dolphinscheduler-service`) 正常运行
-   - 默认地址: `http://localhost:5001`
+1. **DolphinScheduler 可用性**
+   - 所有 DolphinScheduler 交互直接通过 OpenAPI 完成
+   - 确保 `dolphin.url` 可访问且 `dolphin.token`/项目配置正确
 
 2. **状态更新**
    - 执行状态在页面加载时获取
@@ -295,22 +280,22 @@ dolphin:
 ### 问题1：无法显示执行状态
 
 **可能原因**:
-- Python 服务未启动或无法连接
+- DolphinScheduler OpenAPI 无法访问或 token 错误
 - 数据库中没有执行记录
 
 **解决方法**:
-1. 检查 Python 服务状态
+1. 检查 DolphinScheduler 是否运行、`dolphin.url` 是否可连通
 2. 确认任务至少执行过一次
 3. 查看后端日志错误信息
 
 ### 问题2：无法跳转到 DolphinScheduler
 
 **可能原因**:
-- `dolphin.web-url` 配置错误
+- `dolphin.url` 配置错误
 - DolphinScheduler Web UI 未启动
 
 **解决方法**:
-1. 检查 `application.yml` 中的 `web-url` 配置
+1. 检查 `application.yml` 中的 `dolphin.url` 配置
 2. 确认 DolphinScheduler Web UI 可访问
 3. 检查浏览器是否拦截弹窗
 
@@ -322,19 +307,18 @@ dolphin:
 
 **解决方法**:
 1. 刷新页面重新加载状态
-2. 检查 Python 服务返回的状态值
+2. 检查 DolphinScheduler OpenAPI 返回的状态值
 3. 查看状态映射逻辑是否正确
 
 ## 相关文件清单
 
 ### 后端文件
 
-1. `DolphinSchedulerProperties.java` - 添加 webUrl 配置
-2. `DolphinSchedulerService.java` - 添加获取实例状态和 URL 方法
-3. `TaskExecutionStatus.java` - 新建执行状态 DTO
-4. `DataTaskService.java` - 添加 getLatestExecutionStatus 方法
-5. `DataTaskController.java` - 添加 getExecutionStatus API
-6. `application.yml` - 添加 web-url 配置
+1. `DolphinSchedulerProperties.java` - OpenAPI 配置
+2. `DolphinSchedulerService.java` - 获取实例状态和 URL 方法
+3. `TaskExecutionStatus.java` - 执行状态 DTO
+4. `DataTaskService.java` - getLatestExecutionStatus 方法
+5. `DataTaskController.java` - getExecutionStatus API
 
 ### 前端文件
 
@@ -345,7 +329,7 @@ dolphin:
 
 - **后端**: Spring Boot 2.7.18, MyBatis Plus, WebClient
 - **前端**: Vue 3.4, Element Plus 2.5
-- **集成**: DolphinScheduler Python Service
+- **集成**: DolphinScheduler OpenAPI
 - **数据库**: MySQL 8.0 (task_execution_log 表)
 
 ---

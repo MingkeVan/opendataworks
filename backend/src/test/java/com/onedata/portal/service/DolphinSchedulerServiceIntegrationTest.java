@@ -24,13 +24,8 @@ import static org.mockito.Mockito.*;
 /**
  * Integration test for DolphinSchedulerService.
  *
- * This test validates the complete Java -> Python Service -> DolphinScheduler
- * integration chain.
- *
- * Prerequisites:
- * 1. Python dolphinscheduler-service must be running on http://localhost:5001
- * 2. DolphinScheduler must be running and accessible
- * 3. Python service must have proper configuration in .env file
+ * This test validates the Java -> DolphinScheduler OpenAPI integration chain
+ * with a mocked OpenAPI client.
  *
  * Test Flow:
  * 1. Sync workflow with tasks and relations

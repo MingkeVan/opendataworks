@@ -26,13 +26,12 @@ import java.util.Comparator;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Thin client for the Python-based dolphinscheduler-service.
+ * Client wrapper around the DolphinScheduler OpenAPI.
  *
  * <p>
- * The Java backend now delegates workflow orchestration to the Python
- * service which wraps DolphinScheduler via the official SDK. This class
- * focuses on request/response mapping and retains backward-compatible
- * helper methods for building task payloads.
+ * Encapsulates request/response mapping and workflow helper utilities so the
+ * rest of the codebase can manage tasks without depending on an additional
+ * Python layer.
  * </p>
  */
 @Slf4j

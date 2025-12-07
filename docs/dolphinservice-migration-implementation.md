@@ -1,5 +1,7 @@
 # DolphinScheduler Python 服务下线实施计划与关键设计（评审稿）
 
+> 说明：迁移已完成，Java 后端直接调用 DolphinScheduler OpenAPI，Python `dolphinscheduler-service` 与 `dolphinscheduler-sdk-python` 已从仓库移除。本文作为历史记录保留设计决策。
+
 ## 目标与范围
 - 目标：用 Java 后端直接调用 DolphinScheduler OpenAPI，完全替代 Python dolphinscheduler-service（含 Java Gateway 依赖）。
 - 范围：工作流创建/更新（含任务、依赖、坐标）、上线/下线、启动实例、实例查询/日志、数据源列表、删除流程。保持上层业务接口返回模型不变。

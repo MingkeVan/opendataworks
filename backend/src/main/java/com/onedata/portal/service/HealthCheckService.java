@@ -32,8 +32,8 @@ public class HealthCheckService {
     public Map<String, ServiceHealthStatus> checkAllServices() {
         Map<String, ServiceHealthStatus> results = new HashMap<>();
 
-        // 检查 DolphinScheduler Python Service
-        results.put("dolphinscheduler-service", checkDolphinSchedulerService());
+        // 检查 DolphinScheduler OpenAPI
+        results.put("dolphinscheduler", checkDolphinSchedulerApi());
 
         // 检查 Doris 集群
         results.put("doris-cluster", checkDorisCluster());
@@ -42,9 +42,9 @@ public class HealthCheckService {
     }
 
     /**
-     * 检查 DolphinScheduler Python Service 健康状态
+     * 检查 DolphinScheduler OpenAPI 健康状态
      */
-    public ServiceHealthStatus checkDolphinSchedulerService() {
+    public ServiceHealthStatus checkDolphinSchedulerApi() {
         ServiceHealthStatus status = new ServiceHealthStatus();
         status.setServiceName("DolphinScheduler OpenAPI");
         status.setServiceUrl(dolphinProperties.getUrl());

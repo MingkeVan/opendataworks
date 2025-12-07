@@ -93,7 +93,6 @@ opendataworks 是一个面向大数据平台的统一数据门户系统,旨在�
 - ✅ 支持任务依赖关系配置
 - ✅ 工作流上线/下线管理
 - ✅ 任务执行状态同步
-- ✅ Python 中间服务层 (dolphinscheduler-service)
 
 #### 📈 数据血缘可视化
 - ✅ 基于任务输入输出自动生成血缘关系
@@ -179,27 +178,17 @@ opendataworks 是一个面向大数据平台的统一数据门户系统,旨在�
 │  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                     │                           │
-                    │                           │ HTTP Client
+                    │                           │ REST/OpenAPI
                     ↓                           ↓
     ┌──────────────────────┐    ┌────────────────────────────────┐
-    │   MySQL 8.0+         │    │  DolphinScheduler Service      │
-    │                      │    │  (Python FastAPI)              │
+    │   MySQL 8.0+         │    │   Apache DolphinScheduler      │
+    │                      │    │   (Workflow Orchestration)     │
     │  - data_table        │    │                                │
-    │  - data_task         │    │  ┌──────────────────────────┐ │
-    │  - data_lineage      │    │  │ pydolphinscheduler SDK  │ │
-    │  - task_execution    │    │  └──────────────────────────┘ │
+    │  - data_task         │    │  - Master Server               │
+    │  - data_lineage      │    │  - Worker Server               │
+    │  - task_execution    │    │  - API Server (OpenAPI)        │
     │    _log              │    └────────────────────────────────┘
-    └──────────────────────┘                    │
-                                                │ Java Gateway
-                                                ↓
-                            ┌────────────────────────────────────┐
-                            │   Apache DolphinScheduler          │
-                            │   (Workflow Orchestration)         │
-                            │                                    │
-                            │  - Master Server                   │
-                            │  - Worker Server                   │
-                            │  - API Server                      │
-                            └────────────────────────────────────┘
+    └──────────────────────┘
 ```
 
 ### 技术选型
@@ -227,16 +216,6 @@ opendataworks 是一个面向大数据平台的统一数据门户系统,旨在�
 | ECharts | 5.4+ | 图表库 |
 | Vue Router | 4.x | 路由管理 |
 | Axios | 1.6+ | HTTP 客户端 |
-
-#### 中间服务
-
-| 技术 | 版本 | 说明 |
-|------|------|------|
-| Python | 3.9+ | 开发语言 |
-| FastAPI | 0.109+ | Web 框架 |
-| pydolphinscheduler | 3.2.0 | DolphinScheduler SDK |
-| Uvicorn | 0.27+ | ASGI 服务器 |
-| Pydantic | 2.x | 数据验证 |
 
 #### 外部依赖
 
@@ -310,15 +289,6 @@ opendataworks/
 │   ├── package.json
 │   └── vite.config.js
 │
-├── dolphinscheduler-service/         # Python 中间服务
-│   ├── dolphinscheduler_service/
-│   │   ├── main.py                  # FastAPI 应用
-│   │   ├── scheduler.py             # 调度器核心逻辑
-│   │   ├── models.py                # Pydantic 模型
-│   │   └── config.py                # 配置管理
-│   ├── requirements.txt
-│   └── README.md
-│
 ├── docs/
 │   ├── README.md                    # 文档索引
 │   ├── handbook/                    # 产品/架构/开发/运维/测试手册
@@ -340,7 +310,6 @@ opendataworks/
 - **JDK**: 8 或更高版本
 - **Maven**: 3.6+
 - **Node.js**: 16+ (推荐 18 LTS)
-- **Python**: 3.9+
 - **MySQL**: 8.0+
 - **DolphinScheduler**: 3.2.0+ (可选,用于任务调度)
 
@@ -492,25 +461,7 @@ scripts/dev/init-database.sh -r root密码 -p 应用密码
 
 参考官方文档: https://dolphinscheduler.apache.org/zh-cn/docs/3.2.0/guide/installation/standalone
 
-#### 4. 启动 Python 中间服务
-
-```bash
-cd dolphinscheduler-service
-
-# 创建虚拟环境
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 启动服务
-uvicorn dolphinscheduler_service.main:app --host 0.0.0.0 --port 5001
-```
-
-服务将运行在 `http://localhost:5001`
-
-#### 5. 启动后端服务
+#### 4. 启动后端服务
 
 ```bash
 cd backend
@@ -525,10 +476,12 @@ spring:
     username: root
     password: your_password
 
-# 配置 DolphinScheduler 服务地址（注意：这是 Python 中间服务的地址，不是 DolphinScheduler 的 API 地址）
+# 配置 DolphinScheduler OpenAPI
 dolphin:
-  service-url: http://localhost:5001  # Python 中间服务地址
-  project-name: test-project
+  url: http://localhost:12345/dolphinscheduler
+  token: your_dolphinscheduler_token
+  project-name: opendataworks
+  project-code: 0
 
 # 编译并启动
 mvn clean install
@@ -537,7 +490,7 @@ mvn spring-boot:run
 
 服务将运行在 `http://localhost:8080`
 
-#### 6. 启动前端应用
+#### 5. 启动前端应用
 
 ```bash
 cd frontend
@@ -551,13 +504,13 @@ npm run dev
 
 应用将运行在 `http://localhost:5173`
 
-#### 7. 访问应用
+#### 6. 访问应用
 
 打开浏览器访问: `http://localhost:5173`
 
 ### 开发环境一键启动（Docker Compose）
 
-如果希望一次性在本机拉起完整的前端、后端、Python 服务和 MySQL，可直接使用 `deploy/docker-compose.dev.yml`：
+如果希望一次性在本机拉起前端、后端和 MySQL，可直接使用 `deploy/docker-compose.dev.yml`，DolphinScheduler 请指向现有集群：
 
 ```bash
 # 1. 准备环境变量
@@ -626,9 +579,9 @@ scripts/deploy/start.sh
 1. 在任务列表中找到已创建的任务
 2. 点击"发布"按钮
 3. 系统会自动:
-   - 调用 Python 服务创建工作流
-   - 同步任务定义到 DolphinScheduler
-   - 配置任务依赖关系
+   - 通过 Java 后端调用 DolphinScheduler OpenAPI 创建/更新工作流
+   - 同步任务定义与依赖关系到 DolphinScheduler
+   - 刷新本地状态与血缘数据
 4. 发布成功后,任务状态变为"已发布"
 
 ### 4. 执行任务
@@ -703,11 +656,13 @@ mybatis-plus:
 
 # DolphinScheduler 配置
 dolphin:
-  service-url: http://localhost:5001      # Python 服务地址
-  project-name: opendataworks              # 项目名称 (自动查询 project-code)
-  tenant-code: default                     # 租户代码
-  worker-group: default                    # Worker 组
-  execution-type: PARALLEL                 # 执行类型
+  url: http://localhost:12345/dolphinscheduler   # OpenAPI 地址
+  token: your_dolphinscheduler_token             # 安全中心 Token
+  project-name: opendataworks                    # 项目名称 (自动查询 project-code)
+  project-code: 0                                # 可选：已知的项目编码
+  tenant-code: default                           # 租户代码
+  worker-group: default                          # Worker 组
+  execution-type: PARALLEL                       # 执行类型
 
 # 日志配置
 logging:
@@ -731,12 +686,6 @@ export default defineConfig({
   }
 })
 ```
-
-### Python 服务配置
-
-参考 `dolphinscheduler-service/README.md`
-
----
 
 ## 📊 数据模型
 
@@ -905,7 +854,8 @@ java -jar target/opendataworks-backend-1.0.0.jar \
   --spring.datasource.url=jdbc:mysql://your-db-host:3306/opendataworks \
   --spring.datasource.username=your-username \
   --spring.datasource.password=your-password \
-  --dolphin.service-url=http://your-dolphin-service:5001
+  --dolphin.url=http://your-dolphin-api:12345/dolphinscheduler \
+  --dolphin.token=your-ds-token
 ```
 
 #### 2. 前端打包
@@ -958,32 +908,11 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-**Python 服务** (`/etc/systemd/system/dolphinscheduler-service.service`):
-
-```ini
-[Unit]
-Description=DolphinScheduler Service
-After=network.target
-
-[Service]
-Type=simple
-User=opendataworks
-WorkingDirectory=/opt/dolphinscheduler-service
-ExecStart=/opt/dolphinscheduler-service/venv/bin/uvicorn dolphinscheduler_service.main:app --host 0.0.0.0 --port 5001
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
 启动服务:
 
 ```bash
 sudo systemctl enable opendataworks
 sudo systemctl start opendataworks
-
-sudo systemctl enable dolphinscheduler-service
-sudo systemctl start dolphinscheduler-service
 ```
 
 ### Docker 部署 (即将支持)
@@ -1081,9 +1010,9 @@ services:
 **问题**: 发布任务时提示连接失败
 
 **解决方案**:
-- 检查 Python 服务是否启动: `curl http://localhost:5001/health`
-- 检查 DolphinScheduler 是否运行
-- 确认配置文件中的 `dolphin.service-url` 正确
+- 检查 DolphinScheduler 是否运行，`DOLPHIN_URL` 是否可访问
+- 确认配置文件中的 `dolphin.url`/`dolphin.token` 正确
+- 查看后端日志是否存在 401/404 等 OpenAPI 错误码
 
 ### 2. 前端调用后端接口 CORS 错误
 
@@ -1118,27 +1047,7 @@ services:
 **解决方案**:
 - 确保 DolphinScheduler 中已创建对应项目
 - 检查 `dolphin.project-name` 配置是否正确
-- 查看 Python 服务日志: `tail -f dolphinscheduler-service/service.log`
-
-### 6. Python Dolphin 服务无法连接到 Java Gateway 25333 端口
-
-**问题**: `dolphinscheduler-service` 日志出现 `GatewayError`/`ConnectRefusedError`，提示无法连接 `25333` 端口。
-
-**解决方案**:
-1. **确认 Python 服务配置**：检查 `.env` 或环境变量中的 `PYDS_JAVA_GATEWAY_ADDRESS`、`PYDS_JAVA_GATEWAY_PORT` 是否指向 DolphinScheduler API Server（默认 `25333`）。
-2. **开启 Python Gateway**：在 DolphinScheduler API Server 节点的 `api-server/conf/application.yaml`（离线安装路径 `${DOLPHINSCHEDULER_HOME}/api-server/conf/application.yaml`）下，将 `python-gateway.enabled` 设为 `true`，并根据需要调整 `address`、`port`、`token`：
-
-   ```yaml
-   python-gateway:
-     enabled: true
-     address: 0.0.0.0
-     port: 25333
-     token: "<可选：如启用需要同步配置 PYDS_JAVA_GATEWAY_AUTH_TOKEN>"
-   ```
-
-   修改后重启 `dolphinscheduler-api` 服务（Docker 部署 `docker compose restart dolphinscheduler-api`，Systemd 部署 `systemctl restart dolphinscheduler-api`）。
-3. **验证端口开放**：在 DolphinScheduler 服务器上执行 `ss -lntp | grep 25333`（或 `netstat -tunlp | grep 25333`），确认端口监听；在 `dolphinscheduler-service` 服务器上执行 `nc -zv <api-server-host> 25333`，验证网络连通性。
-4. **启用 Token 保护（可选）**：若启用了 `python-gateway.token`，在 `dolphinscheduler-service` 的 `.env` 中追加 `PYDS_JAVA_GATEWAY_AUTH_TOKEN=<相同的 token>` 并重启服务。
+- 查看后端日志：`backend/logs/*.log` 或容器日志，确认 OpenAPI 是否返回错误码/鉴权失败
 
 ---
 

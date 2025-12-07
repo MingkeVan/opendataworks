@@ -59,10 +59,6 @@ WantedBy=multi-user.target
 
 3. `sudo systemctl daemon-reload && sudo systemctl enable --now opendataworks-backend`。
 
-### Python Service
-
-类似，创建 `opendataworks-dolphin.service`，`WorkingDirectory=/opt/opendataworks/dolphinscheduler-service`，`ExecStart=/opt/.../venv/bin/gunicorn -c gunicorn_conf.py dolphinscheduler_service.main:app`。
-
 ### 前端
 
 1. `npm run build` 产物复制到 `/opt/opendataworks/frontend/dist`。
@@ -89,7 +85,6 @@ server {
 | 组件 | 文件 | 说明 |
 | --- | --- | --- |
 | Backend | `application.yml` | DB、Dolphin/Dinky、日志、CORS |
-| Python Service | `.env` | Dolphin host、port、user、token、project、tenant |
 | Frontend | `.env.production` | `VITE_API_BASE`, `VITE_DOLPHIN_URL` |
 | Compose | `deploy/docker-compose.prod.yml` | 镜像/tag/端口/卷 |
 
@@ -102,7 +97,7 @@ server {
 ## 镜像构建与大小控制
 
 - 构建脚本：`scripts/build/build-multiarch.sh`，支持多架构 `linux/amd64,linux/arm64`。
-- 产物：`opendataworks-backend`, `opendataworks-dolphin-service`, `opendataworks-frontend`。
+- 产物：`opendataworks-backend`, `opendataworks-frontend`。
 - 构建前确保 `frontend/dist`、`backend/target` 已存在，否则脚本会自动触发构建。
 
 ## 运维 checklist
@@ -111,8 +106,6 @@ server {
 2. **启动中**：观察 Compose/systemd 日志；若 Backend 启动 >60s，优先检查 MySQL 连接。
 3. **启动后**：
    - `curl http://<host>:8080/api/actuator/health`
-   - `curl http://<host>:5001/health`
    - `mysql -u opendataworks -popendataworks123 -h <db> opendataworks -e "SHOW TABLES"`
    - 前端页面是否可打开/登录
 4. **巡检**：定期查看 `inspection_issue`、`task_execution_log`，配合 [testing-guide.md](testing-guide.md) 的脚本回归关键流程。
-

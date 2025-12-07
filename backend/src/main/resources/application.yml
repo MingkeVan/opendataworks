@@ -44,7 +44,7 @@ mybatis-plus:
 dolphin:
   url: ${DOLPHIN_URL:http://localhost:12345/dolphinscheduler}
   token: ${DOLPHIN_TOKEN:8b9dc67bf292234b6ae92befc378f254}
-  project-name: opendataworks
+  project-name: ${DOLPHIN_PROJECT_NAME:opendataworks}
   project-code: ${DOLPHIN_PROJECT_CODE:0}
   tenant-code: default
   worker-group: default

@@ -4,7 +4,7 @@ import lombok.Builder;
 import lombok.Data;
 
 /**
- * Simplified Dolphin workflow instance summary returned by dolphinscheduler-service.
+ * Simplified DolphinScheduler workflow instance summary returned by OpenAPI calls.
  */
 @Data
 @Builder

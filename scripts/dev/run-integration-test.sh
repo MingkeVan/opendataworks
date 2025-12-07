@@ -36,14 +36,15 @@ if ! command -v mvn &> /dev/null && [ ! -f "./mvnw" ]; then
 fi
 echo -e "${GREEN}✓ Maven 已安装${NC}"
 
-# 检查 Python 服务
-if ! curl -s http://localhost:5001/health > /dev/null 2>&1; then
-    echo -e "${RED}✗ dolphinscheduler-service 未运行 (http://localhost:5001)${NC}"
-    echo -e "${YELLOW}  请先启动 Python 服务：${NC}"
-    echo -e "${YELLOW}  cd dolphinscheduler-service && source venv/bin/activate && python -m dolphinscheduler_service.app${NC}"
+# 检查 DolphinScheduler OpenAPI
+DOLPHIN_URL=${DOLPHIN_URL:-http://localhost:12345/dolphinscheduler}
+if curl -s "${DOLPHIN_URL}" > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ DolphinScheduler 可访问: ${DOLPHIN_URL}${NC}"
+else
+    echo -e "${RED}✗ 无法访问 DolphinScheduler (${DOLPHIN_URL})${NC}"
+    echo -e "${YELLOW}  请确认 DolphinScheduler 已启动，并根据需要设置 DOLPHIN_URL/DOLPHIN_TOKEN 环境变量${NC}"
     exit 1
 fi
-echo -e "${GREEN}✓ dolphinscheduler-service 运行中${NC}"
 
 # 检查后端服务
 if ! curl -s http://localhost:8080/actuator/health > /dev/null 2>&1; then
@@ -183,9 +184,8 @@ else
 
     echo -e "${YELLOW}故障排查：${NC}"
     echo -e "  1. 检查日志文件：backend/target/surefire-reports/"
-    echo -e "  2. 检查 dolphinscheduler-service 日志"
-    echo -e "  3. 检查 DolphinScheduler 是否正常运行"
-    echo -e "  4. 查看详细文档：docs/workflow-integration-test-guide.md\n"
+    echo -e "  2. 检查 DolphinScheduler 是否正常运行、Token 是否正确"
+    echo -e "  3. 查看详细文档：docs/workflow-integration-test-guide.md\n"
 fi
 
 exit $TEST_RESULT

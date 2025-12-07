@@ -2,7 +2,7 @@
 
 ## 背景
 
-- `create` 仅向 `data_lineage` 记录上下游血缘；`publish` 在内存中临时拼装 DolphinScheduler 所需的任务定义与依赖关系，并直接同步至 Python 网关（参见 `backend/src/main/java/com/onedata/portal/service/DataTaskService.java:184`）。
+- `create` 仅向 `data_lineage` 记录上下游血缘；`publish` 在内存中临时拼装 DolphinScheduler 所需的任务定义与依赖关系，并直接通过 OpenAPI 同步（参见 `backend/src/main/java/com/onedata/portal/service/DataTaskService.java`）。
 - 发布后缺乏持久化的工作流定义快照，无法追溯差异、生成审计记录或执行版本回滚。
 
 ## 问题与目标

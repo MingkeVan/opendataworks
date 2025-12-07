@@ -8,7 +8,6 @@
 | --- | --- |
 | Java | 8 或 11 (Gradle/IntelliJ) |
 | Node.js | 18+ (支持 Vite 5) |
-| Python | 3.10+ (FastAPI 依赖) |
 | MySQL | 8.0+ |
 | Docker (可选) | 24+ |
 
@@ -38,20 +37,7 @@ cd backend
 - 配置文件 `application.yml` 中的 `spring.datasource.url` 已指向 `opendataworks`。
 - 开启调试日志：`./mvnw spring-boot:run -Dspring-boot.run.arguments="--logging.level.com.onedata.portal=DEBUG"`。
 
-## 第三步：启动 DolphinScheduler 适配层 (Python)
-
-```bash
-cd dolphinscheduler-service
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn dolphinscheduler_service.main:app --host 0.0.0.0 --port 5001
-```
-
-- `.env` 文件存放 DolphinScheduler API 地址/凭证。
-- 本地调试可将 `DOLPHIN_HOST=localhost`, `DOLPHIN_PORT=12345`。
-- 若要使用 gunicorn：`./scripts/run-prod.sh`。
-
-## 第四步：启动前端 (Vue3)
+## 第三步：启动前端 (Vue3)
 
 ```bash
 cd frontend
@@ -75,7 +61,7 @@ npm run dev -- --host 0.0.0.0 --port 5173
 | 问题 | 排查方式 |
 | --- | --- |
 | “Access denied for user 'opendataworks'” | 确认 init 脚本执行成功；`mysql -uopendataworks -popendataworks123 opendataworks -e "SHOW TABLES;"` |
-| 调度接口 500 | 检查 Python service 日志；确认 `.env` 的 Token/Project/Worker Group 正确 |
+| 调度接口 500 | 检查后端日志；确认 `dolphin.url`/`token`/Project 配置正确且 OpenAPI 可访问 |
 | 前端跨域 | 调整 `frontend/.env.development` 的 `VITE_API_BASE`，或在 backend 开启 CORS |
 | 示例数据缺失 | 重新运行 init script 并确认 `LOAD_SAMPLE_DATA=true` |
 | Doris 集群不可用 | 在 `doris_cluster` 表中配置 FE 地址，并在 Portal 中标记 `is_default=1` |

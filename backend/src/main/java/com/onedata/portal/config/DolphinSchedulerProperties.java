@@ -18,13 +18,13 @@ public class DolphinSchedulerProperties {
     /** DolphinScheduler API token */
     private String token;
 
-    /** DolphinScheduler project name managed by the Python service. */
+    /** DolphinScheduler project name used by the Java backend. */
     private String projectName = "opendataworks";
 
     /** DolphinScheduler project code (if known) */
     private Long projectCode;
 
-    /** Default tenant code forwarded to the dolphinscheduler-service. */
+    /** Default tenant code forwarded to DolphinScheduler. */
     private String tenantCode = "default";
 
     /** DolphinScheduler worker group assigned to shell tasks. */

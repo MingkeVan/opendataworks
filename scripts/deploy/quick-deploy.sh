@@ -62,7 +62,6 @@ check_dependencies() {
 
     # 必需的工具
     check_command "java" || all_ok=false
-    check_command "python3" || all_ok=false
     check_command "node" || all_ok=false
     check_command "npm" || all_ok=false
     check_command "docker" || all_ok=false
@@ -80,21 +79,13 @@ check_dependencies() {
 
 # 检查 DolphinScheduler
 check_dolphinscheduler() {
-    log_info "检查 DolphinScheduler..."
+    DOLPHIN_URL=${DOLPHIN_URL:-http://localhost:12345/dolphinscheduler}
+    log_info "检查 DolphinScheduler (${DOLPHIN_URL})..."
 
-    if docker ps | grep -q dolphinscheduler; then
-        log_success "DolphinScheduler 容器正在运行"
-
-        # 测试 API 连接
-        if curl -sf http://localhost:12345/dolphinscheduler/ui > /dev/null; then
-            log_success "DolphinScheduler Web UI 可访问"
-        else
-            log_warning "DolphinScheduler Web UI 无法访问"
-        fi
+    if curl -sf "${DOLPHIN_URL}" > /dev/null 2>&1; then
+        log_success "DolphinScheduler Web 可访问"
     else
-        log_error "DolphinScheduler 容器未运行"
-        log_info "请先启动 DolphinScheduler:"
-        echo "  docker-compose up -d"
+        log_error "无法访问 DolphinScheduler，请先启动或调整 DOLPHIN_URL/DOLPHIN_TOKEN"
         exit 1
     fi
     echo ""
@@ -140,57 +131,6 @@ deploy_backend() {
 
     log_error "后端服务启动超时"
     log_info "查看日志: tail -f /tmp/backend.log"
-    popd >/dev/null
-    exit 1
-}
-
-# 部署 Python 服务
-deploy_python_service() {
-    log_info "部署 Python DolphinScheduler 服务..."
-
-    pushd "$REPO_ROOT/dolphinscheduler-service" >/dev/null
-
-    # 检查 Python 环境
-    if [ ! -d "venv" ]; then
-        log_info "创建 Python 虚拟环境..."
-        python3 -m venv venv
-    fi
-
-    # 激活虚拟环境
-    source venv/bin/activate
-
-    # 安装依赖
-    log_info "安装 Python 依赖..."
-    pip install -q -r requirements.txt || pip install -r requirements.txt
-
-    # 检查端口占用
-    if lsof -ti:5001 > /dev/null 2>&1; then
-        log_warning "端口 5001 已被占用，停止旧进程..."
-        pkill -f "uvicorn.*dolphinscheduler_service" || true
-        sleep 2
-    fi
-
-    # 启动服务
-    log_info "启动 Python 服务..."
-    python -m uvicorn dolphinscheduler_service.main:app \
-        --host 0.0.0.0 --port 5001 \
-        > /tmp/dolphin-service.log 2>&1 &
-    PYTHON_PID=$!
-
-    # 等待服务启动
-    log_info "等待 Python 服务启动..."
-    for i in {1..20}; do
-        if curl -sf http://localhost:5001/health > /dev/null 2>&1; then
-            log_success "Python 服务启动成功 (PID: $PYTHON_PID)"
-            popd >/dev/null
-            echo ""
-            return 0
-        fi
-        sleep 1
-    done
-
-    log_error "Python 服务启动超时"
-    log_info "查看日志: tail -f /tmp/dolphin-service.log"
     popd >/dev/null
     exit 1
 }
@@ -256,28 +196,17 @@ run_verification_tests() {
         return 1
     fi
 
-    # 2. 测试 Python 服务
-    log_info "测试 Python DolphinScheduler 服务..."
-    if curl -sf http://localhost:5001/health > /dev/null; then
-        log_success "Python 服务响应正常"
-    else
-        log_error "Python 服务测试失败"
-        return 1
-    fi
-
-    # 3. 测试 DolphinScheduler 连接
+    # 2. 测试 DolphinScheduler 连接
     log_info "测试 DolphinScheduler 连接..."
-    TOKEN=$(curl -sf -X POST "http://localhost:12345/dolphinscheduler/login" \
-        -d "userName=admin&userPassword=dolphinscheduler123" | jq -r '.data.sessionId' 2>/dev/null)
-
-    if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
-        log_success "DolphinScheduler 连接成功"
+    DOLPHIN_URL=${DOLPHIN_URL:-http://localhost:12345/dolphinscheduler}
+    if curl -sf "${DOLPHIN_URL}" > /dev/null; then
+        log_success "DolphinScheduler Web 可访问 (${DOLPHIN_URL})"
     else
-        log_warning "DolphinScheduler 登录失败（可能需要手动配置）"
+        log_warning "DolphinScheduler Web 不可访问，可能需要手动检查 ${DOLPHIN_URL}"
     fi
 
     echo ""
-    log_success "所有验证测试通过！"
+    log_success "验证测试完成！"
     echo ""
 }
 
@@ -290,7 +219,6 @@ show_deployment_info() {
     echo "服务访问地址:"
     echo "  - 前端:              http://localhost:3000"
     echo "  - 后端 API:          http://localhost:8080"
-    echo "  - Python 服务:       http://localhost:5001"
     echo "  - DolphinScheduler:  http://localhost:12345/dolphinscheduler"
     echo ""
     echo "DolphinScheduler 登录:"
@@ -299,7 +227,6 @@ show_deployment_info() {
     echo ""
     echo "日志文件:"
     echo "  - 后端:     tail -f /tmp/backend.log"
-    echo "  - Python:   tail -f /tmp/dolphin-service.log"
     echo "  - 前端:     tail -f /tmp/frontend.log"
     echo ""
     echo "快速测试命令:"
@@ -326,7 +253,6 @@ main() {
     # 执行部署流程
     check_dependencies
     check_dolphinscheduler
-    deploy_python_service
     deploy_backend
 
     if [ "$SKIP_FRONTEND" = false ]; then

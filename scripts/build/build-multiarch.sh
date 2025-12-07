@@ -31,7 +31,6 @@ PLATFORMS="linux/amd64,linux/arm64"
 PUSH=false
 BUILD_FRONTEND=true
 BUILD_BACKEND=true
-BUILD_DOLPHIN=true
 
 usage() {
     echo "用法: $0 [选项]"
@@ -44,7 +43,6 @@ usage() {
     echo "  --push                  构建后推送到 Docker Hub"
     echo "  --no-frontend           跳过前端镜像构建"
     echo "  --no-backend            跳过后端镜像构建"
-    echo "  --no-dolphin            跳过 DolphinScheduler 服务镜像构建"
     echo "  --platform PLATFORMS    目标平台 (默认: linux/amd64,linux/arm64)"
     echo "  -h, --help              显示此帮助信息"
     echo ""
@@ -85,10 +83,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-backend)
             BUILD_BACKEND=false
-            shift
-            ;;
-        --no-dolphin)
-            BUILD_DOLPHIN=false
             shift
             ;;
         --platform)
@@ -163,7 +157,6 @@ fi
 # 定义镜像名称
 FRONTEND_IMAGE="$DEFAULT_NAMESPACE/opendataworks-frontend"
 BACKEND_IMAGE="$DEFAULT_NAMESPACE/opendataworks-backend"
-DOLPHIN_SERVICE_IMAGE="$DEFAULT_NAMESPACE/opendataworks-dolphin-service"
 
 # 构建参数
 BUILD_ARGS="--platform=$PLATFORMS"
@@ -188,7 +181,6 @@ echo "命名空间:   $DEFAULT_NAMESPACE"
 echo "推送镜像:   $PUSH"
 echo "构建前端:   $BUILD_FRONTEND"
 echo "构建后端:   $BUILD_BACKEND"
-echo "构建Dolphin: $BUILD_DOLPHIN"
 echo "========================================="
 echo ""
 
@@ -198,7 +190,7 @@ SUCCESSFUL_BUILDS=0
 
 # 构建前端镜像
 if [ "$BUILD_FRONTEND" = true ]; then
-    echo -e "${YELLOW}📦 [1/3] 构建前端镜像...${NC}"
+    echo -e "${YELLOW}📦 [1/2] 构建前端镜像...${NC}"
     echo "镜像: $FRONTEND_IMAGE:$VERSION"
     echo "平台: $PLATFORMS"
 
@@ -220,7 +212,7 @@ fi
 
 # 构建后端镜像
 if [ "$BUILD_BACKEND" = true ]; then
-    echo -e "${YELLOW}📦 [2/3] 构建后端镜像...${NC}"
+    echo -e "${YELLOW}📦 [2/2] 构建后端镜像...${NC}"
     echo "镜像: $BACKEND_IMAGE:$VERSION"
     echo "平台: $PLATFORMS"
 
@@ -234,28 +226,6 @@ if [ "$BUILD_BACKEND" = true ]; then
         ((SUCCESSFUL_BUILDS++))
     else
         echo -e "${RED}❌ 后端镜像构建失败${NC}"
-    fi
-    cd "$REPO_ROOT"
-    ((TOTAL_BUILDS++))
-    echo ""
-fi
-
-# 构建 DolphinScheduler 服务镜像
-if [ "$BUILD_DOLPHIN" = true ]; then
-    echo -e "${YELLOW}📦 [3/3] 构建 DolphinScheduler 服务镜像...${NC}"
-    echo "镜像: $DOLPHIN_SERVICE_IMAGE:$VERSION"
-    echo "平台: $PLATFORMS"
-
-    cd "$REPO_ROOT/dolphinscheduler-service"
-    if docker buildx build $BUILD_ARGS \
-        -t $DOLPHIN_SERVICE_IMAGE:$VERSION \
-        -t $DOLPHIN_SERVICE_IMAGE:latest \
-        --file Dockerfile \
-        . ; then
-        echo -e "${GREEN}✅ DolphinScheduler 服务镜像构建成功${NC}"
-        ((SUCCESSFUL_BUILDS++))
-    else
-        echo -e "${RED}❌ DolphinScheduler 服务镜像构建失败${NC}"
     fi
     cd "$REPO_ROOT"
     ((TOTAL_BUILDS++))
@@ -277,12 +247,10 @@ if [ $SUCCESSFUL_BUILDS -eq $TOTAL_BUILDS ]; then
         echo "✅ 镜像已推送到 Docker Hub:"
         [ "$BUILD_FRONTEND" = true ] && echo "  - $FRONTEND_IMAGE:$VERSION"
         [ "$BUILD_BACKEND" = true ] && echo "  - $BACKEND_IMAGE:$VERSION"
-        [ "$BUILD_DOLPHIN" = true ] && echo "  - $DOLPHIN_SERVICE_IMAGE:$VERSION"
         echo ""
         echo "📝 拉取镜像命令:"
         [ "$BUILD_FRONTEND" = true ] && echo "  docker pull $FRONTEND_IMAGE:$VERSION"
         [ "$BUILD_BACKEND" = true ] && echo "  docker pull $BACKEND_IMAGE:$VERSION"
-        [ "$BUILD_DOLPHIN" = true ] && echo "  docker pull $DOLPHIN_SERVICE_IMAGE:$VERSION"
     else
         echo "ℹ️  镜像已构建到本地 Docker 镜像仓库"
         echo ""
