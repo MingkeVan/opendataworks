@@ -3,6 +3,7 @@ package com.onedata.portal.service;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.config.DolphinSchedulerProperties;
+import com.onedata.portal.dto.DolphinDatasourceOption;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.TableTaskRelation;
@@ -48,23 +49,25 @@ public class WorkflowDeployService {
 
     @Transactional
     public DeploymentResult deploy(DataWorkflow workflow) {
+        // Ensure project exists (force refresh/create)
+        dolphinSchedulerService.getProjectCode(true);
+
         List<WorkflowTaskRelation> bindings = workflowTaskRelationMapper.selectList(
-            Wrappers.<WorkflowTaskRelation>lambdaQuery()
-                .eq(WorkflowTaskRelation::getWorkflowId, workflow.getId())
-        );
+                Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                        .eq(WorkflowTaskRelation::getWorkflowId, workflow.getId()));
         if (CollectionUtils.isEmpty(bindings)) {
             throw new IllegalStateException("工作流尚未绑定任何任务");
         }
         List<Long> taskIds = bindings.stream()
-            .map(WorkflowTaskRelation::getTaskId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toList());
+                .map(WorkflowTaskRelation::getTaskId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
         if (taskIds.isEmpty()) {
             throw new IllegalStateException("任务 ID 列表为空");
         }
         List<DataTask> tasks = dataTaskMapper.selectBatchIds(taskIds);
         Map<Long, DataTask> taskMap = tasks.stream()
-            .collect(Collectors.toMap(DataTask::getId, t -> t));
+                .collect(Collectors.toMap(DataTask::getId, t -> t));
         for (Long taskId : taskIds) {
             if (!taskMap.containsKey(taskId)) {
                 throw new IllegalStateException("任务不存在: " + taskId);
@@ -74,18 +77,17 @@ public class WorkflowDeployService {
         ensureTaskCodes(tasks);
 
         List<TableTaskRelation> tableRelations = tableTaskRelationMapper.selectList(
-            Wrappers.<TableTaskRelation>lambdaQuery()
-                .in(TableTaskRelation::getTaskId, taskIds)
-        );
+                Wrappers.<TableTaskRelation>lambdaQuery()
+                        .in(TableTaskRelation::getTaskId, taskIds));
         Map<Long, Set<Long>> readTables = new HashMap<>();
         Map<Long, Set<Long>> writeTables = new HashMap<>();
         for (TableTaskRelation relation : tableRelations) {
             if ("read".equalsIgnoreCase(relation.getRelationType())) {
                 readTables.computeIfAbsent(relation.getTaskId(), k -> new HashSet<>())
-                    .add(relation.getTableId());
+                        .add(relation.getTableId());
             } else if ("write".equalsIgnoreCase(relation.getRelationType())) {
                 writeTables.computeIfAbsent(relation.getTaskId(), k -> new HashSet<>())
-                    .add(relation.getTableId());
+                        .add(relation.getTableId());
             }
         }
 
@@ -94,26 +96,31 @@ public class WorkflowDeployService {
         List<DolphinSchedulerService.TaskLocationPayload> locationPayloads = new ArrayList<>();
 
         List<DataTask> orderedTasks = bindings.stream()
-            .sorted(Comparator.comparing(WorkflowTaskRelation::getCreatedAt))
-            .map(binding -> taskMap.get(binding.getTaskId()))
-            .collect(Collectors.toList());
+                .sorted(Comparator.comparing(WorkflowTaskRelation::getCreatedAt))
+                .map(binding -> taskMap.get(binding.getTaskId()))
+                .collect(Collectors.toList());
 
         dolphinSchedulerService.alignSequenceWithExistingTasks(
-            orderedTasks.stream()
-                .map(DataTask::getDolphinTaskCode)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList())
-        );
+                orderedTasks.stream()
+                        .map(DataTask::getDolphinTaskCode)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList()));
+
+        // Fetch datasources once
+        List<DolphinDatasourceOption> allDatasources = dolphinSchedulerService.listDatasources(null, null);
+        Map<String, DolphinDatasourceOption> datasourceMap = allDatasources.stream()
+                .collect(Collectors.toMap(DolphinDatasourceOption::getName, opt -> opt,
+                        (v1, v2) -> v1));
 
         int index = 0;
         Map<Long, WorkflowTaskRelation> bindingByTaskId = bindings.stream()
-            .collect(Collectors.toMap(WorkflowTaskRelation::getTaskId, b -> b));
+                .collect(Collectors.toMap(WorkflowTaskRelation::getTaskId, b -> b));
 
         for (DataTask task : orderedTasks) {
             WorkflowTaskRelation binding = bindingByTaskId.get(task.getId());
             NodeAttr attr = parseNodeAttr(binding);
-            String nodeType = attr.getNodeType() != null ? attr.getNodeType() :
-                (task.getDolphinNodeType() == null ? "SHELL" : task.getDolphinNodeType());
+            String nodeType = attr.getNodeType() != null ? attr.getNodeType()
+                    : (task.getDolphinNodeType() == null ? "SHELL" : task.getDolphinNodeType());
             String priority = attr.getPriority() != null ? attr.getPriority() : mapPriority(task.getPriority());
             int version = task.getDolphinTaskVersion() == null ? 1 : task.getDolphinTaskVersion();
 
@@ -124,20 +131,46 @@ public class WorkflowDeployService {
                 sqlOrScript = dolphinSchedulerService.buildShellScript(task.getTaskSql());
             }
 
+            Long datasourceId = null;
+            String realDatasourceType = null;
+            if (StringUtils.hasText(task.getDatasourceName())) {
+                DolphinDatasourceOption option = datasourceMap.get(task.getDatasourceName());
+                if (option == null) {
+                    // Try refreshing list if not found
+                    log.debug("Datasource {} not found in cache, refreshing...", task.getDatasourceName());
+                    List<DolphinDatasourceOption> refreshed = dolphinSchedulerService.listDatasources(null,
+                            task.getDatasourceName());
+                    option = refreshed.stream()
+                            .filter(d -> Objects.equals(d.getName(), task.getDatasourceName()))
+                            .findFirst()
+                            .orElse(null);
+                }
+
+                if (option != null) {
+                    datasourceId = option.getId();
+                    realDatasourceType = option.getType();
+                }
+            }
+
+            if ("SQL".equalsIgnoreCase(nodeType) && datasourceId == null) {
+                throw new IllegalStateException(String.format(
+                        "Datasource '%s' not found for task '%s'. Please check if the datasource exists in DolphinScheduler.",
+                        task.getDatasourceName(), task.getTaskName()));
+            }
+
             Map<String, Object> definition = dolphinSchedulerService.buildTaskDefinition(
-                task.getDolphinTaskCode(),
-                version,
-                task.getTaskName(),
-                task.getTaskDesc(),
-                sqlOrScript,
-                priority,
-                coalesce(attr.getRetryTimes(), task.getRetryTimes(), 0),
-                coalesce(attr.getRetryInterval(), task.getRetryInterval(), 1),
-                coalesce(attr.getTimeoutSeconds(), task.getTimeoutSeconds(), 0),
-                nodeType,
-                task.getDatasourceName(),
-                task.getDatasourceType()
-            );
+                    task.getDolphinTaskCode(),
+                    version,
+                    task.getTaskName(),
+                    task.getTaskDesc(),
+                    sqlOrScript,
+                    priority,
+                    coalesce(attr.getRetryTimes(), task.getRetryTimes(), 0),
+                    coalesce(attr.getRetryInterval(), task.getRetryInterval(), 1),
+                    coalesce(attr.getTimeoutSeconds(), task.getTimeoutSeconds(), 0),
+                    nodeType,
+                    datasourceId,
+                    realDatasourceType != null ? realDatasourceType : task.getDatasourceType());
             definitions.add(definition);
 
             List<DataTask> upstreams = resolveUpstreamTasks(task, orderedTasks, readTables, writeTables);
@@ -146,23 +179,21 @@ public class WorkflowDeployService {
             }
             if (CollectionUtils.isEmpty(upstreams)) {
                 relationPayloads.add(dolphinSchedulerService.buildRelation(0L, 0,
-                    task.getDolphinTaskCode(), version));
+                        task.getDolphinTaskCode(), version));
             } else {
                 for (DataTask upstream : upstreams) {
                     relationPayloads.add(dolphinSchedulerService.buildRelation(
-                        upstream.getDolphinTaskCode(),
-                        upstream.getDolphinTaskVersion() == null ? 1 : upstream.getDolphinTaskVersion(),
-                        task.getDolphinTaskCode(),
-                        version
-                    ));
+                            upstream.getDolphinTaskCode(),
+                            upstream.getDolphinTaskVersion() == null ? 1 : upstream.getDolphinTaskVersion(),
+                            task.getDolphinTaskCode(),
+                            version));
                 }
             }
 
             locationPayloads.add(dolphinSchedulerService.buildLocation(
-                task.getDolphinTaskCode(),
-                index++,
-                computeLane(task)
-            ));
+                    task.getDolphinTaskCode(),
+                    index++,
+                    computeLane(task)));
         }
 
         long workflowCode = workflow.getWorkflowCode() == null ? 0L : workflow.getWorkflowCode();
@@ -173,37 +204,36 @@ public class WorkflowDeployService {
         }
 
         long deployedCode = dolphinSchedulerService.syncWorkflow(
-            workflowCode,
-            workflow.getWorkflowName(),
-            definitions,
-            relationPayloads,
-            locationPayloads
-        );
+                workflowCode,
+                workflow.getWorkflowName(),
+                definitions,
+                relationPayloads,
+                locationPayloads);
 
         updateTaskProcessCode(orderedTasks, deployedCode);
 
         Long projectCode = workflow.getProjectCode();
         if (projectCode == null || projectCode <= 0) {
             if (dolphinSchedulerProperties.getProjectCode() != null
-                && dolphinSchedulerProperties.getProjectCode() > 0) {
+                    && dolphinSchedulerProperties.getProjectCode() > 0) {
                 projectCode = dolphinSchedulerProperties.getProjectCode();
             } else {
                 projectCode = dolphinSchedulerService.getProjectCode();
             }
         }
         return DeploymentResult.builder()
-            .workflowCode(deployedCode)
-            .projectCode(projectCode)
-            .taskCount(orderedTasks.size())
-            .existingWorkflow(existingWorkflow)
-            .build();
+                .workflowCode(deployedCode)
+                .projectCode(projectCode)
+                .taskCount(orderedTasks.size())
+                .existingWorkflow(existingWorkflow)
+                .build();
     }
 
     private void ensureTaskCodes(List<DataTask> tasks) {
         List<Long> existingCodes = tasks.stream()
-            .map(DataTask::getDolphinTaskCode)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toList());
+                .map(DataTask::getDolphinTaskCode)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
         dolphinSchedulerService.alignSequenceWithExistingTasks(existingCodes);
         for (DataTask task : tasks) {
             boolean changed = false;
@@ -222,9 +252,9 @@ public class WorkflowDeployService {
     }
 
     private List<DataTask> resolveUpstreamTasks(DataTask task,
-                                                List<DataTask> scopedTasks,
-                                                Map<Long, Set<Long>> readTables,
-                                                Map<Long, Set<Long>> writeTables) {
+            List<DataTask> scopedTasks,
+            Map<Long, Set<Long>> readTables,
+            Map<Long, Set<Long>> writeTables) {
         Set<Long> reads = readTables.getOrDefault(task.getId(), Collections.emptySet());
         if (reads.isEmpty()) {
             return Collections.emptyList();

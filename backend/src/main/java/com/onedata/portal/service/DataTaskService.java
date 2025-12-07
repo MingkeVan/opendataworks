@@ -119,11 +119,18 @@ public class DataTaskService {
      */
     @Transactional
     public DataTask create(DataTask task, List<Long> inputTableIds, List<Long> outputTableIds) {
+        validateTask(task);
+        if (!StringUtils.hasText(task.getTaskCode())) {
+            task.setTaskCode(generateUniqueTaskCode(task.getTaskName()));
+        }
+        DataTask exists = dataTaskMapper.selectOne(new LambdaQueryWrapper<DataTask>()
+                .eq(DataTask::getTaskCode, task.getTaskCode()));
         if (exists != null) {
             throw new RuntimeException("任务编码已存在: " + task.getTaskCode());
         }
 
         task.setStatus("draft");
+
         dataTaskMapper.insert(task);
         log.info("Created task: {}", task.getTaskName());
 
@@ -169,6 +176,7 @@ public class DataTaskService {
      */
     @Transactional
     public DataTask update(DataTask task, List<Long> inputTableIds, List<Long> outputTableIds) {
+        validateTask(task);
         DataTask exists = dataTaskMapper.selectById(task.getId());
         if (exists == null) {
             throw new RuntimeException("任务不存在");
@@ -319,6 +327,21 @@ public class DataTaskService {
                 sqlOrScript = dolphinSchedulerService.buildShellScript(dataTask.getTaskSql());
             }
 
+            Long datasourceId = null;
+            if (StringUtils.hasText(dataTask.getDatasourceName())) {
+                List<DolphinDatasourceOption> options = dolphinSchedulerService.listDatasources(
+                        null, dataTask.getDatasourceName());
+                datasourceId = options.stream()
+                        .filter(opt -> Objects.equals(opt.getName(), dataTask.getDatasourceName()))
+                        .map(DolphinDatasourceOption::getId)
+                        .findFirst()
+                        .orElse(null);
+                if (datasourceId == null) {
+                    log.warn("Datasource not found: name={}, type={}", dataTask.getDatasourceName(),
+                            dataTask.getDatasourceType());
+                }
+            }
+
             Map<String, Object> definition = dolphinSchedulerService.buildTaskDefinition(
                     dataTask.getDolphinTaskCode(),
                     version,
@@ -330,7 +353,7 @@ public class DataTaskService {
                     dataTask.getRetryInterval() == null ? 1 : dataTask.getRetryInterval(),
                     dataTask.getTimeoutSeconds() == null ? 0 : dataTask.getTimeoutSeconds(),
                     nodeType,
-                    dataTask.getDatasourceName(),
+                    datasourceId,
                     dataTask.getDatasourceType());
             definitions.add(definition);
 
@@ -460,16 +483,8 @@ public class DataTaskService {
     public void executeTask(Long taskId) {
         DataTask task = getById(taskId);
         if (task != null) {
-            testExecute(task);
+            executeWorkflow(taskId);
         }
-    }
-
-    /**
-     * @deprecated 临时工作流清理逻辑不再需要，保留以兼容旧代码引用，但不再实际调度
-     */
-    @Async
-    public void cleanupTempWorkflowAsync(Long workflowCode, String taskName) {
-        // no-op
     }
 
     /**
@@ -811,6 +826,14 @@ public class DataTaskService {
             status.setDolphinTaskUrl(dolphinSchedulerService.getTaskDefinitionUrl(task.getDolphinTaskCode()));
         }
         return status;
+    }
+
+    private void validateTask(DataTask task) {
+        if ("SQL".equalsIgnoreCase(task.getDolphinNodeType())) {
+            if (!StringUtils.hasText(task.getDatasourceName())) {
+                throw new IllegalArgumentException("SQL 任务必须选择数据源");
+            }
+        }
     }
 
     private List<Long> findTaskIdsByWorkflow(Long workflowId) {

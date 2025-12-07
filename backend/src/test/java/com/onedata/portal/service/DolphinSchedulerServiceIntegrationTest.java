@@ -2,9 +2,14 @@ package com.onedata.portal.service;
 
 import com.onedata.portal.config.DolphinSchedulerProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.onedata.portal.service.dolphin.DolphinOpenApiClient;
+import com.onedata.portal.dto.dolphin.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.ArrayList;
@@ -13,11 +18,14 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Integration test for DolphinSchedulerService.
  *
- * This test validates the complete Java -> Python Service -> DolphinScheduler integration chain.
+ * This test validates the complete Java -> Python Service -> DolphinScheduler
+ * integration chain.
  *
  * Prerequisites:
  * 1. Python dolphinscheduler-service must be running on http://localhost:5001
@@ -31,17 +39,22 @@ import static org.junit.jupiter.api.Assertions.*;
  * 4. Release workflow to OFFLINE state
  */
 @DisplayName("DolphinScheduler Service Integration Tests")
+@ExtendWith(MockitoExtension.class)
 class DolphinSchedulerServiceIntegrationTest {
 
     private DolphinSchedulerService service;
     private DolphinSchedulerProperties properties;
     private static final String TEST_WORKFLOW_NAME = "java-integration-test";
 
+    @Mock
+    private DolphinOpenApiClient openApiClient;
+
     @BeforeEach
     void setUp() {
         // Setup properties
         properties = new DolphinSchedulerProperties();
-        properties.setServiceUrl("http://localhost:5001");
+        properties.setUrl("http://localhost:12345/dolphinscheduler");
+        properties.setToken("test-token");
         properties.setProjectName("test-project");
         properties.setTenantCode("default");
         properties.setWorkerGroup("default");
@@ -49,14 +62,10 @@ class DolphinSchedulerServiceIntegrationTest {
 
         // Create service instance
         ObjectMapper objectMapper = new ObjectMapper();
-        WebClient.Builder builder = WebClient.builder();
-        service = new DolphinSchedulerService(properties, objectMapper, builder);
+        service = new DolphinSchedulerService(properties, objectMapper, openApiClient);
 
         System.out.println("============================================================");
-        System.out.println("Starting DolphinScheduler Integration Test");
-        System.out.println("Service URL: " + properties.getServiceUrl());
-        System.out.println("Project: " + properties.getProjectName());
-        System.out.println("Workflow: " + TEST_WORKFLOW_NAME);
+        System.out.println("Starting DolphinScheduler Integration Test (Mocked)");
         System.out.println("============================================================");
     }
 
@@ -65,42 +74,52 @@ class DolphinSchedulerServiceIntegrationTest {
     void testCompleteWorkflowLifecycle() {
         System.out.println("\n🧪 Test 1: Complete Workflow Lifecycle\n");
 
+        // Mock behaviors
+        DolphinProject mockProject = new DolphinProject();
+        mockProject.setCode(123456L);
+        when(openApiClient.getProject(anyString())).thenReturn(mockProject);
+        when(openApiClient.createOrUpdateProcessDefinition(anyLong(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(999L); // Return mock workflow code
+
         // Step 1: Build task definitions
         System.out.println("Step 1: Building task definitions...");
         long task1Code = service.nextTaskCode();
         long task2Code = service.nextTaskCode();
 
         Map<String, Object> task1 = service.buildTaskDefinition(
-            task1Code,
-            1,
-            "java_test_task_1",
-            "First test task from Java",
-            "#!/bin/bash\necho 'Java Test Task 1 executed'",
-            "MEDIUM",
-            0,
-            1,
-            3600
-        );
+                task1Code,
+                1,
+                "java_test_task_1",
+                "First test task from Java",
+                "#!/bin/bash\necho 'Java Test Task 1 executed'",
+                "MEDIUM",
+                0,
+                1,
+                3600,
+                "SHELL",
+                null,
+                null);
 
         Map<String, Object> task2 = service.buildTaskDefinition(
-            task2Code,
-            1,
-            "java_test_task_2",
-            "Second test task from Java",
-            "#!/bin/bash\necho 'Java Test Task 2 executed'",
-            "MEDIUM",
-            0,
-            1,
-            3600
-        );
+                task2Code,
+                1,
+                "java_test_task_2",
+                "Second test task from Java",
+                "#!/bin/bash\necho 'Java Test Task 2 executed'",
+                "MEDIUM",
+                0,
+                1,
+                3600,
+                "SHELL",
+                null,
+                null);
 
         List<Map<String, Object>> tasks = new ArrayList<>();
         tasks.add(task1);
         tasks.add(task2);
 
         System.out.println("✅ Created " + tasks.size() + " task definitions");
-        System.out.println("   Task 1 code: " + task1Code);
-        System.out.println("   Task 2 code: " + task2Code);
 
         // Step 2: Build relations
         System.out.println("\nStep 2: Building task relations...");
@@ -116,20 +135,20 @@ class DolphinSchedulerServiceIntegrationTest {
         System.out.println("✅ Created 2 task locations");
 
         // Step 4: Sync workflow
-        System.out.println("\nStep 4: Syncing workflow with Python service...");
-        service.syncWorkflow(
-            0,  // workflowCode = 0 means create new
-            TEST_WORKFLOW_NAME,
-            tasks,
-            relations,
-            locations
-        );
-        System.out.println("✅ Workflow synced successfully");
+        System.out.println("\nStep 4: Syncing workflow (Mocked)...");
+        long workflowCode = service.syncWorkflow(
+                0, // workflowCode = 0 means create new
+                TEST_WORKFLOW_NAME,
+                tasks,
+                relations,
+                locations);
 
-        // For subsequent operations, we need the workflow code
-        // In a real scenario, we would get this from the sync response
-        // For now, let's assume we have it from a previous sync
-        long workflowCode = System.currentTimeMillis(); // Mock workflow code
+        assertEquals(999L, workflowCode);
+        verify(openApiClient, times(1)).getProject(properties.getProjectName());
+        verify(openApiClient, times(1)).createOrUpdateProcessDefinition(eq(123456L), eq(TEST_WORKFLOW_NAME), any(),
+                any(), any(), any(), any(), any(), isNull());
+
+        System.out.println("✅ Workflow synced successfully (Mocked)");
 
         System.out.println("\n✅ Test 1 Completed: Workflow lifecycle test passed");
     }
@@ -180,8 +199,8 @@ class DolphinSchedulerServiceIntegrationTest {
         long upstreamCode = 100001;
         long downstreamCode = 100002;
 
-        DolphinSchedulerService.TaskRelationPayload relation =
-            service.buildRelation(upstreamCode, 1, downstreamCode, 1);
+        DolphinSchedulerService.TaskRelationPayload relation = service.buildRelation(upstreamCode, 1, downstreamCode,
+                1);
 
         System.out.println("Created relation:");
         System.out.println("  Upstream: " + relation.getPreTaskCode());
@@ -204,8 +223,7 @@ class DolphinSchedulerServiceIntegrationTest {
         int index = 0;
         int lane = 0;
 
-        DolphinSchedulerService.TaskLocationPayload location =
-            service.buildLocation(taskCode, index, lane);
+        DolphinSchedulerService.TaskLocationPayload location = service.buildLocation(taskCode, index, lane);
 
         System.out.println("Created location:");
         System.out.println("  Task code: " + location.getTaskCode());

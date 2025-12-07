@@ -12,14 +12,8 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "dolphin")
 public class DolphinSchedulerProperties {
 
-    /** dolphinscheduler-service base url, for example: http://localhost:8081 */
-    private String serviceUrl;
-
-    /** DolphinScheduler Web UI base URL, for example: http://localhost:12345/dolphinscheduler */
-    private String webuiUrl;
-
-    /** DolphinScheduler OpenAPI base URL, default to Web UI host */
-    private String openapiUrl;
+    /** DolphinScheduler base URL (including /dolphinscheduler path) */
+    private String url;
 
     /** DolphinScheduler API token */
     private String token;

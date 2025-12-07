@@ -123,8 +123,12 @@ const drawerLoading = ref(false)
 const tasksLoading = ref(false)
 const taskOptions = ref([])
 const workflowNumericId = computed(() => {
+  if (props.workflowId === null || props.workflowId === undefined || props.workflowId === '') {
+    return null
+  }
   const id = Number(props.workflowId)
-  return Number.isFinite(id) ? id : null
+  // Ensure id is a positive number (DB IDs are usually > 0)
+  return (Number.isFinite(id) && id > 0) ? id : null
 })
 const isEditMode = computed(() => workflowNumericId.value !== null)
 const drawerTitle = computed(() => (isEditMode.value ? '编辑工作流' : '新建工作流'))

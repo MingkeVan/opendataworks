@@ -27,13 +27,10 @@ public class DolphinDatasourceController {
      */
     @GetMapping("/datasources")
     public Result<List<DolphinDatasourceOption>> listDatasources(
-        @RequestParam(required = false) String type,
-        @RequestParam(required = false) String keyword
-    ) {
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String keyword) {
         String filterType;
-        if (!StringUtils.hasText(type)) {
-            filterType = "DORIS";
-        } else if ("ALL".equalsIgnoreCase(type)) {
+        if ("ALL".equalsIgnoreCase(type)) {
             filterType = null;
         } else {
             filterType = type;

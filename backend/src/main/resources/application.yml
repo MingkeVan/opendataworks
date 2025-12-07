@@ -40,11 +40,10 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 # DolphinScheduler 配置
+# DolphinScheduler 配置
 dolphin:
-  service-url: ${DOLPHIN_SERVICE_URL:http://localhost:5001}
-  webui-url: http://localhost:12345/dolphinscheduler
-  openapi-url: ${DOLPHIN_OPENAPI_URL:http://localhost:12345/dolphinscheduler}
-  token: ${DOLPHIN_TOKEN:dev-token}
+  url: ${DOLPHIN_URL:http://localhost:12345/dolphinscheduler}
+  token: ${DOLPHIN_TOKEN:8b9dc67bf292234b6ae92befc378f254}
   project-name: opendataworks
   project-code: ${DOLPHIN_PROJECT_CODE:0}
   tenant-code: default

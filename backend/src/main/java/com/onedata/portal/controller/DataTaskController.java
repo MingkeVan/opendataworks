@@ -79,25 +79,6 @@ public class DataTaskController {
     }
 
     /**
-     * 发布任务
-     */
-    @PostMapping("/{id}/publish")
-    public Result<Void> publish(@PathVariable Long id) {
-        return Result.fail(
-                400,
-                "任务发布入口已迁移，请前往“工作流管理”页面执行发布操作");
-    }
-
-    /**
-     * 手动执行单个任务（测试模式 - 创建临时单任务工作流）
-     */
-    @PostMapping("/{id}/execute")
-    public Result<Void> execute(@PathVariable Long id) {
-        dataTaskService.executeTask(id);
-        return Result.success();
-    }
-
-    /**
      * 执行整个工作流（包含所有依赖关系）
      */
     @PostMapping("/{id}/execute-workflow")

@@ -5,15 +5,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.config.DolphinSchedulerProperties;
 import com.onedata.portal.dto.DolphinDatasourceOption;
+import com.onedata.portal.dto.dolphin.*;
+import com.onedata.portal.service.dolphin.DolphinOpenApiClient;
 import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.UriComponentsBuilder;
-import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -29,10 +28,12 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Thin client for the Python-based dolphinscheduler-service.
  *
- * <p>The Java backend now delegates workflow orchestration to the Python
+ * <p>
+ * The Java backend now delegates workflow orchestration to the Python
  * service which wraps DolphinScheduler via the official SDK. This class
  * focuses on request/response mapping and retains backward-compatible
- * helper methods for building task payloads.</p>
+ * helper methods for building task payloads.
+ * </p>
  */
 @Slf4j
 @Service
@@ -42,21 +43,18 @@ public class DolphinSchedulerService {
 
     private final DolphinSchedulerProperties properties;
     private final ObjectMapper objectMapper;
-    private final WebClient serviceClient;
+    private final DolphinOpenApiClient openApiClient;
     private final AtomicLong taskCodeSequence = new AtomicLong(System.currentTimeMillis());
 
     // Cache for project code to avoid repeated API calls
     private volatile Long cachedProjectCode;
 
     public DolphinSchedulerService(DolphinSchedulerProperties properties,
-                                   ObjectMapper objectMapper,
-                                   WebClient.Builder builder) {
+            ObjectMapper objectMapper,
+            DolphinOpenApiClient openApiClient) {
         this.properties = properties;
         this.objectMapper = objectMapper;
-        this.serviceClient = builder
-            .baseUrl(properties.getServiceUrl())
-            .defaultHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
-            .build();
+        this.openApiClient = openApiClient;
     }
 
     /**
@@ -81,12 +79,28 @@ public class DolphinSchedulerService {
             }
 
             try {
-                Map<String, Object> body = new HashMap<>();
-                body.put("projectName", properties.getProjectName());
-                JsonNode data = postJson("/api/v1/projects/query", body);
-                cachedProjectCode = data.path("projectCode").asLong();
-                log.info("Queried project code for {}: {}", properties.getProjectName(), cachedProjectCode);
-                return cachedProjectCode;
+                DolphinProject project = openApiClient.getProject(properties.getProjectName());
+                if (project != null) {
+                    cachedProjectCode = project.getCode();
+                    log.info("Queried project code for {}: {}", properties.getProjectName(), cachedProjectCode);
+                    return cachedProjectCode;
+                } else {
+                    log.info("Project {} not found. Attempting to create it...", properties.getProjectName());
+                    try {
+                        Long newCode = openApiClient.createProject(properties.getProjectName(),
+                                "Auto-created by OpenDataWorks");
+                        if (newCode != null && newCode > 0) {
+                            cachedProjectCode = newCode;
+                            log.info("Created project {}: {}", properties.getProjectName(), cachedProjectCode);
+                            return cachedProjectCode;
+                        }
+                    } catch (Exception ex) {
+                        log.error("Failed to auto-create project {}", properties.getProjectName(), ex);
+                    }
+
+                    log.warn("Project {} could not be found or created", properties.getProjectName());
+                    return null;
+                }
             } catch (Exception e) {
                 log.warn("Failed to query project code for {}: {}", properties.getProjectName(), e.getMessage());
                 return null;
@@ -103,192 +117,204 @@ public class DolphinSchedulerService {
     }
 
     /**
-     * Synchronise tasks, relations and locations with the dolphinscheduler-service.
-     * Returns the actual workflow code (may differ from input if workflowCode was 0).
+     * Synchronise tasks, relations and locations with DolphinScheduler via OpenAPI.
+     * Returns the actual workflow code (may differ from input if workflowCode was
+     * 0).
      */
     public long syncWorkflow(long workflowCode,
-                             String workflowName,
-                             List<Map<String, Object>> tasks,
-                             List<TaskRelationPayload> relations,
-                             List<TaskLocationPayload> locations) {
-        Map<String, Object> body = new HashMap<>();
-        body.put("workflowName", workflowName);
-        body.put("projectName", properties.getProjectName());
-        body.put("tenantCode", properties.getTenantCode());
-        body.put("executionType", properties.getExecutionType());
-        body.put("workerGroup", properties.getWorkerGroup());
-        body.put("tasks", tasks);
-        body.put("relations", relations == null ? Collections.emptyList() : relations);
-        body.put("locations", locations == null ? Collections.emptyList() : locations);
-
-        try {
-            String debugPayload = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(body);
-            log.debug("Syncing workflow {} with payload:\n{}", workflowCode, debugPayload);
-        } catch (JsonProcessingException e) {
-            log.warn("Failed to serialize debug payload", e);
+            String workflowName,
+            List<Map<String, Object>> tasks,
+            List<TaskRelationPayload> relations,
+            List<TaskLocationPayload> locations) {
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            throw new IllegalStateException("Cannot sync workflow: Project not found");
         }
 
-        JsonNode response = postJson(String.format("/api/v1/workflows/%d/sync", workflowCode), body);
-        long actualWorkflowCode = response.path("workflowCode").asLong(workflowCode);
-        int taskCount = response.path("taskCount").asInt(tasks.size());
-        log.info("Synchronized Dolphin workflow {}({}) with {} tasks via dolphinscheduler-service",
-            workflowName, actualWorkflowCode, taskCount);
-        return actualWorkflowCode;
+        try {
+            String taskJson = objectMapper.writeValueAsString(tasks);
+            String relationJson = objectMapper
+                    .writeValueAsString(relations != null ? relations : Collections.emptyList());
+            String locationJson = objectMapper
+                    .writeValueAsString(locations != null ? locations : Collections.emptyList());
+
+            log.info("Syncing workflow '{}' to project {}", workflowName, projectCode);
+
+            return openApiClient.createOrUpdateProcessDefinition(
+                    projectCode,
+                    workflowName,
+                    "", // description
+                    properties.getTenantCode(),
+                    properties.getExecutionType(),
+                    relationJson,
+                    taskJson,
+                    locationJson,
+                    workflowCode > 0 ? workflowCode : null);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize workflow data", e);
+        }
     }
 
     /**
      * Update workflow release state (ONLINE/OFFLINE).
      */
     public void setWorkflowReleaseState(long workflowCode, String releaseState) {
-        Map<String, Object> body = new HashMap<>();
-        body.put("releaseState", releaseState);
-        body.put("projectName", properties.getProjectName());
-        postJson(String.format("/api/v1/workflows/%d/release", workflowCode), body);
+        Long projectCode = getProjectCode();
+        if (projectCode == null)
+            return;
+
+        openApiClient.releaseProcessDefinition(projectCode, workflowCode, releaseState);
         log.info("Updated Dolphin workflow {} release state to {}", workflowCode, releaseState);
     }
 
     /**
-     * Start workflow instance via dolphinscheduler-service.
+     * Start workflow instance via DolphinScheduler OpenAPI.
      */
     public String startProcessInstance(Long workflowCode, String projectName, String workflowName) {
         if (workflowCode == null) {
             throw new IllegalArgumentException("workflowCode must not be null");
         }
-        Map<String, Object> body = new HashMap<>();
-        String resolvedProject = StringUtils.hasText(projectName) ? projectName : properties.getProjectName();
-        String resolvedWorkflow = StringUtils.hasText(workflowName)
-            ? workflowName
-            : "workflow-" + workflowCode;
-        body.put("projectName", resolvedProject);
-        body.put("workflowName", resolvedWorkflow);
-        JsonNode data = postJson(String.format("/api/v1/workflows/%d/start", workflowCode), body);
-        String executionId = Optional.ofNullable(data.path("instanceId").asText(null))
-            .orElse("exec-" + System.currentTimeMillis());
-        log.info("Invoked dolphinscheduler-service start for workflow {} (project={}, name={}) -> {}",
-            workflowCode, resolvedProject, resolvedWorkflow, executionId);
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            throw new IllegalStateException("Cannot start workflow: Project not found");
+        }
+
+        Long instanceId = openApiClient.startProcessInstance(
+                projectCode,
+                workflowCode,
+                "", // scheduleTime
+                "CONTINUE", // failureStrategy
+                "NONE", // warningType
+                null, // warningGroupId
+                "START_PROCESS",
+                properties.getWorkerGroup(),
+                properties.getTenantCode());
+
+        String executionId = instanceId != null ? String.valueOf(instanceId) : "exec-" + System.currentTimeMillis();
+        log.info("Started workflow instance for definition {} -> {}", workflowCode, executionId);
         return executionId;
     }
 
     /**
-     * Delete workflow definition via dolphinscheduler-service.
-     * Used for cleaning up temporary test workflows.
+     * Delete workflow definition via DolphinScheduler OpenAPI.
      */
     public void deleteWorkflow(Long workflowCode) {
-        if (workflowCode == null) {
-            throw new IllegalArgumentException("workflowCode must not be null");
-        }
+        if (workflowCode == null)
+            return;
+
+        Long projectCode = getProjectCode();
+        if (projectCode == null)
+            return;
+
+        // Ensure offline before delete
         try {
-            Map<String, Object> body = new HashMap<>();
-            body.put("projectName", properties.getProjectName());
-            postJson(String.format("/api/v1/workflows/%d/delete", workflowCode), body);
-            log.info("Deleted DolphinScheduler workflow {}", workflowCode);
-        } catch (Exception e) {
-            log.warn("Failed to delete workflow {}: {}", workflowCode, e.getMessage());
+            setWorkflowReleaseState(workflowCode, "OFFLINE");
+        } catch (Exception ignored) {
         }
+
+        openApiClient.deleteProcessDefinition(projectCode, workflowCode);
+        log.info("Deleted DolphinScheduler workflow {}", workflowCode);
     }
 
     /**
-     * Get workflow instance status via dolphinscheduler-service.
-     * Returns instance information including state, start time, end time, etc.
+     * Get workflow instance status via DolphinScheduler OpenAPI.
      */
     public JsonNode getWorkflowInstanceStatus(Long workflowCode, String instanceId) {
-        if (workflowCode == null || instanceId == null) {
-            throw new IllegalArgumentException("workflowCode and instanceId must not be null");
-        }
+        // Implementation note: converting DTO back to JsonNode to maintain
+        // compatibility
+        // with existing frontend/controller logic which expects raw JsonNode
+        if (workflowCode == null || instanceId == null)
+            return null;
+
+        Long projectCode = getProjectCode();
+        if (projectCode == null)
+            return null;
+
         try {
-            String path = String.format("/api/v1/workflows/%d/instances/%s", workflowCode, instanceId);
-            Map<String, Object> body = new HashMap<>();
-            body.put("projectName", properties.getProjectName());
-            JsonNode data = postJson(path, body);
-            log.debug("Retrieved instance status for workflow {} instance {}: {}",
-                workflowCode, instanceId, data.path("state").asText());
-            return data;
-        } catch (Exception e) {
-            log.warn("Failed to get instance status for workflow {} instance {}: {}",
-                workflowCode, instanceId, e.getMessage());
+            // Note: instanceId in argument is string, but DS uses long ID.
+            // If instanceId comes from our startProcessInstance mock return, we can't query
+            // it.
+            // Assuming instanceId is a valid numeric string here.
+            long id = Long.parseLong(instanceId);
+            DolphinProcessInstance instance = openApiClient.getProcessInstance(projectCode, id);
+            return objectMapper.valueToTree(instance);
+        } catch (NumberFormatException e) {
+            log.warn("Invalid instance ID format: {}", instanceId);
             return null;
         }
     }
 
     /**
-     * List workflow instances via dolphinscheduler-service with pagination.
+     * List workflow instances via DolphinScheduler OpenAPI.
      */
     public List<WorkflowInstanceSummary> listWorkflowInstances(Long workflowCode, int limit) {
         if (workflowCode == null || workflowCode <= 0) {
             return Collections.emptyList();
         }
-        int pageSize = Math.min(Math.max(limit, 1), 100);
-        Map<String, Object> body = new HashMap<>();
-        body.put("projectName", properties.getProjectName());
-        body.put("pageNum", 1);
-        body.put("pageSize", pageSize);
+        Long projectCode = getProjectCode();
+        if (projectCode == null)
+            return Collections.emptyList();
 
-        try {
-            JsonNode data = postJson(
-                String.format("/api/v1/workflows/%d/instances/list", workflowCode),
-                body
-            );
-            JsonNode instancesNode = data.path("instances");
-            if (instancesNode == null || !instancesNode.isArray()) {
-                return Collections.emptyList();
-            }
-            List<WorkflowInstanceSummary> result = new ArrayList<>();
-            for (JsonNode node : instancesNode) {
-                WorkflowInstanceSummary summary = mapInstanceSummary(node);
-                if (summary != null) {
-                    result.add(summary);
-                }
-            }
-            return result;
-        } catch (Exception e) {
-            log.warn("Failed to list workflow instances for {}: {}", workflowCode, e.getMessage());
+        int pageSize = Math.min(Math.max(limit, 1), 100);
+
+        DolphinPageData<DolphinProcessInstance> page = openApiClient.listProcessInstances(
+                projectCode, 1, pageSize, workflowCode);
+
+        if (page == null || page.getTotalList() == null) {
             return Collections.emptyList();
         }
+
+        List<WorkflowInstanceSummary> result = new ArrayList<>();
+        for (DolphinProcessInstance instance : page.getTotalList()) {
+            result.add(WorkflowInstanceSummary.builder()
+                    .instanceId(instance.getId())
+                    .state(instance.getState())
+                    .commandType(instance.getCommandType())
+                    .startTime(instance.getStartTime())
+                    .endTime(instance.getEndTime())
+                    .durationMs(parseDuration(instance.getDuration()))
+                    .build());
+        }
+        return result;
     }
 
     /**
      * Generate DolphinScheduler Web UI URL for workflow definition.
-     * Format: http://{host}:{port}/dolphinscheduler/ui/projects/{projectCode}/workflow/definitions/{workflowCode}
      */
     public String getWorkflowDefinitionUrl(Long workflowCode) {
-        if (workflowCode == null) {
+        if (workflowCode == null)
             return null;
-        }
+
         String baseUrl = getWebuiBaseUrl();
-        if (baseUrl == null || baseUrl.isEmpty()) {
-            log.warn("dolphin.webui-url is not configured, cannot generate workflow URL");
+        if (baseUrl == null)
             return null;
-        }
+
         Long projectCode = getProjectCode();
-        if (projectCode == null) {
-            log.warn("Cannot generate workflow URL without project code");
+        if (projectCode == null)
             return null;
-        }
+
         return String.format("%s/ui/projects/%d/workflow/definitions/%d",
-            baseUrl, projectCode, workflowCode);
+                baseUrl, projectCode, workflowCode);
     }
 
     /**
-     * Generate DolphinScheduler Web UI URL for task instances filtered by taskCode.
-     * Format: http://{host}:{port}/dolphinscheduler/ui/projects/{projectCode}/task/instances?taskCode={taskCode}
+     * Generate DolphinScheduler Web UI URL for task instances.
      */
     public String getTaskDefinitionUrl(Long taskCode) {
-        if (taskCode == null) {
+        if (taskCode == null)
             return null;
-        }
+
         String baseUrl = getWebuiBaseUrl();
-        if (baseUrl == null || baseUrl.isEmpty()) {
-            log.warn("dolphin.webui-url is not configured, cannot generate task URL");
+        if (baseUrl == null)
             return null;
-        }
+
         Long projectCode = getProjectCode();
-        if (projectCode == null) {
-            log.warn("Cannot generate task URL without project code");
+        if (projectCode == null)
             return null;
-        }
+
         UriComponentsBuilder builder = UriComponentsBuilder
-            .fromHttpUrl(String.format("%s/ui/projects/%d/task/instances", baseUrl, projectCode))
-            .queryParam("taskCode", taskCode);
+                .fromHttpUrl(String.format("%s/ui/projects/%d/task/instances", baseUrl, projectCode))
+                .queryParam("taskCode", taskCode);
         if (StringUtils.hasText(properties.getProjectName())) {
             builder.queryParam("projectName", properties.getProjectName());
         }
@@ -296,14 +322,15 @@ public class DolphinSchedulerService {
     }
 
     /**
-     * Return the configured DolphinScheduler Web UI base URL without trailing slashes.
+     * Return the configured DolphinScheduler Web UI base URL without trailing
+     * slashes.
      */
     public String getWebuiBaseUrl() {
-        String webuiUrl = properties.getWebuiUrl();
-        if (!StringUtils.hasText(webuiUrl)) {
+        String url = properties.getUrl();
+        if (!StringUtils.hasText(url)) {
             return null;
         }
-        return webuiUrl.replaceAll("/+$", "");
+        return url.replaceAll("/+$", "");
     }
 
     /**
@@ -325,50 +352,50 @@ public class DolphinSchedulerService {
             return;
         }
         existingCodes.stream()
-            .filter(Objects::nonNull)
-            .max(Comparator.naturalOrder())
-            .ifPresent(this::initialiseSequence);
+                .filter(Objects::nonNull)
+                .max(Comparator.naturalOrder())
+                .ifPresent(this::initialiseSequence);
     }
 
     /**
      * Build task definition payload for DolphinScheduler SHELL task.
      */
     public Map<String, Object> buildTaskDefinition(long taskCode,
-                                                   int taskVersion,
-                                                   String taskName,
-                                                   String description,
-                                                   String rawScript,
-                                                   String taskPriority,
-                                                   int retryTimes,
-                                                   int retryInterval,
-                                                   int timeoutSeconds) {
+            int taskVersion,
+            String taskName,
+            String description,
+            String rawScript,
+            String taskPriority,
+            int retryTimes,
+            int retryInterval,
+            int timeoutSeconds) {
         return buildTaskDefinition(taskCode, taskVersion, taskName, description, rawScript,
-            taskPriority, retryTimes, retryInterval, timeoutSeconds, "SHELL", null, null);
+                taskPriority, retryTimes, retryInterval, timeoutSeconds, "SHELL", null, null);
     }
 
     /**
      * Build task definition payload for DolphinScheduler with flexible task type.
      */
     public Map<String, Object> buildTaskDefinition(long taskCode,
-                                                   int taskVersion,
-                                                   String taskName,
-                                                   String description,
-                                                   String rawScript,
-                                                   String taskPriority,
-                                                   int retryTimes,
-                                                   int retryInterval,
-                                                   int timeoutSeconds,
-                                                   String nodeType,
-                                                   String datasourceName,
-                                                   String datasourceType) {
+            int taskVersion,
+            String taskName,
+            String description,
+            String rawScript,
+            String taskPriority,
+            int retryTimes,
+            int retryInterval,
+            int timeoutSeconds,
+            String nodeType,
+            Long datasourceId,
+            String datasourceType) {
         Map<String, Object> payload = new HashMap<>();
         payload.put("code", taskCode);
         payload.put("name", taskName);
         payload.put("version", taskVersion);
         payload.put("description", description == null ? "" : description);
-        payload.put("delayTime", 0);
-        payload.put("failRetryInterval", Math.max(retryInterval, 1));
-        payload.put("failRetryTimes", Math.max(retryTimes, 0));
+        payload.put("delayTime", "0");
+        payload.put("failRetryInterval", String.valueOf(Math.max(retryInterval, 1)));
+        payload.put("failRetryTimes", String.valueOf(Math.max(retryTimes, 0)));
         payload.put("flag", "YES");
         payload.put("taskPriority", taskPriority);
         payload.put("workerGroup", properties.getWorkerGroup());
@@ -378,21 +405,26 @@ public class DolphinSchedulerService {
         payload.put("timeoutFlag", timeoutSeconds > 0 ? "OPEN" : "CLOSE");
         payload.put("timeoutNotifyStrategy", "");
 
+        // Added missing fields based on user payload
+        payload.put("cpuQuota", -1);
+        payload.put("memoryMax", -1);
+        payload.put("taskExecuteType", "BATCH");
+        payload.put("isCache", "NO");
+
         try {
             if ("SQL".equalsIgnoreCase(nodeType)) {
-                payload.put("taskParams", objectMapper.writeValueAsString(
-                    TaskParams.sql(rawScript, datasourceName, datasourceType)));
+                payload.put("taskParams", TaskParams.sql(rawScript, datasourceId, datasourceType));
             } else {
-                payload.put("taskParams", objectMapper.writeValueAsString(TaskParams.shell(rawScript)));
+                payload.put("taskParams", TaskParams.shell(rawScript));
             }
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Unable to serialise task parameters for dolphinscheduler-service", e);
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to construct task parameters", e);
         }
         return payload;
     }
 
     public TaskRelationPayload buildRelation(long upstreamCode, int upstreamVersion,
-                                             long downstreamCode, int downstreamVersion) {
+            long downstreamCode, int downstreamVersion) {
         TaskRelationPayload relation = new TaskRelationPayload();
         relation.setName("");
         relation.setPreTaskCode(upstreamCode);
@@ -421,148 +453,45 @@ public class DolphinSchedulerService {
     }
 
     /**
-     * Retrieve datasource options from dolphinscheduler-service.
+     * Retrieve datasource options from DolphinScheduler OpenAPI.
      */
     public List<DolphinDatasourceOption> listDatasources(String type, String keyword) {
-        UriComponentsBuilder builder = UriComponentsBuilder.fromPath("/api/v1/dolphin/datasources");
-        if (StringUtils.hasText(type)) {
-            builder.queryParam("type", type);
-        }
-        if (StringUtils.hasText(keyword)) {
-            builder.queryParam("keyword", keyword);
-        }
-
         try {
-            JsonNode data = getJson(builder.toUriString());
-            JsonNode items = data.path("datasources");
-            if (items.isMissingNode() || !items.isArray()) {
-                items = data.path("items");
-            }
+            List<DolphinDatasource> rawList = openApiClient.listDatasources(1, 100);
 
             List<DolphinDatasourceOption> result = new ArrayList<>();
-            if (items.isArray()) {
-                for (JsonNode node : items) {
-                    String name = node.path("name").asText(null);
-                    if (!StringUtils.hasText(name)) {
-                        continue;
-                    }
-                    DolphinDatasourceOption option = new DolphinDatasourceOption();
-                    if (node.hasNonNull("id")) {
-                        option.setId(node.path("id").asLong());
-                    }
-                    option.setName(name);
-                    option.setType(node.path("type").asText(null));
-                    option.setDbName(node.path("dbName").asText(null));
-                    option.setDescription(node.path("description").asText(null));
-                    result.add(option);
+            for (DolphinDatasource ds : rawList) {
+                // Filter logic
+                if (StringUtils.hasText(type) && !type.equalsIgnoreCase(ds.getType())) {
+                    continue;
                 }
+                if (StringUtils.hasText(keyword) && !ds.getName().contains(keyword)) {
+                    continue;
+                }
+
+                DolphinDatasourceOption option = new DolphinDatasourceOption();
+                option.setId(ds.getId());
+                option.setName(ds.getName());
+                option.setType(ds.getType());
+                option.setDbName(ds.getDatabase());
+                option.setDescription(ds.getNote());
+                result.add(option);
             }
             return result;
         } catch (Exception ex) {
-            log.warn("Failed to load datasources from dolphinscheduler-service: {}", ex.getMessage());
+            log.warn("Failed to load datasources from DolphinScheduler: {}", ex.getMessage());
             return Collections.emptyList();
         }
     }
 
-    private WorkflowInstanceSummary mapInstanceSummary(JsonNode node) {
-        if (node == null || node.isMissingNode()) {
+    private Long parseDuration(String value) {
+        if (!StringUtils.hasText(value))
             return null;
-        }
-        JsonNode idNode = node.get("instanceId");
-        if (idNode == null || idNode.isNull()) {
-            return null;
-        }
-        Long instanceId = idNode.isNumber() ? idNode.asLong() : parseLong(idNode.asText(null));
-        if (instanceId == null) {
-            return null;
-        }
-        Long duration = null;
-        JsonNode durationNode = node.get("duration");
-        if (durationNode != null && !durationNode.isNull()) {
-            duration = durationNode.isNumber() ? durationNode.asLong() : parseLong(durationNode.asText());
-        }
-        return WorkflowInstanceSummary.builder()
-            .instanceId(instanceId)
-            .state(textValue(node, "state"))
-            .commandType(textValue(node, "commandType"))
-            .startTime(textValue(node, "startTime"))
-            .endTime(textValue(node, "endTime"))
-            .durationMs(duration)
-            .rawJson(node.toString())
-            .build();
-    }
-
-    private Long parseLong(String value) {
-        if (!StringUtils.hasText(value)) {
-            return null;
-        }
+        // Basic parsing, assuming simple format or ms
         try {
             return Long.parseLong(value);
-        } catch (NumberFormatException ex) {
-            return null;
-        }
-    }
-
-    private String textValue(JsonNode node, String field) {
-        JsonNode value = node.get(field);
-        if (value == null || value.isNull()) {
-            return null;
-        }
-        return value.asText();
-    }
-
-    private JsonNode getJson(String path) {
-        return getJson(path, DEFAULT_TIMEOUT);
-    }
-
-    private JsonNode getJson(String path, Duration timeout) {
-        try {
-            Mono<String> responseMono = serviceClient.get()
-                .uri(path)
-                .retrieve()
-                .bodyToMono(String.class);
-            String raw = responseMono.block(timeout);
-            return extractDataNode(path, raw);
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to call dolphinscheduler-service GET " + path, e);
-        }
-    }
-
-    private JsonNode postJson(String path, Map<String, ?> body) {
-        return postJson(path, body, DEFAULT_TIMEOUT);
-    }
-
-    private JsonNode postJson(String path, Map<String, ?> body, Duration timeout) {
-        try {
-            String payload = objectMapper.writeValueAsString(body);
-            Mono<String> responseMono = serviceClient.post()
-                .uri(path)
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(payload)
-                .retrieve()
-                .bodyToMono(String.class);
-            String raw = responseMono.block(timeout);
-            return extractDataNode(path, raw);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Failed to serialise request body for dolphinscheduler-service", e);
-        }
-    }
-
-    private JsonNode extractDataNode(String path, String rawResponse) {
-        if (rawResponse == null) {
-            throw new IllegalStateException("dolphinscheduler-service returned empty response for " + path);
-        }
-        try {
-            JsonNode node = objectMapper.readTree(rawResponse);
-            boolean success = node.path("success").asBoolean(false);
-            if (!success) {
-                String message = node.path("message").asText("unknown error");
-                String code = node.path("code").asText("UNKNOWN");
-                throw new IllegalStateException("dolphinscheduler-service error (" + code + "): " + message);
-            }
-            return node.path("data");
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Failed to parse dolphinscheduler-service response", e);
+            return 0L;
         }
     }
 
@@ -639,25 +568,27 @@ public class DolphinSchedulerService {
         private final List<Object> resourceList = new ArrayList<>();
         private final String rawScript;
         private final String type;
-        private final String datasource;
+        private final Long datasource;
         private final String sql;
-        private final Integer sqlType;
+        private final String sqlType;
         private final Integer displayRows;
+        private final List<String> preStatements = new ArrayList<>();
+        private final List<String> postStatements = new ArrayList<>();
 
         public static TaskParams shell(String script) {
             return new TaskParams(script, null, null, null);
         }
 
-        public static TaskParams sql(String sql, String datasourceName, String datasourceType) {
-            return new TaskParams(null, datasourceName, datasourceType, sql);
+        public static TaskParams sql(String sql, Long datasourceId, String datasourceType) {
+            return new TaskParams(null, datasourceId, datasourceType, sql);
         }
 
-        private TaskParams(String rawScript, String datasourceName, String datasourceType, String sql) {
+        private TaskParams(String rawScript, Long datasourceId, String datasourceType, String sql) {
             this.rawScript = rawScript;
-            this.datasource = datasourceName;
+            this.datasource = datasourceId;
             this.sql = sql;
-            // SQL type: 0=NON_QUERY, 1=QUERY
-            this.sqlType = sql != null && sql.trim().toUpperCase().startsWith("SELECT") ? 1 : 0;
+            // SQL type: 0=NON_QUERY, 1=QUERY (as string)
+            this.sqlType = sql != null && sql.trim().toUpperCase().startsWith("SELECT") ? "1" : "0";
             this.displayRows = 10;
             // Don't default to MYSQL - let DolphinScheduler infer type from datasource name
             this.type = datasourceType;

@@ -46,41 +46,40 @@ public class HealthCheckService {
      */
     public ServiceHealthStatus checkDolphinSchedulerService() {
         ServiceHealthStatus status = new ServiceHealthStatus();
-        status.setServiceName("DolphinScheduler Python Service");
-        status.setServiceUrl(dolphinProperties.getServiceUrl());
+        status.setServiceName("DolphinScheduler OpenAPI");
+        status.setServiceUrl(dolphinProperties.getUrl());
 
         try {
             long startTime = System.currentTimeMillis();
 
-            // 调用健康检查接口
+            // Check connectivity by querying projects
             WebClient client = webClientBuilder.build();
-            String healthUrl = dolphinProperties.getServiceUrl() + "/health";
+            String checkUrl = dolphinProperties.getUrl() + "/projects?pageSize=1";
 
-            Map<String, Object> response = client.get()
-                .uri(healthUrl)
-                .retrieve()
-                .bodyToMono(Map.class)
-                .timeout(Duration.ofSeconds(5))
-                .block();
+            String response = client.get()
+                    .uri(checkUrl)
+                    .header("token", dolphinProperties.getToken())
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .timeout(Duration.ofSeconds(5))
+                    .block();
 
             long responseTime = System.currentTimeMillis() - startTime;
 
-            if (response != null && "healthy".equals(response.get("status"))) {
+            if (response != null && response.contains("\"code\":0")) {
                 status.setHealthy(true);
-                status.setMessage("服务运行正常");
+                status.setMessage("Service Normal");
                 status.setResponseTimeMs(responseTime);
-                status.setDetails(response);
             } else {
                 status.setHealthy(false);
-                status.setMessage("服务返回异常状态");
+                status.setMessage("Service returned abnormal status");
                 status.setResponseTimeMs(responseTime);
-                status.setDetails(response);
             }
 
         } catch (Exception e) {
             log.error("Failed to check DolphinScheduler service health", e);
             status.setHealthy(false);
-            status.setMessage("无法连接到服务: " + e.getMessage());
+            status.setMessage("Cannot connect to service: " + e.getMessage());
             status.setError(e.getClass().getSimpleName());
         }
 
@@ -97,10 +96,10 @@ public class HealthCheckService {
         try {
             // 获取默认集群
             DorisCluster cluster = dorisClusterMapper.selectList(null)
-                .stream()
-                .filter(c -> c.getIsDefault() == 1)
-                .findFirst()
-                .orElse(null);
+                    .stream()
+                    .filter(c -> c.getIsDefault() == 1)
+                    .findFirst()
+                    .orElse(null);
 
             if (cluster == null) {
                 status.setHealthy(false);
@@ -115,16 +114,16 @@ public class HealthCheckService {
             // 通过 HTTP API 检查 Doris FE 状态
             WebClient client = webClientBuilder.build();
             String healthUrl = String.format("http://%s:%d/api/health",
-                cluster.getFeHost(), cluster.getFePort());
+                    cluster.getFeHost(), cluster.getFePort());
 
             try {
                 String response = client.get()
-                    .uri(healthUrl)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .timeout(Duration.ofSeconds(5))
-                    .onErrorResume(e -> Mono.just(""))
-                    .block();
+                        .uri(healthUrl)
+                        .retrieve()
+                        .bodyToMono(String.class)
+                        .timeout(Duration.ofSeconds(5))
+                        .onErrorResume(e -> Mono.just(""))
+                        .block();
 
                 long responseTime = System.currentTimeMillis() - startTime;
 
@@ -189,10 +188,10 @@ public class HealthCheckService {
         try {
             // 获取默认集群
             DorisCluster cluster = dorisClusterMapper.selectList(null)
-                .stream()
-                .filter(c -> c.getIsDefault() == 1)
-                .findFirst()
-                .orElse(null);
+                    .stream()
+                    .filter(c -> c.getIsDefault() == 1)
+                    .findFirst()
+                    .orElse(null);
 
             if (cluster == null) {
                 log.warn("No default Doris cluster found");
@@ -202,21 +201,20 @@ public class HealthCheckService {
             // 通过 Doris REST API 获取 Backend 节点信息
             WebClient client = webClientBuilder.build();
             String backendUrl = String.format("http://%s:%d/rest/v1/system?path=//backends",
-                cluster.getFeHost(), cluster.getFePort());
+                    cluster.getFeHost(), cluster.getFePort());
 
             try {
                 Map<String, Object> response = client.get()
-                    .uri(backendUrl)
-                    .headers(headers -> {
-                        String auth = Base64.getEncoder().encodeToString(
-                            (cluster.getUsername() + ":" + cluster.getPassword()).getBytes()
-                        );
-                        headers.set("Authorization", "Basic " + auth);
-                    })
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .timeout(Duration.ofSeconds(10))
-                    .block();
+                        .uri(backendUrl)
+                        .headers(headers -> {
+                            String auth = Base64.getEncoder().encodeToString(
+                                    (cluster.getUsername() + ":" + cluster.getPassword()).getBytes());
+                            headers.set("Authorization", "Basic " + auth);
+                        })
+                        .retrieve()
+                        .bodyToMono(Map.class)
+                        .timeout(Duration.ofSeconds(10))
+                        .block();
 
                 if (response != null && response.containsKey("data")) {
                     Map<String, Object> data = (Map<String, Object>) response.get("data");
@@ -265,14 +263,13 @@ public class HealthCheckService {
 
             if (status.getMemoryLimitBytes() > 0) {
                 status.setMemoryUsagePercent(
-                    (double) status.getMemoryUsedBytes() / status.getMemoryLimitBytes() * 100
-                );
+                        (double) status.getMemoryUsedBytes() / status.getMemoryLimitBytes() * 100);
             }
 
             // 判断节点健康状态
             status.setHealthy(status.isAlive() &&
-                status.getDiskUsagePercent() < 90.0 &&
-                status.getMemoryUsagePercent() < 90.0);
+                    status.getDiskUsagePercent() < 90.0 &&
+                    status.getMemoryUsagePercent() < 90.0);
 
         } catch (Exception e) {
             log.warn("Failed to parse backend info: {}", backend, e);

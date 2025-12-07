@@ -319,6 +319,45 @@ const open = async (id = null, initialData = {}) => {
   }
 }
 
+const handleClose = () => {
+  visible.value = false
+  emit('close')
+}
+
+const handleSave = async () => {
+  if (!formRef.value) return
+  
+  try {
+    await formRef.value.validate()
+  } catch (err) {
+    return
+  }
+  
+  loading.value = true
+  try {
+    const payload = {
+      task: { ...form.task },
+      inputTableIds: form.inputTableIds,
+      outputTableIds: form.outputTableIds
+    }
+    
+    if (isEdit.value) {
+      await taskApi.update(form.task.id, payload)
+      ElMessage.success('更新成功')
+    } else {
+      await taskApi.create(payload)
+      ElMessage.success('创建成功')
+    }
+    visible.value = false
+    emit('saved')
+  } catch (error) {
+    console.error(error)
+    ElMessage.error(isEdit.value ? '更新失败' : '创建失败')
+  } finally {
+    loading.value = false
+  }
+}
+
 const resetForm = () => {
     form.task = {
         id: null,
