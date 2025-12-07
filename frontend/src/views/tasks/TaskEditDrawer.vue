@@ -22,6 +22,23 @@
         <el-input v-model="form.task.taskDesc" type="textarea" :rows="3" placeholder="请输入任务描述" />
       </el-form-item>
 
+      <el-form-item label="所属工作流" prop="task.workflowId">
+        <el-select
+          v-model="form.task.workflowId"
+          placeholder="请选择工作流"
+          filterable
+          :disabled="!!lockedWorkflowId"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="item in workflowOptions"
+            :key="item.id"
+            :label="item.workflowName"
+            :value="item.id"
+          />
+        </el-select>
+      </el-form-item>
+
       <el-form-item label="数据源" prop="task.datasourceName">
         <el-select
           v-model="form.task.datasourceName"
@@ -42,15 +59,15 @@
       </el-form-item>
 
       <el-form-item label="SQL 脚本" prop="task.taskSql" class="sql-editor-item">
-        <div class="sql-editor-container">
-          <el-input
-            v-model="form.task.taskSql"
-            type="textarea"
-            :rows="12"
-            placeholder="请输入 SQL 脚本"
-            font-family="monospace"
-          />
-        </div>
+        <el-input
+          v-model="form.task.taskSql"
+          type="textarea"
+          :rows="15"
+          placeholder="请输入 SQL 脚本"
+          class="sql-input"
+          resize="none"
+          spellcheck="false"
+        />
       </el-form-item>
 
       <el-form-item label="输入表" prop="inputTableIds">
@@ -120,6 +137,7 @@
 import { ref, reactive, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { taskApi } from '@/api/task'
+import { workflowApi } from '@/api/workflow'
 
 import { tableApi } from '@/api/table'
 
@@ -129,6 +147,17 @@ const visible = ref(false)
 const isEdit = ref(false)
 const loading = ref(false)
 const formRef = ref(null)
+const lockedWorkflowId = ref(null)
+const workflowOptions = ref([])
+
+const fetchWorkflowOptions = async () => {
+    try {
+        const res = await workflowApi.list({ pageNum: 1, pageSize: 200 }) // Load enough workflows
+        workflowOptions.value = res.records || []
+    } catch (error) {
+        console.error('获取工作流列表失败:', error)
+    }
+}
 
 
 
@@ -174,7 +203,7 @@ const form = reactive({
 
 const rules = {
   'task.taskName': [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
-  'task.taskName': [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
+  'task.workflowId': [{ required: true, message: '请选择所属工作流', trigger: 'change' }],
   'task.datasourceName': [{ required: true, message: '请选择数据源', trigger: 'change' }],
   'task.taskSql': [{ required: true, message: 'SQL 脚本不能为空', trigger: 'blur' }]
 }
@@ -284,8 +313,10 @@ const open = async (id = null, initialData = {}) => {
   // Reset form
   resetForm()
   
-  // Fetch datasources
-  await fetchDatasourceOptions()
+  // Fetch datasources and workflows
+  await Promise.all([fetchDatasourceOptions(), fetchWorkflowOptions()])
+
+  lockedWorkflowId.value = null
 
   if (id) {
     // Edit mode
@@ -315,6 +346,7 @@ const open = async (id = null, initialData = {}) => {
     // Set workflowId if provided
     if (initialData.workflowId) {
         form.task.workflowId = initialData.workflowId
+        lockedWorkflowId.value = initialData.workflowId
     }
   }
 }
@@ -386,10 +418,18 @@ defineExpose({
 </script>
 
 <style scoped>
-.sql-editor-container {
-  height: 300px;
-  border: 1px solid #dcdfe6;
-  border-radius: 4px;
+.sql-input :deep(.el-textarea__inner) {
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  background-color: #fafafa;
+  color: #333;
+  padding: 12px;
+}
+
+.sql-input :deep(.el-textarea__inner):focus {
+  background-color: #fff;
+  border-color: #409eff;
 }
 
 </style>

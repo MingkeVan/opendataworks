@@ -55,6 +55,12 @@ const routes = [
         meta: { title: '工作流管理' }
       },
       {
+        path: '/workflows/:id(\\d+)',
+        name: 'WorkflowDetail',
+        component: () => import('@/views/workflows/WorkflowDetail.vue'),
+        meta: { title: '工作流详情' }
+      },
+      {
         path: '/tasks',
         redirect: { path: '/workflows', query: { tab: 'tasks' } }
       },

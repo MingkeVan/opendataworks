@@ -155,9 +155,9 @@
             <el-button
               link
               type="primary"
-              @click="openEditDrawer(row)"
+              @click="handleViewDetail(row)"
             >
-              编辑
+              详情
             </el-button>
           </template>
         </el-table-column>
@@ -175,157 +175,7 @@
       />
     </el-card>
 
-    <el-drawer
-      v-model="detailDrawerVisible"
-      size="50%"
-      :title="workflowDetail?.workflow?.workflowName || '工作流详情'"
-      destroy-on-close
-    >
-      <div class="detail-body" v-loading="detailLoading">
-        <el-empty v-if="!workflowDetail && !detailLoading" description="请选择左侧工作流查看详情" />
-        <template v-else-if="workflowDetail">
-          <el-alert
-            v-if="pendingApprovalFlags[workflowDetail.workflow?.id]"
-            type="warning"
-            show-icon
-            title="存在待审批的发布请求"
-            class="pending-alert"
-          />
-          <section class="detail-section">
-            <div class="section-header">
-              <span>基本信息</span>
-              <div class="section-actions">
-                <el-button
-                  v-if="workflowDetail?.workflow?.id"
-                  text
-                  size="small"
-                  @click="handleDetailEdit"
-                >
-                  编辑
-                </el-button>
-                <el-button text size="small" @click="refreshDetail">刷新</el-button>
-              </div>
-            </div>
-            <el-descriptions :column="2" border class="detail-descriptions">
-              <el-descriptions-item label="状态">
-                <el-tag size="small" :type="getWorkflowStatusType(workflowDetail.workflow?.status)">
-                  {{ getWorkflowStatusText(workflowDetail.workflow?.status) }}
-                </el-tag>
-              </el-descriptions-item>
-              <el-descriptions-item label="发布状态">
-                <el-tag size="small" :type="getPublishStateType(workflowDetail.workflow)">
-                  {{ getPublishStateText(workflowDetail.workflow) }}
-                </el-tag>
-              </el-descriptions-item>
-              <el-descriptions-item label="项目编码">
-                {{ workflowDetail.workflow?.projectCode || '-' }}
-              </el-descriptions-item>
-              <el-descriptions-item label="Dolphin 流程编码">
-                {{ workflowDetail.workflow?.workflowCode || '-' }}
-              </el-descriptions-item>
-              <el-descriptions-item label="当前版本">
-                {{ workflowDetail.workflow?.currentVersionId || '-' }}
-              </el-descriptions-item>
-              <el-descriptions-item label="最后发布版本">
-                {{ workflowDetail.workflow?.lastPublishedVersionId || '-' }}
-              </el-descriptions-item>
-              <el-descriptions-item label="描述" :span="2">
-                {{ workflowDetail.workflow?.description || '-' }}
-              </el-descriptions-item>
-            </el-descriptions>
-          </section>
-
-          <section class="detail-section">
-            <div class="section-header">
-              <span>最近实例</span>
-            </div>
-            <el-table
-              v-if="workflowDetail.recentInstances?.length"
-              :data="workflowDetail.recentInstances"
-              border
-              size="small"
-            >
-              <el-table-column prop="instanceId" label="实例ID" width="140">
-                <template #default="{ row }">
-                  <el-link type="primary" @click="openDolphinInstance(row)" :disabled="!buildDolphinInstanceUrl(row)">
-                    #{{ row.instanceId }}
-                  </el-link>
-                </template>
-              </el-table-column>
-              <el-table-column prop="state" label="状态" width="120">
-                <template #default="{ row }">
-                  <el-tag size="small" :type="getInstanceStateType(row.state)">
-                    {{ getInstanceStateText(row.state) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="triggerType" label="触发方式" width="120">
-                <template #default="{ row }">
-                  {{ getTriggerText(row.triggerType) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="startTime" label="开始时间" width="170">
-                <template #default="{ row }">
-                  {{ formatDateTime(row.startTime) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="endTime" label="结束时间" width="170">
-                <template #default="{ row }">
-                  {{ formatDateTime(row.endTime) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="durationMs" label="耗时" width="120">
-                <template #default="{ row }">
-                  {{ formatDuration(row.durationMs, row.startTime, row.endTime) }}
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-empty
-              v-else
-              description="暂无执行记录"
-            />
-          </section>
-
-          <section class="detail-section">
-            <div class="section-header">
-              <span>发布记录</span>
-            </div>
-            <el-table
-              v-if="workflowDetail.publishRecords?.length"
-              :data="workflowDetail.publishRecords"
-              border
-              size="small"
-            >
-              <el-table-column prop="operation" label="操作" width="120">
-                <template #default="{ row }">
-                  {{ getOperationText(row.operation) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="status" label="状态" width="140">
-                <template #default="{ row }">
-                  <el-tag size="small" :type="getPublishRecordStatusType(row.status)">
-                    {{ getPublishRecordStatusText(row.status) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="versionId" label="版本ID" width="120" />
-              <el-table-column prop="operator" label="操作人" width="120" />
-              <el-table-column prop="createdAt" label="时间" width="170">
-                <template #default="{ row }">
-                  {{ formatDateTime(row.createdAt) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="log" label="备注">
-                <template #default="{ row }">
-                  {{ formatLog(row.log) }}
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-empty v-else description="暂无发布记录" />
-          </section>
-        </template>
-      </div>
-    </el-drawer>
+    <!-- Detail Drawer Removed -->
 
     <WorkflowCreateDrawer
       v-model="createDrawerVisible"
@@ -339,12 +189,14 @@
 <script setup>
 import { ref, reactive, onMounted, watch } from 'vue'
 import dayjs from 'dayjs'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Search, Link, Plus } from '@element-plus/icons-vue'
 import { workflowApi } from '@/api/workflow'
 import { taskApi } from '@/api/task'
 import WorkflowCreateDrawer from './WorkflowCreateDrawer.vue'
 
+const router = useRouter()
 const loading = ref(false)
 const workflows = ref([])
 const pagination = reactive({
@@ -363,12 +215,8 @@ const statusOptions = [
   { label: '失败', value: 'failed' }
 ]
 
-const detailDrawerVisible = ref(false)
-const detailLoading = ref(false)
-const workflowDetail = ref(null)
 const dolphinWebuiUrl = ref('')
 const pendingApprovalFlags = reactive({})
-const currentWorkflow = ref(null)
 const createDrawerVisible = ref(false)
 const editingWorkflowId = ref(null)
 const actionLoading = reactive({})
@@ -408,11 +256,6 @@ const openCreateDrawer = () => {
   createDrawerVisible.value = true
 }
 
-const openEditDrawer = (workflow) => {
-  if (!workflow?.id) return
-  editingWorkflowId.value = workflow.id
-  createDrawerVisible.value = true
-}
 
 const closeWorkflowDrawer = () => {
   createDrawerVisible.value = false
@@ -427,9 +270,6 @@ const handleCreateSuccess = () => {
 const handleUpdateSuccess = (workflowId) => {
   closeWorkflowDrawer()
   loadWorkflows()
-  if (detailDrawerVisible.value && workflowDetail.value?.workflow?.id === workflowId) {
-    fetchWorkflowDetail(workflowId)
-  }
 }
 
 const handleSizeChange = (size) => {
@@ -442,39 +282,9 @@ const handleCurrentChange = () => {
   loadWorkflows()
 }
 
-const fetchWorkflowDetail = async (workflowId) => {
-  if (!workflowId) {
-    return
-  }
-  detailLoading.value = true
-  try {
-    workflowDetail.value = await workflowApi.detail(workflowId)
-    syncPendingFlag(workflowId, workflowDetail.value?.publishRecords || [])
-  } catch (error) {
-    console.error('加载工作流详情失败', error)
-    ElMessage.error('加载详情失败')
-  } finally {
-    detailLoading.value = false
-  }
-}
-
 const handleViewDetail = (row) => {
-  currentWorkflow.value = row
-  detailDrawerVisible.value = true
-  fetchWorkflowDetail(row.id)
-}
-
-const refreshDetail = () => {
-  const id = workflowDetail.value?.workflow?.id
-  if (id) {
-    fetchWorkflowDetail(id)
-  }
-}
-
-const handleDetailEdit = () => {
-  const workflow = workflowDetail.value?.workflow
-  if (!workflow?.id) return
-  openEditDrawer(workflow)
+  if (!row?.id) return
+  router.push(`/workflows/${row.id}`)
 }
 
 const syncPendingFlag = (workflowId, records) => {
@@ -515,26 +325,6 @@ const openDolphin = (workflow) => {
   window.open(url, '_blank')
 }
 
-const buildDolphinInstanceUrl = (instance) => {
-  const workflow = workflowDetail.value?.workflow
-  if (!workflow || !dolphinWebuiUrl.value) {
-    return ''
-  }
-  if (!workflow.projectCode || !workflow.workflowCode || !instance?.instanceId) {
-    return ''
-  }
-  const base = dolphinWebuiUrl.value.replace(/\/+$/, '')
-  return `${base}/ui/projects/${workflow.projectCode}/workflow/instances/${instance.instanceId}?code=${workflow.workflowCode}`
-}
-
-const openDolphinInstance = (instance) => {
-  const url = buildDolphinInstanceUrl(instance)
-  if (!url) {
-    ElMessage.warning('无法跳转到实例详情')
-    return
-  }
-  window.open(url, '_blank')
-}
 
 const buildRowInstanceUrl = (row) => {
   if (!row || !dolphinWebuiUrl.value || !row.projectCode || !row.workflowCode || !row.latestInstanceId) {
@@ -652,9 +442,6 @@ const isExecuteDisabled = (row) => {
 
 const refreshAfterAction = (workflowId) => {
   loadWorkflows()
-  if (detailDrawerVisible.value && workflowDetail.value?.workflow?.id === workflowId) {
-    fetchWorkflowDetail(workflowId)
-  }
 }
 
 const handleDeploy = async (row) => {
@@ -947,59 +734,4 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
-.detail-body {
-  min-height: 400px;
-}
-
-.detail-section {
-  margin-bottom: 24px;
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-  font-weight: 600;
-}
-
-.section-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.detail-descriptions {
-  margin-bottom: 12px;
-}
-
-.pending-alert {
-  margin-bottom: 16px;
-}
-
-.publish-form .publish-target {
-  margin-bottom: 12px;
-}
-
-.publish-form .publish-target .label {
-  font-size: 13px;
-  color: #909399;
-}
-
-.publish-form .publish-target .value {
-  font-size: 15px;
-  font-weight: 600;
-  margin-top: 4px;
-}
-
-.latest-instance {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.latest-instance .instance-time {
-  font-size: 12px;
-  color: #909399;
-}
 </style>
