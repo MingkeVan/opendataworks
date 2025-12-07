@@ -27,10 +27,9 @@ public class DorisClusterService {
      */
     public List<DorisCluster> listAll() {
         return dorisClusterMapper.selectList(
-            new LambdaQueryWrapper<DorisCluster>()
-                .orderByDesc(DorisCluster::getIsDefault)
-                .orderByAsc(DorisCluster::getClusterName)
-        );
+                new LambdaQueryWrapper<DorisCluster>()
+                        .orderByDesc(DorisCluster::getIsDefault)
+                        .orderByAsc(DorisCluster::getClusterName));
     }
 
     /**
@@ -38,6 +37,16 @@ public class DorisClusterService {
      */
     public DorisCluster getById(Long id) {
         return dorisClusterMapper.selectById(id);
+    }
+
+    /**
+     * 根据名称获取集群
+     */
+    public DorisCluster getByName(String name) {
+        return dorisClusterMapper.selectOne(
+                new LambdaQueryWrapper<DorisCluster>()
+                        .eq(DorisCluster::getClusterName, name)
+                        .last("LIMIT 1"));
     }
 
     /**
@@ -133,7 +142,7 @@ public class DorisClusterService {
 
     private void resetDefaultFlag(Long excludeId) {
         LambdaUpdateWrapper<DorisCluster> updateWrapper = new LambdaUpdateWrapper<DorisCluster>()
-            .set(DorisCluster::getIsDefault, 0);
+                .set(DorisCluster::getIsDefault, 0);
         if (excludeId != null) {
             updateWrapper.ne(DorisCluster::getId, excludeId);
         }

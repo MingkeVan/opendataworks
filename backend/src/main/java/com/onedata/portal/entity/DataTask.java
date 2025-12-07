@@ -28,6 +28,8 @@ public class DataTask {
 
     private String datasourceType; // datasource type: MYSQL, DORIS, etc.
 
+    // clusterId and database removed during rollback
+
     @TableField("task_sql")
     private String taskSql;
 

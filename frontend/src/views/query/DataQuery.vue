@@ -90,6 +90,9 @@
                 <el-icon><VideoPlay /></el-icon> 执行
               </el-button>
               <el-button @click="resetForm"><el-icon><RefreshRight /></el-icon> 重置</el-button>
+              <el-button type="success" @click="saveAsTask" plain>
+                 <el-icon><Plus /></el-icon> 存为任务
+              </el-button>
            </div>
         </div>
 
@@ -286,6 +289,8 @@ SELECT * FROM table_name LIMIT 100;"
       </div>
 
     </el-card>
+
+    <TaskEditDrawer ref="taskDrawerRef" />
   </div>
 </template>
 
@@ -298,8 +303,9 @@ import { dataQueryApi } from '@/api/query'
 import { 
   DataBoard, Connection, Coin, Memo, ArrowRight, VideoPlay, RefreshRight, 
   List, TrendCharts, Clock, Timer, Files, Warning, Download,
-  Histogram, DataLine, PieChart, DataAnalysis
+  Histogram, DataLine, PieChart, DataAnalysis, Plus
 } from '@element-plus/icons-vue'
+import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
 
 // --- State ---
 const clusterOptions = ref([])
@@ -338,6 +344,7 @@ const paginatedRows = computed(() => {
 
 // Visual Chart
 const chartRef = ref(null)
+const taskDrawerRef = ref(null)
 let chartInstance = null
 const chartConfig = reactive({
   type: 'bar',
@@ -478,6 +485,18 @@ function exportResult() {
    link.href = URL.createObjectURL(blob)
    link.download = `export_${Date.now()}.csv`
    link.click()
+}
+
+function saveAsTask() {
+   if (!queryForm.sql.trim()) {
+      ElMessage.warning('请先输入 SQL');
+      return;
+   }
+   taskDrawerRef.value?.open(null, {
+      taskSql: queryForm.sql,
+      taskName: '新建查询任务_' + new Date().getTime(),
+      taskDesc: `From Data Query Page\nCluster: ${queryForm.clusterId}\nDatabase: ${queryForm.database}`
+   })
 }
 
 // Charting

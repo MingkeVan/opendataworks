@@ -42,7 +42,7 @@
           <el-button type="primary" @click="handleFilter">查询</el-button>
           <el-button @click="resetFilters">重置</el-button>
         </div>
-        <el-button type="primary" @click="$router.push('/tasks/create')">
+        <el-button type="primary" @click="openCreateDrawer">
           <el-icon><Plus /></el-icon>
           新建任务
         </el-button>
@@ -138,8 +138,7 @@
         <el-table-column prop="owner" label="负责人" width="120" />
         <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="$router.push(`/tasks/${row.id}/edit`)">编辑</el-button>
-            <el-button link type="warning" @click="handleExecuteTask(row.id)" v-if="row.status === 'published'">执行任务</el-button>
+            <el-button link type="primary" @click="openEditDrawer(row)">编辑</el-button>
             <el-button link type="info" @click="openDolphinTask(row)" v-if="row.executionStatus && row.executionStatus.dolphinTaskUrl">
               查看任务
             </el-button>
@@ -163,6 +162,8 @@
         style="margin-top: 20px; justify-content: flex-end"
       />
     </el-card>
+
+    <TaskEditDrawer ref="drawerRef" @success="handleDrawerSuccess" />
   </div>
 </template>
 
@@ -172,6 +173,7 @@ import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { taskApi } from '@/api/task'
 import { workflowApi } from '@/api/workflow'
+import TaskEditDrawer from './TaskEditDrawer.vue'
 
 const loading = ref(false)
 const tableData = ref([])
@@ -180,6 +182,8 @@ const pagination = reactive({
   pageSize: 20,
   total: 0
 })
+
+const drawerRef = ref(null)
 
 const filters = reactive({
   taskType: '',
@@ -285,21 +289,21 @@ const resetFilters = () => {
   handleFilter()
 }
 
-const handleExecuteTask = async (id) => {
-  try {
-    await taskApi.execute(id)
-    ElMessage.success('单任务执行已触发')
-    // 刷新执行状态
-    setTimeout(() => loadData(), 1000)
-  } catch (error) {
-    console.error('执行失败:', error)
-    const errorMessage = error.response?.data?.message || error.message || '执行失败，请稍后重试'
-    ElMessage.error({
-      message: errorMessage,
-      duration: 6000,
-      showClose: true
-    })
+const openCreateDrawer = () => {
+  const initialData = {}
+  const workflowId = parseNumericFilter(filters.workflowId)
+  if (workflowId) {
+    initialData.workflowId = workflowId
   }
+  drawerRef.value?.open(null, initialData)
+}
+
+const openEditDrawer = (row) => {
+  drawerRef.value?.open(row.id)
+}
+
+const handleDrawerSuccess = () => {
+  loadData()
 }
 
 const handleDelete = async (id) => {

@@ -3,6 +3,7 @@ package com.onedata.portal.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
+import com.onedata.portal.dto.SqlQueryResponse;
 import com.onedata.portal.dto.TaskExecutionStatus;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.service.DataTaskService;
@@ -40,7 +41,7 @@ public class DataTaskController {
             @RequestParam(required = false) Long upstreamTaskId,
             @RequestParam(required = false) Long downstreamTaskId) {
         Page<DataTask> page = dataTaskService.list(pageNum, pageSize, taskType, status,
-            workflowId, upstreamTaskId, downstreamTaskId);
+                workflowId, upstreamTaskId, downstreamTaskId);
         return Result.success(PageResult.of(page.getTotal(), page.getRecords()));
     }
 
@@ -58,10 +59,9 @@ public class DataTaskController {
     @PostMapping
     public Result<DataTask> create(@RequestBody TaskCreateRequest request) {
         DataTask task = dataTaskService.create(
-            request.getTask(),
-            request.getInputTableIds(),
-            request.getOutputTableIds()
-        );
+                request.getTask(),
+                request.getInputTableIds(),
+                request.getOutputTableIds());
         return Result.success(task);
     }
 
@@ -72,10 +72,9 @@ public class DataTaskController {
     public Result<DataTask> update(@PathVariable Long id, @RequestBody TaskUpdateRequest request) {
         request.getTask().setId(id);
         DataTask updatedTask = dataTaskService.update(
-            request.getTask(),
-            request.getInputTableIds(),
-            request.getOutputTableIds()
-        );
+                request.getTask(),
+                request.getInputTableIds(),
+                request.getOutputTableIds());
         return Result.success(updatedTask);
     }
 
@@ -85,9 +84,8 @@ public class DataTaskController {
     @PostMapping("/{id}/publish")
     public Result<Void> publish(@PathVariable Long id) {
         return Result.fail(
-            400,
-            "任务发布入口已迁移，请前往“工作流管理”页面执行发布操作"
-        );
+                400,
+                "任务发布入口已迁移，请前往“工作流管理”页面执行发布操作");
     }
 
     /**

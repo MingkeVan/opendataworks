@@ -5,11 +5,13 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.onedata.portal.dto.DolphinDatasourceOption;
+import com.onedata.portal.dto.SqlQueryRequest;
+import com.onedata.portal.dto.SqlQueryResponse;
 import com.onedata.portal.dto.TaskExecutionStatus;
 import com.onedata.portal.entity.DataLineage;
-import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
+import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.entity.TableTaskRelation;
 import com.onedata.portal.entity.TaskExecutionLog;
 import com.onedata.portal.entity.WorkflowTaskRelation;
@@ -34,9 +36,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -56,24 +55,19 @@ public class DataTaskService {
     private final WorkflowTaskRelationMapper workflowTaskRelationMapper;
     private final DataWorkflowMapper dataWorkflowMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
-    private final DataTableService dataTableService;
-    private final ScheduledExecutorService tempWorkflowCleanupScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread thread = new Thread(r);
-        thread.setName("temp-workflow-cleaner");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private final DataQueryService dataQueryService;
+    private final DorisClusterService dorisClusterService;
 
     /**
      * 分页查询任务列表
      */
     public Page<DataTask> list(int pageNum,
-                               int pageSize,
-                               String taskType,
-                               String status,
-                               Long workflowId,
-                               Long upstreamTaskId,
-                               Long downstreamTaskId) {
+            int pageSize,
+            String taskType,
+            String status,
+            Long workflowId,
+            Long upstreamTaskId,
+            Long downstreamTaskId) {
         Page<DataTask> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<DataTask> wrapper = new LambdaQueryWrapper<>();
 
@@ -125,17 +119,6 @@ public class DataTaskService {
      */
     @Transactional
     public DataTask create(DataTask task, List<Long> inputTableIds, List<Long> outputTableIds) {
-        // 如果未提供任务编码,自动生成一个唯一编码
-        String taskCode = task.getTaskCode();
-        if (taskCode == null || taskCode.trim().isEmpty()) {
-            task.setTaskCode(generateUniqueTaskCode(task.getTaskName()));
-        }
-
-        // 检查任务编码是否已存在
-        DataTask exists = dataTaskMapper.selectOne(
-            new LambdaQueryWrapper<DataTask>()
-                .eq(DataTask::getTaskCode, task.getTaskCode())
-        );
         if (exists != null) {
             throw new RuntimeException("任务编码已存在: " + task.getTaskCode());
         }
@@ -168,6 +151,16 @@ public class DataTaskService {
         // 维护表与任务的关联关系
         saveTableTaskRelations(task.getId(), inputTableIds, outputTableIds);
 
+        // 如果提供了 wokflowId，建立工作流关联
+        if (task.getWorkflowId() != null) {
+            WorkflowTaskRelation relation = new WorkflowTaskRelation();
+            relation.setWorkflowId(task.getWorkflowId());
+            relation.setTaskId(task.getId());
+            relation.setUpstreamTaskCount(0); // 初始为0，或者需要计算
+            relation.setDownstreamTaskCount(0);
+            workflowTaskRelationMapper.insert(relation);
+        }
+
         return task;
     }
 
@@ -187,9 +180,8 @@ public class DataTaskService {
 
         // 删除旧的血缘关系
         dataLineageMapper.delete(
-            new LambdaQueryWrapper<DataLineage>()
-                .eq(DataLineage::getTaskId, task.getId())
-        );
+                new LambdaQueryWrapper<DataLineage>()
+                        .eq(DataLineage::getTaskId, task.getId()));
 
         clearTableTaskRelations(task.getId());
 
@@ -222,6 +214,7 @@ public class DataTaskService {
 
     /**
      * 更新任务（仅基本信息，不更新血缘）
+     * 
      * @deprecated 使用 update(DataTask, List<Long>, List<Long>) 代替
      */
     @Deprecated
@@ -249,15 +242,14 @@ public class DataTaskService {
         }
 
         log.info("任务信息: taskCode={}, taskName={}, engine={}",
-            target.getTaskCode(), target.getTaskName(), target.getEngine());
+                target.getTaskCode(), target.getTaskName(), target.getEngine());
 
         // 查询全部 Dolphin 任务，构建统一工作流
         log.info("查询所有 Dolphin 引擎任务...");
         List<DataTask> dolphinTasks = dataTaskMapper.selectList(
-            new LambdaQueryWrapper<DataTask>()
-                .eq(DataTask::getEngine, "dolphin")
-                .orderByAsc(DataTask::getId)
-        );
+                new LambdaQueryWrapper<DataTask>()
+                        .eq(DataTask::getEngine, "dolphin")
+                        .orderByAsc(DataTask::getId));
         if (dolphinTasks.isEmpty()) {
             log.error("未找到任何 Dolphin 引擎任务");
             throw new RuntimeException("未找到任何 Dolphin 引擎任务");
@@ -272,21 +264,20 @@ public class DataTaskService {
         // 获取已存在的 workflow code (如果有的话)
         // 如果数据库中有记录,尝试复用;如果没有或者 syncWorkflow 失败,会创建新的
         Long existingWorkflowCode = dolphinTasks.stream()
-            .map(DataTask::getDolphinProcessCode)
-            .filter(Objects::nonNull)
-            .findFirst()
-            .orElse(null);
+                .map(DataTask::getDolphinProcessCode)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
 
         long workflowCode = existingWorkflowCode != null ? existingWorkflowCode : 0L;
         log.info("使用 workflow code: {} ({})", workflowCode,
-            workflowCode > 0 ? "更新现有工作流" : "创建新工作流");
+                workflowCode > 0 ? "更新现有工作流" : "创建新工作流");
 
         // 对齐任务编号生成器，避免与已存在的任务编码冲突
         dolphinSchedulerService.alignSequenceWithExistingTasks(
-            dolphinTasks.stream()
-                .map(DataTask::getDolphinTaskCode)
-                .collect(Collectors.toList())
-        );
+                dolphinTasks.stream()
+                        .map(DataTask::getDolphinTaskCode)
+                        .collect(Collectors.toList()));
 
         for (DataTask dataTask : dolphinTasks) {
             boolean changed = false;
@@ -306,7 +297,7 @@ public class DataTaskService {
         }
 
         Map<Long, DataTask> taskMap = dolphinTasks.stream()
-            .collect(java.util.stream.Collectors.toMap(DataTask::getId, t -> t));
+                .collect(java.util.stream.Collectors.toMap(DataTask::getId, t -> t));
 
         List<Map<String, Object>> definitions = new ArrayList<>();
         List<DolphinSchedulerService.TaskRelationPayload> relations = new ArrayList<>();
@@ -329,48 +320,44 @@ public class DataTaskService {
             }
 
             Map<String, Object> definition = dolphinSchedulerService.buildTaskDefinition(
-                dataTask.getDolphinTaskCode(),
-                version,
-                dataTask.getTaskName(),
-                dataTask.getTaskDesc(),
-                sqlOrScript,
-                priority,
-                dataTask.getRetryTimes() == null ? 0 : dataTask.getRetryTimes(),
-                dataTask.getRetryInterval() == null ? 1 : dataTask.getRetryInterval(),
-                dataTask.getTimeoutSeconds() == null ? 0 : dataTask.getTimeoutSeconds(),
-                nodeType,
-                dataTask.getDatasourceName(),
-                dataTask.getDatasourceType()
-            );
+                    dataTask.getDolphinTaskCode(),
+                    version,
+                    dataTask.getTaskName(),
+                    dataTask.getTaskDesc(),
+                    sqlOrScript,
+                    priority,
+                    dataTask.getRetryTimes() == null ? 0 : dataTask.getRetryTimes(),
+                    dataTask.getRetryInterval() == null ? 1 : dataTask.getRetryInterval(),
+                    dataTask.getTimeoutSeconds() == null ? 0 : dataTask.getTimeoutSeconds(),
+                    nodeType,
+                    dataTask.getDatasourceName(),
+                    dataTask.getDatasourceType());
             definitions.add(definition);
 
             List<DataTask> upstreamTasks = resolveUpstreamTasks(dataTask.getId(), taskMap);
             if (upstreamTasks.isEmpty()) {
                 relations.add(dolphinSchedulerService.buildRelation(
-                    0L, 0, dataTask.getDolphinTaskCode(), version
-                ));
+                        0L, 0, dataTask.getDolphinTaskCode(), version));
             } else {
                 for (DataTask upstream : upstreamTasks) {
                     relations.add(dolphinSchedulerService.buildRelation(
-                        upstream.getDolphinTaskCode(),
-                        upstream.getDolphinTaskVersion() == null ? 1 : upstream.getDolphinTaskVersion(),
-                        dataTask.getDolphinTaskCode(),
-                        version
-                    ));
+                            upstream.getDolphinTaskCode(),
+                            upstream.getDolphinTaskVersion() == null ? 1 : upstream.getDolphinTaskVersion(),
+                            dataTask.getDolphinTaskCode(),
+                            version));
                 }
             }
 
             int lane = computeLaneByLayer(dataTask);
             locations.add(dolphinSchedulerService.buildLocation(
-                dataTask.getDolphinTaskCode(),
-                index++,
-                lane
-            ));
+                    dataTask.getDolphinTaskCode(),
+                    index++,
+                    lane));
         }
 
         // syncWorkflow 返回实际的 workflow code (如果是新建则返回新的 code)
         log.info("开始同步工作流到 DolphinScheduler: workflowCode={}, taskCount={}",
-            workflowCode, definitions.size());
+                workflowCode, definitions.size());
         try {
             if (workflowCode > 0) {
                 log.info("将现有工作流置为 OFFLINE 后再同步: workflowCode={}", workflowCode);
@@ -380,12 +367,11 @@ public class DataTaskService {
             String workflowName = resolveWorkflowDisplayName(target);
 
             long actualWorkflowCode = dolphinSchedulerService.syncWorkflow(
-                workflowCode,
-                workflowName,
-                definitions,
-                relations,
-                locations
-            );
+                    workflowCode,
+                    workflowName,
+                    definitions,
+                    relations,
+                    locations);
             log.info("工作流同步成功: actualWorkflowCode={}", actualWorkflowCode);
 
             // 更新所有 dolphin 任务的 dolphinProcessCode
@@ -405,42 +391,40 @@ public class DataTaskService {
             target.setDolphinProcessCode(actualWorkflowCode);
             dataTaskMapper.updateById(target);
             log.info("任务发布成功: taskId={}, taskName={}, workflowCode={}, status=ONLINE",
-                taskId, target.getTaskName(), actualWorkflowCode);
+                    taskId, target.getTaskName(), actualWorkflowCode);
         } catch (Exception e) {
             log.error("发布任务失败: taskId={}, taskName={}, error={}",
-                taskId, target.getTaskName(), e.getMessage(), e);
+                    taskId, target.getTaskName(), e.getMessage(), e);
             throw new RuntimeException("发布任务到 DolphinScheduler 失败: " + e.getMessage(), e);
         }
     }
 
     private List<DataTask> resolveUpstreamTasks(Long taskId, Map<Long, DataTask> taskMap) {
         List<DataLineage> inputLineage = dataLineageMapper.selectList(
-            new LambdaQueryWrapper<DataLineage>()
-                .eq(DataLineage::getTaskId, taskId)
-                .eq(DataLineage::getLineageType, "input")
-        );
+                new LambdaQueryWrapper<DataLineage>()
+                        .eq(DataLineage::getTaskId, taskId)
+                        .eq(DataLineage::getLineageType, "input"));
 
         Set<Long> upstreamTableIds = inputLineage.stream()
-            .map(DataLineage::getUpstreamTableId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toSet());
+                .map(DataLineage::getUpstreamTableId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
         if (upstreamTableIds.isEmpty()) {
             return Collections.emptyList();
         }
 
         List<DataLineage> outputLineage = dataLineageMapper.selectList(
-            new LambdaQueryWrapper<DataLineage>()
-                .in(DataLineage::getDownstreamTableId, upstreamTableIds)
-                .eq(DataLineage::getLineageType, "output")
-        );
+                new LambdaQueryWrapper<DataLineage>()
+                        .in(DataLineage::getDownstreamTableId, upstreamTableIds)
+                        .eq(DataLineage::getLineageType, "output"));
 
         return outputLineage.stream()
-            .map(DataLineage::getTaskId)
-            .filter(Objects::nonNull)
-            .map(taskMap::get)
-            .filter(Objects::nonNull)
-            .distinct()
-            .collect(Collectors.toList());
+                .map(DataLineage::getTaskId)
+                .filter(Objects::nonNull)
+                .map(taskMap::get)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     private String mapPriority(Integer value) {
@@ -469,121 +453,23 @@ public class DataTaskService {
     }
 
     /**
-     * 执行单个任务（测试模式）
-     * 创建临时的单任务工作流，忽略上游依赖，用于测试验证
+     * @deprecated 使用 testExecute 代替
      */
+    @Deprecated
     @Transactional
     public void executeTask(Long taskId) {
-        DataTask task = dataTaskMapper.selectById(taskId);
-        if (task == null) {
-            throw new RuntimeException("任务不存在");
+        DataTask task = getById(taskId);
+        if (task != null) {
+            testExecute(task);
         }
-
-        if (!"dolphin".equalsIgnoreCase(task.getEngine())) {
-            throw new RuntimeException("仅支持 Dolphin 引擎任务执行");
-        }
-
-        // 确保任务有 task code 和 version
-        if (task.getDolphinTaskCode() == null) {
-            task.setDolphinTaskCode(dolphinSchedulerService.nextTaskCode());
-            task.setDolphinTaskVersion(1);
-            dataTaskMapper.updateById(task);
-        }
-
-        // 创建临时单任务工作流
-        String tempWorkflowName = "test-task-" + task.getDolphinTaskCode();
-
-        // 构建任务定义
-        String priority = mapPriority(task.getPriority());
-        int version = task.getDolphinTaskVersion() != null ? task.getDolphinTaskVersion() : 1;
-        String nodeType = task.getDolphinNodeType() != null ? task.getDolphinNodeType() : "SHELL";
-        String sqlOrScript;
-
-        if ("SQL".equalsIgnoreCase(nodeType)) {
-            sqlOrScript = task.getTaskSql();
-        } else {
-            sqlOrScript = dolphinSchedulerService.buildShellScript(task.getTaskSql());
-        }
-
-        Map<String, Object> definition = dolphinSchedulerService.buildTaskDefinition(
-            task.getDolphinTaskCode(),
-            version,
-            task.getTaskName(),
-            task.getTaskDesc(),
-            sqlOrScript,
-            priority,
-            task.getRetryTimes() == null ? 0 : task.getRetryTimes(),
-            task.getRetryInterval() == null ? 1 : task.getRetryInterval(),
-            task.getTimeoutSeconds() == null ? 0 : task.getTimeoutSeconds(),
-            nodeType,
-            task.getDatasourceName(),
-            null  // Don't pass datasourceType - let DolphinScheduler find datasource by name only
-        );
-
-        // 单任务工作流，无上游依赖
-        List<DolphinSchedulerService.TaskRelationPayload> relations = new ArrayList<>();
-        relations.add(dolphinSchedulerService.buildRelation(0L, 0, task.getDolphinTaskCode(), version));
-
-        // 任务位置
-        List<DolphinSchedulerService.TaskLocationPayload> locations = new ArrayList<>();
-        locations.add(dolphinSchedulerService.buildLocation(task.getDolphinTaskCode(), 0, 0));
-
-        // 同步临时工作流（使用 0 表示创建新工作流）
-        // 注意: DolphinScheduler 会自动生成 workflow code，返回的可能与请求的不同
-        long actualWorkflowCode = dolphinSchedulerService.syncWorkflow(
-            0L,
-            tempWorkflowName,
-            Collections.singletonList(definition),
-            relations,
-            locations
-        );
-
-        log.info("Created temporary workflow: name={} actualCode={}",
-            tempWorkflowName, actualWorkflowCode);
-
-        // 设置为 ONLINE 状态
-        dolphinSchedulerService.setWorkflowReleaseState(actualWorkflowCode, "ONLINE");
-
-        // 创建执行日志
-        TaskExecutionLog executionLog = new TaskExecutionLog();
-        executionLog.setTaskId(taskId);
-        executionLog.setStatus("pending");
-        executionLog.setStartTime(LocalDateTime.now());
-        executionLog.setTriggerType("manual");
-        executionLogMapper.insert(executionLog);
-
-        // 执行临时工作流
-        String executionId = dolphinSchedulerService.startProcessInstance(
-            actualWorkflowCode,
-            null,
-            tempWorkflowName
-        );
-        executionLog.setExecutionId(executionId);
-        executionLog.setStatus("running");
-        executionLogMapper.updateById(executionLog);
-
-        log.info("Started single task execution (test mode): task={} workflow={} actualCode={} execution={}",
-            task.getTaskName(), tempWorkflowName, actualWorkflowCode, executionId);
-
-        // 异步清理临时工作流（使用实际的 workflow code）
-        cleanupTempWorkflowAsync(actualWorkflowCode, task.getTaskName());
     }
 
     /**
-     * 异步清理临时测试工作流
-     * 等待一段时间后删除，确保任务有足够时间执行
+     * @deprecated 临时工作流清理逻辑不再需要，保留以兼容旧代码引用，但不再实际调度
      */
     @Async
     public void cleanupTempWorkflowAsync(Long workflowCode, String taskName) {
-        tempWorkflowCleanupScheduler.schedule(() -> {
-            try {
-                dolphinSchedulerService.deleteWorkflow(workflowCode);
-                log.info("Cleaned up temporary workflow {} for task {}", workflowCode, taskName);
-            } catch (Exception e) {
-                log.error("Failed to cleanup temporary workflow {} for task {}: {}",
-                    workflowCode, taskName, e.getMessage());
-            }
-        }, 5, TimeUnit.MINUTES);
+        // no-op
     }
 
     /**
@@ -610,16 +496,15 @@ public class DataTaskService {
 
         // 执行统一工作流
         String executionId = dolphinSchedulerService.startProcessInstance(
-            task.getDolphinProcessCode(),
-            null,
-            resolveWorkflowDisplayName(task)
-        );
+                task.getDolphinProcessCode(),
+                null,
+                resolveWorkflowDisplayName(task));
         executionLog.setExecutionId(executionId);
         executionLog.setStatus("running");
         executionLogMapper.updateById(executionLog);
 
         log.info("Started workflow execution: task={} workflow={} execution={}",
-            task.getTaskName(), task.getDolphinProcessCode(), executionId);
+                task.getTaskName(), task.getDolphinProcessCode(), executionId);
     }
 
     /**
@@ -650,9 +535,8 @@ public class DataTaskService {
 
         // 删除血缘关系
         dataLineageMapper.delete(
-            new LambdaQueryWrapper<DataLineage>()
-                .eq(DataLineage::getTaskId, id)
-        );
+                new LambdaQueryWrapper<DataLineage>()
+                        .eq(DataLineage::getTaskId, id));
 
         clearTableTaskRelations(id);
 
@@ -661,15 +545,15 @@ public class DataTaskService {
 
         if (workflowCode != null) {
             List<DataTask> remainingDolphinTasks = dataTaskMapper.selectList(
-                new LambdaQueryWrapper<DataTask>()
-                    .eq(DataTask::getEngine, "dolphin")
-            );
+                    new LambdaQueryWrapper<DataTask>()
+                            .eq(DataTask::getEngine, "dolphin"));
             if (remainingDolphinTasks.isEmpty()) {
                 log.info("No Dolphin tasks remain, deleting workflow {}", workflowCode);
                 dolphinSchedulerService.deleteWorkflow(workflowCode);
             } else {
                 Long republishTaskId = remainingDolphinTasks.get(0).getId();
-                log.info("Re-synchronising workflow {} after task deletion using task {}", workflowCode, republishTaskId);
+                log.info("Re-synchronising workflow {} after task deletion using task {}", workflowCode,
+                        republishTaskId);
                 publish(republishTaskId);
             }
         }
@@ -682,8 +566,8 @@ public class DataTaskService {
 
         if (inputTableIds != null) {
             LinkedHashSet<Long> uniqueInputs = inputTableIds.stream()
-                .filter(Objects::nonNull)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
             for (Long tableId : uniqueInputs) {
                 TableTaskRelation relation = new TableTaskRelation();
                 relation.setTaskId(taskId);
@@ -695,8 +579,8 @@ public class DataTaskService {
 
         if (outputTableIds != null) {
             LinkedHashSet<Long> uniqueOutputs = outputTableIds.stream()
-                .filter(Objects::nonNull)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
             for (Long tableId : uniqueOutputs) {
                 TableTaskRelation relation = new TableTaskRelation();
                 relation.setTaskId(taskId);
@@ -742,11 +626,10 @@ public class DataTaskService {
 
         // 获取最近一次执行记录
         TaskExecutionLog latestLog = executionLogMapper.selectOne(
-            new LambdaQueryWrapper<TaskExecutionLog>()
-                .eq(TaskExecutionLog::getTaskId, taskId)
-                .orderByDesc(TaskExecutionLog::getCreatedAt)
-                .last("LIMIT 1")
-        );
+                new LambdaQueryWrapper<TaskExecutionLog>()
+                        .eq(TaskExecutionLog::getTaskId, taskId)
+                        .orderByDesc(TaskExecutionLog::getCreatedAt)
+                        .last("LIMIT 1"));
 
         TaskExecutionStatus status = new TaskExecutionStatus();
         status.setTaskId(taskId);
@@ -768,9 +651,8 @@ public class DataTaskService {
             if (task.getDolphinProcessCode() != null && latestLog.getExecutionId() != null) {
                 try {
                     JsonNode instanceData = dolphinSchedulerService.getWorkflowInstanceStatus(
-                        task.getDolphinProcessCode(),
-                        latestLog.getExecutionId()
-                    );
+                            task.getDolphinProcessCode(),
+                            latestLog.getExecutionId());
 
                     if (instanceData != null) {
                         // 更新状态信息
@@ -792,14 +674,15 @@ public class DataTaskService {
                     }
                 } catch (Exception e) {
                     log.warn("Failed to get real-time status from DolphinScheduler for task {}: {}",
-                        taskId, e.getMessage());
+                            taskId, e.getMessage());
                 }
             }
         }
 
         // 生成 DolphinScheduler Web UI 跳转链接
         if (task.getDolphinProcessCode() != null) {
-            status.setDolphinWorkflowUrl(dolphinSchedulerService.getWorkflowDefinitionUrl(task.getDolphinProcessCode()));
+            status.setDolphinWorkflowUrl(
+                    dolphinSchedulerService.getWorkflowDefinitionUrl(task.getDolphinProcessCode()));
         }
         if (task.getDolphinTaskCode() != null) {
             status.setDolphinTaskUrl(dolphinSchedulerService.getTaskDefinitionUrl(task.getDolphinTaskCode()));
@@ -848,30 +731,27 @@ public class DataTaskService {
     public com.onedata.portal.controller.DataTaskController.TaskLineageResponse getTaskLineage(Long taskId) {
         // 获取输入表
         List<DataLineage> inputLineages = dataLineageMapper.selectList(
-            new LambdaQueryWrapper<DataLineage>()
-                .eq(DataLineage::getTaskId, taskId)
-                .eq(DataLineage::getLineageType, "input")
-        );
+                new LambdaQueryWrapper<DataLineage>()
+                        .eq(DataLineage::getTaskId, taskId)
+                        .eq(DataLineage::getLineageType, "input"));
         List<Long> inputTableIds = inputLineages.stream()
-            .map(DataLineage::getUpstreamTableId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toList());
+                .map(DataLineage::getUpstreamTableId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
 
         // 获取输出表
         List<DataLineage> outputLineages = dataLineageMapper.selectList(
-            new LambdaQueryWrapper<DataLineage>()
-                .eq(DataLineage::getTaskId, taskId)
-                .eq(DataLineage::getLineageType, "output")
-        );
+                new LambdaQueryWrapper<DataLineage>()
+                        .eq(DataLineage::getTaskId, taskId)
+                        .eq(DataLineage::getLineageType, "output"));
         List<Long> outputTableIds = outputLineages.stream()
-            .map(DataLineage::getDownstreamTableId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toList());
+                .map(DataLineage::getDownstreamTableId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
 
         return new com.onedata.portal.controller.DataTaskController.TaskLineageResponse(
-            inputTableIds,
-            outputTableIds
-        );
+                inputTableIds,
+                outputTableIds);
     }
 
     private void attachExecutionStatus(List<DataTask> tasks) {
@@ -879,18 +759,17 @@ public class DataTaskService {
             return;
         }
         List<Long> taskIds = tasks.stream()
-            .map(DataTask::getId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toList());
+                .map(DataTask::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
         if (taskIds.isEmpty()) {
             return;
         }
 
         List<TaskExecutionLog> logs = executionLogMapper.selectList(
-            Wrappers.<TaskExecutionLog>lambdaQuery()
-                .in(TaskExecutionLog::getTaskId, taskIds)
-                .orderByDesc(TaskExecutionLog::getStartTime)
-        );
+                Wrappers.<TaskExecutionLog>lambdaQuery()
+                        .in(TaskExecutionLog::getTaskId, taskIds)
+                        .orderByDesc(TaskExecutionLog::getStartTime));
 
         Map<Long, TaskExecutionLog> latestLogByTask = new LinkedHashMap<>();
         for (TaskExecutionLog log : logs) {
@@ -926,7 +805,7 @@ public class DataTaskService {
         status.setDolphinProjectName(resolveWorkflowDisplayName(task));
         if (task.getDolphinProcessCode() != null) {
             status.setDolphinWorkflowUrl(
-                dolphinSchedulerService.getWorkflowDefinitionUrl(task.getDolphinProcessCode()));
+                    dolphinSchedulerService.getWorkflowDefinitionUrl(task.getDolphinProcessCode()));
         }
         if (task.getDolphinTaskCode() != null) {
             status.setDolphinTaskUrl(dolphinSchedulerService.getTaskDefinitionUrl(task.getDolphinTaskCode()));
@@ -936,64 +815,59 @@ public class DataTaskService {
 
     private List<Long> findTaskIdsByWorkflow(Long workflowId) {
         List<WorkflowTaskRelation> relations = workflowTaskRelationMapper.selectList(
-            Wrappers.<WorkflowTaskRelation>lambdaQuery()
-                .eq(WorkflowTaskRelation::getWorkflowId, workflowId)
-        );
+                Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                        .eq(WorkflowTaskRelation::getWorkflowId, workflowId));
         return relations.stream()
-            .map(WorkflowTaskRelation::getTaskId)
-            .filter(Objects::nonNull)
-            .distinct()
-            .collect(Collectors.toList());
+                .map(WorkflowTaskRelation::getTaskId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     private List<Long> findDownstreamTaskIds(Long upstreamTaskId) {
         List<TableTaskRelation> writes = tableTaskRelationMapper.selectList(
-            Wrappers.<TableTaskRelation>lambdaQuery()
-                .eq(TableTaskRelation::getTaskId, upstreamTaskId)
-                .eq(TableTaskRelation::getRelationType, "write")
-        );
+                Wrappers.<TableTaskRelation>lambdaQuery()
+                        .eq(TableTaskRelation::getTaskId, upstreamTaskId)
+                        .eq(TableTaskRelation::getRelationType, "write"));
         Set<Long> tableIds = writes.stream()
-            .map(TableTaskRelation::getTableId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toSet());
+                .map(TableTaskRelation::getTableId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
         if (tableIds.isEmpty()) {
             return Collections.emptyList();
         }
         List<TableTaskRelation> reads = tableTaskRelationMapper.selectList(
-            Wrappers.<TableTaskRelation>lambdaQuery()
-                .in(TableTaskRelation::getTableId, tableIds)
-                .eq(TableTaskRelation::getRelationType, "read")
-        );
+                Wrappers.<TableTaskRelation>lambdaQuery()
+                        .in(TableTaskRelation::getTableId, tableIds)
+                        .eq(TableTaskRelation::getRelationType, "read"));
         return reads.stream()
-            .map(TableTaskRelation::getTaskId)
-            .filter(id -> id != null && !Objects.equals(id, upstreamTaskId))
-            .distinct()
-            .collect(Collectors.toList());
+                .map(TableTaskRelation::getTaskId)
+                .filter(id -> id != null && !Objects.equals(id, upstreamTaskId))
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     private List<Long> findUpstreamTaskIds(Long downstreamTaskId) {
         List<TableTaskRelation> reads = tableTaskRelationMapper.selectList(
-            Wrappers.<TableTaskRelation>lambdaQuery()
-                .eq(TableTaskRelation::getTaskId, downstreamTaskId)
-                .eq(TableTaskRelation::getRelationType, "read")
-        );
+                Wrappers.<TableTaskRelation>lambdaQuery()
+                        .eq(TableTaskRelation::getTaskId, downstreamTaskId)
+                        .eq(TableTaskRelation::getRelationType, "read"));
         Set<Long> tableIds = reads.stream()
-            .map(TableTaskRelation::getTableId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toSet());
+                .map(TableTaskRelation::getTableId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
         if (tableIds.isEmpty()) {
             return Collections.emptyList();
         }
         List<TableTaskRelation> writes = tableTaskRelationMapper.selectList(
-            Wrappers.<TableTaskRelation>lambdaQuery()
-                .in(TableTaskRelation::getTableId, tableIds)
-                .eq(TableTaskRelation::getRelationType, "write")
-        );
+                Wrappers.<TableTaskRelation>lambdaQuery()
+                        .in(TableTaskRelation::getTableId, tableIds)
+                        .eq(TableTaskRelation::getRelationType, "write"));
         return writes.stream()
-            .map(TableTaskRelation::getTaskId)
-            .filter(id -> id != null && !Objects.equals(id, downstreamTaskId))
-            .distinct()
-            .collect(Collectors.toList());
+                .map(TableTaskRelation::getTaskId)
+                .filter(id -> id != null && !Objects.equals(id, downstreamTaskId))
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     private void applyIdFilter(LambdaQueryWrapper<DataTask> wrapper, List<Long> taskIds) {
@@ -1010,30 +884,29 @@ public class DataTaskService {
             return;
         }
         List<Long> taskIds = tasks.stream()
-            .map(DataTask::getId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toList());
+                .map(DataTask::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
         if (taskIds.isEmpty()) {
             return;
         }
         List<WorkflowTaskRelation> relations = workflowTaskRelationMapper.selectList(
-            Wrappers.<WorkflowTaskRelation>lambdaQuery()
-                .in(WorkflowTaskRelation::getTaskId, taskIds)
-        );
+                Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                        .in(WorkflowTaskRelation::getTaskId, taskIds));
         if (relations.isEmpty()) {
             return;
         }
         Map<Long, WorkflowTaskRelation> relationMap = relations.stream()
-            .collect(Collectors.toMap(WorkflowTaskRelation::getTaskId, r -> r));
+                .collect(Collectors.toMap(WorkflowTaskRelation::getTaskId, r -> r));
         List<Long> workflowIds = relations.stream()
-            .map(WorkflowTaskRelation::getWorkflowId)
-            .filter(Objects::nonNull)
-            .distinct()
-            .collect(Collectors.toList());
+                .map(WorkflowTaskRelation::getWorkflowId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
         Map<Long, DataWorkflow> workflowMap = workflowIds.isEmpty()
-            ? Collections.emptyMap()
-            : dataWorkflowMapper.selectBatchIds(workflowIds).stream()
-                .collect(Collectors.toMap(DataWorkflow::getId, w -> w));
+                ? Collections.emptyMap()
+                : dataWorkflowMapper.selectBatchIds(workflowIds).stream()
+                        .collect(Collectors.toMap(DataWorkflow::getId, w -> w));
         for (DataTask task : tasks) {
             WorkflowTaskRelation relation = relationMap.get(task.getId());
             if (relation == null) {
