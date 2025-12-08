@@ -8,8 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # 检查配置文件
-CONFIG_FILE="${CONFIG_FILE:-$REPO_ROOT/deploy/docker-build.env}"
-EXAMPLE_FILE="$REPO_ROOT/deploy/docker-build.env.example"
+CONFIG_FILE="${CONFIG_FILE:-$SCRIPT_DIR/docker-build.env}"
+EXAMPLE_FILE="$SCRIPT_DIR/docker-build.env.example"
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "❌ 配置文件不存在: $CONFIG_FILE"
     echo ""
