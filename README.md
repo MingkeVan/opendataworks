@@ -9,12 +9,13 @@
 
 <div align="center">
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Java](https://img.shields.io/badge/Java-8+-orange.svg)](https://www.oracle.com/java/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7.18-brightgreen.svg)](https://spring.io/projects/spring-boot)
-[![Vue](https://img.shields.io/badge/Vue-3.4+-green.svg)](https://vuejs.org/)
-[![DolphinScheduler](https://img.shields.io/badge/DolphinScheduler-3.2.0-blue.svg)](https://dolphinscheduler.apache.org/)
-[![DeepWiki](https://img.shields.io/badge/Wiki-DeepWiki-blue)](https://deepwiki.com/MingkeVan/opendataworks)
+[![Stars Badge](https://img.shields.io/github/stars/MingkeVan/opendataworks?style=flat-square)](https://github.com/MingkeVan/opendataworks/stargazers)
+[![Forks Badge](https://img.shields.io/github/forks/MingkeVan/opendataworks?style=flat-square)](https://github.com/MingkeVan/opendataworks/network/members)
+[![Pull Requests Badge](https://img.shields.io/github/issues-pr/MingkeVan/opendataworks?style=flat-square)](https://github.com/MingkeVan/opendataworks/pulls)
+[![Issues Badge](https://img.shields.io/github/issues/MingkeVan/opendataworks?style=flat-square)](https://github.com/MingkeVan/opendataworks/issues)
+[![License Badge](https://img.shields.io/github/license/MingkeVan/opendataworks?style=flat-square)](https://github.com/MingkeVan/opendataworks/blob/main/LICENSE)
+[![Downloads Badge](https://img.shields.io/github/downloads/MingkeVan/opendataworks/total?style=flat-square)](https://github.com/MingkeVan/opendataworks/releases)
+[![Ask DeepWiki](https://img.shields.io/badge/Ask%20DeepWiki-AI%20Assistant-blue?style=flat-square)](https://deepwiki.com/MingkeVan/opendataworks)
 
 **一站式数据任务管理与数据血缘可视化平台**
 
