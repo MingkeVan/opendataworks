@@ -4,7 +4,7 @@
 
 ## 📋 概述
 
-项目主页位于 `docs/site/index.html`，通过 GitHub Pages 托管，提供专业的项目展示和宣传页面。
+项目主页位于 `docs/index.html`，通过 GitHub Pages 托管，提供专业的项目展示和宣传页面。
 
 ## 🚀 启用 GitHub Pages
 
@@ -30,21 +30,18 @@ Your site is live at https://mingkevan.github.io/opendataworks/
 ### 3. 访问项目主页
 
 - **主页 URL**: https://mingkevan.github.io/opendataworks/
-- **备用 URL**: https://mingkevan.github.io/opendataworks/site/ (子目录访问)
 - **完整 URL**: https://mingkevan.github.io/opendataworks/index.html
 
 ## 📁 项目主页文件结构
 
 ```
 docs/
-├── index.html              # 项目主页（根目录，直接访问）
-├── site/
-│   └── index.html          # 项目主页（子目录备份）
+├── index.html              # 项目主页
+├── assets/                 # 静态资源 (图标、图片)
 ├── _config.yml             # GitHub Pages 配置
-├── features/               # 功能文档
-├── guides/                 # 使用指南
-├── design/                 # 设计文档
-└── GITHUB_PAGES_SETUP.md   # 本文档
+├── guide/                  # 模块化文档 (Start, Architecture, Config, Manual, Contribution, FAQ)
+├── handbook/               # 详细手册
+└── guide/contribution/site-setup.md   # 本文档
 ```
 
 ## 🎨 主页特性
@@ -75,7 +72,7 @@ docs/
 
 ### 修改内容
 
-编辑 `docs/index.html` 文件（或 `docs/site/index.html`）：
+编辑 `docs/index.html` 文件：
 
 ```html
 <!-- 修改项目标题 -->
