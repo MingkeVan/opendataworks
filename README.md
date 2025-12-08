@@ -9,13 +9,15 @@
 
 <div align="center">
 
-[![Stars Badge](https://img.shields.io/github/stars/MingkeVan/opendataworks?style=flat-square)](https://github.com/MingkeVan/opendataworks/stargazers)
-[![Forks Badge](https://img.shields.io/github/forks/MingkeVan/opendataworks?style=flat-square)](https://github.com/MingkeVan/opendataworks/network/members)
-[![Pull Requests Badge](https://img.shields.io/github/issues-pr/MingkeVan/opendataworks?style=flat-square)](https://github.com/MingkeVan/opendataworks/pulls)
-[![Issues Badge](https://img.shields.io/github/issues/MingkeVan/opendataworks?style=flat-square)](https://github.com/MingkeVan/opendataworks/issues)
-[![License Badge](https://img.shields.io/github/license/MingkeVan/opendataworks?style=flat-square)](https://github.com/MingkeVan/opendataworks/blob/main/LICENSE)
-[![Downloads Badge](https://img.shields.io/github/downloads/MingkeVan/opendataworks/total?style=flat-square)](https://github.com/MingkeVan/opendataworks/releases)
-[![Ask DeepWiki](https://img.shields.io/badge/Ask%20DeepWiki-AI%20Assistant-blue?style=flat-square)](https://deepwiki.com/MingkeVan/opendataworks)
+<p align="center">
+  <a href="https://github.com/MingkeVan/opendataworks/stargazers"><img src="https://img.shields.io/github/stars/MingkeVan/opendataworks" alt="Stars Badge"/></a>
+  <a href="https://github.com/MingkeVan/opendataworks/network/members"><img src="https://img.shields.io/github/forks/MingkeVan/opendataworks" alt="Forks Badge"/></a>
+  <a href="https://github.com/MingkeVan/opendataworks/pulls"><img src="https://img.shields.io/github/issues-pr/MingkeVan/opendataworks" alt="Pull Requests Badge"/></a>
+  <a href="https://github.com/MingkeVan/opendataworks/issues"><img src="https://img.shields.io/github/issues/MingkeVan/opendataworks" alt="Issues Badge"/></a>
+  <a href="https://github.com/MingkeVan/opendataworks/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MingkeVan/opendataworks" alt="License Badge"/></a>
+  <a href="https://github.com/MingkeVan/opendataworks/releases"><img src="https://img.shields.io/github/downloads/MingkeVan/opendataworks/total" alt="Downloads"></a>
+  <a href="https://deepwiki.com/MingkeVan/opendataworks"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
+</p>
 
 **一站式数据任务管理与数据血缘可视化平台**
 
