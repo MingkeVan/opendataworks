@@ -7,7 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DEPLOY_DIR="$REPO_ROOT/deploy"
+DEPLOY_DIR="$SCRIPT_DIR"
 COMPOSE_FILE_NAME="docker-compose.prod.yml"
 COMPOSE_FILE="$DEPLOY_DIR/$COMPOSE_FILE_NAME"
 ENV_FILE="$DEPLOY_DIR/.env"

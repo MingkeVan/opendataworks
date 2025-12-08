@@ -1,12 +1,40 @@
-# Scripts Directory
+# OpenDataWorks Utility Scripts
 
-OpenDataWorks scripts are grouped by purpose. Every script is self-contained and can be executed from any working directory.
+This directory contains various utility scripts for building, deploying, testing, and maintaining the OpenDataWorks platform.
 
-- `build/` – image build automation (single-arch, multi-arch, quick wrapper)
-- `deploy/` – runtime operations: start/stop/restart, image loading, offline package bootstrap, quick local deployment helper
-- `dev/` – developer utilities: database initialization, workflow integration tests, end-to-end verification
-- `offline/` – tooling to assemble offline deployment bundles
-- `maintenance/` – one-off maintenance helpers (e.g. legacy script cleanup)
-- `test/` – workflow regression scripts and verifiers used during troubleshooting
+## Directory Structure
 
-See individual script headers for detailed usage instructions.
+| Directory | Description |
+|-----------|-------------|
+| `build/` | Scripts for building the project artifacts (frontend, backend). |
+| `deploy/` | **Deployment configurations and scripts.** Contains Docker Compose files, environment configurations (`.env`), and control scripts (`start.sh`, `stop.sh`). |
+| `dev/` | Developer tools and utilities for local development setup. |
+| `maintenance/` | Maintenance scripts for system cleanup, data migration, or other administrative tasks. |
+| `offline/` | Scripts related to creating and managing offline deployment packages. |
+| `test/` | Automated test scripts for validating workflows and system functionality. |
+
+## Common Tasks
+
+### Deployment
+Go to `deploy/` directory to manage the application lifecycle.
+```bash
+# Start the application
+./scripts/deploy/start.sh
+
+# Stop the application
+./scripts/deploy/stop.sh
+```
+
+### Testing
+Run automated tests from the `test/` directory.
+```bash
+# Run workflow lifecycle tests
+./scripts/test/test-workflow-lifecycle.sh
+```
+
+### Build
+Build the project using scripts in `build/`.
+```bash
+# Build backend
+./scripts/build/build-backend.sh
+```

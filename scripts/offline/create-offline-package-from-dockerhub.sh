@@ -109,25 +109,33 @@ trap '[[ "$KEEP_WORKDIR" = true ]] || rm -rf "$WORKDIR"' EXIT
 log "Preparing deployment package workspace at $PACKAGE_ROOT"
 mkdir -p "$PACKAGE_ROOT"
 
+# 定义包内目录结构：统一放入 deploy 目录
 DEPLOY_PACKAGE_DIR="$PACKAGE_ROOT/deploy"
-SCRIPTS_PACKAGE_DIR="$PACKAGE_ROOT/scripts"
 DEPLOY_IMAGE_DIR="$DEPLOY_PACKAGE_DIR/docker-images"
 
 mkdir -p "$DEPLOY_PACKAGE_DIR"
-tar -C "$REPO_ROOT/deploy" --exclude='docker-images/*.tar' -cf - . | tar -C "$DEPLOY_PACKAGE_DIR" -xf -
 mkdir -p "$DEPLOY_IMAGE_DIR"
+
+# 1. 复制 scripts/deploy 下的所有内容（脚本+配置）到包内的 deploy 目录
+log "Copying scripts/deploy content to package deploy/"
+# 排除 docker-images/*.tar 避免重复复制（如果本地已有）
+tar -C "$REPO_ROOT/scripts/deploy" --exclude='docker-images/*.tar' -cf - . | tar -C "$DEPLOY_PACKAGE_DIR" -xf -
+
+# 2. 清理旧的 tar 包（如果不知何故被复制了）
 rm -f "$DEPLOY_IMAGE_DIR/"*.tar 2>/dev/null || true
 
 if [[ -d "$REPO_ROOT/database/mysql" ]]; then
-    log "Copying database/mysql scripts"
-    mkdir -p "$PACKAGE_ROOT/database/mysql"
-    tar -C "$REPO_ROOT/database/mysql" -cf - . | tar -C "$PACKAGE_ROOT/database/mysql" -xf -
+    # 注意：database/mysql 已被删除，此逻辑仅作兼容保留，或应移除
+    # 既然V2迁移已包含数据，可能不再需要，但保留以防万一用户重建了目录
+    if [ "$(ls -A $REPO_ROOT/database/mysql)" ]; then
+        log "Copying database/mysql scripts"
+        mkdir -p "$PACKAGE_ROOT/database/mysql"
+        tar -C "$REPO_ROOT/database/mysql" -cf - . | tar -C "$PACKAGE_ROOT/database/mysql" -xf -
+    fi
 fi
 
-mkdir -p "$SCRIPTS_PACKAGE_DIR"
-tar -C "$REPO_ROOT/scripts" -cf - deploy | tar -C "$SCRIPTS_PACKAGE_DIR" -xf -
-
-cp "$REPO_ROOT/deploy/offline/README_OFFLINE.md" "$PACKAGE_ROOT/README_OFFLINE.md"
+# 3. 复制文档
+cp "$REPO_ROOT/scripts/offline/README_OFFLINE.md" "$PACKAGE_ROOT/README_OFFLINE.md"
 if [[ -f "$REPO_ROOT/docs/handbook/operations-guide.md" ]]; then
     cp "$REPO_ROOT/docs/handbook/operations-guide.md" "$PACKAGE_ROOT/OPERATIONS_GUIDE.md"
 fi
@@ -135,23 +143,30 @@ if [[ -f "$REPO_ROOT/docs/handbook/testing-guide.md" ]]; then
     cp "$REPO_ROOT/docs/handbook/testing-guide.md" "$PACKAGE_ROOT/TESTING_GUIDE.md"
 fi
 
-# 包含根目录 .env 或 .env.example，供 docker-compose 使用
+# 4. 处理 .env 文件
+# 优先使用 scripts/deploy/.env (如果因为某种原因存在且是最新的)
+# 其次使用 repo root .env
 ROOT_ENV_FILE="$REPO_ROOT/.env"
 ROOT_ENV_EXAMPLE="$REPO_ROOT/.env.example"
 
-if [[ -f "$ROOT_ENV_FILE" ]]; then
-    log "Copying repository .env to deploy/.env"
-    cp "$ROOT_ENV_FILE" "$DEPLOY_PACKAGE_DIR/.env"
-    if [[ -f "$ROOT_ENV_EXAMPLE" ]]; then
-        log "Copying .env.example alongside deploy/.env"
-        cp "$ROOT_ENV_EXAMPLE" "$DEPLOY_PACKAGE_DIR/.env.example"
+# 如果 deploy 目录里已经有了 .env (从上面 tar 复制过来的)，则保留
+if [[ ! -f "$DEPLOY_PACKAGE_DIR/.env" ]]; then
+    if [[ -f "$ROOT_ENV_FILE" ]]; then
+        log "Copying repository .env to deploy/.env"
+        cp "$ROOT_ENV_FILE" "$DEPLOY_PACKAGE_DIR/.env"
+    elif [[ -f "$ROOT_ENV_EXAMPLE" ]]; then
+        log "No .env found, copying .env.example as deploy/.env"
+        cp "$ROOT_ENV_EXAMPLE" "$DEPLOY_PACKAGE_DIR/.env"
+    else
+        log "WARNING: neither .env nor .env.example found at repository root"
     fi
-elif [[ -f "$ROOT_ENV_EXAMPLE" ]]; then
-    log "No .env found, copying .env.example as deploy/.env"
-    cp "$ROOT_ENV_EXAMPLE" "$DEPLOY_PACKAGE_DIR/.env"
-    cp "$ROOT_ENV_EXAMPLE" "$DEPLOY_PACKAGE_DIR/.env.example"
-else
-    log "WARNING: neither .env nor .env.example found at repository root; docker compose env will be missing"
+fi
+
+# 确保 .env.example 存在
+if [[ ! -f "$DEPLOY_PACKAGE_DIR/.env.example" ]]; then
+    if [[ -f "$ROOT_ENV_EXAMPLE" ]]; then
+         cp "$ROOT_ENV_EXAMPLE" "$DEPLOY_PACKAGE_DIR/.env.example"
+    fi
 fi
 
 declare -a MANIFEST_RAW=()

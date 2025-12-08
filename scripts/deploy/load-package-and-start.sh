@@ -98,11 +98,11 @@ if [[ -z "${PACKAGE_DIR:-}" ]]; then
     die "failed to determine package directory"
 fi
 
-SCRIPTS_DIR="$PACKAGE_DIR/scripts/deploy"
+SCRIPTS_DIR="$PACKAGE_DIR/deploy"
 ASSETS_DIR="$PACKAGE_DIR/deploy"
 
 if [[ ! -d "$SCRIPTS_DIR" ]]; then
-    die "scripts/deploy directory not found in package"
+    die "deploy directory (scripts+assets) not found in package"
 fi
 
 if [[ ! -d "$ASSETS_DIR/docker-images" ]]; then

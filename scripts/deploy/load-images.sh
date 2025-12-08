@@ -29,7 +29,7 @@ fi
 echo ""
 
 # 镜像文件目录
-IMAGE_DIR="$REPO_ROOT/deploy/docker-images"
+IMAGE_DIR="$SCRIPT_DIR/docker-images"
 
 # 检查镜像目录是否存在
 if [ ! -d "$IMAGE_DIR" ]; then

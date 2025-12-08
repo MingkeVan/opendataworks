@@ -1,7 +1,5 @@
 SET NAMES utf8mb4;
 
-USE opendataworks;
-
 -- 确保业务域与数据域基础数据存在且编码正确
 INSERT INTO business_domain (domain_code, domain_name, description) VALUES
 ('tech', '技术域', '技术相关的业务域,包括研发、运维等')
