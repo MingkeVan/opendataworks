@@ -365,12 +365,52 @@
                 </div>
 
                 <div
-                    style="margin-top: 4rem; padding: 1rem; background: white; border-radius: 12px; box-shadow: var(--shadow-lg); border: 1px solid var(--border); max-width: 900px; margin-left: auto; margin-right: auto;">
-                    <div
-                        style="background: #f1f5f9; height: 400px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 1.1rem; border-radius: 8px; border: 2px dashed #cbd5e1;">
-                        此处可放置产品 UI 截图或演示视频
+                    style="margin-top: 4rem; max-width: 900px; margin-left: auto; margin-right: auto; text-align: left;">
+                    <div class="quickstart-tabs">
+                        <div class="tab-buttons">
+                            <button class="tab-button active" onclick="switchTab('docker')">Docker 快速启动</button>
+                            <button class="tab-button" onclick="switchTab('source')">源码部署</button>
+                        </div>
+                        <div id="docker" class="tab-panel active">
+                            <p style="margin-bottom: 1rem; color: var(--text-muted);">最快上手方式，包含所有依赖服务。</p>
+                            <div class="code-block">
+                                <pre><code># 1. 克隆项目
+git clone https://github.com/MingkeVan/opendataworks.git
+cd opendataworks
+
+# 2. 准备配置
+cp deploy/.env.example deploy/.env
+
+# 3. 一键启动 (前端 + 后端 + MySQL)
+docker compose -f deploy/docker-compose.dev.yml up -d</code></pre>
+                            </div>
+                        </div>
+                        <div id="source" class="tab-panel">
+                            <p style="margin-bottom: 1rem; color: var(--text-muted);">适合开发调试，需手动准备基础环境。</p>
+                            <div class="code-block">
+                                <pre><code># 后端启动
+cd backend
+mvn clean install && mvn spring-boot:run
+
+# 前端启动
+cd frontend
+npm install && npm run dev</code></pre>
+                            </div>
+                        </div>
                     </div>
                 </div>
+
+                <script>
+                    function switchTab(tabId) {
+                        // Hide all panels
+                        document.querySelectorAll('.tab-panel').forEach(el => el.style.display = 'none');
+                        document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
+
+                        // Show target panel
+                        document.getElementById(tabId).style.display = 'block';
+                        event.target.classList.add('active');
+                    }
+                </script>
             </div>
         </section>
 
