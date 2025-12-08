@@ -8,7 +8,7 @@
 
 2. **加载镜像**
    ```bash
-   scripts/deploy/load-images.sh
+   deploy/load-images.sh
    ```
 
 3. **配置环境变量**
@@ -19,12 +19,12 @@
 
 4. **启动服务**
    ```bash
-   scripts/deploy/start.sh
+   deploy/start.sh
    ```
 
 5. **常用操作**
-   - 查看状态：`scripts/deploy/start.sh` 输出中的命令参考
-   - 停止服务：`scripts/deploy/stop.sh`
-   - 重启服务：`scripts/deploy/restart.sh`
+   - 查看状态：`deploy/start.sh` 输出中的命令参考
+   - 停止服务：`deploy/stop.sh`
+   - 重启服务：`deploy/restart.sh`
 
 更多部署细节可参考仓库 `docs/handbook/operations-guide.md` 与 `docs/handbook/testing-guide.md`。
