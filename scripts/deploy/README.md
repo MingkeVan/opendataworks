@@ -1,43 +1,103 @@
-# Deployment Scripts
+# OpenDataWorks Deployment Guide
 
-This directory contains control scripts and configurations for deploying OpenDataWorks using Docker Compose.
+This guide covers both Online (source code) and Offline (deployment package) deployment methods.
 
-## Files
+## Directory Contents
 
-### Control Scripts
-- `start.sh`: Starts the application using `docker-compose.prod.yml`. Checks for `.env` and creates it if missing.
-- `stop.sh`: Stops the application services.
-- `restart.sh`: Restarts the application services.
-- `load-images.sh`: Loads Docker images from `docker-images/` directory (for offline deployment).
-- `quick-deploy.sh`: A helper script for quick deployment setups.
+- `start.sh`: Starts the application. Checks for `.env` and creates it if missing.
+- `stop.sh`: Stops all services.
+- `restart.sh`: Restarts all services.
+- `load-images.sh`: Loads Docker images from `docker-images/` (Offline mode).
+- `create-offline-package.sh`: Utility to generate an offline deployment package.
+- `docker-compose.prod.yml`: Production configuration.
+- `.env.example`: Template for environment variables.
 
-### Configuration
-- `docker-compose.prod.yml`: Production Docker Compose configuration.
-- `docker-compose.dev.yml`: Development Docker Compose configuration.
-- `.env.example`: Template for environment variables. Copy to `.env` to customize.
+---
 
-## Usage
+## 1. Online Deployment (From Source)
+
+Use this method if you have internet access and are deploying directly from the source code repository.
 
 ### Prerequisites
 - Docker and Docker Compose installed.
+- Internet access to pull images from Docker Hub.
 
-### Starting the Application
-1. (Optional) Configure environment variables:
+### Steps
+1. **Navigate to deploy directory**:
+   ```bash
+   cd scripts/deploy
+   ```
+
+2. **Configure Environment**:
    ```bash
    cp .env.example .env
-   # Edit .env with your settings
+   # Edit .env and configure settings (Database, DolphinScheduler, etc.)
+   vim .env
    ```
-2. Run start script:
+
+3. **Start Services**:
    ```bash
    ./start.sh
+   # This will automatically pull the necessary images from Docker Hub.
    ```
 
-### Stopping the Application
+---
+
+## 2. Offline Deployment (Using Package)
+
+Use this method for isolated environments without internet access. You will use the `opendataworks-deployment-*.tar.gz` package.
+
+### Prerequisites
+- Docker or Podman installed on the target machine.
+- The offline deployment package (`opendataworks-deployment-*.tar.gz`).
+
+### Steps
+1. **Extract Package**:
+   ```bash
+   tar -xzf opendataworks-deployment-*.tar.gz
+   cd opendataworks-deployment
+   ```
+
+2. **Load Images**:
+   This loads all required Docker images from the local archive.
+   ```bash
+   deploy/load-images.sh
+   ```
+
+3. **Configure Environment**:
+   ```bash
+   cp deploy/.env.example deploy/.env
+   # Edit .env and configure settings
+   vim deploy/.env
+   ```
+
+4. **Start Services**:
+   ```bash
+   deploy/start.sh
+   ```
+
+---
+
+## Common Operations
+
+### Stop Services
 ```bash
+# Online
 ./stop.sh
+# Offline
+deploy/stop.sh
 ```
 
-### Restarting
+### Restart Services
 ```bash
+# Online
 ./restart.sh
+# Offline
+deploy/restart.sh
+```
+
+### Check Logs
+```bash
+# View logs for a specific service (e.g., backend)
+docker-compose -f docker-compose.prod.yml logs -f backend
 ```

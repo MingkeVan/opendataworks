@@ -8,7 +8,7 @@ PACKAGE_NAME="opendataworks-deployment"
 
 usage() {
     cat <<'EOF'
-Usage: scripts/offline/create-offline-package-from-dockerhub.sh [options]
+Usage: scripts/deploy/create-offline-package.sh [options]
 
 Options:
   --registry <registry>     Remote registry host (default: docker.io)
@@ -23,9 +23,8 @@ Environment overrides:
   OPENDATAWORKS_REGISTRY, OPENDATAWORKS_NAMESPACE, OPENDATAWORKS_TAG,
   OPENDATAWORKS_PLATFORM
 
-The script packages current deploy/ assets and scripts/deploy/, pulls required images
-from Docker Hub, retags them for local use, saves them into deploy/docker-images/*.tar,
-and produces a compressed archive that can be copied into an isolated environment.
+The script packages current scripts/deploy content, pulls required images
+from Docker Hub, retags them, and produces a compressed archive.
 EOF
 }
 
@@ -135,7 +134,7 @@ if [[ -d "$REPO_ROOT/database/mysql" ]]; then
 fi
 
 # 3. 复制文档
-cp "$REPO_ROOT/scripts/offline/README_OFFLINE.md" "$PACKAGE_ROOT/README_OFFLINE.md"
+cp "$REPO_ROOT/scripts/deploy/README.md" "$PACKAGE_ROOT/README.md"
 if [[ -f "$REPO_ROOT/docs/handbook/operations-guide.md" ]]; then
     cp "$REPO_ROOT/docs/handbook/operations-guide.md" "$PACKAGE_ROOT/OPERATIONS_GUIDE.md"
 fi
