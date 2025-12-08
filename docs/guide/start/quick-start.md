@@ -86,12 +86,12 @@ npm run dev
 
 ```bash
 # 1. 准备配置
-cp scripts/deploy/.env.example scripts/deploy/.env
+cp deploy/.env.example deploy/.env
 
 # 2. 启动服务
-docker compose -f scripts/deploy/docker-compose.dev.yml up -d
+docker compose -f deploy/docker-compose.dev.yml up -d
 ```
 
 ### 生产环境/离线部署
 
-请参考 [部署文档](../../../scripts/deploy/README.md) 获取详细的生产环境部署和离线包制作指南。
+请参考 [部署文档](../../../../deploy/README.md) 获取详细的生产环境部署和离线包制作指南。

@@ -43,6 +43,24 @@ opendataworks 是一个面向大数据平台的统一数据门户系统,旨在�
 - 🔗 **血缘可视化**: 自动解析血缘、ECharts 可视化、链路追踪
 - 📈 **执行监控**: 实时状态、历史日志、统计分析
 
+### Docker 部署
+
+#### 开发环境快速启动
+
+如果希望一次性在本机拉起完整环境（前端 + 后端 + MySQL），可使用开发环境 Compose：
+
+```bash
+# 1. 准备配置
+cp deploy/.env.example deploy/.env
+
+# 2. 启动服务
+docker compose -f deploy/docker-compose.dev.yml up -d
+```
+
+#### 生产环境/离线部署
+
+请参考 [部署文档](deploy/README.md) 获取详细的生产环境部署和离线包制作指南。
+
 ## 🚀 快速开始
 
 请参考 [快速开始指南](docs/guide/start/quick-start.md) 进行部署和启动。

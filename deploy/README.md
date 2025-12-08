@@ -25,7 +25,7 @@ Use this method if you have internet access and are deploying directly from the 
 ### Steps
 1. **Navigate to deploy directory**:
    ```bash
-   cd scripts/deploy
+   cd deploy
    ```
 
 2. **Configure Environment**:

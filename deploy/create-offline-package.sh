@@ -8,7 +8,7 @@ PACKAGE_NAME="opendataworks-deployment"
 
 usage() {
     cat <<'EOF'
-Usage: scripts/deploy/create-offline-package.sh [options]
+Usage: deploy/create-offline-package.sh [options]
 
 Options:
   --registry <registry>     Remote registry host (default: docker.io)
@@ -118,7 +118,7 @@ mkdir -p "$DEPLOY_IMAGE_DIR"
 # 1. 复制 scripts/deploy 下的所有内容（脚本+配置）到包内的 deploy 目录
 log "Copying scripts/deploy content to package deploy/"
 # 排除 docker-images/*.tar 避免重复复制（如果本地已有）
-tar -C "$REPO_ROOT/scripts/deploy" --exclude='docker-images/*.tar' -cf - . | tar -C "$DEPLOY_PACKAGE_DIR" -xf -
+tar -C "$REPO_ROOT/deploy" --exclude='docker-images/*.tar' -cf - . | tar -C "$DEPLOY_PACKAGE_DIR" -xf -
 
 # 2. 清理旧的 tar 包（如果不知何故被复制了）
 rm -f "$DEPLOY_IMAGE_DIR/"*.tar 2>/dev/null || true
@@ -134,7 +134,7 @@ if [[ -d "$REPO_ROOT/database/mysql" ]]; then
 fi
 
 # 3. 复制文档
-cp "$REPO_ROOT/scripts/deploy/README.md" "$PACKAGE_ROOT/README.md"
+cp "$REPO_ROOT/deploy/README.md" "$PACKAGE_ROOT/README.md"
 if [[ -f "$REPO_ROOT/docs/handbook/operations-guide.md" ]]; then
     cp "$REPO_ROOT/docs/handbook/operations-guide.md" "$PACKAGE_ROOT/OPERATIONS_GUIDE.md"
 fi
@@ -146,7 +146,7 @@ fi
 # 优先使用 scripts/deploy/.env (如果因为某种原因存在且是最新的)
 # 其次使用 repo root .env
 ROOT_ENV_FILE="$REPO_ROOT/.env"
-ROOT_ENV_EXAMPLE="$REPO_ROOT/scripts/deploy/.env.example"
+ROOT_ENV_EXAMPLE="$REPO_ROOT/deploy/.env.example"
 
 # 如果 deploy 目录里已经有了 .env (从上面 tar 复制过来的)，则保留
 if [[ ! -f "$DEPLOY_PACKAGE_DIR/.env" ]]; then
