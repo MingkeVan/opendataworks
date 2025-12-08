@@ -7,1286 +7,506 @@
     <meta name="description" content="OpenDataWorks - 一站式数据任务管理与数据血缘可视化平台">
     <meta name="keywords" content="数据门户,数据血缘,任务调度,DolphinScheduler,开源,大数据">
     <meta name="author" content="OpenDataWorks Team">
-
-    <!-- Open Graph / Facebook -->
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://mingkevan.github.io/opendataworks/">
-    <meta property="og:title" content="OpenDataWorks - 一站式数据门户">
-    <meta property="og:description" content="统一数据资产管理、任务调度编排和血缘关系追踪解决方案">
-
-    <!-- Twitter -->
-    <meta property="twitter:card" content="summary_large_image">
-    <meta property="twitter:url" content="https://mingkevan.github.io/opendataworks/">
-    <meta property="twitter:title" content="OpenDataWorks">
-    <meta property="twitter:description" content="一站式数据任务管理与数据血缘可视化平台">
-
     <title>OpenDataWorks - 一站式数据门户平台</title>
+    <link rel="icon" type="image/svg+xml" href="assets/icons/opendataworks-icon.ico">
 
     <style>
         :root {
-            --primary-color: #3b82f6;
-            --primary-dark: #2563eb;
-            --secondary-color: #8b5cf6;
-            --success-color: #10b981;
-            --text-color: #1f2937;
-            --text-light: #6b7280;
-            --bg-light: #f9fafb;
-            --border-color: #e5e7eb;
-            --shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            /* 核心色调 - 深邃蓝紫色系 */
+            --primary: #4f46e5;
+            --primary-dark: #4338ca;
+            --secondary: #0ea5e9;
+            --accent: #8b5cf6;
+
+            /* 背景和文字 */
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+
+            /* 阴影 */
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
         }
 
-        * {
+        /* 基础重置 */
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-main);
+            background-color: var(--bg-body);
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
         }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-            line-height: 1.6;
-            color: var(--text-color);
+        a {
+            text-decoration: none;
+            color: inherit;
+            transition: color 0.2s;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        img {
+            max-width: 100%;
+            height: auto;
+        }
+
+        .container {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0 1.5rem;
         }
 
         /* Header */
         header {
             position: sticky;
             top: 0;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-bottom: 1px solid var(--border-color);
-            padding: 1rem 0;
-            z-index: 1000;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            z-index: 50;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
         }
 
         nav {
-            max-width: 1200px;
-            margin: 0 auto;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 0 2rem;
+            height: 4.5rem;
         }
 
         .logo {
             display: flex;
             align-items: center;
-            gap: 0.65rem;
-            font-size: 1.4rem;
+            gap: 0.75rem;
             font-weight: 700;
-            color: var(--primary-color);
-            text-decoration: none;
-        }
-
-        .logo picture {
-            display: inline-flex;
-            width: 42px;
-            height: 42px;
+            font-size: 1.25rem;
+            color: var(--text-main);
         }
 
         .logo img {
-            width: 100%;
-            height: 100%;
+            height: 32px;
+            width: 32px;
         }
 
         .nav-links {
             display: flex;
             gap: 2rem;
-            list-style: none;
+            align-items: center;
         }
 
         .nav-links a {
-            color: var(--text-color);
-            text-decoration: none;
             font-weight: 500;
-            transition: color 0.3s;
-            position: relative;
-            display: inline-block;
+            color: var(--text-muted);
         }
 
         .nav-links a:hover {
-            color: var(--primary-color);
+            color: var(--primary);
         }
 
         .nav-links a.active {
-            color: var(--primary-color);
+            color: var(--primary);
         }
 
-        .nav-links a.active::after {
-            content: '';
-            position: absolute;
-            left: 0;
-            right: 0;
-            bottom: -0.5rem;
-            height: 3px;
-            background: var(--primary-color);
-            border-radius: 999px;
-        }
-
-        .nav-links li {
-            position: relative;
-        }
-
-        /* Hero Section */
-        .hero {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .btn-github {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: #24292f;
             color: white;
-            padding: 6rem 2rem;
-            text-align: center;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: background 0.2s;
         }
 
-        .hero-content {
-            max-width: 900px;
-            margin: 0 auto;
+        .btn-github:hover {
+            background: #333;
+        }
+
+        /* Hero */
+        .hero {
+            padding: 8rem 0 6rem;
+            text-align: center;
+            background: radial-gradient(circle at top center, rgba(79, 70, 229, 0.1) 0%, transparent 70%);
         }
 
         .hero h1 {
-            font-size: 3rem;
-            margin-bottom: 1.5rem;
+            font-size: 3.5rem;
+            line-height: 1.1;
             font-weight: 800;
+            letter-spacing: -0.02em;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(to right, var(--primary-dark) 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
 
         .hero p {
             font-size: 1.25rem;
-            margin-bottom: 2.5rem;
-            opacity: 0.95;
+            color: var(--text-muted);
+            max-width: 700px;
+            margin: 0 auto 2.5rem;
         }
 
-        .cta-buttons {
+        .hero-actions {
             display: flex;
-            gap: 1rem;
             justify-content: center;
-            flex-wrap: wrap;
+            gap: 1rem;
         }
 
         .btn {
-            padding: 0.875rem 2rem;
-            border-radius: 0.5rem;
-            text-decoration: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
             font-weight: 600;
-            transition: all 0.3s;
-            display: inline-block;
+            transition: all 0.2s;
         }
 
         .btn-primary {
-            background: white;
-            color: var(--primary-color);
-            box-shadow: var(--shadow);
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2);
         }
 
         .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            background: var(--primary-dark);
+            transform: translateY(-1px);
         }
 
         .btn-secondary {
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: 2px solid white;
+            background: white;
+            border: 1px solid var(--border);
+            color: var(--text-main);
         }
 
         .btn-secondary:hover {
-            background: rgba(255, 255, 255, 0.3);
+            border-color: var(--text-muted);
+            background: var(--bg-body);
         }
 
-        /* Container */
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 2rem;
-        }
-
-        /* Section */
-        section {
+        /* Features */
+        .section {
             padding: 5rem 0;
         }
 
         .section-title {
             text-align: center;
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
+            font-size: 2.25rem;
             font-weight: 700;
+            margin-bottom: 1rem;
         }
 
-        .section-subtitle {
+        .section-desc {
             text-align: center;
-            color: var(--text-light);
+            color: var(--text-muted);
             font-size: 1.125rem;
-            margin-bottom: 3rem;
+            margin-bottom: 4rem;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
         }
 
-        /* Features Grid */
-        .features-grid {
+        .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
             gap: 2rem;
-            margin-top: 3rem;
         }
 
-        .feature-card {
-            background: white;
+        .card {
+            background: var(--bg-card);
             padding: 2rem;
-            border-radius: 1rem;
-            box-shadow: var(--shadow);
-            transition: transform 0.3s;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            transition: all 0.3s;
         }
 
-        .feature-card:hover {
-            transform: translateY(-5px);
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+            border-color: var(--primary);
         }
 
-        .feature-icon {
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-        }
-
-        .feature-card h3 {
-            font-size: 1.5rem;
-            margin-bottom: 0.75rem;
-            color: var(--text-color);
-        }
-
-        .feature-card p {
-            color: var(--text-light);
-            line-height: 1.7;
-        }
-
-        /* Quick Start */
-        .quickstart {
-            background: var(--bg-light);
-        }
-
-        .quickstart-tabs {
-            background: white;
-            border-radius: 1rem;
-            box-shadow: var(--shadow);
-            padding: 2rem;
-        }
-
-        .tab-buttons {
+        .card-icon {
+            width: 48px;
+            height: 48px;
+            background: rgba(79, 70, 229, 0.1);
+            color: var(--primary);
+            border-radius: 10px;
             display: flex;
-            flex-wrap: wrap;
-            gap: 0.75rem;
-            margin-bottom: 1.5rem;
-        }
-
-        .tab-button {
-            border: 1px solid var(--border-color);
-            background: transparent;
-            padding: 0.75rem 1.25rem;
-            border-radius: 999px;
-            cursor: pointer;
-            font-weight: 600;
-            color: var(--text-light);
-            transition: all 0.3s ease;
-        }
-
-        .tab-button.active,
-        .tab-button:hover {
-            color: white;
-            background: var(--primary-color);
-            border-color: var(--primary-color);
-            box-shadow: 0 10px 20px -10px rgba(59, 130, 246, 0.6);
-        }
-
-        .tab-content {
-            position: relative;
-        }
-
-        .tab-panel {
-            display: none;
-            animation: fadeIn 0.4s ease;
-        }
-
-        .tab-panel.active {
-            display: block;
-        }
-
-        .code-block {
-            background: #1e293b;
-            color: #e2e8f0;
-            padding: 1.5rem;
-            border-radius: 0.75rem;
-            overflow-x: auto;
-            margin: 1rem 0 0;
-            font-family: 'Monaco', 'Consolas', monospace;
-            font-size: 0.875rem;
-            line-height: 1.7;
-        }
-
-        .code-block pre {
-            margin: 0;
-        }
-
-        .tab-meta {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            color: var(--text-light);
-            font-size: 0.95rem;
-        }
-
-        .tab-meta span {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.25rem;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .doc-section {
-            background: white;
-        }
-
-        .doc-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 1.5rem;
-            margin-top: 2rem;
-        }
-
-        .doc-card {
-            border: 1px solid var(--border-color);
-            border-radius: 1rem;
-            padding: 1.75rem;
-            box-shadow: 0 10px 30px -20px rgba(37, 99, 235, 0.35);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-            background: linear-gradient(180deg, rgba(59, 130, 246, 0.05), rgba(139, 92, 246, 0.05));
-        }
-
-        .doc-card:hover {
-            transform: translateY(-6px);
-            box-shadow: 0 25px 45px -20px rgba(59, 130, 246, 0.25);
-        }
-
-        .doc-card h3 {
-            margin-bottom: 0.75rem;
-            font-size: 1.35rem;
-        }
-
-        .doc-card p {
-            color: var(--text-light);
-            margin-bottom: 1rem;
-        }
-
-        .doc-card details {
-            background: rgba(59, 130, 246, 0.08);
-            border-radius: 0.75rem;
-            padding: 0.75rem 1rem;
-            margin-bottom: 1rem;
-        }
-
-        .doc-card summary {
-            cursor: pointer;
-            font-weight: 600;
-            color: var(--primary-dark);
-        }
-
-        .doc-card ul {
-            margin-left: 1.25rem;
-            margin-top: 0.75rem;
-            color: var(--text-light);
-            line-height: 1.8;
-        }
-
-        .doc-actions {
-            display: flex;
-            gap: 0.75rem;
-            flex-wrap: wrap;
-        }
-
-        .inline-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-            color: var(--primary-dark);
-            text-decoration: none;
-            font-weight: 600;
-        }
-
-        .inline-link::after {
-            content: '→';
-            font-size: 0.9rem;
-        }
-
-        .inline-link:hover {
-            text-decoration: underline;
-        }
-
-        .highlight-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-            background: rgba(16, 185, 129, 0.12);
-            color: var(--success-color);
-            padding: 0.35rem 0.75rem;
-            border-radius: 999px;
-            font-size: 0.85rem;
-            font-weight: 600;
-        }
-
-        .timeline {
-            margin-top: 3rem;
-            border-left: 3px solid rgba(59, 130, 246, 0.15);
-            padding-left: 1.5rem;
-        }
-
-        .timeline-item {
-            position: relative;
-            padding-bottom: 1.5rem;
-        }
-
-        .timeline-item::before {
-            content: '';
-            position: absolute;
-            left: -1.7rem;
-            top: 0.3rem;
-            width: 10px;
-            height: 10px;
-            border-radius: 999px;
-            background: var(--primary-color);
-            box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.12);
-        }
-
-        .timeline-item h4 {
-            font-size: 1.1rem;
-            margin-bottom: 0.25rem;
-        }
-
-        .timeline-item p {
-            color: var(--text-light);
-            margin-bottom: 0;
-        }
-
-        .community-section {
-            background: var(--bg-light);
-        }
-
-        .community-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 1.5rem;
-            margin-top: 2rem;
-        }
-
-        .community-card {
-            background: white;
-            padding: 1.75rem;
-            border-radius: 1rem;
-            box-shadow: var(--shadow);
-            transition: transform 0.3s ease;
-        }
-
-        .community-card:hover {
-            transform: translateY(-6px);
-        }
-
-        .community-card h3 {
-            margin-bottom: 0.5rem;
-        }
-
-        .community-card p {
-            color: var(--text-light);
-            margin-bottom: 1rem;
-        }
-
-        .community-actions {
-            display: flex;
-            gap: 0.75rem;
-            flex-wrap: wrap;
-        }
-
-        .community-actions button,
-        .community-actions a {
-            padding: 0.5rem 1rem;
-            border-radius: 999px;
-            border: 1px solid var(--border-color);
-            background: rgba(59, 130, 246, 0.08);
-            color: var(--primary-dark);
-            font-weight: 600;
-            text-decoration: none;
-        }
-
-        .community-actions a:hover,
-        .community-actions button:hover:not(:disabled) {
-            background: var(--primary-color);
-            color: white;
-        }
-
-        .community-actions button:disabled {
-            opacity: 0.6;
-            cursor: default;
-        }
-
-        .back-to-top {
-            position: fixed;
-            right: 1.5rem;
-            bottom: 1.5rem;
-            background: var(--primary-color);
-            color: white;
-            border: none;
-            width: 3rem;
-            height: 3rem;
-            border-radius: 50%;
-            box-shadow: 0 20px 35px -15px rgba(59, 130, 246, 0.65);
-            cursor: pointer;
-            display: none;
             align-items: center;
             justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .card h3 {
             font-size: 1.25rem;
+            margin-bottom: 0.75rem;
+            font-weight: 600;
         }
 
-        .back-to-top.show {
-            display: flex;
-        }
-
-        /* Stats */
-        .stats {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
-            color: white;
-            text-align: center;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 3rem;
-            margin-top: 2rem;
-        }
-
-        .stat-item h3 {
-            font-size: 3rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .stat-item p {
-            font-size: 1.125rem;
-            opacity: 0.9;
+        .card p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            line-height: 1.6;
         }
 
         /* Architecture */
-        .architecture-diagram {
+        .architecture {
             background: white;
             padding: 2rem;
-            border-radius: 1rem;
-            box-shadow: var(--shadow);
-            margin-top: 2rem;
-        }
-
-        .architecture-diagram img {
-            width: 100%;
-            height: auto;
-        }
-
-        /* CTA Section */
-        .cta-section {
-            background: var(--bg-light);
+            border-radius: 16px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border);
+            overflow: hidden;
             text-align: center;
         }
 
-        .cta-section h2 {
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-        }
-
-        .cta-section p {
-            font-size: 1.25rem;
-            color: var(--text-light);
-            margin-bottom: 2rem;
+        .arch-code {
+            text-align: left;
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 1.5rem;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
         }
 
         /* Footer */
         footer {
-            background: #1f2937;
-            color: white;
-            padding: 3rem 0 1.5rem;
+            background: #111827;
+            color: #d1d5db;
+            padding: 4rem 0 2rem;
+            margin-top: 4rem;
         }
 
-        .footer-content {
+        .footer-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(4, 1fr);
             gap: 2rem;
-            margin-bottom: 2rem;
+            margin-bottom: 3rem;
         }
 
-        .footer-section h4 {
+        .footer-col h4 {
+            color: white;
             margin-bottom: 1rem;
-            font-size: 1.125rem;
+            font-size: 1rem;
         }
 
-        .footer-section ul {
-            list-style: none;
-        }
-
-        .footer-section a {
-            color: #9ca3af;
-            text-decoration: none;
-            transition: color 0.3s;
-            display: block;
+        .footer-col ul li {
             margin-bottom: 0.5rem;
         }
 
-        .footer-section a:hover {
+        .footer-col a:hover {
             color: white;
         }
 
         .footer-bottom {
-            text-align: center;
-            padding-top: 2rem;
             border-top: 1px solid #374151;
-            color: #9ca3af;
+            padding-top: 2rem;
+            text-align: center;
+            font-size: 0.875rem;
         }
 
         /* Responsive */
         @media (max-width: 768px) {
             .hero h1 {
-                font-size: 2rem;
-            }
-
-            .hero p {
-                font-size: 1rem;
-            }
-
-            .section-title {
-                font-size: 2rem;
+                font-size: 2.5rem;
             }
 
             .nav-links {
                 display: none;
             }
-        }
 
-        /* Badges */
-        .badges {
-            display: flex;
-            gap: 0.5rem;
-            justify-content: center;
-            margin: 2rem 0;
-            flex-wrap: wrap;
-        }
-
-        .badge {
-            display: inline-block;
+            .footer-grid {
+                grid-template-columns: 1fr 1fr;
+            }
         }
     </style>
 </head>
 
 <body>
-    <!-- Header -->
+
     <header>
-        <nav>
-            <a href="#" class="logo">
-                <picture>
-                    <source srcset="assets/icons/opendataworks-icon-dark.svg" media="(prefers-color-scheme: dark)">
-                    <img src="assets/icons/opendataworks-icon-light.svg" alt="OpenDataWorks 图标">
-                </picture>
-                <span>OpenDataWorks</span>
-            </a>
-            <ul class="nav-links">
-                <li><a href="#features">功能特性</a></li>
-                <li><a href="#quickstart">快速开始</a></li>
-                <li><a href="#docs">项目文档</a></li>
-                <li><a href="#architecture">系统架构</a></li>
-                <li><a href="#community">社区</a></li>
-            </ul>
-        </nav>
+        <div class="container">
+            <nav>
+                <a href="#" class="logo">
+                    <img src="assets/icons/opendataworks-icon-light.svg" alt="logo">
+                    <span>OpenDataWorks</span>
+                </a>
+                <div class="nav-links">
+                    <a href="#features">功能特性</a>
+                    <a href="#architecture">架构设计</a>
+                    <a href="guide/start/quick-start.md">文档</a>
+                    <a href="https://github.com/MingkeVan/opendataworks" target="_blank" class="btn-github">GitHub</a>
+                </div>
+            </nav>
+        </div>
     </header>
 
-    <!-- Hero Section -->
-    <section class="hero">
-        <div class="hero-content">
-            <h1>OpenDataWorks</h1>
-            <p>一站式数据任务管理与数据血缘可视化平台<br>统一数据资产管理 · 智能任务调度 · 血缘关系追踪</p>
-
-            <div class="badges">
-                <a class="badge" href="https://github.com/MingkeVan/opendataworks/blob/main/LICENSE">
-                    <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
-                </a>
-                <a class="badge" href="https://www.oracle.com/java/">
-                    <img src="https://img.shields.io/badge/Java-8+-orange.svg" alt="Java">
-                </a>
-                <a class="badge" href="https://spring.io/projects/spring-boot">
-                    <img src="https://img.shields.io/badge/Spring%20Boot-2.7.18-brightgreen.svg" alt="Spring Boot">
-                </a>
-                <a class="badge" href="https://vuejs.org/">
-                    <img src="https://img.shields.io/badge/Vue-3.4+-green.svg" alt="Vue">
-                </a>
-                <a class="badge" href="https://dolphinscheduler.apache.org/">
-                    <img src="https://img.shields.io/badge/DolphinScheduler-3.2.0-blue.svg" alt="DolphinScheduler">
-                </a>
-            </div>
-
-            <div class="cta-buttons">
-                <a href="https://github.com/MingkeVan/opendataworks" class="btn btn-primary">⭐ GitHub Star</a>
-                <a href="#quickstart" class="btn btn-secondary">📚 快速开始</a>
-                <a href="#docs" class="btn btn-secondary" style="border-color: rgba(255,255,255,0.6);">🧭 浏览文档</a>
-            </div>
-        </div>
-    </section>
-
-    <!-- Features Section -->
-    <section id="features">
-        <div class="container">
-            <h2 class="section-title">核心功能</h2>
-            <p class="section-subtitle">为企业数据平台提供全方位的管理和监控解决方案</p>
-
-            <div class="features-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">📊</div>
-                    <h3>数据资产管理</h3>
-                    <p>统一管理数据表元信息、字段级别管理、数据域和业务域分类，支持 ODS/DWD/DIM/DWS/ADS 完整分层</p>
+    <main>
+        <!-- Hero Section -->
+        <section class="hero">
+            <div class="container">
+                <h1>一站式大数据任务管理与<br>数据血缘可视化平台</h1>
+                <p>基于 DolphinScheduler 的企业级数据门户。统一管理数据资产，智能编排任务调度，全链路追踪数据血缘，提升团队协作效率。</p>
+                <div class="hero-actions">
+                    <a href="guide/start/quick-start.md" class="btn btn-primary">快速开始</a>
+                    <a href="https://github.com/MingkeVan/opendataworks" target="_blank"
+                        class="btn btn-secondary">查看源码</a>
                 </div>
 
-                <div class="feature-card">
-                    <div class="feature-icon">🔄</div>
-                    <h3>任务调度编排</h3>
-                    <p>可视化配置批处理和流处理任务，深度集成 DolphinScheduler，支持 SQL 和 Shell 任务类型</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">🔗</div>
-                    <h3>数据血缘追踪</h3>
-                    <p>基于任务输入输出自动生成血缘关系图，ECharts 力导向图可视化展示，支持链路追踪</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">📈</div>
-                    <h3>执行监控</h3>
-                    <p>实时监控任务执行状态，查看执行历史和日志，统计任务成功率和耗时，失败任务告警</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">🎯</div>
-                    <h3>智能调度</h3>
-                    <p>自动查询 DolphinScheduler 项目信息，无需硬编码，支持任务依赖配置，工作流上线/下线管理</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">🖥️</div>
-                    <h3>现代化界面</h3>
-                    <p>Vue 3 + Element Plus 构建，响应式设计，支持多种分辨率，顶部水平菜单布局，操作简洁流畅</p>
+                <div
+                    style="margin-top: 4rem; padding: 1rem; background: white; border-radius: 12px; box-shadow: var(--shadow-lg); border: 1px solid var(--border); max-width: 900px; margin-left: auto; margin-right: auto;">
+                    <div
+                        style="background: #f1f5f9; height: 400px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 1.1rem; border-radius: 8px; border: 2px dashed #cbd5e1;">
+                        此处可放置产品 UI 截图或演示视频
+                    </div>
                 </div>
             </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- Stats Section -->
-    <section class="stats">
-        <div class="container">
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <h3>50%+</h3>
-                    <p>开发效率提升</p>
-                </div>
-                <div class="stat-item">
-                    <h3>100%</h3>
-                    <p>开源免费</p>
-                </div>
-                <div class="stat-item">
-                    <h3>3层</h3>
-                    <p>架构设计</p>
-                </div>
-                <div class="stat-item">
-                    <h3>6+</h3>
-                    <p>核心模块</p>
+        <!-- Features Section -->
+        <section id="features" class="section">
+            <div class="container">
+                <h2 class="section-title">核心特性</h2>
+                <p class="section-desc">为数据团队打造的现代化工作台，覆盖开发、治理、监控全流程。</p>
+
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-icon">📊</div>
+                        <h3>数据资产全景</h3>
+                        <p>统一纳管 ODS/DWD/ADS 各层数据表。支持字段级元数管理、业务域归类，让数据资产井井有条。</p>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon">🔄</div>
+                        <h3>智能任务调度</h3>
+                        <p>可视化 DAG 任务编排，深度集成 DolphinScheduler。无需硬编码，自动解析依赖，支持 SQL/Shell 多种任务类型。</p>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon">🕸️</div>
+                        <h3>自动血缘解析</h3>
+                        <p>基于任务执行逻辑自动生成数据血缘图。使用 ECharts 力导向图展示，清晰追踪数据来龙去脉。</p>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon">⚡</div>
+                        <h3>一键快速部署</h3>
+                        <p>提供 Docker Compose 一键启动包和离线部署方案。内置 MySQL 和 DolphinScheduler，开箱即用。</p>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon">🛡️</div>
+                        <h3>企业级质量监控</h3>
+                        <p>任务执行实时监控，失败自动告警。历史日志全记录，运行状态一目了然。</p>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon">🎨</div>
+                        <h3>现代化交互体验</h3>
+                        <p>采用 Vue 3 + Element Plus 构建，响应式布局。界面简洁美观，操作流畅丝滑。</p>
+                    </div>
                 </div>
             </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- Quick Start Section -->
-    <section id="quickstart" class="quickstart">
-        <div class="container">
-            <h2 class="section-title">快速开始</h2>
-            <p class="section-subtitle">根据场景选择合适的部署方式，一页即可完成准备工作</p>
+        <!-- Architecture Section -->
+        <section id="architecture" class="section" style="background-color: #f8fafc;">
+            <div class="container">
+                <h2 class="section-title">技术架构</h2>
+                <p class="section-desc">采用前后端分离架构，组件松耦合，易于扩展和维护。</p>
 
-            <div class="quickstart-tabs">
-                <div class="tab-buttons">
-                    <button class="tab-button active" data-target="tab-script">🚀 一键脚本部署</button>
-                    <button class="tab-button" data-target="tab-docker">🐳 Docker Compose</button>
-                    <button class="tab-button" data-target="tab-dev">🛠️ 本地开发环境</button>
-                </div>
-
-                <div class="tab-content">
-                    <div class="tab-panel active" id="tab-script">
-                        <div class="tab-meta">
-                            <span>⏱️ 约 5 分钟</span>
-                            <span>🧰 适用场景：首次体验 / 快速演示</span>
-                        </div>
-                        <div class="code-block">
-                            <pre># 克隆项目并进入目录
-git clone https://github.com/MingkeVan/opendataworks.git
-cd opendataworks
-
-#!/bin/bash
-# 初始化数据库（自定义 root 与应用密码）
-scripts/dev/init-database.sh -r &lt;mysql-root&gt; -p &lt;app-password&gt;
-
-# 一键启动前后端与编排服务
-scripts/deploy/quick-deploy.sh --with-doris=false
-
-# 浏览器访问
-# 前端:           http://localhost:3000
-# 后端 API:       http://localhost:8080
-# DolphinScheduler: http://localhost:12345/dolphinscheduler</pre>
+                <div class="grid" style="grid-template-columns: 1fr 1fr; align-items: center;">
+                    <div class="architecture">
+                        <!-- ASCII Diagram Representation -->
+                        <div class="arch-code">
+                            +---------------------+ +----------------------+
+                            | Frontend (Vue3) | <---> | Backend (Spring) |
+                                +---------------------+ +----------+-----------+
+                                | |
+                                v v
+                                +---------------------+ +----------------------+
+                                | User / Browser | | MySQL Database |
+                                +---------------------+ +----------------------+
+                                ^
+                                |
+                                +----------------------+
+                                | DolphinScheduler |
+                                +----------------------+
                         </div>
                     </div>
-
-                    <div class="tab-panel" id="tab-docker">
-                        <div class="tab-meta">
-                            <span>⏱️ 约 8 分钟</span>
-                            <span>🧰 适用场景：CI/CD 集成 / 云主机部署</span>
-                        </div>
-                        <div class="code-block">
-                            <pre># 克隆仓库并进入目录
-git clone https://github.com/MingkeVan/opendataworks.git
-cd opendataworks
-
-cp sample.env .env # 根据环境修改变量
-
-# 启动服务（前后端、MySQL、DolphinScheduler）
-docker compose -f docker-compose.yml up -d
-
-# 查看运行状态
-docker compose ps
-
-# 停止服务
-docker compose down
-
-# 可选：集成 Doris
-# docker compose -f docker-compose-doris.yml up -d</pre>
-                        </div>
-                    </div>
-
-                    <div class="tab-panel" id="tab-dev">
-                        <div class="tab-meta">
-                            <span>⏱️ 约 12 分钟</span>
-                            <span>🧰 适用场景：二次开发 / 团队协作</span>
-                        </div>
-                        <div class="code-block">
-                            <pre># 准备前端环境
-cd frontend
-npm install
-npm run dev -- --host 0.0.0.0 --port 3000
-
-# 新开终端：启动后端
-cd backend
-mvn clean install -DskipTests
-mvn spring-boot:run
-
-# 确保 DolphinScheduler OpenAPI 可访问
-# export DOLPHIN_URL=http://localhost:12345/dolphinscheduler
-# export DOLPHIN_TOKEN=<your-token></pre>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="timeline">
-                <div class="timeline-item">
-                    <h4>准备阶段 <span class="highlight-badge">建议：8 核 / 16 GB</span></h4>
-                    <p>确认 MySQL、Docker 环境或 JDK 8+ 等依赖已安装，可选创建独立的操作系统用户。</p>
-                </div>
-                <div class="timeline-item">
-                    <h4>部署阶段</h4>
-                    <p>按照上方选定的方式完成部署，等待服务端口全部就绪后执行健康检查脚本 <code>scripts/check-services.sh</code>。</p>
-                </div>
-                <div class="timeline-item">
-                    <h4>体验阶段</h4>
-                    <p>登录 DolphinScheduler 创建首个流程，使用前端血缘图谱确认任务运行情况，并在首页仪表盘查看实时指标。</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Documentation Section -->
-    <section id="docs" class="doc-section">
-        <div class="container">
-            <h2 class="section-title">项目文档</h2>
-            <p class="section-subtitle">在页面内快速预览关键章节，降低跳转频率</p>
-
-            <div class="doc-grid">
-                <div class="doc-card">
-                    <h3>项目总览</h3>
-                    <p>了解 OpenDataWorks 的整体定位、模块划分与能力边界，帮助团队进行方案选型。</p>
-                    <details>
-                        <summary>核心内容</summary>
-                        <ul>
-                            <li>平台优势与目标用户画像</li>
-                            <li>功能地图与迭代规划</li>
-                            <li>常见问题与 FAQ</li>
-                        </ul>
-                    </details>
-                    <div class="doc-actions">
-                        <a class="inline-link" href="../README.md">查看 README 原文</a>
-                    </div>
-                </div>
-
-                <div class="doc-card">
-                    <h3>部署指南</h3>
-                    <p>针对不同运行环境给出最佳实践，确保部署过程稳定、可复制。</p>
-                    <details>
-                        <summary>核心步骤</summary>
-                        <ul>
-                            <li>环境要求与网络端口清单</li>
-                            <li>Docker & Shell 自动化脚本说明</li>
-                            <li>多租户与安全加固建议</li>
-                        </ul>
-                    </details>
-                    <div class="doc-actions">
-                        <a class="inline-link" href="handbook/operations-guide.md">部署文档全文</a>
-                    </div>
-                </div>
-
-                <div class="doc-card">
-                    <h3>功能场景</h3>
-                    <p>聚焦任务调度、血缘分析、资产管理等高频场景，提供操作路径与最佳实践。</p>
-                    <details>
-                        <summary>精选用例</summary>
-                        <ul>
-                            <li>在 DolphinScheduler 中编排跨源作业</li>
-                            <li>构建字段级血缘链路</li>
-                            <li>指标看板与任务监控</li>
-                        </ul>
-                    </details>
-                    <div class="doc-actions">
-                        <a class="inline-link" href="handbook/features/">功能文档目录</a>
-                    </div>
-                </div>
-
-                <div class="doc-card">
-                    <h3>操作手册</h3>
-                    <p>涵盖产品体验流程与常用指令，便于新同学快速熟悉平台。</p>
-                    <details>
-                        <summary>推荐阅读</summary>
-                        <ul>
-                            <li>快速手动验证流程</li>
-                            <li>集成测试执行说明</li>
-                            <li>贡献指南与代码规范</li>
-                        </ul>
-                    </details>
-                    <div class="doc-actions">
-                        <a class="inline-link" href="handbook/">操作指南合集</a>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Architecture Section -->
-    <section id="architecture">
-        <div class="container">
-            <h2 class="section-title">系统架构</h2>
-            <p class="section-subtitle">采用前后端分离架构，支持微服务扩展</p>
-
-            <div class="architecture-diagram">
-                <pre style="font-size: 0.75rem; line-height: 1.4; color: #374151;">
-┌─────────────────────────────────────────────────────────────────┐
-│                         用户浏览器                                │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                │ HTTP/HTTPS
-                                ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                    前端应用 (Vue 3 + Vite)                       │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
-│  │ 表管理   │  │ 任务管理  │  │ 血缘关系  │  │ 执行监控  │       │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                │ REST API
-                                ↓
-┌─────────────────────────────────────────────────────────────────┐
-│              后端应用 (Spring Boot 2.7.18)                       │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Controller → Service → Mapper (MyBatis-Plus)           │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                    │                           │
-                    ↓                           ↓
-    ┌──────────────────────┐    ┌────────────────────────────────┐
-    │   MySQL 8.0+         │    │  DolphinScheduler Service      │
-    │   (数据持久化)        │    │  (Python FastAPI)              │
-    └──────────────────────┘    └────────────────────────────────┘
-                                                │
-                                                ↓
-                            ┌────────────────────────────────────┐
-                            │   Apache DolphinScheduler          │
-                            │   (Workflow Orchestration)         │
-                            └────────────────────────────────────┘
-                </pre>
-            </div>
-
-            <div style="margin-top: 3rem;">
-                <h3 style="font-size: 1.5rem; margin-bottom: 1.5rem; text-align: center;">技术栈</h3>
-                <div class="features-grid">
-                    <div class="feature-card">
-                        <h3>后端技术</h3>
-                        <ul style="color: var(--text-light); line-height: 2;">
-                            <li>✓ Spring Boot 2.7.18</li>
-                            <li>✓ MyBatis-Plus 3.5.5</li>
-                            <li>✓ MySQL 8.0+</li>
-                            <li>✓ WebFlux 响应式</li>
-                        </ul>
-                    </div>
-                    <div class="feature-card">
-                        <h3>前端技术</h3>
-                        <ul style="color: var(--text-light); line-height: 2;">
-                            <li>✓ Vue 3.4+</li>
-                            <li>✓ Element Plus UI</li>
-                            <li>✓ ECharts 图表</li>
-                            <li>✓ Vite 构建工具</li>
-                        </ul>
-                    </div>
-                    <div class="feature-card">
-                        <h3>中间服务</h3>
-                        <ul style="color: var(--text-light); line-height: 2;">
-                            <li>✓ Python 3.9+</li>
-                            <li>✓ FastAPI 框架</li>
-                            <li>✓ pydolphinscheduler</li>
-                            <li>✓ Uvicorn ASGI</li>
+                    <div>
+                        <h3 style="font-size: 1.5rem; margin-bottom: 1rem;">稳健的技术栈</h3>
+                        <ul style="display: flex; flex-direction: column; gap: 1rem;">
+                            <li style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span style="color: var(--primary);">✅</span> <strong>前端:</strong> Vue 3, Vite, Element
+                                Plus, ECharts
+                            </li>
+                            <li style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span style="color: var(--primary);">✅</span> <strong>后端:</strong> Spring Boot 2.7,
+                                Mybatis Plus
+                            </li>
+                            <li style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span style="color: var(--primary);">✅</span> <strong>调度:</strong> Apache
+                                DolphinScheduler 3.2.0
+                            </li>
+                            <li style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span style="color: var(--primary);">✅</span> <strong>数据:</strong> MySQL 8.0, Flyway 迁移
+                            </li>
+                            <li style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span style="color: var(--primary);">✅</span> <strong>部署:</strong> Docker Compose, Shell
+                                Scripts
+                            </li>
                         </ul>
                     </div>
                 </div>
             </div>
-        </div>
-    </section>
+        </section>
+    </main>
 
-    <!-- Community Section -->
-    <section id="community" class="community-section">
-        <div class="container">
-            <h2 class="section-title">社区共建</h2>
-            <p class="section-subtitle">吸收优秀开源社区经验，打造友好透明的协作流程</p>
-
-            <div class="community-grid">
-                <div class="community-card">
-                    <h3>加入贡献者计划</h3>
-                    <p>参考 Apache、Vue 等社区最佳实践，提供标准化 Issue 模板与代码规范，帮助你高效提交改动。</p>
-                    <div class="community-actions">
-                        <button type="button"
-                            data-copy="git clone https://github.com/MingkeVan/opendataworks.git">复制仓库地址</button>
-                        <a href="../README.md#贡献指南">贡献步骤</a>
-                    </div>
-                </div>
-
-                <div class="community-card">
-                    <h3>版本路线图</h3>
-                    <p>每月发布一次迭代计划，涵盖血缘可视化增强、调度编排优化以及数据质量评估等重点特性。</p>
-                    <details>
-                        <summary>下一步计划</summary>
-                        <ul style="color: var(--text-light); line-height: 1.8; margin-top: 0.75rem;">
-                            <li>更智能的血缘分析与异常提醒</li>
-                            <li>统一的多云部署配置模板</li>
-                            <li>数据质量评分与告警集成</li>
-                        </ul>
-                    </details>
-                    <div class="community-actions">
-                        <a href="../README.md#开发路线图">路线图概览</a>
-                    </div>
-                </div>
-
-                <div class="community-card">
-                    <h3>反馈与支持</h3>
-                    <p>在 Issue、Discussions 中与 Maintainer 实时沟通，也可通过脚本快速导出诊断信息。</p>
-                    <div class="community-actions">
-                        <a href="https://github.com/MingkeVan/opendataworks/issues">提交 Issue</a>
-                        <button type="button" data-copy="scripts/export-diagnostics.sh">复制诊断脚本</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- CTA Section -->
-    <section class="cta-section">
-        <div class="container">
-            <h2>准备好开始了吗？</h2>
-            <p>立即部署 OpenDataWorks，提升您的数据管理效率</p>
-            <div class="cta-buttons">
-                <a href="https://github.com/MingkeVan/opendataworks" class="btn btn-primary">
-                    🚀 立即开始
-                </a>
-                <a href="https://github.com/MingkeVan/opendataworks/issues" class="btn btn-secondary"
-                    style="color: var(--text-color);">
-                    💬 问题反馈
-                </a>
-            </div>
-        </div>
-    </section>
-
-    <!-- Footer -->
     <footer>
         <div class="container">
-            <div class="footer-content">
-                <div class="footer-section">
-                    <h4>资源</h4>
+            <div class="footer-grid">
+                <div class="footer-col">
+                    <h4>OpenDataWorks</h4>
+                    <p style="font-size: 0.9rem; color: #9ca3af;">致力于降低大数据开发门槛，提供优雅的数据治理体验。</p>
+                </div>
+                <div class="footer-col">
+                    <h4>快速通道</h4>
                     <ul>
-                        <li><a href="guide/start/quick-start.md">项目文档</a></li>
-                        <li><a href="handbook/operations-guide.md">部署指南</a></li>
-                        <li><a href="guide/manual/features.md">使用指南</a></li>
-                        <li><a href="guide/manual/features.md">功能文档</a></li>
+                        <li><a href="guide/start/quick-start.md">快速开始</a></li>
+                        <li><a href="deploy/README.md">部署指南</a></li>
+                        <li><a href="guide/manual/features.md">功能手册</a></li>
                     </ul>
                 </div>
-                <div class="footer-section">
-                    <h4>社区</h4>
+                <div class="footer-col">
+                    <h4>社区资源</h4>
                     <ul>
-                        <li><a href="https://github.com/MingkeVan/opendataworks">GitHub</a></li>
-                        <li><a href="guide/start/quick-start.md">文档</a></li>
-                        <li><a href="https://github.com/MingkeVan/opendataworks/issues">问题反馈</a></li>
-                        <li><a href="#community">讨论区入口</a></li>
-                        <li><a href="https://github.com/MingkeVan/opendataworks/pulls">贡献代码</a></li>
+                        <li><a href="https://github.com/MingkeVan/opendataworks/issues">提交 Issue</a></li>
+                        <li><a href="https://github.com/MingkeVan/opendataworks/discussions">参与讨论</a></li>
+                        <li><a href="guide/contribution/guide.md">贡献代码</a></li>
                     </ul>
                 </div>
-                <div class="footer-section">
-                    <h4>关于</h4>
-                    <ul>
-                        <li><a href="https://github.com/MingkeVan/opendataworks/blob/main/LICENSE">开源协议</a></li>
-                        <li><a href="../CHANGELOG.md">更新日志</a></li>
-                        <li><a href="#community">开发路线图</a></li>
-                        <li><a href="#community">贡献指南</a></li>
-                    </ul>
-                </div>
-                <div class="footer-section">
+                <div class="footer-col">
                     <h4>相关项目</h4>
                     <ul>
-                        <li><a href="https://dolphinscheduler.apache.org/">Apache DolphinScheduler</a></li>
-                        <li><a href="https://spring.io/projects/spring-boot">Spring Boot</a></li>
-                        <li><a href="https://vuejs.org/">Vue.js</a></li>
-                        <li><a href="https://element-plus.org/">Element Plus</a></li>
+                        <li><a href="https://dolphinscheduler.apache.org/" target="_blank">DolphinScheduler</a></li>
+                        <li><a href="https://vuejs.org/" target="_blank">Vue.js</a></li>
+                        <li><a href="https://spring.io/" target="_blank">Spring Boot</a></li>
                     </ul>
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>&copy; 2025 OpenDataWorks Team. 采用 Apache License 2.0 开源协议</p>
-                <p>Made with ❤️ by the OpenDataWorks community</p>
+                <p>&copy; 2025 OpenDataWorks Team. Licensed under Apache License 2.0.</p>
             </div>
         </div>
     </footer>
 
-    <button class="back-to-top" aria-label="回到顶部">↑</button>
-
-    <script>
-        // Smooth scrolling for anchor links
-        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-            const href = anchor.getAttribute('href');
-            if (href === '#') {
-                return;
-            }
-
-            anchor.addEventListener('click', function (e) {
-                e.preventDefault();
-                const target = document.querySelector(href);
-                if (target) {
-                    target.scrollIntoView({
-                        behavior: 'smooth',
-                        block: 'start'
-                    });
-                }
-            });
-        });
-
-        // Tab interactions
-        const tabButtons = document.querySelectorAll('.tab-button');
-        const tabPanels = document.querySelectorAll('.tab-panel');
-
-        tabButtons.forEach(button => {
-            button.addEventListener('click', () => {
-                const targetId = button.getAttribute('data-target');
-                tabButtons.forEach(btn => btn.classList.toggle('active', btn === button));
-                tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === targetId));
-            });
-        });
-
-        // Animate elements on scroll
-        const revealElements = document.querySelectorAll('.feature-card, .stat-item, .doc-card, .community-card');
-        const revealObserver = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    entry.target.style.opacity = '1';
-                    entry.target.style.transform = 'translateY(0)';
-                    revealObserver.unobserve(entry.target);
-                }
-            });
-        }, { threshold: 0.15, rootMargin: '0px 0px -80px 0px' });
-
-        revealElements.forEach(el => {
-            el.style.opacity = '0';
-            el.style.transform = 'translateY(20px)';
-            el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
-            revealObserver.observe(el);
-        });
-
-        // Active navigation on scroll
-        const navLinks = document.querySelectorAll('.nav-links a[href^="#"]');
-        if (navLinks.length) {
-            navLinks[0].classList.add('active');
-        }
-        const sectionObserver = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                const id = entry.target.getAttribute('id');
-                const link = document.querySelector(`.nav-links a[href="#${id}"]`);
-                if (!link) return;
-                if (entry.isIntersecting) {
-                    navLinks.forEach(item => item.classList.remove('active'));
-                    link.classList.add('active');
-                }
-            });
-        }, { threshold: 0.35 });
-
-        document.querySelectorAll('section[id]').forEach(section => sectionObserver.observe(section));
-
-        // Back to top button
-        const backToTop = document.querySelector('.back-to-top');
-        window.addEventListener('scroll', () => {
-            if (window.scrollY > 600) {
-                backToTop.classList.add('show');
-            } else {
-                backToTop.classList.remove('show');
-            }
-        });
-
-        backToTop.addEventListener('click', () => {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
-
-        // Clipboard helper
-        document.querySelectorAll('button[data-copy]').forEach(button => {
-            button.addEventListener('click', async () => {
-                const content = button.getAttribute('data-copy');
-                try {
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        await navigator.clipboard.writeText(content);
-                    } else {
-                        const tempInput = document.createElement('textarea');
-                        tempInput.value = content;
-                        document.body.appendChild(tempInput);
-                        tempInput.select();
-                        document.execCommand('copy');
-                        document.body.removeChild(tempInput);
-                    }
-                    const originalText = button.textContent;
-                    button.textContent = '已复制 ✔';
-                    button.disabled = true;
-                    setTimeout(() => {
-                        button.textContent = originalText;
-                        button.disabled = false;
-                    }, 2000);
-                } catch (err) {
-                    console.error('复制失败', err);
-                }
-            });
-        });
-    </script>
 </body>
 
 </html>
