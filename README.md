@@ -29,14 +29,6 @@
 
 opendataworks 是一个面向大数据平台的统一数据门户系统,旨在为企业提供一站式的数据资产管理、任务调度编排和血缘关系追踪解决方案。
 
-### 🎨 品牌图标
-
-- `frontend/public/opendataworks-icon-light.svg`：适用于浅色背景,README/浅色 favicon 默认使用
-- `frontend/public/opendataworks-icon-dark.svg`：适用于深色模式,前端与站点在 `prefers-color-scheme: dark` 下自动切换
-- `frontend/public/opendataworks-icon-light-fav.svg` / `...-dark-fav.svg`：同款但放大 35%, 专供浏览器标签/快捷方式, 避免首页展示过大
-- `frontend/public/opendataworks-icon.ico`：包含 16~256px 多尺寸,兼容传统浏览器/Windows 快捷方式
-- `docs/site/assets/icons/`：为 GitHub Pages 版本同步存放的同款资源,便于独立部署
-
 ## 📁 仓库结构
 
 - `deploy/`：集中存放 Docker Compose 与环境变量模板
@@ -322,143 +314,29 @@ git clone https://github.com/MingkeVan/opendataworks.git
 cd opendataworks
 ```
 
-#### 2. 数据库初始化
+#### 2. 准备数据库
 
-##### 方法一：使用自动化脚本（推荐）
-
-使用提供的初始化脚本自动完成数据库创建、用户配置和表结构初始化：
+由于项目集成了 Flyway，您只需创建数据库和用户，无需手动导入表结构。
 
 ```bash
-# 基本用法
-scripts/dev/init-database.sh -r root密码 -p 应用密码
+# 登录 MySQL
+mysql -u root -p
 
-# 包含示例数据
-scripts/dev/init-database.sh -r root密码 -p 应用密码 -s
+# 执行以下 SQL 创建数据库和用户
+CREATE DATABASE opendataworks DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-# 自定义配置
-scripts/dev/init-database.sh \
-  -h localhost \
-  -P 3306 \
-  -d opendataworks \
-  -u opendataworks \
-  -p 应用密码 \
-  -r root密码 \
-  -s
-
-# 查看所有选项
-scripts/dev/init-database.sh --help
-```
-
-**脚本功能**:
-- ✅ 自动创建数据库（UTF-8MB4 字符集）
-- ✅ 创建应用用户并授权
-- ✅ 执行建表脚本
-- ✅ 加载巡检模块表结构
-- ✅ 可选加载示例数据
-- ✅ 验证初始化结果
-- ✅ 显示连接信息
-
-##### 方法二：手动初始化
-
-如果需要手动控制每个步骤：
-
-```bash
-# 1. 创建数据库
-mysql -u root -p << EOF
-CREATE DATABASE opendataworks
-  DEFAULT CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-EOF
-
-# 2. 创建应用用户（推荐，避免使用 root）
-mysql -u root -p << EOF
-CREATE USER 'opendataworks'@'localhost' IDENTIFIED BY 'your_password';
-GRANT ALL PRIVILEGES ON opendataworks.* TO 'opendataworks'@'localhost';
-
--- 如需远程访问，添加远程用户
-CREATE USER 'opendataworks'@'%' IDENTIFIED BY 'your_password';
+CREATE USER 'opendataworks'@'%' IDENTIFIED BY 'opendataworks123';
 GRANT ALL PRIVILEGES ON opendataworks.* TO 'opendataworks'@'%';
-
 FLUSH PRIVILEGES;
-EOF
 
-# 3. 执行建表脚本（核心表结构）
-mysql -u root -p opendataworks < database/mysql/10-core-schema.sql
-
-# 4. 执行巡检模块脚本（可选）
-mysql -u root -p opendataworks < database/mysql/20-inspection-schema.sql
-
-# 5. 加载示例数据（可选，用于测试）
-mysql -u root -p opendataworks < database/mysql/30-sample-data.sql
+EXIT;
 ```
 
-##### 验证数据库初始化
-
-```bash
-# 检查数据库是否创建成功
-mysql -u opendataworks -p opendataworks -e "SHOW TABLES;"
-
-# 预期输出应包含以下表：
-# - data_table（数据表元信息）
-# - data_task（任务定义）
-# - data_lineage（血缘关系）
-# - task_execution_log（执行日志）
-# - data_domain（数据域）
-# - business_domain（业务域）
-# - inspection_task（巡检任务，可选）
-# - inspection_rule（巡检规则，可选）
-
-# 查看表数量
-mysql -u opendataworks -p opendataworks -e "SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = 'opendataworks';"
-```
-
-##### 数据库迁移（如果需要）
-
-如果数据库已存在且需要升级：
-
-```bash
-# 查看当前数据库版本
-mysql -u opendataworks -p opendataworks -e "SELECT * FROM schema_version LIMIT 1;"
-
-# 执行增量迁移脚本
-mysql -u opendataworks -p opendataworks < backend/src/main/resources/db/migration/V2__add_table_features.sql
-mysql -u opendataworks -p opendataworks < backend/src/main/resources/db/migration/V3__add_statistics_history.sql
-```
-
-##### 常见问题排查
-
-**问题1：字符集错误**
-```bash
-# 检查数据库字符集
-mysql -u root -p -e "SELECT default_character_set_name, default_collation_name FROM information_schema.schemata WHERE schema_name = 'opendataworks';"
-
-# 如果字符集不正确，修改
-mysql -u root -p -e "ALTER DATABASE opendataworks CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-```
-
-**问题2：权限不足**
-```bash
-# 检查用户权限
-mysql -u root -p -e "SHOW GRANTS FOR 'opendataworks'@'localhost';"
-
-# 重新授权
-mysql -u root -p -e "GRANT ALL PRIVILEGES ON opendataworks.* TO 'opendataworks'@'localhost'; FLUSH PRIVILEGES;"
-```
-
-**问题3：表已存在**
-```bash
-# 备份现有数据
-mysqldump -u root -p opendataworks > opendataworks_backup_$(date +%Y%m%d).sql
-
-# 删除数据库重建
-mysql -u root -p -e "DROP DATABASE opendataworks;"
-scripts/dev/init-database.sh -r root密码 -p 应用密码
-```
+> **注意**: 具体的表结构和初始化数据将在后端服务首次启动时自动通过 Flyway 迁移。
 
 #### 3. 启动 DolphinScheduler (可选)
 
 如果需要任务调度功能,请先安装并启动 DolphinScheduler。
-
 参考官方文档: https://dolphinscheduler.apache.org/zh-cn/docs/3.2.0/guide/installation/standalone
 
 #### 4. 启动后端服务
@@ -466,29 +344,16 @@ scripts/dev/init-database.sh -r root密码 -p 应用密码
 ```bash
 cd backend
 
-# 修改配置文件
-vim src/main/resources/application.yml
-
-# 配置数据库连接
-spring:
-  datasource:
-    url: jdbc:mysql://localhost:3306/opendataworks
-    username: root
-    password: your_password
-
-# 配置 DolphinScheduler OpenAPI
-dolphin:
-  url: http://localhost:12345/dolphinscheduler
-  token: your_dolphinscheduler_token
-  project-name: opendataworks
-  project-code: 0
+# 修改配置文件 (如需修改数据库密码或 DolphinScheduler 地址)
+# vim src/main/resources/application.yml
 
 # 编译并启动
 mvn clean install
 mvn spring-boot:run
 ```
 
-服务将运行在 `http://localhost:8080`
+- 服务启动后，Flyway 会自动执行迁移脚本 (`src/main/resources/db/migration/`)。
+- 服务默认运行在 `http://localhost:8080`。
 
 #### 5. 启动前端应用
 
@@ -502,121 +367,30 @@ npm install
 npm run dev
 ```
 
-应用将运行在 `http://localhost:5173`
+- 应用将运行在 `http://localhost:5173`。
+- 默认账户：不需要登录（目前版本）或根据后续更新。
 
 #### 6. 访问应用
 
 打开浏览器访问: `http://localhost:5173`
 
-### 开发环境一键启动（Docker Compose）
+### Docker 部署
 
-如果希望一次性在本机拉起前端、后端和 MySQL，可直接使用 `deploy/docker-compose.dev.yml`，DolphinScheduler 请指向现有集群：
+#### 开发环境快速启动
 
-```bash
-# 1. 准备环境变量
-cp deploy/.env.example deploy/.env        # 按需修改数据库与 DolphinScheduler 配置
-
-# 2. 启动完整开发栈
-docker compose -f deploy/docker-compose.dev.yml up -d
-
-# 3. 查看运行状态
-docker compose -f deploy/docker-compose.dev.yml ps
-
-# 4. 停止并清理
-docker compose -f deploy/docker-compose.dev.yml down
-```
-
-> 提示  
-> - 该 Compose 文件使用 `mikefan2019/opendataworks-*` 镜像，若需自建镜像，请先执行 `scripts/build/build-images.sh` 并按需修改 `image` 字段。  
-> - 如果遇到 `proxy already running`，说明之前的 Compose 实例未完全退出，先执行 `docker compose -f deploy/docker-compose.dev.yml down` 或重启 Docker 再尝试。
-
-### Docker 快速部署 (推荐)
+如果希望一次性在本机拉起完整环境（前端 + 后端 + MySQL），可使用开发环境 Compose：
 
 ```bash
-# 1. 构建或下载镜像
-scripts/build/build-images.sh
+# 1. 准备配置
+cp scripts/deploy/.env.example scripts/deploy/.env
 
-# 2. 内网主机加载镜像
-scripts/deploy/load-images.sh
-
-# 3. 启动所有服务
-scripts/deploy/start.sh
+# 2. 启动服务
+docker compose -f scripts/deploy/docker-compose.dev.yml up -d
 ```
 
----
+#### 生产环境/离线部署
 
-## 📚 使用说明
-
-### 1. 数据表管理
-
-1. 进入"表管理"页面
-2. 点击"新建表"按钮
-3. 填写表名、数据层级、业务域等信息
-4. 添加字段定义
-5. 点击"保存"
-
-### 2. 创建批处理任务
-
-1. 进入"任务管理"页面
-2. 点击"新建任务"按钮
-3. 填写任务基本信息:
-   - 任务名称
-   - 任务类型 (批任务/流任务)
-   - 执行引擎 (DolphinScheduler/Dinky)
-4. 配置任务参数:
-   - 节点类型 (SQL/Shell/Python)
-   - 数据源 (如果是 SQL 任务)
-   - SQL 语句或 Shell 脚本
-5. 配置调度参数:
-   - 优先级
-   - 超时时间
-   - 重试次数
-6. 选择输入表和输出表 (用于血缘关系)
-7. 点击"保存"
-
-### 3. 发布任务到 DolphinScheduler
-
-1. 在任务列表中找到已创建的任务
-2. 点击"发布"按钮
-3. 系统会自动:
-   - 通过 Java 后端调用 DolphinScheduler OpenAPI 创建/更新工作流
-   - 同步任务定义与依赖关系到 DolphinScheduler
-   - 刷新本地状态与血缘数据
-4. 发布成功后,任务状态变为"已发布"
-
-### 4. 执行任务
-
-有两种执行方式:
-
-#### 单任务执行 (快速测试)
-- 点击"执行任务"按钮
-- 系统创建临时工作流并立即执行
-- 适合快速测试单个任务
-
-#### 工作流执行 (生产环境)
-- 点击"执行工作流"按钮
-- 系统按依赖关系执行完整工作流
-- 适合生产环境正式运行
-
-### 5. 查看血缘关系
-
-1. 进入"血缘关系"页面
-2. 选择数据层级筛选 (可选)
-3. 查看数据血缘图:
-   - 表节点显示为圆形
-   - 任务节点显示为方形
-   - 连线表示数据流向
-4. 点击节点查看详细信息
-
-### 6. 执行监控
-
-1. 在任务列表中查看"最近执行"列
-2. 点击任务名称进入详情页
-3. 查看:
-   - 执行历史记录
-   - 执行状态 (pending/running/success/failed)
-   - 执行日志
-   - 执行时长统计
+请参考 [部署文档](scripts/deploy/README.md) 获取详细的生产环境部署和离线包制作指南。
 
 ---
 
