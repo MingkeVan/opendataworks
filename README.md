@@ -14,6 +14,7 @@
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7.18-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-green.svg)](https://vuejs.org/)
 [![DolphinScheduler](https://img.shields.io/badge/DolphinScheduler-3.2.0-blue.svg)](https://dolphinscheduler.apache.org/)
+[![DeepWiki](https://img.shields.io/badge/Wiki-DeepWiki-blue)](https://deepwiki.org)
 
 **一站式数据任务管理与数据血缘可视化平台**
 

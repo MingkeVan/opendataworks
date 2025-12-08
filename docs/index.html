@@ -329,6 +329,86 @@
             .footer-grid {
                 grid-template-columns: 1fr 1fr;
             }
+
+            .architecture-grid {
+                grid-template-columns: 1fr !important;
+            }
+        }
+
+        /* Quickstart Tabs */
+        .quickstart-tabs {
+            background: white;
+            border-radius: 12px;
+            box-shadow: var(--shadow-lg);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .tab-buttons {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            background: #f8fafc;
+        }
+
+        .tab-button {
+            flex: 1;
+            padding: 1rem;
+            border: none;
+            background: none;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 1rem;
+        }
+
+        .tab-button:hover {
+            color: var(--primary);
+            background: #f1f5f9;
+        }
+
+        .tab-button.active {
+            color: var(--primary);
+            background: white;
+            border-bottom: 2px solid var(--primary);
+            margin-bottom: -1px;
+        }
+
+        .tab-panel {
+            padding: 1.5rem;
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        /* Code Block */
+        .code-block {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-x: auto;
+        }
+
+        .code-block pre {
+            margin: 0;
+            font-family: 'Fira Code', Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
+            font-size: 0.9rem;
+            color: #e2e8f0;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
     </style>
 </head>
@@ -461,7 +541,7 @@ npm install && npm run dev</code></pre>
                 <h2 class="section-title">技术架构</h2>
                 <p class="section-desc">采用前后端分离架构，组件松耦合，易于扩展和维护。</p>
 
-                <div class="grid" style="grid-template-columns: 1fr 1fr; align-items: center;">
+                <div class="grid architecture-grid" style="grid-template-columns: 1fr 1fr; align-items: center;">
                     <div class="architecture">
                         <!-- ASCII Diagram Representation -->
                         <div class="arch-code">
