@@ -14,7 +14,7 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://deepwiki.com/MingkeVan/opendataworks.git
+git clone https://github.com/MingkeVan/opendataworks.git
 cd opendataworks
 ```
 

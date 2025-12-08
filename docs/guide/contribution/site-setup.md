@@ -10,7 +10,7 @@
 
 ### 1. 在 GitHub 仓库中启用 Pages
 
-1. 访问 GitHub 仓库: https://deepwiki.com/MingkeVan/opendataworks
+1. 访问 GitHub 仓库: https://github.com/MingkeVan/opendataworks
 2. 点击 **Settings** (设置)
 3. 在左侧菜单找到 **Pages**
 4. 在 **Source** (源) 部分:
