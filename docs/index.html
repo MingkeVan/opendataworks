@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -55,7 +56,7 @@
             border-bottom: 1px solid var(--border-color);
             padding: 1rem 0;
             z-index: 1000;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         }
 
         nav {
@@ -336,6 +337,7 @@
                 opacity: 0;
                 transform: translateY(10px);
             }
+
             to {
                 opacity: 1;
                 transform: translateY(0);
@@ -359,7 +361,7 @@
             padding: 1.75rem;
             box-shadow: 0 10px 30px -20px rgba(37, 99, 235, 0.35);
             transition: transform 0.3s ease, box-shadow 0.3s ease;
-            background: linear-gradient(180deg, rgba(59,130,246,0.05), rgba(139,92,246,0.05));
+            background: linear-gradient(180deg, rgba(59, 130, 246, 0.05), rgba(139, 92, 246, 0.05));
         }
 
         .doc-card:hover {
@@ -678,6 +680,7 @@
         }
     </style>
 </head>
+
 <body>
     <!-- Header -->
     <header>
@@ -821,7 +824,7 @@
                             <span>🧰 适用场景：首次体验 / 快速演示</span>
                         </div>
                         <div class="code-block">
-<pre># 克隆项目并进入目录
+                            <pre># 克隆项目并进入目录
 git clone https://github.com/MingkeVan/opendataworks.git
 cd opendataworks
 
@@ -845,7 +848,7 @@ scripts/deploy/quick-deploy.sh --with-doris=false
                             <span>🧰 适用场景：CI/CD 集成 / 云主机部署</span>
                         </div>
                         <div class="code-block">
-<pre># 克隆仓库并进入目录
+                            <pre># 克隆仓库并进入目录
 git clone https://github.com/MingkeVan/opendataworks.git
 cd opendataworks
 
@@ -871,7 +874,7 @@ docker compose down
                             <span>🧰 适用场景：二次开发 / 团队协作</span>
                         </div>
                         <div class="code-block">
-<pre># 准备前端环境
+                            <pre># 准备前端环境
 cd frontend
 npm install
 npm run dev -- --host 0.0.0.0 --port 3000
@@ -1070,7 +1073,8 @@ mvn spring-boot:run
                     <h3>加入贡献者计划</h3>
                     <p>参考 Apache、Vue 等社区最佳实践，提供标准化 Issue 模板与代码规范，帮助你高效提交改动。</p>
                     <div class="community-actions">
-                        <button type="button" data-copy="git clone https://github.com/MingkeVan/opendataworks.git">复制仓库地址</button>
+                        <button type="button"
+                            data-copy="git clone https://github.com/MingkeVan/opendataworks.git">复制仓库地址</button>
                         <a href="../README.md#贡献指南">贡献步骤</a>
                     </div>
                 </div>
@@ -1112,7 +1116,8 @@ mvn spring-boot:run
                 <a href="https://github.com/MingkeVan/opendataworks" class="btn btn-primary">
                     🚀 立即开始
                 </a>
-                <a href="https://github.com/MingkeVan/opendataworks/issues" class="btn btn-secondary" style="color: var(--text-color);">
+                <a href="https://github.com/MingkeVan/opendataworks/issues" class="btn btn-secondary"
+                    style="color: var(--text-color);">
                     💬 问题反馈
                 </a>
             </div>
@@ -1126,16 +1131,17 @@ mvn spring-boot:run
                 <div class="footer-section">
                     <h4>资源</h4>
                     <ul>
-                        <li><a href="#docs">文档概览</a></li>
-                        <li><a href="handbook/operations-guide.md">部署指南</a></li>
-                        <li><a href="#quickstart">快速上手</a></li>
-                        <li><a href="#community">社区支持</a></li>
+                        <li><a href="../guide/start/quick-start.md">项目文档</a></li>
+                        <li><a href="../handbook/operations-guide.md">部署指南</a></li>
+                        <li><a href="../guide/manual/features.md">使用指南</a></li>
+                        <li><a href="../guide/manual/features.md">功能文档</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
                     <h4>社区</h4>
                     <ul>
                         <li><a href="https://github.com/MingkeVan/opendataworks">GitHub</a></li>
+                        <li><a href="../guide/start/quick-start.md">文档</a></li>
                         <li><a href="https://github.com/MingkeVan/opendataworks/issues">问题反馈</a></li>
                         <li><a href="#community">讨论区入口</a></li>
                         <li><a href="https://github.com/MingkeVan/opendataworks/pulls">贡献代码</a></li>
@@ -1282,4 +1288,5 @@ mvn spring-boot:run
         });
     </script>
 </body>
+
 </html>
