@@ -4,11 +4,11 @@ This guide covers both Online (source code) and Offline (deployment package) dep
 
 ## Directory Contents
 
-- `start.sh`: Starts the application. Checks for `.env` and creates it if missing.
-- `stop.sh`: Stops all services.
-- `restart.sh`: Restarts all services.
-- `load-images.sh`: Loads Docker images from `docker-images/` (Offline mode).
-- `create-offline-package.sh`: Utility to generate an offline deployment package.
+- `../scripts/start.sh`: Starts the application. Checks for `.env` and creates it if missing.
+- `../scripts/stop.sh`: Stops all services.
+- `../scripts/restart.sh`: Restarts all services.
+- `../scripts/load-images.sh`: Loads Docker images from `docker-images/` (Offline mode).
+- `../scripts/create-offline-package.sh`: Utility to generate an offline deployment package.
 - `docker-compose.prod.yml`: Production configuration.
 - `.env.example`: Template for environment variables.
 
@@ -37,9 +37,7 @@ Use this method if you have internet access and are deploying directly from the 
 
 3. **Start Services**:
    ```bash
-   ./start.sh
-   # This will automatically pull the necessary images from Docker Hub.
-   ```
+    ./../scripts/start.sh
 
 ---
 
@@ -61,7 +59,7 @@ Use this method for isolated environments without internet access. You will use 
 2. **Load Images**:
    This loads all required Docker images from the local archive.
    ```bash
-   deploy/load-images.sh
+   scripts/load-images.sh
    ```
 
 3. **Configure Environment**:
@@ -73,7 +71,7 @@ Use this method for isolated environments without internet access. You will use 
 
 4. **Start Services**:
    ```bash
-   deploy/start.sh
+   scripts/start.sh
    ```
 
 ---
@@ -82,18 +80,18 @@ Use this method for isolated environments without internet access. You will use 
 
 ### Stop Services
 ```bash
-# Online
-./stop.sh
-# Offline
-deploy/stop.sh
+# Online (from root)
+scripts/stop.sh
+# Offline (from package root)
+scripts/stop.sh
 ```
 
 ### Restart Services
 ```bash
-# Online
-./restart.sh
-# Offline
-deploy/restart.sh
+# Online (from root)
+scripts/restart.sh
+# Offline (from package root)
+scripts/restart.sh
 ```
 
 ### Check Logs
