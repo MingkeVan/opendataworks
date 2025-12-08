@@ -146,7 +146,7 @@ fi
 # 优先使用 scripts/deploy/.env (如果因为某种原因存在且是最新的)
 # 其次使用 repo root .env
 ROOT_ENV_FILE="$REPO_ROOT/.env"
-ROOT_ENV_EXAMPLE="$REPO_ROOT/.env.example"
+ROOT_ENV_EXAMPLE="$REPO_ROOT/scripts/deploy/.env.example"
 
 # 如果 deploy 目录里已经有了 .env (从上面 tar 复制过来的)，则保留
 if [[ ! -f "$DEPLOY_PACKAGE_DIR/.env" ]]; then
