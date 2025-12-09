@@ -90,7 +90,7 @@ log.info("Created temporary workflow: name={} actualCode={}", ...);
 5. ✅ `COMPLETION_REPORT.md` - 本报告
 
 ### 辅助文件
-- ✅ `scripts/maintenance/cleanup-test-scripts.sh` - 清理测试脚本工具
+- （无额外辅助脚本；历史清理脚本已移除）
 
 ---
 
@@ -115,12 +115,7 @@ log.info("Created temporary workflow: name={} actualCode={}", ...);
 
 ### 可选操作
 
-3. **清理测试脚本**:
-   ```bash
-   scripts/maintenance/cleanup-test-scripts.sh
-   ```
-
-4. **提交代码** (如果使用 Git):
+3. **提交代码** (如果使用 Git):
    ```bash
    git add .
    git commit -m "fix: 修复临时工作流 workflow code 不匹配问题"

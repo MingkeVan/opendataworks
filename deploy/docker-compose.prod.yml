@@ -7,15 +7,16 @@ services:
     container_name: opendataworks-mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: root123
-      MYSQL_DATABASE: opendataworks
-      MYSQL_USER: opendataworks
-      MYSQL_PASSWORD: opendataworks123
-      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-opendataworks}
+      MYSQL_USER: ${MYSQL_USER:-opendataworks}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-opendataworks123}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+      # 可选：在 ../database/mysql 中放置初始化 SQL
       - ../database/mysql:/docker-entrypoint-initdb.d:ro
     networks:
       - opendataworks-network

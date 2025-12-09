@@ -17,7 +17,7 @@
 
 ## 使用建议
 
-1. **入门三步**: 阅读 `overview` → 初始化数据库 (`scripts/dev/init-database.sh`) → 参考 `development-guide` 启动三套服务。
+1. **入门三步**: 阅读 `overview` → 配置 `deploy/.env`（数据库/Dolphin 连接）→ 参考 `development-guide` 启动三套服务。
 2. **遇到环境差异**: `data-model-and-sql` 汇总了所有数据库脚本以及变更策略，优先查看该文档再改 SQL。
 3. **上线/巡检**: `operations-guide` 与 `testing-guide` 覆盖部署、巡检、连通性验证的流程，可直接复用。
 4. **专题文档**: 老的 `docs/design|guides|deployment` 目录均已合并进本手册，如需历史版本可在 Git 历史中查看。

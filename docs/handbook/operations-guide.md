@@ -7,8 +7,8 @@
 | 方式 | 适用场景 | 入口 |
 | --- | --- | --- |
 | Docker Compose | PoC、本地/测试环境一键启动 | `deploy/docker-compose.prod.yml` |
-| 离线包 | 无外网、需要提前拉取镜像 | `scripts/offline/create-offline-package-from-dockerhub.sh` |
-| 裸机/systemd | 生产环境分层部署、需要自定义安全策略 | `docs/handbook/operations-guide.md` 本文 + `scripts/deploy/*.sh` |
+| 离线包 | 无外网、需要提前拉取镜像 | `scripts/create-offline-package.sh` + `scripts/load-package-and-start.sh` |
+| 裸机/systemd | 生产环境分层部署、需要自定义安全策略 | `docs/handbook/operations-guide.md` 本文 + `scripts/*.sh` |
 
 ## Docker Compose
 
@@ -31,9 +31,9 @@ scripts/build/build-multiarch.sh --namespace your-registry
 
 ## 离线部署
 
-1. 执行 `scripts/offline/create-offline-package-from-dockerhub.sh`，生成 `opendataworks-deployment-*.tar.gz`。
-2. 目标机器解压后包含：Docker Compose 文件、镜像 tar、配置样例、`database/mysql` 脚本。
-3. 使用 `scripts/deploy/load-package-and-start.sh --package <tar>` 自动加载镜像并启动。
+1. 执行 `scripts/create-offline-package.sh`，生成 `opendataworks-deployment-*.tar.gz`（可指定 `--platform` 或镜像标签）。
+2. 目标机器解压后包含：`deploy/docker-compose*.yml`、`deploy/.env.example`、`scripts/` 控制脚本、`deploy/docker-images/*.tar`。
+3. 使用 `scripts/load-package-and-start.sh --package <tar>` 自动解压、加载镜像并启动。
 
 ## 裸机部署 (systemd)
 
@@ -85,14 +85,14 @@ server {
 | 组件 | 文件 | 说明 |
 | --- | --- | --- |
 | Backend | `application.yml` | DB、Dolphin/Dinky、日志、CORS |
-| Frontend | `.env.production` | `VITE_API_BASE`, `VITE_DOLPHIN_URL` |
+| Frontend | `frontend/nginx.conf` | 反向代理 `/api/` 至 `backend:8080/api/` |
 | Compose | `deploy/docker-compose.prod.yml` | 镜像/tag/端口/卷 |
 
 ## 滚动/重启
 
 - Docker：`docker compose restart backend` / `logs -f backend`。
 - systemd：`sudo systemctl restart opendataworks-backend`。
-- 数据库迁移后，可运行 `scripts/dev/init-database.sh`（仅开发环境）或在生产环境执行 Flyway 脚本。
+- 数据库迁移由 Flyway 自动执行；如需重置数据，请根据实际环境手工清理/初始化数据库。
 
 ## 镜像构建与大小控制
 

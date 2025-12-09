@@ -8,7 +8,7 @@
 deploy/
 ├── .env.example              # 环境变量配置示例
 ├── docker-compose.dev.yml    # 开发环境编排 (Backend + Frontend + MySQL)
-├── docker-compose.prod.yml   # 生产环境编排 (包含 DolphinScheduler)
+├── docker-compose.prod.yml   # 生产环境编排 (Backend + Frontend + MySQL，DolphinScheduler 外置)
 ├── docker-images/            # 离线镜像存储目录 (自动生成/使用)
 └── README.md                 # 目录说明
 ```
@@ -34,12 +34,12 @@ cp deploy/.env.example deploy/.env
 docker compose -f deploy/docker-compose.dev.yml up -d
 
 # 3. 访问应用
-# 前端地址: http://localhost:5173
+# 前端地址: http://localhost:8081
 ```
 
 ## 3. 生产环境部署
 
-生产环境部署包含完整的组件栈 (Backend, Frontend, MySQL, DolphinScheduler)。
+生产环境部署包含核心组件栈 (Backend, Frontend, MySQL)，DolphinScheduler 需单独部署或指向现有集群。
 
 ### 步骤
 
@@ -57,8 +57,8 @@ docker compose -f deploy/docker-compose.dev.yml up -d
     ```
 
 3.  **验证**:
-    - 前端: `http://<服务器IP>:5173` (或配置的端口)
-    - DolphinScheduler: `http://<服务器IP>:12345/dolphinscheduler/ui`
+    - 前端: `http://<服务器IP>` (默认 80)
+    - 后端: `http://<服务器IP>:8080/api`
 
 ## 4. 离线部署
 
@@ -85,8 +85,8 @@ bash scripts/create-offline-package.sh --platform linux/amd64
     ```
 3.  执行启动脚本：
     ```bash
-    # 加载镜像并启动服务
-    bash scripts/load-package-and-start.sh
+    # 加载镜像并启动服务（脚本会自动解压并查找 deploy/docker-images）
+    bash scripts/load-package-and-start.sh --package opendataworks-deployment-xxxx.tar.gz
     ```
 
 ## 5. 常用操作
@@ -111,7 +111,7 @@ bash scripts/create-offline-package.sh --platform linux/amd64
 ## 常见问题
 
 ### 端口冲突
-如果 `5173` 或 `8080` 端口被占用，请在 `deploy/.env` 中修改 `FRONTEND_PORT` 或 `BACKEND_PORT`。
+如果端口被占用，请编辑 `deploy/docker-compose.*.yml` 中的 `ports` 映射后重新启动。
 
 ### 数据库连接失败
 请检查 `.env` 中的 `MYSQL_PASSWORD` 是否与数据库实际密码一致，或者检查防火墙设置。

@@ -148,8 +148,7 @@ if [[ -f "$REPO_ROOT/docs/handbook/testing-guide.md" ]]; then
 fi
 
 # 4. 处理 .env 文件
-# 优先使用 scripts/deploy/.env (如果因为某种原因存在且是最新的)
-# 其次使用 repo root .env
+# 优先使用 deploy/.env（若已存在），否则尝试仓库根 .env，最后回退到示例
 ROOT_ENV_FILE="$REPO_ROOT/.env"
 ROOT_ENV_EXAMPLE="$REPO_ROOT/deploy/.env.example"
 

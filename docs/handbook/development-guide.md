@@ -11,19 +11,20 @@
 | MySQL | 8.0+ |
 | Docker (可选) | 24+ |
 
-## 第一步：初始化数据库
+## 第一步：准备数据库
+
+使用本地 MySQL 创建数据库和用户（Flyway 首次启动会自动建表/迁移）：
 
 ```bash
-# 1. 进入脚本目录
-cd scripts/dev
-
-# 2. 填写 root/admin 密码并执行
-DB_ROOT_PASSWORD=root DB_PASSWORD=opendataworks123 \
-./init-database.sh -s
+mysql -u root -p <<'SQL'
+CREATE DATABASE opendataworks DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'opendataworks'@'%' IDENTIFIED BY 'opendataworks123';
+GRANT ALL PRIVILEGES ON opendataworks.* TO 'opendataworks'@'%';
+FLUSH PRIVILEGES;
+SQL
 ```
 
-- 脚本会创建 `opendataworks` 数据库、`opendataworks` 用户、核心表以及示例数据。
-- 需要生成大量演示数据时，执行 `mysql < database/mysql/addons/40-init-test-data.sql`。
+> 如果已经通过 `deploy/docker-compose.dev.yml` 启动了 MySQL，可复用该容器的账号/密码，或在 `deploy/.env` 中调整后重启。
 
 ## 第二步：启动后端 (Spring Boot)
 
@@ -60,10 +61,10 @@ npm run dev -- --host 0.0.0.0 --port 5173
 
 | 问题 | 排查方式 |
 | --- | --- |
-| “Access denied for user 'opendataworks'” | 确认 init 脚本执行成功；`mysql -uopendataworks -popendataworks123 opendataworks -e "SHOW TABLES;"` |
+| “Access denied for user 'opendataworks'” | 确认数据库用户/密码已创建；`mysql -uopendataworks -popendataworks123 opendataworks -e "SHOW TABLES;"` |
 | 调度接口 500 | 检查后端日志；确认 `dolphin.url`/`token`/Project 配置正确且 OpenAPI 可访问 |
-| 前端跨域 | 调整 `frontend/.env.development` 的 `VITE_API_BASE`，或在 backend 开启 CORS |
-| 示例数据缺失 | 重新运行 init script 并确认 `LOAD_SAMPLE_DATA=true` |
+| 前端跨域 | 运行前端时设置 `VITE_API_BASE=http://localhost:8080/api npm run dev`，或在 backend 开启 CORS |
+| 示例数据缺失 | 确认 Flyway 迁移已完成；如需演示数据可根据业务手工插入 |
 | Doris 集群不可用 | 在 `doris_cluster` 表中配置 FE 地址，并在 Portal 中标记 `is_default=1` |
 
 ## 推荐工作流

@@ -7,7 +7,7 @@
 | 层级 | 覆盖内容 | 入口 |
 | --- | --- | --- |
 | 单元/服务测试 | Mapper、Service、调度编排 | `./mvnw test`，可通过 `-Dtest=TaskExecutionWorkflowTest` 定点 |
-| 集成测试 | 真正调用 DolphinScheduler OpenAPI、MySQL | `scripts/run-workflow-test.sh` + `backend/src/test/java/...` |
+| 集成测试 | 真正调用 DolphinScheduler OpenAPI、MySQL | `backend/scripts/run-integration-test.sh` |
 | 手工回归 | 浏览器操作、工作流生命周期、异常场景 | 本指南 “手工测试剧本” |
 | 前端冒烟 | 关键页面渲染、交互 | `docs/reports/BROWSER_TEST_RESULTS.md` 中列出的脚本 |
 
@@ -49,18 +49,15 @@
 
 | 脚本 | 功能 |
 | --- | --- |
-| `scripts/run-workflow-test.sh` | 清理测试数据、执行 `WorkflowLifecycleFullTest` |
-| `scripts/dev/run-integration-test.sh` | 启动临时 MySQL、执行后端/前端集成测试、校验 Dolphin API |
-| `backend/scripts/prepare-test-env.sh` | 校验 DolphinScheduler 连接、创建默认项目/工作流 |
+| `backend/scripts/prepare-test-env.sh` | 校验 DolphinScheduler 连接并指导创建测试项目/工作流 |
 | `backend/scripts/run-integration-test.sh` | 针对 `DolphinSchedulerClientIntegrationTest` 的快捷入口 |
-| `scripts/test/test-workflow-lifecycle.sh` (参考) | 旧版 Bash 测试，可作为 CLI 校验模板 |
+| `mvn test -Dtest=DolphinSchedulerClientIntegrationTest -Dspring.profiles.active=test` | 直接通过 Maven 运行集成测试 |
 
 运行示例：
 
 ```bash
 # 运行集成测试
-DB_ROOT_PASSWORD=root DB_PASSWORD=opendataworks123 \
-scripts/dev/run-integration-test.sh
+(cd backend && bash scripts/run-integration-test.sh)
 ```
 
 ## DolphinScheduler 集成测试

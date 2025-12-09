@@ -37,7 +37,8 @@ Use this method if you have internet access and are deploying directly from the 
 
 3. **Start Services**:
    ```bash
-    ./../scripts/start.sh
+   ../scripts/start.sh
+   ```
 
 ---
 

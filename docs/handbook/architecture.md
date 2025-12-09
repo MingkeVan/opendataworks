@@ -60,7 +60,7 @@
 | --- | --- | --- |
 | 后端 | Java 8+, Spring Boot 2.7.18, MyBatis-Plus 3.5.5, Lombok | 构建脚本 `./mvnw` |
 | 前端 | Vue 3.4+, Vite 5, Pinia, Element Plus, ECharts | `npm run dev/build` |
-| 数据库 | MySQL 8.0+, Doris (目标库) | 初始化脚本见 `database/mysql` |
+| 数据库 | MySQL 8.0+, Doris (目标库) | 初始化脚本见 `backend/src/main/resources/db/migration` (Flyway) |
 
 ## 架构演进提示
 

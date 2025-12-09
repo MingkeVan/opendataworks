@@ -7,7 +7,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "========================================="
 echo "  OpenDataWorks 镜像加载脚本"
@@ -42,7 +42,6 @@ fi
 REQUIRED_IMAGES=(
     "opendataworks-frontend.tar"
     "opendataworks-backend.tar"
-    "opendataworks-dolphin-service.tar"
     "mysql-8.0.tar"
 )
 
@@ -60,25 +59,19 @@ echo "📦 开始加载镜像..."
 echo ""
 
 # 加载前端镜像
-echo "📦 [1/4] 加载前端镜像..."
+echo "📦 [1/3] 加载前端镜像..."
 $CONTAINER_CMD load -i "$IMAGE_DIR/opendataworks-frontend.tar"
 echo "✅ 前端镜像加载完成"
 echo ""
 
 # 加载后端镜像
-echo "📦 [2/4] 加载后端镜像..."
+echo "📦 [2/3] 加载后端镜像..."
 $CONTAINER_CMD load -i "$IMAGE_DIR/opendataworks-backend.tar"
 echo "✅ 后端镜像加载完成"
 echo ""
 
-# 加载 DolphinScheduler 服务镜像
-echo "📦 [3/4] 加载 DolphinScheduler 服务镜像..."
-$CONTAINER_CMD load -i "$IMAGE_DIR/opendataworks-dolphin-service.tar"
-echo "✅ DolphinScheduler 服务镜像加载完成"
-echo ""
-
 # 加载 MySQL 镜像
-echo "📦 [4/4] 加载 MySQL 镜像..."
+echo "📦 [3/3] 加载 MySQL 镜像..."
 $CONTAINER_CMD load -i "$IMAGE_DIR/mysql-8.0.tar"
 echo "✅ MySQL 镜像加载完成"
 echo ""
@@ -96,7 +89,6 @@ echo ""
 IMAGES=(
     "opendataworks-frontend:latest"
     "opendataworks-backend:latest"
-    "opendataworks-dolphin-service:latest"
     "mysql:8.0"
 )
 

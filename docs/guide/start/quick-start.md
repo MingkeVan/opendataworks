@@ -90,6 +90,10 @@ cp deploy/.env.example deploy/.env
 
 # 2. 启动服务
 docker compose -f deploy/docker-compose.dev.yml up -d
+
+# 访问
+# 前端: http://localhost:8081
+# 后端: http://localhost:8080/api
 ```
 
 ### 生产环境/离线部署

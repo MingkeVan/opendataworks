@@ -4,27 +4,31 @@ This directory contains various utility scripts for building and deploying the O
 
 ## Directory Structure
 
-| Directory | Description |
-|-----------|-------------|
-| `build/` | Scripts for building the project artifacts (frontend, backend). |
-| `deploy/` | **Deployment configurations and scripts.** Contains Docker Compose files, environment configurations (`.env`), and control scripts (`start.sh`, `stop.sh`). |
-| `offline/` | Scripts related to creating and managing offline deployment packages. |
+| Path | Description |
+|------|-------------|
+| `build/` | Build helpers for Docker images (single arch / multi-arch). |
+| `start.sh` | Start the stack with `deploy/docker-compose.prod.yml`, auto-creating `deploy/.env` from the example when missing. |
+| `stop.sh` | Stop all services defined in `deploy/docker-compose.prod.yml`. |
+| `restart.sh` | Restart services from the compose file. |
+| `load-images.sh` | Load tarred images from `deploy/docker-images/` (offline deployment). |
+| `load-package-and-start.sh` | Extract an offline package, load images, and optionally start the stack. |
+| `create-offline-package.sh` | Produce an offline tarball containing compose files, scripts, and images. |
 
 ## Common Tasks
 
 ### Deployment
-Go to `deploy/` directory to manage the application lifecycle.
+From the repository root:
 ```bash
-# Start the application
-./scripts/deploy/start.sh
+# Start the application (deploy/.env is required)
+bash scripts/start.sh
 
 # Stop the application
-./scripts/deploy/stop.sh
+bash scripts/stop.sh
 ```
 
 ### Build
 Build the project using scripts in `build/`.
 ```bash
-# Build backend
-./scripts/build/build-backend.sh
+# Build images (multi-arch)
+bash scripts/build/build-multiarch.sh
 ```
