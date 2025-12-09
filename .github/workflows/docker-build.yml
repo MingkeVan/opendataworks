@@ -94,10 +94,11 @@ jobs:
       - name: Create Release Body
         id: release_body
         run: |
+          VERSION=${GITHUB_REF_NAME#v}
           echo "DOCKER_LINKS<<EOF" >> $GITHUB_ENV
           echo "## 🐳 Docker Images" >> $GITHUB_ENV
-          echo "- [Frontend](https://hub.docker.com/r/${{ env.DOCKER_NAMESPACE }}/opendataworks-frontend/tags?page=1&name=${{ github.ref_name }})" >> $GITHUB_ENV
-          echo "- [Backend](https://hub.docker.com/r/${{ env.DOCKER_NAMESPACE }}/opendataworks-backend/tags?page=1&name=${{ github.ref_name }})" >> $GITHUB_ENV
+          echo "- [Frontend](https://hub.docker.com/r/${{ env.DOCKER_NAMESPACE }}/opendataworks-frontend/tags?name=${VERSION})" >> $GITHUB_ENV
+          echo "- [Backend](https://hub.docker.com/r/${{ env.DOCKER_NAMESPACE }}/opendataworks-backend/tags?name=${VERSION})" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
       - name: Create GitHub Release
