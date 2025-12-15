@@ -26,7 +26,8 @@ scripts/build/build-multiarch.sh --namespace your-registry
 - 环境变量重点：
   - `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE=opendataworks`, `MYSQL_USER=opendataworks`
   - `SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/opendataworks`
-  - `DOLPHIN_*` 放在 `.env` 或 Compose env 中
+  - `SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/opendataworks`
+  - DolphinScheduler 配置请在系统管理界面进行
 - 需要扩展端口（如前端 80 → 8081）时，直接修改 `ports`。
 
 ## 离线部署

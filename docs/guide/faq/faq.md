@@ -5,8 +5,8 @@
 **问题**: 发布任务时提示连接失败
 
 **解决方案**:
-- 检查 DolphinScheduler 是否运行，`DOLPHIN_URL` 是否可访问
-- 确认配置文件中的 `dolphin.url`/`dolphin.token` 正确
+- 检查 DolphinScheduler 是否运行
+- 确认系统管理界面中的 DolphinScheduler 配置正确
 - 查看后端日志是否存在 401/404 等 OpenAPI 错误码
 
 ## 2. 前端调用后端接口 CORS 错误
@@ -41,5 +41,5 @@
 
 **解决方案**:
 - 确保 DolphinScheduler 中已创建对应项目
-- 检查 `dolphin.project-name` 配置是否正确
+- 检查系统管理界面中的项目名称配置是否正确
 - 查看后端日志：`backend/logs/*.log` 或容器日志，确认 OpenAPI 是否返回错误码/鉴权失败

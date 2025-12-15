@@ -1,12 +1,12 @@
 package com.onedata.portal.service;
 
-import com.onedata.portal.config.DolphinSchedulerProperties;
+import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.mapper.DorisClusterMapper;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
+
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
@@ -22,7 +22,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class HealthCheckService {
 
-    private final DolphinSchedulerProperties dolphinProperties;
+    private final DolphinConfigService dolphinConfigService;
     private final DorisClusterMapper dorisClusterMapper;
     private final WebClient.Builder webClientBuilder;
 
@@ -47,18 +47,25 @@ public class HealthCheckService {
     public ServiceHealthStatus checkDolphinSchedulerApi() {
         ServiceHealthStatus status = new ServiceHealthStatus();
         status.setServiceName("DolphinScheduler OpenAPI");
-        status.setServiceUrl(dolphinProperties.getUrl());
+
+        DolphinConfig config = dolphinConfigService.getActiveConfig();
+        if (config == null || !Boolean.TRUE.equals(config.getIsActive())) {
+            status.setHealthy(false);
+            status.setMessage("DolphinScheduler config is missing or inactive");
+            return status;
+        }
+        status.setServiceUrl(config.getUrl());
 
         try {
             long startTime = System.currentTimeMillis();
 
             // Check connectivity by querying projects
             WebClient client = webClientBuilder.build();
-            String checkUrl = dolphinProperties.getUrl() + "/projects?pageSize=1";
+            String checkUrl = config.getUrl() + "/projects?pageSize=1";
 
             String response = client.get()
                     .uri(checkUrl)
-                    .header("token", dolphinProperties.getToken())
+                    .header("token", config.getToken())
                     .retrieve()
                     .bodyToMono(String.class)
                     .timeout(Duration.ofSeconds(5))

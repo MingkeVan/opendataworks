@@ -4,7 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.dto.workflow.WorkflowApprovalRequest;
 import com.onedata.portal.dto.workflow.WorkflowPublishRequest;
-import com.onedata.portal.config.DolphinSchedulerProperties;
+
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.WorkflowPublishRecord;
 import com.onedata.portal.entity.WorkflowVersion;
@@ -33,7 +33,6 @@ public class WorkflowPublishService {
     private final DataWorkflowMapper dataWorkflowMapper;
     private final WorkflowDeployService workflowDeployService;
     private final DolphinSchedulerService dolphinSchedulerService;
-    private final DolphinSchedulerProperties dolphinSchedulerProperties;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -61,7 +60,8 @@ public class WorkflowPublishService {
         publishRecordMapper.insert(record);
 
         try {
-            log.info("Workflow {} publish operation {} initiated for version {}", workflowId, record.getOperation(), version.getVersionNo());
+            log.info("Workflow {} publish operation {} initiated for version {}", workflowId, record.getOperation(),
+                    version.getVersionNo());
             switch (record.getOperation()) {
                 case "deploy":
                     handleDeploy(workflow, version, record, request);
@@ -130,9 +130,9 @@ public class WorkflowPublishService {
     }
 
     private void handleDeploy(DataWorkflow workflow,
-                              WorkflowVersion version,
-                              WorkflowPublishRecord record,
-                              WorkflowPublishRequest request) {
+            WorkflowVersion version,
+            WorkflowPublishRecord record,
+            WorkflowPublishRequest request) {
         boolean needApproval = Boolean.TRUE.equals(request.getRequireApproval());
         boolean approved = Boolean.TRUE.equals(request.getApproved());
         if (needApproval && !approved) {
@@ -144,8 +144,8 @@ public class WorkflowPublishService {
     }
 
     private void performDeploy(DataWorkflow workflow,
-                               WorkflowVersion version,
-                               WorkflowPublishRecord record) {
+            WorkflowVersion version,
+            WorkflowPublishRecord record) {
         WorkflowDeployService.DeploymentResult result = workflowDeployService.deploy(workflow);
         workflow.setWorkflowCode(result.getWorkflowCode());
         if (result.getProjectCode() != null) {
@@ -159,8 +159,8 @@ public class WorkflowPublishService {
 
     @Transactional
     public WorkflowPublishRecord approve(Long workflowId,
-                                         Long recordId,
-                                         WorkflowApprovalRequest request) {
+            Long recordId,
+            WorkflowApprovalRequest request) {
         WorkflowPublishRecord record = publishRecordMapper.selectById(recordId);
         if (record == null || !Objects.equals(record.getWorkflowId(), workflowId)) {
             throw new IllegalArgumentException("发布记录不存在");
@@ -183,21 +183,6 @@ public class WorkflowPublishService {
         publishRecordMapper.updateById(record);
         dataWorkflowMapper.updateById(workflow);
         return record;
-    }
-
-    private Long resolveProjectCode(DataWorkflow workflow) {
-        if (workflow.getProjectCode() != null && workflow.getProjectCode() > 0) {
-            return workflow.getProjectCode();
-        }
-        if (dolphinSchedulerProperties.getProjectCode() != null && dolphinSchedulerProperties.getProjectCode() > 0) {
-            return dolphinSchedulerProperties.getProjectCode();
-        }
-        Long resolved = dolphinSchedulerService.getProjectCode();
-        if (resolved != null && resolved > 0) {
-            workflow.setProjectCode(resolved);
-            return resolved;
-        }
-        return null;
     }
 
     private String toJson(Object value) {

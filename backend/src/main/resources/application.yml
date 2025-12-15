@@ -45,21 +45,7 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 # DolphinScheduler 配置
-# DolphinScheduler 配置
-dolphin:
-  url: ${DOLPHIN_URL:http://localhost:12345/dolphinscheduler}
-  token: ${DOLPHIN_TOKEN:383de56bcc1e2e30b871872cf76d4feb}
-  project-name: ${DOLPHIN_PROJECT_NAME:opendataworks}
-  project-code: ${DOLPHIN_PROJECT_CODE:0}
-  tenant-code: default
-  worker-group: default
-  execution-type: PARALLEL
 
-# Dinky 配置（预留）
-dinky:
-  api-url: http://localhost:8888
-  token: your-dinky-token
-  enabled: false
 
 # 日志配置
 logging:

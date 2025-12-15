@@ -37,7 +37,7 @@ services:
     restart: always
     env_file:
       - ./.env
-    # DolphinScheduler 不包含在本 Compose 中，请在 .env 中设置 DOLPHIN_URL/DOLPHIN_TOKEN
+    # DolphinScheduler 不包含在本 Compose 中，配置请在系统管理界面进行
     ports:
       - "8080:8080"
     depends_on:

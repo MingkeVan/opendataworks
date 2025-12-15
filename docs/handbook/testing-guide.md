@@ -23,8 +23,10 @@
 3. 回到 DolphinScheduler → Workflow Definition 页面，确认多出 `test-task-<timestamp>`。
 4. 手动删除（OpenAPI 示例）：
    ```bash
-   DOLPHIN_URL=${DOLPHIN_URL:-http://localhost:12345/dolphinscheduler}
-   DOLPHIN_TOKEN=${DOLPHIN_TOKEN:-changeme}
+   ```bash
+   # 请先在 "系统管理 -> Dolphin 配置" 中获取配置信息
+   DOLPHIN_URL="http://localhost:12345/dolphinscheduler"
+   DOLPHIN_TOKEN="<YOUR_TOKEN>"
    PROJECT_CODE=<from_dolphinscheduler_ui>
    WORKFLOW_CODE=123456789
 
@@ -74,13 +76,14 @@
 4. 确认 MySQL 存在 `opendataworks` 数据库，字符集 `utf8mb4`。
 
 ### 配置参数
-编辑 `backend/src/test/resources/application-test.yml`：
+集成测试使用独立的 `DolphinConfig` 配置，通常通过环境变量 `DS_BASE_URL` 等注入（见 `backend/scripts/prepare-test-env.sh`）。
+
+若需调试 `RealDolphinSchedulerIntegrationTest`，请按照脚本提示导出环境变量。
 
 ```yaml
-dolphin:
-  url: http://localhost:12345/dolphinscheduler
-  token: <DOLPHINSCHEDULER_TOKEN>
-  project-name: opendataworks-test
+# backend/src/test/resources/application-test.yml
+# 已移除 dolphin 配置段，改为代码动态加载或环境变量注入
+
   project-code: <FROM_UI_OR_API>
   tenant-code: default
   worker-group: default

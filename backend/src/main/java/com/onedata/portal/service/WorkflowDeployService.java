@@ -2,7 +2,7 @@ package com.onedata.portal.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.onedata.portal.config.DolphinSchedulerProperties;
+
 import com.onedata.portal.dto.DolphinDatasourceOption;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
@@ -43,7 +43,6 @@ public class WorkflowDeployService {
     private final DataTaskMapper dataTaskMapper;
     private final TableTaskRelationMapper tableTaskRelationMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
-    private final DolphinSchedulerProperties dolphinSchedulerProperties;
 
     private final ObjectMapper objectMapper;
 
@@ -214,12 +213,7 @@ public class WorkflowDeployService {
 
         Long projectCode = workflow.getProjectCode();
         if (projectCode == null || projectCode <= 0) {
-            if (dolphinSchedulerProperties.getProjectCode() != null
-                    && dolphinSchedulerProperties.getProjectCode() > 0) {
-                projectCode = dolphinSchedulerProperties.getProjectCode();
-            } else {
-                projectCode = dolphinSchedulerService.getProjectCode();
-            }
+            projectCode = dolphinSchedulerService.getProjectCode();
         }
         return DeploymentResult.builder()
                 .workflowCode(deployedCode)
