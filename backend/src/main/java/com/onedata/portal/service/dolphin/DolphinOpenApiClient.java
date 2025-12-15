@@ -1,10 +1,10 @@
 package com.onedata.portal.service.dolphin;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.onedata.portal.config.DolphinSchedulerProperties;
+import com.onedata.portal.entity.DolphinConfig;
+import com.onedata.portal.service.DolphinConfigService;
 import com.onedata.portal.dto.dolphin.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -14,43 +14,96 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Direct client for DolphinScheduler OpenAPI.
  * Handles authentication, request building, and response parsing.
+ * Now supports dynamic configuration via DolphinConfigService.
  */
 @Slf4j
 @Component
 public class DolphinOpenApiClient {
 
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
-    private final DolphinSchedulerProperties properties;
+    private final DolphinConfigService dolphinConfigService;
     private final ObjectMapper objectMapper;
-    private final WebClient webClient;
+    private final WebClient.Builder webClientBuilder;
 
-    public DolphinOpenApiClient(DolphinSchedulerProperties properties,
+    // Cache the WebClient instance to avoid recreating it for every request
+    // Key: url + token
+    private final Map<String, WebClient> webClientCache = new ConcurrentHashMap<>();
+
+    public DolphinOpenApiClient(DolphinConfigService dolphinConfigService,
             ObjectMapper objectMapper,
             WebClient.Builder builder) {
-        this.properties = properties;
+        this.dolphinConfigService = dolphinConfigService;
         this.objectMapper = objectMapper;
+        this.webClientBuilder = builder;
+    }
 
-        String baseUrl = properties.getUrl();
-        if (!StringUtils.hasText(baseUrl)) {
-            throw new IllegalStateException("DolphinScheduler URL is not configured (dolphin.url)");
+    private WebClient getWebClient() {
+        DolphinConfig config = dolphinConfigService.getActiveConfig();
+        if (config == null || !StringUtils.hasText(config.getUrl())) {
+            throw new IllegalStateException("DolphinScheduler configuration is missing or URL is empty");
         }
+        return getWebClient(config);
+    }
 
-        this.webClient = builder
-                .baseUrl(baseUrl)
-                .defaultHeader("token", properties.getToken())
-                .defaultHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
-                .build();
+    private WebClient getWebClient(DolphinConfig config) {
+        String key = config.getUrl() + "::" + config.getToken();
+        return webClientCache.computeIfAbsent(key, k -> {
+            log.info("Creating new WebClient for DolphinScheduler at {}", config.getUrl());
+            return webClientBuilder.clone() // Clone builder to avoid side effects
+                    .baseUrl(config.getUrl())
+                    .defaultHeader("token", config.getToken())
+                    .defaultHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .build();
+        });
+    }
+
+    /**
+     * Test connection with provided configuration.
+     */
+    public boolean testConnection(DolphinConfig config) {
+        try {
+            if (config == null || !StringUtils.hasText(config.getUrl())) {
+                return false;
+            }
+            // Use a temporary WebClient for testing
+            WebClient client = webClientBuilder.clone()
+                    .baseUrl(config.getUrl())
+                    .defaultHeader("token", config.getToken())
+                    .defaultHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .build();
+
+            // Try to list projects (lightweight) or just checking system info if possible.
+            // Using list projects as it's common.
+            String path = "/projects";
+            Map<String, String> params = new HashMap<>();
+            params.put("pageNo", "1");
+            params.put("pageSize", "1");
+
+            MultiValueMap<String, String> multiMap = new LinkedMultiValueMap<>();
+            params.forEach(multiMap::add);
+
+            JsonNode result = executeRequest(client, client.get().uri(uriBuilder -> {
+                uriBuilder.path(path);
+                uriBuilder.queryParams(multiMap);
+                return uriBuilder.build();
+            }));
+
+            return result != null;
+        } catch (Exception e) {
+            log.warn("Connection test failed: {}", e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -289,7 +342,7 @@ public class DolphinOpenApiClient {
     // --- Private Helpers ---
 
     private JsonNode getWithParams(String path, MultiValueMap<String, String> queryParams) {
-        return executeRequest(webClient.get().uri(uriBuilder -> {
+        return executeRequest(getWebClient(), getWebClient().get().uri(uriBuilder -> {
             uriBuilder.path(path);
             if (queryParams != null) {
                 uriBuilder.queryParams(queryParams);
@@ -307,24 +360,24 @@ public class DolphinOpenApiClient {
     }
 
     private JsonNode postForm(String path, MultiValueMap<String, String> formData) {
-        return executeRequest(webClient.post()
+        return executeRequest(getWebClient(), getWebClient().post()
                 .uri(path)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .body(BodyInserters.fromFormData(formData)));
     }
 
     private JsonNode putForm(String path, MultiValueMap<String, String> formData) {
-        return executeRequest(webClient.put()
+        return executeRequest(getWebClient(), getWebClient().put()
                 .uri(path)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .body(BodyInserters.fromFormData(formData)));
     }
 
     private JsonNode delete(String path) {
-        return executeRequest(webClient.delete().uri(path));
+        return executeRequest(getWebClient(), getWebClient().delete().uri(path));
     }
 
-    private JsonNode executeRequest(WebClient.RequestHeadersSpec<?> requestSpec) {
+    private JsonNode executeRequest(WebClient client, WebClient.RequestHeadersSpec<?> requestSpec) {
         try {
             String response = requestSpec.retrieve()
                     .bodyToMono(String.class)

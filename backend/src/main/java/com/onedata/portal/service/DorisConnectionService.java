@@ -2,6 +2,8 @@ package com.onedata.portal.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.onedata.portal.config.DorisJdbcProperties;
+import com.onedata.portal.context.UserContextHolder;
+import com.onedata.portal.dto.DorisCredential;
 import com.onedata.portal.dto.TableStatistics;
 import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.mapper.DorisClusterMapper;
@@ -25,6 +27,7 @@ public class DorisConnectionService {
 
     private final DorisClusterMapper dorisClusterMapper;
     private final DorisJdbcProperties dorisJdbcProperties;
+    private final UserMappingService userMappingService;
 
     /**
      * 执行 SQL (主要用于创建表等 DDL)
@@ -78,11 +81,47 @@ public class DorisConnectionService {
         return getConnection(cluster, database);
     }
 
+    /**
+     * 获取连接（使用用户上下文自动选择凭据）
+     * 如果当前有用户上下文，则使用用户对应的Doris凭据
+     * 否则使用集群默认凭据
+     */
     private Connection getConnection(DorisCluster cluster, String database) throws SQLException {
         String targetDb = StringUtils.hasText(database) ? database : dorisJdbcProperties.getDefaultDatabase();
         String url = buildJdbcUrl(cluster, targetDb);
-        String password = cluster.getPassword() == null ? "" : cluster.getPassword();
-        Connection connection = DriverManager.getConnection(url, cluster.getUsername(), password);
+        
+        // 尝试从用户上下文获取用户ID
+        String userId = UserContextHolder.getCurrentUserId();
+        
+        String username;
+        String password;
+        
+        if (userId != null && StringUtils.hasText(database)) {
+            // 有用户上下文且指定了数据库，使用用户映射的Doris凭据
+            try {
+                DorisCredential credential = userMappingService.getDorisCredential(userId, cluster.getId(), database);
+                username = credential.getUsername();
+                password = credential.getPassword();
+                log.debug("Using user-mapped Doris credential for user {} on database {}", userId, database);
+            } catch (Exception e) {
+                // 如果获取用户凭据失败，记录警告并使用集群默认凭据
+                log.warn("Failed to get user-mapped credential for user {} on database {}, falling back to cluster default: {}", 
+                        userId, database, e.getMessage());
+                username = cluster.getUsername();
+                password = cluster.getPassword() == null ? "" : cluster.getPassword();
+            }
+        } else {
+            // 没有用户上下文或未指定数据库，使用集群默认凭据
+            username = cluster.getUsername();
+            password = cluster.getPassword() == null ? "" : cluster.getPassword();
+            if (userId == null) {
+                log.debug("No user context found, using cluster default credential");
+            } else {
+                log.debug("No database specified, using cluster default credential");
+            }
+        }
+        
+        Connection connection = DriverManager.getConnection(url, username, password);
         applySessionCharset(connection);
         return connection;
     }

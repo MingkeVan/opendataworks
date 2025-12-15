@@ -3,7 +3,7 @@ package com.onedata.portal.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.onedata.portal.config.DolphinSchedulerProperties;
+import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.dto.DolphinDatasourceOption;
 import com.onedata.portal.dto.dolphin.*;
 import com.onedata.portal.service.dolphin.DolphinOpenApiClient;
@@ -21,7 +21,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Comparator;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -40,7 +39,7 @@ public class DolphinSchedulerService {
 
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
 
-    private final DolphinSchedulerProperties properties;
+    private final DolphinConfigService dolphinConfigService;
     private final ObjectMapper objectMapper;
     private final DolphinOpenApiClient openApiClient;
     private final AtomicLong taskCodeSequence = new AtomicLong(System.currentTimeMillis());
@@ -48,12 +47,20 @@ public class DolphinSchedulerService {
     // Cache for project code to avoid repeated API calls
     private volatile Long cachedProjectCode;
 
-    public DolphinSchedulerService(DolphinSchedulerProperties properties,
+    public DolphinSchedulerService(DolphinConfigService dolphinConfigService,
             ObjectMapper objectMapper,
             DolphinOpenApiClient openApiClient) {
-        this.properties = properties;
+        this.dolphinConfigService = dolphinConfigService;
         this.objectMapper = objectMapper;
         this.openApiClient = openApiClient;
+    }
+
+    private DolphinConfig getConfig() {
+        DolphinConfig config = dolphinConfigService.getActiveConfig();
+        if (config == null) {
+            throw new IllegalStateException("DolphinScheduler configuration is missing");
+        }
+        return config;
     }
 
     /**
@@ -77,31 +84,32 @@ public class DolphinSchedulerService {
                 return cachedProjectCode;
             }
 
+            String projectName = getConfig().getProjectName();
             try {
-                DolphinProject project = openApiClient.getProject(properties.getProjectName());
+                DolphinProject project = openApiClient.getProject(projectName);
                 if (project != null) {
                     cachedProjectCode = project.getCode();
-                    log.info("Queried project code for {}: {}", properties.getProjectName(), cachedProjectCode);
+                    log.info("Queried project code for {}: {}", projectName, cachedProjectCode);
                     return cachedProjectCode;
                 } else {
-                    log.info("Project {} not found. Attempting to create it...", properties.getProjectName());
+                    log.info("Project {} not found. Attempting to create it...", projectName);
                     try {
-                        Long newCode = openApiClient.createProject(properties.getProjectName(),
+                        Long newCode = openApiClient.createProject(projectName,
                                 "Auto-created by OpenDataWorks");
                         if (newCode != null && newCode > 0) {
                             cachedProjectCode = newCode;
-                            log.info("Created project {}: {}", properties.getProjectName(), cachedProjectCode);
+                            log.info("Created project {}: {}", projectName, cachedProjectCode);
                             return cachedProjectCode;
                         }
                     } catch (Exception ex) {
-                        log.error("Failed to auto-create project {}", properties.getProjectName(), ex);
+                        log.error("Failed to auto-create project {}", projectName, ex);
                     }
 
-                    log.warn("Project {} could not be found or created", properties.getProjectName());
+                    log.warn("Project {} could not be found or created", projectName);
                     return null;
                 }
             } catch (Exception e) {
-                log.warn("Failed to query project code for {}: {}", properties.getProjectName(), e.getMessage());
+                log.warn("Failed to query project code for {}: {}", projectName, e.getMessage());
                 return null;
             }
         }
@@ -139,12 +147,13 @@ public class DolphinSchedulerService {
 
             log.info("Syncing workflow '{}' to project {}", workflowName, projectCode);
 
+            DolphinConfig config = getConfig();
             return openApiClient.createOrUpdateProcessDefinition(
                     projectCode,
                     workflowName,
                     "", // description
-                    properties.getTenantCode(),
-                    properties.getExecutionType(),
+                    config.getTenantCode(),
+                    config.getExecutionType(),
                     relationJson,
                     taskJson,
                     locationJson,
@@ -178,6 +187,7 @@ public class DolphinSchedulerService {
             throw new IllegalStateException("Cannot start workflow: Project not found");
         }
 
+        DolphinConfig config = getConfig();
         Long instanceId = openApiClient.startProcessInstance(
                 projectCode,
                 workflowCode,
@@ -186,8 +196,8 @@ public class DolphinSchedulerService {
                 "NONE", // warningType
                 null, // warningGroupId
                 "START_PROCESS",
-                properties.getWorkerGroup(),
-                properties.getTenantCode());
+                config.getWorkerGroup(),
+                config.getTenantCode());
 
         String executionId = instanceId != null ? String.valueOf(instanceId) : "exec-" + System.currentTimeMillis();
         log.info("Started workflow instance for definition {} -> {}", workflowCode, executionId);
@@ -314,8 +324,9 @@ public class DolphinSchedulerService {
         UriComponentsBuilder builder = UriComponentsBuilder
                 .fromHttpUrl(String.format("%s/ui/projects/%d/task/instances", baseUrl, projectCode))
                 .queryParam("taskCode", taskCode);
-        if (StringUtils.hasText(properties.getProjectName())) {
-            builder.queryParam("projectName", properties.getProjectName());
+        String projectName = getConfig().getProjectName();
+        if (StringUtils.hasText(projectName)) {
+            builder.queryParam("projectName", projectName);
         }
         return builder.build(true).toUriString();
     }
@@ -325,7 +336,7 @@ public class DolphinSchedulerService {
      * slashes.
      */
     public String getWebuiBaseUrl() {
-        String url = properties.getUrl();
+        String url = getConfig().getUrl();
         if (!StringUtils.hasText(url)) {
             return null;
         }
@@ -397,7 +408,8 @@ public class DolphinSchedulerService {
         payload.put("failRetryTimes", String.valueOf(Math.max(retryTimes, 0)));
         payload.put("flag", "YES");
         payload.put("taskPriority", taskPriority);
-        payload.put("workerGroup", properties.getWorkerGroup());
+        DolphinConfig config = getConfig();
+        payload.put("workerGroup", config.getWorkerGroup());
         payload.put("environmentCode", -1);
         payload.put("taskType", nodeType == null ? "SHELL" : nodeType);
         payload.put("timeout", timeoutSeconds);

@@ -47,9 +47,9 @@
             <el-icon><Warning /></el-icon>
             <span>数据巡检</span>
           </el-menu-item>
-          <el-menu-item index="/settings/doris-clusters">
+          <el-menu-item index="/settings">
             <el-icon><Setting /></el-icon>
-            <span>Doris 集群</span>
+            <span>配置管理</span>
           </el-menu-item>
         </el-menu>
       </div>
@@ -94,7 +94,7 @@ const activeMenu = computed(() => {
     return '/inspection'
   }
   if (path.startsWith('/settings')) {
-    return '/settings/doris-clusters'
+    return '/settings'
   }
   return path
 })

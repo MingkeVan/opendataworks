@@ -66,3 +66,10 @@ logging:
   level:
     com.onedata.portal: debug
     org.springframework.web: info
+
+# 认证配置
+auth:
+  anonymous:
+    enabled: true
+    user-id: 1
+    username: admin

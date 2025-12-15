@@ -1,7 +1,7 @@
 package com.onedata.portal.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.onedata.portal.config.DolphinSchedulerProperties;
+import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.dto.dolphin.DolphinProject;
 import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
 import com.onedata.portal.service.dolphin.DolphinOpenApiClient;
@@ -27,7 +27,6 @@ class RealDolphinSchedulerIntegrationTest {
 
     private DolphinSchedulerService service;
     private DolphinOpenApiClient openApiClient;
-    private DolphinSchedulerProperties properties;
 
     // Configuration from environment to avoid hardcoding credentials
     private static final String SERVICE_URL = System.getenv("DS_BASE_URL");
@@ -39,18 +38,27 @@ class RealDolphinSchedulerIntegrationTest {
         Assumptions.assumeTrue(StringUtils.hasText(SERVICE_URL) && StringUtils.hasText(TOKEN),
                 "Set DS_BASE_URL and DS_TOKEN to run real DolphinScheduler integration tests.");
 
-        properties = new DolphinSchedulerProperties();
-        properties.setUrl(SERVICE_URL);
-        properties.setToken(TOKEN);
-        properties.setProjectName(StringUtils.hasText(PROJECT_NAME) ? PROJECT_NAME : "opendataworks");
-        properties.setTenantCode("default");
-        properties.setWorkerGroup("default");
-        properties.setExecutionType("PARALLEL");
+        // Create config from env vars
+        DolphinConfig config = new DolphinConfig();
+        config.setUrl(SERVICE_URL);
+        config.setToken(TOKEN);
+        config.setProjectName(StringUtils.hasText(PROJECT_NAME) ? PROJECT_NAME : "opendataworks");
+        config.setTenantCode("default");
+        config.setWorkerGroup("default");
+        config.setExecutionType("PARALLEL");
+        config.setIsActive(true);
 
+        // Mock config service
+        DolphinConfigService configService = org.mockito.Mockito.mock(DolphinConfigService.class);
+        org.mockito.Mockito.when(configService.getActiveConfig()).thenReturn(config);
+
+        // Use real mapper/builder where possible or mocks
         ObjectMapper objectMapper = new ObjectMapper();
         WebClient.Builder builder = WebClient.builder();
-        openApiClient = new DolphinOpenApiClient(properties, objectMapper, builder);
-        service = new DolphinSchedulerService(properties, objectMapper, openApiClient);
+
+        // Instantiate real client with mocked config service
+        openApiClient = new DolphinOpenApiClient(configService, objectMapper, builder);
+        service = new DolphinSchedulerService(configService, objectMapper, openApiClient);
     }
 
     @Test

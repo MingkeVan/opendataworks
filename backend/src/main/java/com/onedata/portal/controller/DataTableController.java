@@ -1,6 +1,7 @@
 package com.onedata.portal.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.onedata.portal.annotation.RequireAuth;
 import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
 import com.onedata.portal.dto.TableOption;
@@ -192,6 +193,7 @@ public class DataTableController {
      * 支持缓存机制，默认缓存5分钟
      * 使用 forceRefresh=true 强制刷新
      */
+    @RequireAuth
     @GetMapping("/{id}/statistics")
     public Result<TableStatistics> getStatistics(
             @PathVariable Long id,
@@ -308,6 +310,7 @@ public class DataTableController {
     /**
      * 获取表的建表语句（DDL）
      */
+    @RequireAuth
     @GetMapping("/{id}/ddl")
     public Result<String> getTableDdl(
             @PathVariable Long id,
@@ -344,6 +347,7 @@ public class DataTableController {
     /**
      * 预览表数据
      */
+    @RequireAuth
     @GetMapping("/{id}/preview")
     public Result<List<Map<String, Object>>> previewTableData(
             @PathVariable Long id,

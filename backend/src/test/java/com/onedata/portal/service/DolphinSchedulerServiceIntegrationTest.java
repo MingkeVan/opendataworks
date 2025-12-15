@@ -1,6 +1,6 @@
 package com.onedata.portal.service;
 
-import com.onedata.portal.config.DolphinSchedulerProperties;
+import com.onedata.portal.entity.DolphinConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.service.dolphin.DolphinOpenApiClient;
 import com.onedata.portal.dto.dolphin.*;
@@ -38,26 +38,32 @@ import static org.mockito.Mockito.*;
 class DolphinSchedulerServiceIntegrationTest {
 
     private DolphinSchedulerService service;
-    private DolphinSchedulerProperties properties;
+
     private static final String TEST_WORKFLOW_NAME = "java-integration-test";
 
     @Mock
     private DolphinOpenApiClient openApiClient;
 
+    @Mock
+    private DolphinConfigService dolphinConfigService;
+
     @BeforeEach
     void setUp() {
-        // Setup properties
-        properties = new DolphinSchedulerProperties();
-        properties.setUrl("http://localhost:12345/dolphinscheduler");
-        properties.setToken("test-token");
-        properties.setProjectName("test-project");
-        properties.setTenantCode("default");
-        properties.setWorkerGroup("default");
-        properties.setExecutionType("PARALLEL");
+        // Setup properties - mocking DolphinConfig instead of Properties
+        DolphinConfig config = new DolphinConfig();
+        config.setUrl("http://localhost:12345/dolphinscheduler");
+        config.setToken("test-token");
+        config.setProjectName("test-project");
+        config.setTenantCode("default");
+        config.setWorkerGroup("default");
+        config.setExecutionType("PARALLEL");
+
+        // Mock service behavior
+        lenient().when(dolphinConfigService.getActiveConfig()).thenReturn(config);
 
         // Create service instance
         ObjectMapper objectMapper = new ObjectMapper();
-        service = new DolphinSchedulerService(properties, objectMapper, openApiClient);
+        service = new DolphinSchedulerService(dolphinConfigService, objectMapper, openApiClient);
 
         System.out.println("============================================================");
         System.out.println("Starting DolphinScheduler Integration Test (Mocked)");
@@ -139,7 +145,7 @@ class DolphinSchedulerServiceIntegrationTest {
                 locations);
 
         assertEquals(999L, workflowCode);
-        verify(openApiClient, times(1)).getProject(properties.getProjectName());
+        verify(openApiClient, times(1)).getProject("test-project");
         verify(openApiClient, times(1)).createOrUpdateProcessDefinition(eq(123456L), eq(TEST_WORKFLOW_NAME), any(),
                 any(), any(), any(), any(), any(), isNull());
 

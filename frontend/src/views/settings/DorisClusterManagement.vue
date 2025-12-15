@@ -4,7 +4,6 @@
       <template #header>
         <div class="card-header">
           <div>
-            <h3>Doris 集群管理</h3>
             <span class="sub-title">配置 Doris FE 地址、认证信息，支持设置默认集群与连通性检测</span>
           </div>
           <div class="actions">
@@ -317,7 +316,7 @@ loadClusters()
 
 <style scoped>
 .doris-cluster-page {
-  padding: 12px;
+  /* padding removed for tab integration */
 }
 
 .card-header {

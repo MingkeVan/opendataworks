@@ -36,6 +36,8 @@ public class DataQueryHistory {
 
     private String resultPreview;
 
+    private String executedBy;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime executedAt;
 }

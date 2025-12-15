@@ -1,6 +1,8 @@
 package com.onedata.portal.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.onedata.portal.annotation.RequireAuth;
+import com.onedata.portal.context.UserContextHolder;
 import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
 import com.onedata.portal.dto.SqlQueryResponse;
@@ -31,6 +33,7 @@ public class DataTaskController {
     /**
      * 分页查询任务列表
      */
+    @RequireAuth
     @GetMapping
     public Result<PageResult<DataTask>> list(
             @RequestParam(defaultValue = "1") int pageNum,
@@ -40,7 +43,9 @@ public class DataTaskController {
             @RequestParam(required = false) Long workflowId,
             @RequestParam(required = false) Long upstreamTaskId,
             @RequestParam(required = false) Long downstreamTaskId) {
-        Page<DataTask> page = dataTaskService.list(pageNum, pageSize, taskType, status,
+        // 获取当前用户ID，只返回该用户创建的工作流
+        String userId = UserContextHolder.getCurrentUserId();
+        Page<DataTask> page = dataTaskService.listByOwner(userId, pageNum, pageSize, taskType, status,
                 workflowId, upstreamTaskId, downstreamTaskId);
         return Result.success(PageResult.of(page.getTotal(), page.getRecords()));
     }
@@ -56,8 +61,12 @@ public class DataTaskController {
     /**
      * 创建任务
      */
+    @RequireAuth
     @PostMapping
     public Result<DataTask> create(@RequestBody TaskCreateRequest request) {
+        // 设置创建者为当前用户
+        String userId = UserContextHolder.getCurrentUserId();
+        request.getTask().setOwner(userId);
         DataTask task = dataTaskService.create(
                 request.getTask(),
                 request.getInputTableIds(),
@@ -68,6 +77,7 @@ public class DataTaskController {
     /**
      * 更新任务
      */
+    @RequireAuth
     @PutMapping("/{id}")
     public Result<DataTask> update(@PathVariable Long id, @RequestBody TaskUpdateRequest request) {
         request.getTask().setId(id);
@@ -81,6 +91,7 @@ public class DataTaskController {
     /**
      * 执行整个工作流（包含所有依赖关系）
      */
+    @RequireAuth
     @PostMapping("/{id}/execute-workflow")
     public Result<Void> executeWorkflow(@PathVariable Long id) {
         dataTaskService.executeWorkflow(id);

@@ -1,12 +1,11 @@
 package com.onedata.portal.controller;
 
+import com.onedata.portal.annotation.RequireAuth;
 import com.onedata.portal.dto.Result;
 import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.service.DorisClusterService;
 import com.onedata.portal.service.DorisConnectionService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
-
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -60,11 +59,13 @@ public class DorisClusterController {
         return Result.success(dorisConnectionService.testConnection(id));
     }
 
+    @RequireAuth
     @GetMapping("/{id}/databases")
     public Result<List<String>> listDatabases(@PathVariable Long id) {
         return Result.success(dorisConnectionService.getAllDatabases(id));
     }
 
+    @RequireAuth
     @GetMapping("/{id}/databases/{database}/tables")
     public Result<List<Map<String, Object>>> listTables(@PathVariable Long id, @PathVariable String database) {
         return Result.success(dorisConnectionService.getTablesInDatabase(id, database));

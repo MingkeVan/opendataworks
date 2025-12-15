@@ -126,6 +126,23 @@ public class DataQueryService {
         return historyMapper.selectPage(page, wrapper);
     }
 
+    /**
+     * 查询指定用户的历史记录
+     */
+    public Page<DataQueryHistory> listHistoryByUser(String userId, Integer pageNum, Integer pageSize, Long clusterId, String database) {
+        Page<DataQueryHistory> page = new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize);
+        LambdaQueryWrapper<DataQueryHistory> wrapper = new LambdaQueryWrapper<DataQueryHistory>()
+            .eq(DataQueryHistory::getExecutedBy, userId)
+            .orderByDesc(DataQueryHistory::getExecutedAt);
+        if (clusterId != null) {
+            wrapper.eq(DataQueryHistory::getClusterId, clusterId);
+        }
+        if (StringUtils.hasText(database)) {
+            wrapper.eq(DataQueryHistory::getDatabaseName, database);
+        }
+        return historyMapper.selectPage(page, wrapper);
+    }
+
     void validateSql(String sql) {
         if (!StringUtils.hasText(sql)) {
             throw new RuntimeException("SQL 不能为空");
@@ -179,6 +196,8 @@ public class DataQueryService {
         history.setHasMore(hasMore ? 1 : 0);
         history.setResultPreview(buildPreviewJson(columns, rows));
         history.setExecutedAt(LocalDateTime.now());
+        // 从用户上下文获取当前用户ID
+        history.setExecutedBy(com.onedata.portal.context.UserContextHolder.getCurrentUserId());
         historyMapper.insert(history);
         return history;
     }

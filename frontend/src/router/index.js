@@ -95,10 +95,10 @@ const routes = [
         meta: { title: '数据巡检' }
       },
       {
-        path: '/settings/doris-clusters',
-        name: 'DorisClusterManagement',
-        component: () => import('@/views/settings/DorisClusterManagement.vue'),
-        meta: { title: 'Doris 集群管理' }
+        path: '/settings',
+        name: 'Settings',
+        component: () => import('@/views/settings/ConfigurationManagement.vue'),
+        meta: { title: '配置管理' }
       }
     ]
   }

@@ -101,6 +101,52 @@ public class DataTaskService {
     }
 
     /**
+     * 分页查询指定用户的任务列表
+     */
+    public Page<DataTask> listByOwner(String owner,
+            int pageNum,
+            int pageSize,
+            String taskType,
+            String status,
+            Long workflowId,
+            Long upstreamTaskId,
+            Long downstreamTaskId) {
+        Page<DataTask> page = new Page<>(pageNum, pageSize);
+        LambdaQueryWrapper<DataTask> wrapper = new LambdaQueryWrapper<>();
+
+        // 添加owner过滤条件
+        wrapper.eq(DataTask::getOwner, owner);
+
+        if (taskType != null && !taskType.isEmpty()) {
+            wrapper.eq(DataTask::getTaskType, taskType);
+        }
+        if (status != null && !status.isEmpty()) {
+            wrapper.eq(DataTask::getStatus, status);
+        }
+
+        if (workflowId != null) {
+            List<Long> workflowTaskIds = findTaskIdsByWorkflow(workflowId);
+            applyIdFilter(wrapper, workflowTaskIds);
+        }
+
+        if (upstreamTaskId != null) {
+            List<Long> downstreamTaskIds = findDownstreamTaskIds(upstreamTaskId);
+            applyIdFilter(wrapper, downstreamTaskIds);
+        }
+
+        if (downstreamTaskId != null) {
+            List<Long> upstreamTaskIdsForDownstream = findUpstreamTaskIds(downstreamTaskId);
+            applyIdFilter(wrapper, upstreamTaskIdsForDownstream);
+        }
+
+        wrapper.orderByDesc(DataTask::getCreatedAt);
+        Page<DataTask> result = dataTaskMapper.selectPage(page, wrapper);
+        enrichWorkflowMetadata(result.getRecords());
+        attachExecutionStatus(result.getRecords());
+        return result;
+    }
+
+    /**
      * 根据ID获取任务
      */
     public DataTask getById(Long id) {
