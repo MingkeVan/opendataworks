@@ -94,10 +94,15 @@ public class WorkflowDeployService {
         List<DolphinSchedulerService.TaskRelationPayload> relationPayloads = new ArrayList<>();
         List<DolphinSchedulerService.TaskLocationPayload> locationPayloads = new ArrayList<>();
 
-        List<DataTask> orderedTasks = bindings.stream()
-                .sorted(Comparator.comparing(WorkflowTaskRelation::getCreatedAt))
+        // Use topological sort to determine task order for correct DAG layout
+        List<DataTask> allTasks = bindings.stream()
                 .map(binding -> taskMap.get(binding.getTaskId()))
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
+        // Get both sorted tasks and their topological levels for layout
+        TopologicalSortResult sortResult = topologicalSortWithLevels(allTasks, readTables, writeTables);
+        List<DataTask> orderedTasks = sortResult.getSortedTasks();
+        Map<Long, Integer> taskLevels = sortResult.getTaskLevels();
 
         dolphinSchedulerService.alignSequenceWithExistingTasks(
                 orderedTasks.stream()
@@ -111,7 +116,7 @@ public class WorkflowDeployService {
                 .collect(Collectors.toMap(DolphinDatasourceOption::getName, opt -> opt,
                         (v1, v2) -> v1));
 
-        int index = 0;
+        Map<Integer, Integer> levelOffsets = new HashMap<>(); // Track Y offset per level
         Map<Long, WorkflowTaskRelation> bindingByTaskId = bindings.stream()
                 .collect(Collectors.toMap(WorkflowTaskRelation::getTaskId, b -> b));
 
@@ -189,10 +194,16 @@ public class WorkflowDeployService {
                 }
             }
 
+            // Use level-based layout: X grows with level (left-to-right), Y offsets for
+            // parallel tasks
+            int level = taskLevels.getOrDefault(task.getId(), 0);
+            int offsetInLevel = levelOffsets.getOrDefault(level, 0);
+            levelOffsets.put(level, offsetInLevel + 1);
+
             locationPayloads.add(dolphinSchedulerService.buildLocation(
                     task.getDolphinTaskCode(),
-                    index++,
-                    computeLane(task)));
+                    level,
+                    offsetInLevel));
         }
 
         long workflowCode = workflow.getWorkflowCode() == null ? 0L : workflow.getWorkflowCode();
@@ -271,19 +282,135 @@ public class WorkflowDeployService {
         return upstreams;
     }
 
-    private int computeLane(DataTask task) {
-        if (task.getTaskType() == null) {
+    /**
+     * Result of topological sort containing both sorted tasks and their levels.
+     */
+    @Data
+    private static class TopologicalSortResult {
+        private final List<DataTask> sortedTasks;
+        private final Map<Long, Integer> taskLevels; // taskId -> topological level (0-based)
+    }
+
+    /**
+     * Perform topological sort on tasks based on data lineage dependencies.
+     * Uses Kahn's algorithm to ensure upstream tasks appear before downstream
+     * tasks.
+     * Also computes the topological level for each task for proper DAG layout.
+     * Level 0 = no upstream dependencies, Level N = max upstream level + 1.
+     */
+    private TopologicalSortResult topologicalSortWithLevels(List<DataTask> tasks,
+            Map<Long, Set<Long>> readTables,
+            Map<Long, Set<Long>> writeTables) {
+        if (CollectionUtils.isEmpty(tasks)) {
+            return new TopologicalSortResult(Collections.emptyList(), Collections.emptyMap());
+        }
+
+        Map<Long, DataTask> taskMap = tasks.stream()
+                .collect(Collectors.toMap(DataTask::getId, t -> t));
+
+        // Build adjacency graph (upstream -> downstreams) and reverse (downstream ->
+        // upstreams)
+        Map<Long, List<Long>> adjacency = new HashMap<>();
+        Map<Long, List<Long>> reverseAdjacency = new HashMap<>(); // for level calculation
+        Map<Long, Integer> inDegree = new HashMap<>();
+
+        // Initialize graph
+        for (DataTask task : tasks) {
+            inDegree.put(task.getId(), 0);
+            adjacency.put(task.getId(), new ArrayList<>());
+            reverseAdjacency.put(task.getId(), new ArrayList<>());
+        }
+
+        // Populate edges
+        for (DataTask task : tasks) {
+            List<DataTask> upstreams = resolveUpstreamTasks(task, tasks, readTables, writeTables);
+            for (DataTask upstream : upstreams) {
+                adjacency.get(upstream.getId()).add(task.getId());
+                reverseAdjacency.get(task.getId()).add(upstream.getId());
+                inDegree.merge(task.getId(), 1, Integer::sum);
+            }
+        }
+
+        // Compute topological levels (longest path from any source)
+        Map<Long, Integer> taskLevels = new HashMap<>();
+        for (DataTask task : tasks) {
+            computeLevel(task.getId(), reverseAdjacency, taskLevels);
+        }
+
+        // Kahn's Algorithm for sorted order
+        java.util.Queue<Long> queue = new java.util.LinkedList<>();
+
+        // Add initial zero-degree nodes in a deterministic order (by level first, then
+        // by ID)
+        tasks.stream()
+                .filter(t -> inDegree.get(t.getId()) == 0)
+                .sorted(Comparator.comparing((DataTask t) -> taskLevels.getOrDefault(t.getId(), 0))
+                        .thenComparing(DataTask::getId))
+                .map(DataTask::getId)
+                .forEach(queue::add);
+
+        List<DataTask> result = new ArrayList<>();
+        while (!queue.isEmpty()) {
+            Long currentId = queue.poll();
+            result.add(taskMap.get(currentId));
+
+            if (adjacency.containsKey(currentId)) {
+                // Sort downstreams by level then ID for deterministic order
+                List<Long> downstreams = adjacency.get(currentId);
+                downstreams.sort(Comparator.comparing((Long id) -> taskLevels.getOrDefault(id, 0))
+                        .thenComparing(id -> id));
+
+                for (Long downstreamId : downstreams) {
+                    inDegree.put(downstreamId, inDegree.get(downstreamId) - 1);
+                    if (inDegree.get(downstreamId) == 0) {
+                        queue.add(downstreamId);
+                    }
+                }
+            }
+        }
+
+        // Cycle handling: if we didn't visit all nodes, there's a cycle.
+        if (result.size() < tasks.size()) {
+            log.warn(
+                    "Cycle detected or disconnected components in workflow tasks. topologicalSort visited {}/{} tasks.",
+                    result.size(), tasks.size());
+            Set<Long> processed = result.stream().map(DataTask::getId).collect(Collectors.toSet());
+
+            // Append remaining tasks in level/ID order
+            tasks.stream()
+                    .filter(t -> !processed.contains(t.getId()))
+                    .sorted(Comparator.comparing((DataTask t) -> taskLevels.getOrDefault(t.getId(), 0))
+                            .thenComparing(DataTask::getId))
+                    .forEach(result::add);
+        }
+
+        return new TopologicalSortResult(result, taskLevels);
+    }
+
+    /**
+     * Recursively compute the topological level of a task.
+     * Level = max(upstream levels) + 1, or 0 if no upstreams.
+     */
+    private int computeLevel(Long taskId, Map<Long, List<Long>> reverseAdjacency, Map<Long, Integer> levels) {
+        if (levels.containsKey(taskId)) {
+            return levels.get(taskId);
+        }
+
+        List<Long> upstreams = reverseAdjacency.getOrDefault(taskId, Collections.emptyList());
+        if (upstreams.isEmpty()) {
+            levels.put(taskId, 0);
             return 0;
         }
-        switch (task.getTaskType().toLowerCase()) {
-            case "stream":
-                return 1;
-            case "dim":
-            case "dimension":
-                return 2;
-            default:
-                return 0;
+
+        int maxUpstreamLevel = 0;
+        for (Long upstreamId : upstreams) {
+            int upstreamLevel = computeLevel(upstreamId, reverseAdjacency, levels);
+            maxUpstreamLevel = Math.max(maxUpstreamLevel, upstreamLevel);
         }
+
+        int level = maxUpstreamLevel + 1;
+        levels.put(taskId, level);
+        return level;
     }
 
     private String mapPriority(Integer value) {
