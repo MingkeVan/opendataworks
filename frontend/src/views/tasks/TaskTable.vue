@@ -48,22 +48,7 @@
       </el-button>
     </div>
 
-    <el-alert
-      v-if="!workflowId && !embedded"
-      type="info"
-      :closable="false"
-      show-icon
-      class="publish-tip"
-      title="任务发布已迁移至工作流管理"
-    >
-      <template #default>
-        请在
-        <router-link to="/workflows">
-          工作流管理
-        </router-link>
-        页面审核 DAG 并执行发布，确保流程一致。
-      </template>
-    </el-alert>
+
 
     <el-table 
       :data="tableData" 
@@ -466,7 +451,5 @@ watch(() => props.workflowId, () => {
   color: #909399;
 }
 
-.publish-tip {
-  margin-top: 16px;
-}
+
 </style>
