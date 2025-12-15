@@ -43,9 +43,8 @@ public class DataTaskController {
             @RequestParam(required = false) Long workflowId,
             @RequestParam(required = false) Long upstreamTaskId,
             @RequestParam(required = false) Long downstreamTaskId) {
-        // 获取当前用户ID，只返回该用户创建的工作流
-        String userId = UserContextHolder.getCurrentUserId();
-        Page<DataTask> page = dataTaskService.listByOwner(userId, pageNum, pageSize, taskType, status,
+        // 不强制过滤 owner，允许查看所有任务
+        Page<DataTask> page = dataTaskService.list(pageNum, pageSize, taskType, status,
                 workflowId, upstreamTaskId, downstreamTaskId);
         return Result.success(PageResult.of(page.getTotal(), page.getRecords()));
     }
