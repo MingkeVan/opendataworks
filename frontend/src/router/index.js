@@ -64,18 +64,7 @@ const routes = [
         path: '/tasks',
         redirect: { path: '/workflows', query: { tab: 'tasks' } }
       },
-      {
-        path: '/tasks/create',
-        name: 'TaskCreate',
-        component: () => import('@/views/tasks/TaskForm.vue'),
-        meta: { title: '创建任务' }
-      },
-      {
-        path: '/tasks/:id/edit',
-        name: 'TaskEdit',
-        component: () => import('@/views/tasks/TaskForm.vue'),
-        meta: { title: '编辑任务' }
-      },
+
       {
         path: '/lineage',
         name: 'Lineage',

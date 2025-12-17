@@ -681,7 +681,7 @@
                       </template>
                     </el-table-column>
                   </el-table>
-                  <el-empty v-if="!displayFields.length" description="暂无字段信息" />
+                  <el-empty v-if="!displayFields || !displayFields.length" description="暂无字段信息" />
                 </div>
               </el-tab-pane>
 
@@ -934,12 +934,14 @@
         </el-button>
       </template>
     </el-dialog>
+    
+    <TaskEditDrawer ref="taskDrawerRef" @success="handleTaskSuccess" />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, nextTick, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Search,
@@ -959,6 +961,7 @@ import { tableApi } from '@/api/table'
 import * as echarts from 'echarts'
 import { businessDomainApi, dataDomainApi } from '@/api/domain'
 import { tableDesignerApi } from '@/api/tableDesigner'
+import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -1017,6 +1020,8 @@ const auditLoading = ref(false)
 const syncLoading = ref(false)
 const auditResult = ref(null)
 const differenceDialogVisible = ref(false)
+
+const taskDrawerRef = ref(null)
 
 // 字段管理计算属性
 const displayFields = computed(() => fields.value)
@@ -1707,19 +1712,21 @@ const goLineage = () => {
 // 新增关联任务
 const goCreateRelatedTask = (relation) => {
   if (!selectedTable.value) return
-  router.push({
-    path: '/tasks/create',
-    query: {
-      relation,
-      tableId: selectedTable.value.id,
-      redirect: route.fullPath
-    }
+  taskDrawerRef.value?.open(null, {
+    relation,
+    tableId: selectedTable.value.id
   })
 }
 
 const goTaskDetail = (taskId) => {
   if (!taskId) return
-  router.push(`/tasks/${taskId}/edit`)
+  taskDrawerRef.value?.open(taskId)
+}
+
+const handleTaskSuccess = async () => {
+    if (selectedTable.value) {
+        await loadTableDetail(selectedTable.value.id)
+    }
 }
 
 // 删除表
@@ -1855,11 +1862,11 @@ const getLayerType = (layer) => {
     DWS: 'info',
     ADS: 'danger'
   }
-  return types[layer] || ''
+  return types[layer] || 'info'
 }
 
 const taskStatusTag = (status) => {
-  if (!status) return ''
+  if (!status) return 'info'
   switch (status) {
     case 'published':
     case 'running':
@@ -1869,7 +1876,7 @@ const taskStatusTag = (status) => {
     case 'failed':
       return 'danger'
     default:
-      return ''
+      return 'info'
   }
 }
 

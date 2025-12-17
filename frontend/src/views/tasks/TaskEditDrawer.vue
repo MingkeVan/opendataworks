@@ -168,7 +168,11 @@ const visible = ref(false)
 const isEdit = ref(false)
 const loading = ref(false)
 const formRef = ref(null)
+const drawerRef = ref(null)
 const lockedWorkflowId = ref(null)
+const taskNameError = ref('')
+const taskNameChecking = ref(false)
+const originalTaskName = ref('')
 const workflowOptions = ref([])
 
 const fetchWorkflowOptions = async () => {
@@ -370,6 +374,19 @@ const open = async (id = null, initialData = {}) => {
     if (initialData.workflowId) {
         form.task.workflowId = initialData.workflowId
         lockedWorkflowId.value = initialData.workflowId
+    }
+
+    // Handle relation preset (from TableDetail/Management)
+    if (initialData.relation && initialData.tableId) {
+      const tableId = Number(initialData.tableId)
+      if (Number.isFinite(tableId)) {
+        await ensureTableOptionsLoaded([tableId])
+        if (initialData.relation === 'write') {
+           form.outputTableIds = [tableId]
+        } else if (initialData.relation === 'read') {
+           form.inputTableIds = [tableId]
+        }
+      }
     }
   }
 }

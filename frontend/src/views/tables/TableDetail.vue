@@ -441,6 +441,8 @@
         />
       </el-card>
     </template>
+    
+    <TaskEditDrawer ref="taskDrawerRef" @success="refreshRelatedTasks" />
   </div>
 </template>
 
@@ -452,6 +454,7 @@ import { Top, Bottom } from '@element-plus/icons-vue'
 import { tableApi } from '@/api/table'
 import { businessDomainApi, dataDomainApi } from '@/api/domain'
 import { tableDesignerApi } from '@/api/tableDesigner'
+import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -465,6 +468,7 @@ const loading = ref(false)
 const saving = ref(false)
 const statisticsLoading = ref(false)
 const statisticsError = ref('')
+const taskDrawerRef = ref(null)
 
 const tableNameFormRef = ref()
 const tableNameForm = reactive({
@@ -795,7 +799,14 @@ const taskStatusTag = (status) => {
 }
 
 const goTaskDetail = (taskId) => {
-  router.push(`/tasks/${taskId}/edit`)
+  taskDrawerRef.value?.open(taskId)
+}
+
+const refreshRelatedTasks = async () => {
+  if (table.value) {
+    const tasks = await tableApi.getTasks(table.value.id)
+    relatedTasks.value = tasks
+  }
 }
 
 const refreshStatistics = async () => {
