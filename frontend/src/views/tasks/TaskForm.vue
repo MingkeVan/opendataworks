@@ -10,7 +10,26 @@
 
       <el-form :model="form" :rules="rules" ref="formRef" label-width="120px" style="max-width: 800px">
         <el-form-item label="任务名称" prop="taskName">
-          <el-input v-model="form.taskName" />
+          <el-input
+            v-model="form.taskName"
+            @input="handleTaskNameInput"
+            @blur="handleTaskNameBlur"
+          >
+            <template #suffix>
+              <el-icon v-if="taskNameChecking" class="is-loading">
+                <Loading />
+              </el-icon>
+              <el-icon v-else-if="taskNameError" class="error-icon">
+                <CircleClose />
+              </el-icon>
+              <el-icon v-else-if="form.taskName && !taskNameError" class="success-icon">
+                <CircleCheck />
+              </el-icon>
+            </template>
+          </el-input>
+          <div v-if="taskNameError" class="error-text">
+            {{ taskNameError }}
+          </div>
         </el-form-item>
 
         <el-form-item label="任务编码">
@@ -153,6 +172,7 @@
 import { ref, reactive, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Loading, CircleClose, CircleCheck } from '@element-plus/icons-vue'
 import { taskApi } from '@/api/task'
 import { tableApi } from '@/api/table'
 
@@ -166,6 +186,12 @@ const datasourceOptions = ref([])
 const datasourceLoading = ref(false)
 const datasourceOptionMap = reactive({})
 let datasourceSearchTimer = null
+
+// 任务名称检查相关
+const taskNameChecking = ref(false)
+const taskNameError = ref('')
+const originalTaskName = ref('') // 记录原始任务名称（编辑时使用）
+let taskNameCheckTimer = null
 
 const tableOptions = ref([])
 const tableOptionCache = reactive({})
@@ -420,6 +446,8 @@ const loadTask = async () => {
       owner: task.owner || '',
       taskDesc: task.taskDesc || ''
     })
+    // 记录原始任务名称
+    originalTaskName.value = form.taskName
     ensureDatasourceOption(form.datasourceName, form.datasourceType, task.dbName)
 
     // 加载血缘关系数据
@@ -452,6 +480,13 @@ const applyRelationPreset = async () => {
 
 const handleSubmit = async () => {
   if (!formRef.value) return
+
+  // 再次检查任务名称
+  if (taskNameError.value) {
+    ElMessage.error('请解决任务名称重复问题')
+    return
+  }
+
   await formRef.value.validate()
   submitting.value = true
   try {
@@ -496,6 +531,55 @@ const handleCancel = () => {
   }
 }
 
+// 任务名称检查方法
+const checkTaskName = async (taskName) => {
+  if (!taskName) {
+    taskNameError.value = ''
+    return
+  }
+
+  try {
+    taskNameChecking.value = true
+    const excludeId = isEdit.value ? route.params.id : null
+    const exists = await taskApi.checkTaskName(taskName, excludeId)
+    taskNameError.value = exists ? '任务名称已存在' : ''
+  } catch (error) {
+    console.error('检查任务名称失败:', error)
+    taskNameError.value = '检查失败，请稍后重试'
+  } finally {
+    taskNameChecking.value = false
+  }
+}
+
+// 处理任务名称输入（延迟检查）
+const handleTaskNameInput = () => {
+  taskNameError.value = '' // 清除错误
+
+  // 如果名称和原始名称相同，不需要检查
+  if (isEdit.value && form.taskName === originalTaskName.value) {
+    return
+  }
+
+  // 清除之前的计时器
+  if (taskNameCheckTimer) {
+    clearTimeout(taskNameCheckTimer)
+  }
+
+  // 延迟检查，避免频繁请求
+  taskNameCheckTimer = setTimeout(async () => {
+    await checkTaskName(form.taskName)
+  }, 500)
+}
+
+// 失焦时立即检查
+const handleTaskNameBlur = () => {
+  if (taskNameCheckTimer) {
+    clearTimeout(taskNameCheckTimer)
+    taskNameCheckTimer = null
+  }
+  checkTaskName(form.taskName)
+}
+
 watch(
   () => form.datasourceName,
   (value) => {
@@ -533,12 +617,38 @@ onUnmounted(() => {
   if (tableSearchTimer) {
     clearTimeout(tableSearchTimer)
   }
+  if (taskNameCheckTimer) {
+    clearTimeout(taskNameCheckTimer)
+  }
 })
 </script>
 
 <style scoped>
 .task-form {
-  height: 100%;
+  /* 样式保持不变 */
+}
+
+.error-text {
+  color: #f56c6c;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.error-icon {
+  color: #f56c6c;
+}
+
+.success-icon {
+  color: #67c23a;
+}
+
+.is-loading {
+  animation: rotating 2s linear infinite;
+}
+
+@keyframes rotating {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .card-header {

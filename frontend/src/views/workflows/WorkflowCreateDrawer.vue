@@ -28,14 +28,14 @@
           />
         </el-form-item>
 
-        <el-form-item label="关联任务" prop="selectedTaskIds">
+        <el-form-item label="关联任务">
           <el-select
             v-model="form.selectedTaskIds"
             multiple
             filterable
             collapse-tags
             collapse-tags-tooltip
-            placeholder="选择需要纳入该工作流的任务"
+            placeholder="可选择需要纳入该工作流的任务（可选）"
             :loading="tasksLoading"
             @visible-change="handleTaskDropdown"
           >
@@ -140,8 +140,7 @@ const form = reactive({
 })
 
 const rules = {
-  workflowName: [{ required: true, message: '请输入工作流名称', trigger: 'blur' }],
-  selectedTaskIds: [{ required: true, message: '请至少选择一个任务', trigger: 'change' }]
+  workflowName: [{ required: true, message: '请输入工作流名称', trigger: 'blur' }]
 }
 
 const selectedTaskDetails = computed(() =>

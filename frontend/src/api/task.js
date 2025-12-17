@@ -51,6 +51,13 @@ export const taskApi = {
     return request.get(`/v1/tasks/${id}/lineage`)
   },
 
+  // 检查任务名称是否存在
+  checkTaskName(taskName, excludeId) {
+    const params = { taskName }
+    if (excludeId) params.excludeId = excludeId
+    return request.get('/v1/tasks/check-task-name', { params })
+  },
+
   // 获取 Dolphin 数据源列表
   fetchDatasources(params = {}) {
     return request.get('/v1/dolphin/datasources', { params })

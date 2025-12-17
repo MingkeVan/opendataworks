@@ -27,5 +27,9 @@ export const workflowApi = {
 
   execute(id) {
     return request.post(`/v1/workflows/${id}/execute`)
+  },
+
+  delete(id) {
+    return request.delete(`/v1/workflows/${id}`)
   }
 }

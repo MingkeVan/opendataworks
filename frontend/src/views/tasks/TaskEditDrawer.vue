@@ -15,20 +15,41 @@
       style="padding-right: 20px"
     >
       <el-form-item label="任务名称" prop="task.taskName">
-        <el-input v-model="form.task.taskName" placeholder="请输入任务名称" />
+        <el-input
+          v-model="form.task.taskName"
+          placeholder="请输入任务名称"
+          @input="handleTaskNameInput"
+          @blur="handleTaskNameBlur"
+        >
+          <template #suffix>
+            <el-icon v-if="taskNameChecking" class="is-loading">
+              <Loading />
+            </el-icon>
+            <el-icon v-else-if="taskNameError" class="error-icon">
+              <CircleClose />
+            </el-icon>
+            <el-icon v-else-if="form.task.taskName && !taskNameError" class="success-icon">
+              <CircleCheck />
+            </el-icon>
+          </template>
+        </el-input>
+        <div v-if="taskNameError" class="error-text">
+          {{ taskNameError }}
+        </div>
       </el-form-item>
       
       <el-form-item label="任务描述" prop="task.taskDesc">
         <el-input v-model="form.task.taskDesc" type="textarea" :rows="3" placeholder="请输入任务描述" />
       </el-form-item>
 
-      <el-form-item label="所属工作流" prop="task.workflowId">
+      <el-form-item label="所属工作流">
         <el-select
           v-model="form.task.workflowId"
-          placeholder="请选择工作流"
+          placeholder="可选择工作流（可选）"
           filterable
           :disabled="!!lockedWorkflowId"
           style="width: 100%"
+          clearable
         >
           <el-option
             v-for="item in workflowOptions"
@@ -203,7 +224,6 @@ const form = reactive({
 
 const rules = {
   'task.taskName': [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
-  'task.workflowId': [{ required: true, message: '请选择所属工作流', trigger: 'change' }],
   'task.datasourceName': [{ required: true, message: '请选择数据源', trigger: 'change' }],
   'task.taskSql': [{ required: true, message: 'SQL 脚本不能为空', trigger: 'blur' }]
 }
@@ -324,12 +344,15 @@ const open = async (id = null, initialData = {}) => {
       const res = await taskApi.getById(id)
       const taskData = res || {}
       Object.assign(form.task, taskData)
-      
+
+      // 记录原始任务名称
+      originalTaskName.value = form.task.taskName
+
       // Load lineage data (input/output tables)
       const lineage = await taskApi.getTaskLineage(id)
       form.inputTableIds = Array.isArray(lineage.inputTableIds) ? lineage.inputTableIds : []
       form.outputTableIds = Array.isArray(lineage.outputTableIds) ? lineage.outputTableIds : []
-      
+
       // Ensure options are loaded for selected tables
       await ensureTableOptionsLoaded([...form.inputTableIds, ...form.outputTableIds])
 
@@ -342,7 +365,7 @@ const open = async (id = null, initialData = {}) => {
     if (initialData.taskSql) {
        form.task.taskSql = initialData.taskSql
     }
-    
+
     // Set workflowId if provided
     if (initialData.workflowId) {
         form.task.workflowId = initialData.workflowId
@@ -356,15 +379,70 @@ const handleClose = () => {
   emit('close')
 }
 
+// 任务名称检查方法
+const checkTaskName = async (taskName) => {
+  if (!taskName) {
+    taskNameError.value = ''
+    return
+  }
+
+  try {
+    taskNameChecking.value = true
+    const excludeId = isEdit.value ? form.task.id : null
+    const exists = await taskApi.checkTaskName(taskName, excludeId)
+    taskNameError.value = exists ? '任务名称已存在' : ''
+  } catch (error) {
+    console.error('检查任务名称失败:', error)
+    taskNameError.value = '检查失败，请稍后重试'
+  } finally {
+    taskNameChecking.value = false
+  }
+}
+
+// 处理任务名称输入（延迟检查）
+const handleTaskNameInput = () => {
+  taskNameError.value = '' // 清除错误
+
+  // 如果名称和原始名称相同，不需要检查
+  if (isEdit.value && form.task.taskName === originalTaskName.value) {
+    return
+  }
+
+  // 清除之前的计时器
+  if (taskNameCheckTimer) {
+    clearTimeout(taskNameCheckTimer)
+  }
+
+  // 延迟检查，避免频繁请求
+  taskNameCheckTimer = setTimeout(async () => {
+    await checkTaskName(form.task.taskName)
+  }, 500)
+}
+
+// 失焦时立即检查
+const handleTaskNameBlur = () => {
+  if (taskNameCheckTimer) {
+    clearTimeout(taskNameCheckTimer)
+    taskNameCheckTimer = null
+  }
+  checkTaskName(form.task.taskName)
+}
+
 const handleSave = async () => {
   if (!formRef.value) return
-  
+
+  // 再次检查任务名称
+  if (taskNameError.value) {
+    ElMessage.error('请解决任务名称重复问题')
+    return
+  }
+
   try {
     await formRef.value.validate()
   } catch (err) {
     return
   }
-  
+
   loading.value = true
   try {
     const payload = {
@@ -372,7 +450,7 @@ const handleSave = async () => {
       inputTableIds: form.inputTableIds,
       outputTableIds: form.outputTableIds
     }
-    
+
     if (isEdit.value) {
       await taskApi.update(form.task.id, payload)
       ElMessage.success('更新成功')
@@ -410,6 +488,10 @@ const resetForm = () => {
     form.inputTableIds = []
     form.outputTableIds = []
     tableOptions.value = []
+
+    // 重置任务名称检查状态
+    taskNameError.value = ''
+    originalTaskName.value = ''
 }
 
 defineExpose({
@@ -432,4 +514,26 @@ defineExpose({
   border-color: #409eff;
 }
 
+.error-text {
+  color: #f56c6c;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.error-icon {
+  color: #f56c6c;
+}
+
+.success-icon {
+  color: #67c23a;
+}
+
+.is-loading {
+  animation: rotating 2s linear infinite;
+}
+
+@keyframes rotating {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 </style>

@@ -54,4 +54,14 @@ public class WorkflowVersionService {
     public WorkflowVersion getById(Long id) {
         return workflowVersionMapper.selectById(id);
     }
+
+    @Transactional
+    public void deleteByWorkflowId(Long workflowId) {
+        if (workflowId == null) {
+            return;
+        }
+        workflowVersionMapper.delete(
+                Wrappers.<WorkflowVersion>lambdaQuery()
+                        .eq(WorkflowVersion::getWorkflowId, workflowId));
+    }
 }

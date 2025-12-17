@@ -74,6 +74,15 @@
              <el-button
                v-if="workflow?.workflow"
                link
+               type="danger"
+               :icon="Delete"
+               @click="handleDelete(workflow.workflow)"
+             >
+               删除
+             </el-button>
+             <el-button
+               v-if="workflow?.workflow"
+               link
                type="primary"
                @click="openEditDrawer(workflow.workflow)"
              >
@@ -216,15 +225,17 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowLeft, Link } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
+import { ArrowLeft, Link, Delete } from '@element-plus/icons-vue'
 import { workflowApi } from '@/api/workflow'
 import { taskApi } from '@/api/task'
 import dayjs from 'dayjs'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import TaskTable from '../tasks/TaskTable.vue'
 import WorkflowCreateDrawer from './WorkflowCreateDrawer.vue'
 
 const route = useRoute()
+const router = useRouter()
 const loading = ref(false)
 const workflow = ref(null)
 const activeTab = ref('tasks')
@@ -577,6 +588,43 @@ const handleOffline = async (row) => {
     ElMessage.error(getErrorMessage(error))
   } finally {
     setActionLoading(row.id, 'offline', false)
+  }
+}
+
+const handleDelete = async (row) => {
+  if (!row?.id) return
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除工作流"${row.workflowName}"吗？<br/><br/>
+      <div style="color: #666; font-size: 12px;">
+      • 将删除工作流相关的所有数据（版本、发布记录、执行历史等）<br/>
+      • 任务定义将被保留，可被其他工作流复用<br/>
+      • 此操作不可恢复
+      </div>`,
+      '确认删除',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        dangerouslyUseHTMLString: true
+      }
+    )
+
+    setActionLoading(row.id, 'delete', true)
+    try {
+      await workflowApi.delete(row.id)
+      ElMessage.success('工作流删除成功')
+      // 跳转到工作流列表页
+      router.push('/workflows')
+    } catch (error) {
+      console.error('删除失败', error)
+      ElMessage.error(getErrorMessage(error))
+    } finally {
+      setActionLoading(row.id, 'delete', false)
+    }
+  } catch {
+    // 用户取消删除
   }
 }
 

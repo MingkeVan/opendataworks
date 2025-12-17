@@ -50,6 +50,19 @@ public class DataTaskController {
     }
 
     /**
+     * 检查任务名称是否存在
+     */
+    @GetMapping("/check-task-name")
+    public Result<Boolean> checkTaskName(
+            @RequestParam String taskName,
+            @RequestParam(required = false) Long excludeId) {
+        boolean exists = excludeId != null
+                ? dataTaskService.isTaskNameExists(taskName, excludeId)
+                : dataTaskService.isTaskNameExists(taskName);
+        return Result.success(exists);
+    }
+
+    /**
      * 根据ID获取任务详情
      */
     @GetMapping("/{id}")

@@ -57,6 +57,7 @@ public class DataTaskService {
     private final DolphinSchedulerService dolphinSchedulerService;
     private final DataQueryService dataQueryService;
     private final DorisClusterService dorisClusterService;
+    private final WorkflowService workflowService;
 
     /**
      * 分页查询任务列表
@@ -166,6 +167,12 @@ public class DataTaskService {
     @Transactional
     public DataTask create(DataTask task, List<Long> inputTableIds, List<Long> outputTableIds) {
         validateTask(task);
+
+        // 检查任务名称是否已存在
+        if (isTaskNameExists(task.getTaskName())) {
+            throw new RuntimeException("任务名称已存在: " + task.getTaskName());
+        }
+
         if (!StringUtils.hasText(task.getTaskCode())) {
             task.setTaskCode(generateUniqueTaskCode(task.getTaskName()));
         }
@@ -206,12 +213,22 @@ public class DataTaskService {
 
         // 如果提供了 wokflowId，建立工作流关联
         if (task.getWorkflowId() != null) {
-            WorkflowTaskRelation relation = new WorkflowTaskRelation();
-            relation.setWorkflowId(task.getWorkflowId());
-            relation.setTaskId(task.getId());
-            relation.setUpstreamTaskCount(0); // 初始为0，或者需要计算
-            relation.setDownstreamTaskCount(0);
-            workflowTaskRelationMapper.insert(relation);
+            WorkflowTaskRelation existingRelation = workflowTaskRelationMapper.selectOne(
+                    Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                            .eq(WorkflowTaskRelation::getWorkflowId, task.getWorkflowId())
+                            .eq(WorkflowTaskRelation::getTaskId, task.getId()));
+
+            if (existingRelation == null) {
+                WorkflowTaskRelation relation = new WorkflowTaskRelation();
+                relation.setWorkflowId(task.getWorkflowId());
+                relation.setTaskId(task.getId());
+                relation.setUpstreamTaskCount(tableTaskRelationMapper.countUpstreamTasks(task.getId()));
+                relation.setDownstreamTaskCount(tableTaskRelationMapper.countDownstreamTasks(task.getId()));
+                workflowTaskRelationMapper.insert(relation);
+            }
+
+            // 重新计算该工作流中所有任务的上下游关系
+            workflowService.refreshTaskRelations(task.getWorkflowId());
         }
 
         return task;
@@ -226,6 +243,13 @@ public class DataTaskService {
         DataTask exists = dataTaskMapper.selectById(task.getId());
         if (exists == null) {
             throw new RuntimeException("任务不存在");
+        }
+
+        // 检查任务名称是否已被其他任务使用
+        if (!StringUtils.hasText(task.getTaskName())) {
+            // taskName 为空时不检查
+        } else if (!task.getTaskName().equals(exists.getTaskName()) && isTaskNameExists(task.getTaskName(), task.getId())) {
+            throw new RuntimeException("任务名称已存在: " + task.getTaskName());
         }
 
         // 更新任务基本信息
@@ -262,6 +286,11 @@ public class DataTaskService {
         }
 
         saveTableTaskRelations(task.getId(), inputTableIds, outputTableIds);
+
+        // 如果任务属于工作流，重新计算工作流中所有任务的上下游关系
+        if (task.getWorkflowId() != null) {
+            workflowService.refreshTaskRelations(task.getWorkflowId());
+        }
 
         return task;
     }
@@ -601,8 +630,18 @@ public class DataTaskService {
 
         clearTableTaskRelations(id);
 
+        // 删除工作流任务关联关系
+        workflowTaskRelationMapper.delete(
+                new LambdaQueryWrapper<WorkflowTaskRelation>()
+                        .eq(WorkflowTaskRelation::getTaskId, id));
+
         dataTaskMapper.deleteById(id);
         log.info("Deleted task: {}", id);
+
+        // 如果任务属于工作流，重新计算工作流中所有任务的上下游关系
+        if (task.getWorkflowId() != null) {
+            workflowService.refreshTaskRelations(task.getWorkflowId());
+        }
 
         if (workflowCode != null) {
             List<DataTask> remainingDolphinTasks = dataTaskMapper.selectList(
@@ -660,6 +699,7 @@ public class DataTaskService {
         tableTaskRelationMapper.hardDeleteByTaskId(taskId);
     }
 
+    
     private String resolveWorkflowDisplayName(DataTask task) {
         if (task == null) {
             return "legacy-workflow";
@@ -774,6 +814,33 @@ public class DataTaskService {
             default:
                 return "pending";
         }
+    }
+
+    /**
+     * 检查任务名称是否已存在
+     */
+    public boolean isTaskNameExists(String taskName) {
+        if (!StringUtils.hasText(taskName)) {
+            return false;
+        }
+        return dataTaskMapper.selectCount(
+                Wrappers.<DataTask>lambdaQuery()
+                        .eq(DataTask::getTaskName, taskName)
+                        .eq(DataTask::getDeleted, 0)) > 0;
+    }
+
+    /**
+     * 检查任务名称是否已存在（用于更新时排除自身）
+     */
+    public boolean isTaskNameExists(String taskName, Long excludeTaskId) {
+        if (!StringUtils.hasText(taskName) || excludeTaskId == null) {
+            return isTaskNameExists(taskName);
+        }
+        return dataTaskMapper.selectCount(
+                Wrappers.<DataTask>lambdaQuery()
+                        .eq(DataTask::getTaskName, taskName)
+                        .ne(DataTask::getId, excludeTaskId)
+                        .eq(DataTask::getDeleted, 0)) > 0;
     }
 
     /**

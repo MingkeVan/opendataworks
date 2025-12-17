@@ -10,6 +10,7 @@ import com.onedata.portal.entity.TableTaskRelation;
 import com.onedata.portal.entity.WorkflowTaskRelation;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
+import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import lombok.Builder;
 import lombok.Data;
@@ -43,7 +44,7 @@ public class WorkflowDeployService {
     private final DataTaskMapper dataTaskMapper;
     private final TableTaskRelationMapper tableTaskRelationMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
-
+    private final DataWorkflowMapper workflowMapper;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -209,8 +210,16 @@ public class WorkflowDeployService {
         long workflowCode = workflow.getWorkflowCode() == null ? 0L : workflow.getWorkflowCode();
         boolean existingWorkflow = workflowCode > 0;
         if (existingWorkflow) {
-            log.info("Workflow {} already exists, switch OFFLINE before redeploy", workflowCode);
-            dolphinSchedulerService.setWorkflowReleaseState(workflowCode, "OFFLINE");
+            // Check if the workflow definition actually exists in DolphinScheduler
+            boolean workflowExists = dolphinSchedulerService.checkWorkflowExists(workflowCode);
+            if (!workflowExists) {
+                log.warn("Workflow {} no longer exists in DolphinScheduler, creating new definition", workflowCode);
+                existingWorkflow = false;
+                workflowCode = 0L; // Reset to 0 to force creation
+            } else {
+                log.info("Workflow {} already exists, switch OFFLINE before redeploy", workflowCode);
+                dolphinSchedulerService.setWorkflowReleaseState(workflowCode, "OFFLINE");
+            }
         }
 
         long deployedCode = dolphinSchedulerService.syncWorkflow(
@@ -221,6 +230,19 @@ public class WorkflowDeployService {
                 locationPayloads);
 
         updateTaskProcessCode(orderedTasks, deployedCode);
+
+        // Update task status to published
+        updateTaskStatus(orderedTasks);
+
+        // Update workflow code in database if it changed
+        // Handle both null and different values safely
+        Long oldWorkflowCode = workflow.getWorkflowCode();
+        if (oldWorkflowCode == null || deployedCode != oldWorkflowCode.longValue()) {
+            workflow.setWorkflowCode(deployedCode);
+            workflow.setUpdatedBy("system");
+            workflowMapper.updateById(workflow);
+            log.info("Updated workflow code from {} to {}", oldWorkflowCode, deployedCode);
+        }
 
         Long projectCode = workflow.getProjectCode();
         if (projectCode == null || projectCode <= 0) {
@@ -453,6 +475,17 @@ public class WorkflowDeployService {
             if (!Objects.equals(task.getDolphinProcessCode(), workflowCode)) {
                 task.setDolphinProcessCode(workflowCode);
                 dataTaskMapper.updateById(task);
+            }
+        }
+    }
+
+    private void updateTaskStatus(List<DataTask> tasks) {
+        for (DataTask task : tasks) {
+            if (!"published".equals(task.getStatus())) {
+                task.setStatus("published");
+                dataTaskMapper.updateById(task);
+                log.debug("Updated task status to published: taskId={}, taskName={}",
+                        task.getId(), task.getTaskName());
             }
         }
     }

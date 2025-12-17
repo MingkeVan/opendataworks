@@ -240,6 +240,19 @@ public class DolphinOpenApiClient {
     }
 
     /**
+     * Query process definition.
+     */
+    public JsonNode getProcessDefinition(long projectCode, long processCode) {
+        try {
+            String path = String.format("/projects/%d/process-definition/%d", projectCode, processCode);
+            return executeRequest(getWebClient(), getWebClient().get().uri(path));
+        } catch (Exception e) {
+            log.error("Failed to query process definition {}", processCode, e);
+            throw new RuntimeException("Failed to query process definition: " + e.getMessage());
+        }
+    }
+
+    /**
      * Start process instance.
      */
     public Long startProcessInstance(long projectCode,

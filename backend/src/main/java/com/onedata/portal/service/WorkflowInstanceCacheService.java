@@ -8,6 +8,7 @@ import com.onedata.portal.mapper.WorkflowInstanceCacheMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 
 import java.time.LocalDateTime;
@@ -90,5 +91,15 @@ public class WorkflowInstanceCacheService {
             log.warn("Failed to parse datetime {}", dateTime);
             return null;
         }
+    }
+
+    @Transactional
+    public void deleteByWorkflowId(Long workflowId) {
+        if (workflowId == null) {
+            return;
+        }
+        cacheMapper.delete(
+                Wrappers.<WorkflowInstanceCache>lambdaQuery()
+                        .eq(WorkflowInstanceCache::getWorkflowId, workflowId));
     }
 }

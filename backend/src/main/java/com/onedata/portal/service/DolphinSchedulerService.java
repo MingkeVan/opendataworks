@@ -176,6 +176,26 @@ public class DolphinSchedulerService {
     }
 
     /**
+     * Check if workflow definition exists in DolphinScheduler.
+     */
+    public boolean checkWorkflowExists(long workflowCode) {
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            return false;
+        }
+
+        try {
+            // Try to query the workflow definition
+            // If it doesn't exist, the API will throw an exception
+            openApiClient.getProcessDefinition(projectCode, workflowCode);
+            return true;
+        } catch (Exception e) {
+            log.debug("Workflow {} does not exist: {}", workflowCode, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Start workflow instance via DolphinScheduler OpenAPI.
      */
     public String startProcessInstance(Long workflowCode, String projectName, String workflowName) {
@@ -450,7 +470,7 @@ public class DolphinSchedulerService {
     public TaskLocationPayload buildLocation(long taskCode, int index, int lane) {
         TaskLocationPayload location = new TaskLocationPayload();
         location.setTaskCode(taskCode);
-        location.setX(220 + index * 180);
+        location.setX(220 + index * 280);
         location.setY(140 + lane * 140);
         return location;
     }

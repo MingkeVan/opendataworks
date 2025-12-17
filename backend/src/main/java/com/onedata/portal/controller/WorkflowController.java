@@ -70,4 +70,10 @@ public class WorkflowController {
         String executionId = workflowService.executeWorkflow(id);
         return Result.success(executionId);
     }
+
+    @DeleteMapping("/{id}")
+    public Result<Void> delete(@PathVariable Long id) {
+        workflowService.deleteWorkflow(id);
+        return Result.success();
+    }
 }
