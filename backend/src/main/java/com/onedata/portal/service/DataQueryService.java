@@ -41,7 +41,7 @@ public class DataQueryService {
         Pattern.CASE_INSENSITIVE
     );
     private static final Pattern ALLOWED_START = Pattern.compile("^(select|with|show|describe|explain)\\b", Pattern.CASE_INSENSITIVE);
-    private static final int MAX_LIMIT = 1000;
+    private static final int MAX_LIMIT = 10000;
     private static final int DEFAULT_LIMIT = 200;
     private static final int PREVIEW_LIMIT = 100;
 
