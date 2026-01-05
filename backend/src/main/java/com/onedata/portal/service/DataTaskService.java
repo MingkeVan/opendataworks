@@ -398,12 +398,42 @@ public class DataTaskService {
             // For SQL node, use raw SQL; for SHELL, wrap in shell script
             if ("SQL".equalsIgnoreCase(nodeType)) {
                 sqlOrScript = dataTask.getTaskSql();
+            } else if ("DATAX".equalsIgnoreCase(nodeType)) {
+                sqlOrScript = null; // DataX doesn't use sqlOrScript
             } else {
                 sqlOrScript = dolphinSchedulerService.buildShellScript(dataTask.getTaskSql());
             }
 
             Long datasourceId = null;
-            if (StringUtils.hasText(dataTask.getDatasourceName())) {
+            Long targetDatasourceId = null;
+            if ("DATAX".equalsIgnoreCase(nodeType)) {
+                // For DataX, get both source and target datasource IDs
+                if (StringUtils.hasText(dataTask.getDatasourceName())) {
+                    List<DolphinDatasourceOption> options = dolphinSchedulerService.listDatasources(
+                            null, dataTask.getDatasourceName());
+                    datasourceId = options.stream()
+                            .filter(opt -> Objects.equals(opt.getName(), dataTask.getDatasourceName()))
+                            .map(DolphinDatasourceOption::getId)
+                            .findFirst()
+                            .orElse(null);
+                    if (datasourceId == null) {
+                        log.warn("Source datasource not found for DataX: name={}", dataTask.getDatasourceName());
+                    }
+                }
+                if (StringUtils.hasText(dataTask.getTargetDatasourceName())) {
+                    List<DolphinDatasourceOption> options = dolphinSchedulerService.listDatasources(
+                            null, dataTask.getTargetDatasourceName());
+                    targetDatasourceId = options.stream()
+                            .filter(opt -> Objects.equals(opt.getName(), dataTask.getTargetDatasourceName()))
+                            .map(DolphinDatasourceOption::getId)
+                            .findFirst()
+                            .orElse(null);
+                    if (targetDatasourceId == null) {
+                        log.warn("Target datasource not found for DataX: name={}", dataTask.getTargetDatasourceName());
+                    }
+                }
+            } else if (StringUtils.hasText(dataTask.getDatasourceName())) {
+                // For SQL, only get source datasource
                 List<DolphinDatasourceOption> options = dolphinSchedulerService.listDatasources(
                         null, dataTask.getDatasourceName());
                 datasourceId = options.stream()
@@ -429,7 +459,11 @@ public class DataTaskService {
                     dataTask.getTimeoutSeconds() == null ? 0 : dataTask.getTimeoutSeconds(),
                     nodeType,
                     datasourceId,
-                    dataTask.getDatasourceType());
+                    dataTask.getDatasourceType(),
+                    targetDatasourceId,
+                    dataTask.getSourceTable(),
+                    dataTask.getTargetTable(),
+                    dataTask.getColumnMapping());
             definitions.add(definition);
 
             List<DataTask> upstreamTasks = resolveUpstreamTasks(dataTask.getId(), taskMap);

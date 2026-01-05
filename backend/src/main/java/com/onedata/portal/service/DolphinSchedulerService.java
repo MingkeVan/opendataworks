@@ -418,6 +418,30 @@ public class DolphinSchedulerService {
             String nodeType,
             Long datasourceId,
             String datasourceType) {
+        return buildTaskDefinition(taskCode, taskVersion, taskName, description, rawScript,
+                taskPriority, retryTimes, retryInterval, timeoutSeconds, nodeType,
+                datasourceId, datasourceType, null, null, null, null);
+    }
+
+    /**
+     * Build task definition payload for DolphinScheduler with DataX support.
+     */
+    public Map<String, Object> buildTaskDefinition(long taskCode,
+            int taskVersion,
+            String taskName,
+            String description,
+            String rawScript,
+            String taskPriority,
+            int retryTimes,
+            int retryInterval,
+            int timeoutSeconds,
+            String nodeType,
+            Long datasourceId,
+            String datasourceType,
+            Long targetDatasourceId,
+            String sourceTable,
+            String targetTable,
+            String customJson) {
         Map<String, Object> payload = new HashMap<>();
         payload.put("code", taskCode);
         payload.put("name", taskName);
@@ -445,6 +469,9 @@ public class DolphinSchedulerService {
         try {
             if ("SQL".equalsIgnoreCase(nodeType)) {
                 payload.put("taskParams", TaskParams.sql(rawScript, datasourceId, datasourceType));
+            } else if ("DATAX".equalsIgnoreCase(nodeType)) {
+                payload.put("taskParams", TaskParams.datax(datasourceId, targetDatasourceId,
+                        sourceTable, targetTable, customJson));
             } else {
                 payload.put("taskParams", TaskParams.shell(rawScript));
             }
@@ -606,15 +633,29 @@ public class DolphinSchedulerService {
         private final List<String> preStatements = new ArrayList<>();
         private final List<String> postStatements = new ArrayList<>();
 
+        // DataX-specific fields
+        private final Long targetDatasource;
+        private final String sourceTable;
+        private final String targetTable;
+        private final String customJson;
+
         public static TaskParams shell(String script) {
-            return new TaskParams(script, null, null, null);
+            return new TaskParams(script, null, null, null, null, null, null, null);
         }
 
         public static TaskParams sql(String sql, Long datasourceId, String datasourceType) {
-            return new TaskParams(null, datasourceId, datasourceType, sql);
+            return new TaskParams(null, datasourceId, datasourceType, sql, null, null, null, null);
         }
 
-        private TaskParams(String rawScript, Long datasourceId, String datasourceType, String sql) {
+        public static TaskParams datax(Long sourceDatasourceId, Long targetDatasourceId,
+                                       String sourceTable, String targetTable,
+                                       String customJson) {
+            return new TaskParams(null, sourceDatasourceId, null, null,
+                                 targetDatasourceId, sourceTable, targetTable, customJson);
+        }
+
+        private TaskParams(String rawScript, Long datasourceId, String datasourceType, String sql,
+                          Long targetDatasourceId, String sourceTable, String targetTable, String customJson) {
             this.rawScript = rawScript;
             this.datasource = datasourceId;
             this.sql = sql;
@@ -623,6 +664,12 @@ public class DolphinSchedulerService {
             this.displayRows = 10;
             // Don't default to MYSQL - let DolphinScheduler infer type from datasource name
             this.type = datasourceType;
+
+            // DataX fields
+            this.targetDatasource = targetDatasourceId;
+            this.sourceTable = sourceTable;
+            this.targetTable = targetTable;
+            this.customJson = customJson;
         }
     }
 }
