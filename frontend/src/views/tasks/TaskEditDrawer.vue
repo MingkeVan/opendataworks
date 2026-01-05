@@ -60,36 +60,126 @@
         </el-select>
       </el-form-item>
 
-      <el-form-item label="数据源" prop="task.datasourceName">
+      <el-form-item label="任务类型" prop="task.dolphinNodeType">
         <el-select
-          v-model="form.task.datasourceName"
-          placeholder="请选择数据源"
-          filterable
+          v-model="form.task.dolphinNodeType"
+          placeholder="请选择任务类型"
+          @change="handleNodeTypeChange"
           style="width: 100%"
         >
-          <el-option
-            v-for="item in datasourceOptions"
-            :key="item.name"
-            :label="item.name"
-            :value="item.name"
-          >
-           <span>{{ item.name }}</span>
-           <span style="float: right; color: #8492a6; font-size: 13px; margin-left: 10px">{{ item.dbName }}</span>
-          </el-option>
+          <el-option label="SQL" value="SQL" />
+          <el-option label="DataX" value="DATAX" />
+          <el-option label="Shell" value="SHELL" />
+          <el-option label="Python" value="PYTHON" />
         </el-select>
       </el-form-item>
 
-      <el-form-item label="SQL 脚本" prop="task.taskSql" class="sql-editor-item">
-        <el-input
-          v-model="form.task.taskSql"
-          type="textarea"
-          :rows="15"
-          placeholder="请输入 SQL 脚本"
-          class="sql-input"
-          resize="none"
-          spellcheck="false"
-        />
-      </el-form-item>
+      <!-- SQL Task Fields -->
+      <template v-if="form.task.dolphinNodeType === 'SQL'">
+        <el-form-item label="数据源" prop="task.datasourceName">
+          <el-select
+            v-model="form.task.datasourceName"
+            placeholder="请选择数据源"
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="item in datasourceOptions"
+              :key="item.name"
+              :label="item.name"
+              :value="item.name"
+            >
+             <span>{{ item.name }}</span>
+             <span style="float: right; color: #8492a6; font-size: 13px; margin-left: 10px">{{ item.dbName }}</span>
+            </el-option>
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="SQL 脚本" prop="task.taskSql" class="sql-editor-item">
+          <el-input
+            v-model="form.task.taskSql"
+            type="textarea"
+            :rows="15"
+            placeholder="请输入 SQL 脚本"
+            class="sql-input"
+            resize="none"
+            spellcheck="false"
+          />
+        </el-form-item>
+      </template>
+
+      <!-- DataX Task Fields -->
+      <template v-if="form.task.dolphinNodeType === 'DATAX'">
+        <el-form-item label="源数据源" prop="task.datasourceName">
+          <el-select
+            v-model="form.task.datasourceName"
+            placeholder="请选择源数据源"
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="item in datasourceOptions"
+              :key="item.name"
+              :label="item.name"
+              :value="item.name"
+            >
+              <span>{{ item.name }}</span>
+              <span style="float: right; color: #8492a6; font-size: 13px; margin-left: 10px">{{ item.dbName }}</span>
+            </el-option>
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="源表名" prop="task.sourceTable">
+          <el-input v-model="form.task.sourceTable" placeholder="例如: user_info" />
+        </el-form-item>
+
+        <el-form-item label="目标数据源" prop="task.targetDatasourceName">
+          <el-select
+            v-model="form.task.targetDatasourceName"
+            placeholder="请选择目标数据源"
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="item in datasourceOptions"
+              :key="item.name"
+              :label="item.name"
+              :value="item.name"
+            >
+              <span>{{ item.name }}</span>
+              <span style="float: right; color: #8492a6; font-size: 13px; margin-left: 10px">{{ item.dbName }}</span>
+            </el-option>
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="目标表名" prop="task.targetTable">
+          <el-input v-model="form.task.targetTable" placeholder="例如: user_info_copy" />
+        </el-form-item>
+
+        <el-form-item label="列映射（可选）" prop="task.columnMapping">
+          <el-input
+            v-model="form.task.columnMapping"
+            type="textarea"
+            :rows="3"
+            placeholder="留空表示全部列同步，或输入JSON格式的列映射配置"
+          />
+        </el-form-item>
+      </template>
+
+      <!-- SHELL/PYTHON Task Fields -->
+      <template v-if="['SHELL', 'PYTHON'].includes(form.task.dolphinNodeType)">
+        <el-form-item label="脚本内容" prop="task.taskSql" class="sql-editor-item">
+          <el-input
+            v-model="form.task.taskSql"
+            type="textarea"
+            :rows="15"
+            placeholder="请输入脚本内容"
+            class="sql-input"
+            resize="none"
+            spellcheck="false"
+          />
+        </el-form-item>
+      </template>
 
       <el-form-item label="输入表" prop="inputTableIds">
         <el-select
@@ -220,17 +310,45 @@ const form = reactive({
     priority: 5,
     owner: '',
     clusterId: null,
-    database: ''
+    database: '',
+    // DataX fields
+    targetDatasourceName: '',
+    sourceTable: '',
+    targetTable: '',
+    columnMapping: ''
   },
   inputTableIds: [],
   outputTableIds: []
 })
 
-const rules = {
-  'task.taskName': [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
-  'task.datasourceName': [{ required: true, message: '请选择数据源', trigger: 'change' }],
-  'task.taskSql': [{ required: true, message: 'SQL 脚本不能为空', trigger: 'blur' }]
-}
+const rules = computed(() => {
+  const baseRules = {
+    'task.taskName': [{ required: true, message: '请输入任务名称', trigger: 'blur' }]
+  }
+
+  if (form.task.dolphinNodeType === 'SQL') {
+    return {
+      ...baseRules,
+      'task.datasourceName': [{ required: true, message: '请选择数据源', trigger: 'change' }],
+      'task.taskSql': [{ required: true, message: 'SQL 脚本不能为空', trigger: 'blur' }]
+    }
+  } else if (form.task.dolphinNodeType === 'DATAX') {
+    return {
+      ...baseRules,
+      'task.datasourceName': [{ required: true, message: '请选择源数据源', trigger: 'change' }],
+      'task.targetDatasourceName': [{ required: true, message: '请选择目标数据源', trigger: 'change' }],
+      'task.sourceTable': [{ required: true, message: '请输入源表名', trigger: 'blur' }],
+      'task.targetTable': [{ required: true, message: '请输入目标表名', trigger: 'blur' }]
+    }
+  } else if (['SHELL', 'PYTHON'].includes(form.task.dolphinNodeType)) {
+    return {
+      ...baseRules,
+      'task.taskSql': [{ required: true, message: '脚本内容不能为空', trigger: 'blur' }]
+    }
+  }
+
+  return baseRules
+})
 
 const availableTableOptions = computed(() => {
   const seen = new Set()
@@ -500,7 +618,12 @@ const resetForm = () => {
         scheduleCron: '',
         priority: 5,
         owner: '',
-        workflowId: null
+        workflowId: null,
+        // DataX fields
+        targetDatasourceName: '',
+        sourceTable: '',
+        targetTable: '',
+        columnMapping: ''
     }
     form.inputTableIds = []
     form.outputTableIds = []
@@ -509,6 +632,23 @@ const resetForm = () => {
     // 重置任务名称检查状态
     taskNameError.value = ''
     originalTaskName.value = ''
+}
+
+const handleNodeTypeChange = (newType) => {
+  // Clear fields from other task types when switching
+  if (newType !== 'SQL') {
+    form.task.datasourceName = ''
+    form.task.datasourceType = 'DORIS'
+  }
+  if (newType !== 'DATAX') {
+    form.task.targetDatasourceName = ''
+    form.task.sourceTable = ''
+    form.task.targetTable = ''
+    form.task.columnMapping = ''
+  }
+  if (!['SQL', 'SHELL', 'PYTHON'].includes(newType)) {
+    form.task.taskSql = ''
+  }
 }
 
 defineExpose({

@@ -28,6 +28,15 @@ public class DataTask {
 
     private String datasourceType; // datasource type: MYSQL, DORIS, etc.
 
+    // DataX-specific fields
+    private String targetDatasourceName; // target datasource for DataX
+
+    private String sourceTable; // source table name for DataX
+
+    private String targetTable; // target table name for DataX
+
+    private String columnMapping; // column mapping config for DataX (optional JSON)
+
     // clusterId and database removed during rollback
 
     @TableField("task_sql")
