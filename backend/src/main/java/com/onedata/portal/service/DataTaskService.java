@@ -15,6 +15,7 @@ import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.entity.TableTaskRelation;
 import com.onedata.portal.entity.TaskExecutionLog;
 import com.onedata.portal.entity.WorkflowTaskRelation;
+import com.onedata.portal.exception.BusinessException;
 import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
@@ -170,7 +171,7 @@ public class DataTaskService {
 
         // 检查任务名称是否已存在
         if (isTaskNameExists(task.getTaskName())) {
-            throw new RuntimeException("任务名称已存在: " + task.getTaskName());
+            throw new BusinessException("任务名称已存在: " + task.getTaskName());
         }
 
         if (!StringUtils.hasText(task.getTaskCode())) {
@@ -179,7 +180,7 @@ public class DataTaskService {
         DataTask exists = dataTaskMapper.selectOne(new LambdaQueryWrapper<DataTask>()
                 .eq(DataTask::getTaskCode, task.getTaskCode()));
         if (exists != null) {
-            throw new RuntimeException("任务编码已存在: " + task.getTaskCode());
+            throw new BusinessException("任务编码已存在: " + task.getTaskCode());
         }
 
         task.setStatus("draft");
@@ -242,14 +243,14 @@ public class DataTaskService {
         validateTask(task);
         DataTask exists = dataTaskMapper.selectById(task.getId());
         if (exists == null) {
-            throw new RuntimeException("任务不存在");
+            throw new BusinessException("任务不存在");
         }
 
         // 检查任务名称是否已被其他任务使用
         if (!StringUtils.hasText(task.getTaskName())) {
             // taskName 为空时不检查
         } else if (!task.getTaskName().equals(exists.getTaskName()) && isTaskNameExists(task.getTaskName(), task.getId())) {
-            throw new RuntimeException("任务名称已存在: " + task.getTaskName());
+            throw new BusinessException("任务名称已存在: " + task.getTaskName());
         }
 
         // 更新任务基本信息
