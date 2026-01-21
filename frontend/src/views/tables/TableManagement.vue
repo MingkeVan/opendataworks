@@ -1240,11 +1240,18 @@ const loadTablesForDatabase = async (database) => {
       ...tablesByDatabase.value,
       [database]: tables
     }
-    // 预加载血缘信息
-    // 预加载血缘信息
-    for (const table of tables) {
-      loadLineageForTable(table.id)
-    }
+    // 异步预加载血缘信息，不阻塞当前流程
+    setTimeout(() => {
+      // 分批加载以避免瞬间请求过多
+      const batchSize = 5
+      for (let i = 0; i < tables.length; i += batchSize) {
+        const batch = tables.slice(i, i + batchSize)
+        // 每一批之间稍微延迟
+        setTimeout(() => {
+          batch.forEach(table => loadLineageForTable(table.id))
+        }, (i / batchSize) * 200)
+      }
+    }, 0)
   } catch (error) {
     console.error(`加载数据库 ${database} 的表失败:`, error)
     ElMessage.error(`加载数据库 ${database} 的表失败`)
