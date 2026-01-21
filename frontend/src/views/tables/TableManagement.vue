@@ -1442,13 +1442,6 @@ const loadDatabases = async () => {
   loading.value = true
   try {
     databases.value = await tableApi.listDatabases()
-    if (databases.value.length > 0) {
-      // 默认不展开，或者展开第一个但不立即加载全部（由 handleDatabaseChange控制，但 programmatic change 不触发 event）
-      // 这里手动触发第一个的加载
-      const firstDb = databases.value[0]
-      activeDatabase.value = firstDb
-      await handleDatabaseChange(firstDb)
-    }
   } catch (error) {
     console.error('加载数据库列表失败:', error)
     ElMessage.error('加载数据库列表失败')
@@ -1457,56 +1450,24 @@ const loadDatabases = async () => {
   }
 }
 
-// 处理表点击
-const handleTableClick = async (table) => {
-  // 如果是点击的不同数据库的表，需要先找到对应的表ID
-  let targetTable = table
-  if (typeof table.id === 'number') {
-    targetTable = table
-  } else {
-    // 如果是从血缘关系点击过来的，需要重新获取完整信息
-    const fullTable = await tableApi.getById(table.id)
-    targetTable = fullTable
-  }
-
-  selectedTable.value = targetTable
-  activeTab.value = 'basic'
-  isEditing.value = false
-  if (editFormRef.value) {
-    editFormRef.value.clearValidate()
-  }
-  // 切换表时清空DDL和预览数据
-  tableDdl.value = ''
-  previewData.value = []
-  
-  if (String(route.query.tableId || '') !== String(targetTable.id) || route.query.database !== targetTable.dbName) {
-    suppressRouteSync.value = true
-    router.replace({
-      path: route.path,
-      query: {
-        ...route.query,
-        tableId: targetTable.id,
-        database: targetTable.dbName
-      }
-    })
-      .catch(() => {})
-      .finally(() => {
-        suppressRouteSync.value = false
-      })
-  }
-  await loadTableDetail(targetTable.id)
-}
+// ... handleTableClick ...
 
 const syncSelectionFromRoute = async () => {
   const tableIdParam = route.query.tableId
   const databaseParam = route.query.database
   
-  // 优先展开路由中指定的数据库
+  // 1. 如果路由中有数据库参数，优先展开
   if (databaseParam) {
     activeDatabase.value = databaseParam
     await handleDatabaseChange(databaseParam)
+  } else if (databases.value.length > 0) {
+    // 2. 如果路由没有指定数据库，默认展开第一个
+    const firstDb = databases.value[0]
+    activeDatabase.value = firstDb
+    await handleDatabaseChange(firstDb)
   }
 
+  // 3. 如果路由中有表ID，尝试加载详情并选中
   if (!tableIdParam) return
 
   const numericId = Number(tableIdParam)
@@ -1516,13 +1477,15 @@ const syncSelectionFromRoute = async () => {
   }
 
   try {
-    // 如果没有指定数据库，尝试通过ID获取详情后展开
+    // 如果没有指定数据库（上面第2步通过默认展开了第一个，这里可能需要纠正）
     let dbToExpand = databaseParam
     let tableInfo = null
     
+    // 如果只有ID没有数据库参数，需要通过ID反查数据库
     if (!dbToExpand) {
       tableInfo = await tableApi.getById(numericId)
-      if (tableInfo?.dbName) {
+      // 如果反查到的数据库不是当前默认展开的第一个，需要切换
+      if (tableInfo?.dbName && tableInfo.dbName !== activeDatabase.value) {
         dbToExpand = tableInfo.dbName
         activeDatabase.value = dbToExpand
         await handleDatabaseChange(dbToExpand)
