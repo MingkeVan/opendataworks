@@ -28,7 +28,9 @@ public class DorisMetadataSyncService {
     private final DorisConnectionService dorisConnectionService;
     private final DataTableMapper dataTableMapper;
     private final DataFieldMapper dataFieldMapper;
+
     private static final Set<String> IGNORED_DATABASES = new HashSet<>(Arrays.asList("performance_schema", "sys"));
+    private static final int MAX_COMMENT_LENGTH = 5000;
 
     /**
      * 同步结果
@@ -39,6 +41,7 @@ public class DorisMetadataSyncService {
         private int newFields = 0;
         private int updatedFields = 0;
         private int deletedFields = 0;
+        private int deletedTables = 0;
         private List<String> errors = new ArrayList<>();
 
         public void addNewTable() {
@@ -59,6 +62,10 @@ public class DorisMetadataSyncService {
 
         public void addDeletedField() {
             deletedFields++;
+        }
+
+        public void addDeletedTable() {
+            deletedTables++;
         }
 
         public void addError(String error) {
@@ -85,6 +92,10 @@ public class DorisMetadataSyncService {
             return deletedFields;
         }
 
+        public int getDeletedTables() {
+            return deletedTables;
+        }
+
         public List<String> getErrors() {
             return errors;
         }
@@ -92,8 +103,8 @@ public class DorisMetadataSyncService {
         @Override
         public String toString() {
             return String.format(
-                    "SyncResult{newTables=%d, updatedTables=%d, newFields=%d, updatedFields=%d, deletedFields=%d, errors=%d}",
-                    newTables, updatedTables, newFields, updatedFields, deletedFields, errors.size());
+                    "SyncResult{newTables=%d, updatedTables=%d, deletedTables=%d, newFields=%d, updatedFields=%d, deletedFields=%d, errors=%d}",
+                    newTables, updatedTables, deletedTables, newFields, updatedFields, deletedFields, errors.size());
         }
     }
 
@@ -613,6 +624,24 @@ public class DorisMetadataSyncService {
             }
         }
 
+        // 处理已删除的表（平台有但 Doris 没有）
+        Set<String> dorisTableNames = dorisTables.stream()
+                .map(t -> (String) t.get("tableName"))
+                .collect(Collectors.toSet());
+
+        for (DataTable localTable : localTables) {
+            if (!dorisTableNames.contains(localTable.getTableName())) {
+                try {
+                    log.info("Deleting table not in Doris: {}.{}", database, localTable.getTableName());
+                    dataTableMapper.deleteById(localTable.getId());
+                    result.addDeletedTable();
+                } catch (Exception e) {
+                    log.error("Failed to delete table {}.{}", database, localTable.getTableName(), e);
+                    result.addError("删除表 " + database + "." + localTable.getTableName() + " 失败: " + e.getMessage());
+                }
+            }
+        }
+
         return result;
     }
 
@@ -827,7 +856,7 @@ public class DorisMetadataSyncService {
             field.setTableId(tableId);
             field.setFieldName((String) column.get("columnName"));
             field.setFieldType((String) column.get("dataType"));
-            field.setFieldComment((String) column.get("columnComment"));
+            field.setFieldComment(truncateComment((String) column.get("columnComment")));
             field.setIsNullable((Integer) column.get("isNullable"));
             field.setIsPrimary((Integer) column.get("isPrimary"));
             field.setDefaultValue((String) column.get("defaultValue"));
@@ -865,7 +894,7 @@ public class DorisMetadataSyncService {
                 newField.setTableId(tableId);
                 newField.setFieldName(fieldName);
                 newField.setFieldType((String) dorisColumn.get("dataType"));
-                newField.setFieldComment((String) dorisColumn.get("columnComment"));
+                newField.setFieldComment(truncateComment((String) dorisColumn.get("columnComment")));
                 newField.setIsNullable((Integer) dorisColumn.get("isNullable"));
                 newField.setIsPrimary((Integer) dorisColumn.get("isPrimary"));
                 newField.setDefaultValue((String) dorisColumn.get("defaultValue"));
@@ -883,7 +912,7 @@ public class DorisMetadataSyncService {
                     updated = true;
                 }
 
-                String columnComment = (String) dorisColumn.get("columnComment");
+                String columnComment = truncateComment((String) dorisColumn.get("columnComment"));
                 if (!Objects.equals(columnComment, localField.getFieldComment())) {
                     localField.setFieldComment(columnComment);
                     updated = true;
@@ -971,5 +1000,15 @@ public class DorisMetadataSyncService {
         }
 
         return result;
+    }
+
+    private String truncateComment(String comment) {
+        if (comment == null) {
+            return null;
+        }
+        if (comment.length() > MAX_COMMENT_LENGTH) {
+            return comment.substring(0, MAX_COMMENT_LENGTH);
+        }
+        return comment;
     }
 }
