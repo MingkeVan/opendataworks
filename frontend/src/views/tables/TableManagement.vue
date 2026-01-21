@@ -1153,20 +1153,7 @@ const loadDatabases = async () => {
 }
 
 // 加载指定数据库的表列表
-const loadTablesForDatabase = async (database) => {
-  if (!database) return
-  try {
-    const tables = await tableApi.listByDatabase(database, sortField.value, sortOrder.value)
-    tablesByDatabase.value[database] = tables
 
-    // 加载血缘关系信息
-    for (const table of tables) {
-      loadLineageForTable(table.id)
-    }
-  } catch (error) {
-    console.error('加载表列表失败:', error)
-  }
-}
 
 // 加载表的血缘关系
 const loadLineageForTable = async (tableId) => {
@@ -1254,7 +1241,10 @@ const loadTablesForDatabase = async (database) => {
       [database]: tables
     }
     // 预加载血缘信息
-    loadLineageForTables(tables)
+    // 预加载血缘信息
+    for (const table of tables) {
+      loadLineageForTable(table.id)
+    }
   } catch (error) {
     console.error(`加载数据库 ${database} 的表失败:`, error)
     ElMessage.error(`加载数据库 ${database} 的表失败`)
