@@ -1127,22 +1127,7 @@ const canGenerateEditName = computed(
 const sortField = ref('createdAt')
 const sortOrder = ref('desc')
 
-// 加载数据库列表
-const loadDatabases = async () => {
-  loading.value = true
-  try {
-    databases.value = await tableApi.listDatabases()
-    if (databases.value.length > 0) {
-      activeDatabase.value = databases.value[0]
-      await loadTablesForDatabase(databases.value[0])
-    }
-  } catch (error) {
-    console.error('加载数据库列表失败:', error)
-    ElMessage.error('加载数据库列表失败')
-  } finally {
-    loading.value = false
-  }
-}
+
 
 // 记录每个数据库加载的表数量（用于无限滚动）
 const visibleTableCounts = ref({})
