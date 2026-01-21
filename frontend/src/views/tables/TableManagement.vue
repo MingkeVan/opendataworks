@@ -1141,8 +1141,8 @@ const loadDatabases = async () => {
   try {
     databases.value = await tableApi.listDatabases()
     if (databases.value.length > 0) {
-      activeDatabase.value = databases.value[0]
-      await loadTablesForDatabase(databases.value[0])
+      const firstDb = databases.value[0]
+      toggleDatabase(firstDb)
     }
   } catch (error) {
     console.error('加载数据库列表失败:', error)
@@ -1382,15 +1382,15 @@ const handleEditCancel = async () => {
 }
 
 const updateCachedTable = (updatedTable) => {
-  if (!activeDatabase.value) return
-  const list = tablesByDatabase.value[activeDatabase.value] || []
+  if (!updatedTable.dbName) return
+  const list = tablesByDatabase.value[updatedTable.dbName] || []
   const index = list.findIndex((item) => item.id === updatedTable.id)
   if (index === -1) return
   const updatedList = [...list]
   updatedList[index] = { ...updatedList[index], ...updatedTable }
   tablesByDatabase.value = {
     ...tablesByDatabase.value,
-    [activeDatabase.value]: updatedList
+    [updatedTable.dbName]: updatedList
   }
 }
 
@@ -1882,12 +1882,13 @@ const handleTaskSuccess = async () => {
 // 删除表
 const handleDelete = async (id) => {
   try {
+    const dbToRefresh = selectedTable.value?.dbName
     await tableApi.delete(id)
     ElMessage.success('删除成功')
     selectedTable.value = null
     // 重新加载当前数据库的表列表
-    if (activeDatabase.value) {
-      await loadTablesForDatabase(activeDatabase.value)
+    if (dbToRefresh) {
+      await loadTablesForDatabase(dbToRefresh)
     }
   } catch (error) {
     console.error('删除失败:', error)
