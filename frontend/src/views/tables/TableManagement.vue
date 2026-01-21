@@ -2283,7 +2283,7 @@ onUnmounted(() => {
 .database-tree {
   display: flex;
   flex-direction: column;
-  gap: 0; /* 移除间距，更像IDE树形结构 */
+  gap: 4px;
 }
 
 .database-node {
@@ -2294,15 +2294,14 @@ onUnmounted(() => {
 .database-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 8px 12px;
   cursor: pointer;
+  border-radius: 6px;
   transition: all 0.2s ease;
   color: #334155;
-  user-select: none;
-  font-size: 13px;
-  border-radius: 4px; /* 轻微圆角 */
-  margin: 0 4px; /* 侧边留白 */
+  margin: 0;
+  border: 1px solid transparent;
 }
 
 .database-header:hover {
@@ -2310,7 +2309,8 @@ onUnmounted(() => {
 }
 
 .database-header.active {
-  /* color: #334155; */ /* 保持文字颜色，仅图标变化 */
+  background-color: #eef2ff;
+  color: #4f46e5;
 }
 
 .database-header.is-active-db {
@@ -2322,7 +2322,7 @@ onUnmounted(() => {
   font-size: 12px;
   color: #94a3b8;
   transition: transform 0.2s ease;
-  margin-right: 2px;
+  margin-right: 0;
 }
 
 .arrow-icon.expanded {
@@ -2330,16 +2330,17 @@ onUnmounted(() => {
 }
 
 .folder-icon {
-  color: #fbbf24; /* 文件夹更接近Navicat的黄色 */
+  color: #64748b;
   font-size: 16px;
 }
 
 .database-header.active .folder-icon {
-  color: #fbbf24;
+  color: #6366f1;
 }
 
 .database-header .db-name {
   font-weight: 500;
+  font-size: 14px;
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
@@ -2352,77 +2353,89 @@ onUnmounted(() => {
 }
 
 .database-children {
-  padding-left: 0; 
+  padding-left: 20px; /* 恢复缩进 */
   overflow: hidden;
 }
 
 .table-list {
-  padding: 2px 0;
+  padding: 4px 0;
   display: flex;
   flex-direction: column;
-  gap: 0; /* 紧凑列表 */
+  gap: 4px; /* 恢复间距 */
 }
 
 /* 加载更多触点 */
 .load-more-trigger {
   display: flex;
   justify-content: center;
-  padding: 6px;
+  padding: 8px;
   font-size: 12px;
   color: #64748b;
   cursor: pointer;
 }
 
-.load-more-trigger:hover {
-  color: #4f46e5;
+.load-more-trigger .el-button {
+  font-size: 12px;
 }
 
 .empty-tables {
-  padding: 8px 0 8px 24px;
+  padding: 12px;
+  text-align: center;
   font-size: 12px;
   color: #94a3b8;
-  font-style: italic;
+  font-style: normal;
 }
 
 .table-item {
-  padding: 6px 12px 6px 36px; /* 增加左侧缩进，体现层级 */
-  border: none; /* 移除边框 */
-  border-radius: 4px;
+  padding: 6px 8px;
+  border: 1px solid #e2e8f0; /* 恢复边框 */
+  border-radius: 8px;
   cursor: pointer;
-  background-color: transparent;
+  transition: all 0.3s ease;
+  background-color: #fff;
   display: flex;
   align-items: center;
   gap: 8px;
   position: relative;
   overflow: hidden;
-  margin: 1px 4px; /* 侧边留白 */
-  height: 32px; /* 固定高度，更整齐 */
+  margin: 0;
+  height: auto;
 }
 
 .table-item:hover {
-  background-color: #f1f5f9;
-  transform: none; /* 移除位移效果 */
-  box-shadow: none; /* 移除阴影 */
+  border-color: #667eea;
+  background-color: #f0f4ff;
+  transform: translateX(4px); /* 恢复位移效果 */
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.12); /* 恢复阴影 */
 }
 
 .table-item.active {
-  background-color: #eef2ff;
-  color: #4f46e5;
-  box-shadow: none;
+  border-color: #667eea;
+  background-color: #f0f4ff;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+  color: inherit;
 }
 
-/* 数据量进度条背景 - 调整为底部细条或极淡背景 */
+/* 数据量进度条背景 */
 .table-progress-bg {
   position: absolute;
   left: 0;
+  top: 0;
   bottom: 0;
-  height: 2px; /* 改为底部线条 */
-  top: auto;
-  background-color: rgba(79, 70, 229, 0.2);
+  height: auto;
+  background: linear-gradient(90deg, rgba(102, 126, 234, 0.08) 0%, rgba(102, 126, 234, 0.02) 100%);
   transition: width 0.3s ease;
   pointer-events: none;
   z-index: 0;
-  border-radius: 0; /* 移除圆角 */
+  border-radius: 0;
+}
+
+.table-item:hover .table-progress-bg {
+  background: linear-gradient(90deg, rgba(102, 126, 234, 0.12) 0%, rgba(102, 126, 234, 0.04) 100%);
+}
+
+.table-item.active .table-progress-bg {
+  background: linear-gradient(90deg, rgba(102, 126, 234, 0.18) 0%, rgba(102, 126, 234, 0.06) 100%);
 }
 
 /* 表内容容器 */
@@ -2436,13 +2449,13 @@ onUnmounted(() => {
 }
 
 .table-icon {
-  color: #64748b; /* 默认为灰色 */
-  font-size: 14px;
+  color: #667eea;
   flex-shrink: 0;
+  font-size: 14px;
 }
 
 .table-item.active .table-icon {
-  color: #4f46e5;
+  color: #667eea;
 }
 
 .table-info {
@@ -2451,40 +2464,40 @@ onUnmounted(() => {
   gap: 8px;
   flex: 1;
   min-width: 0;
-  max-width: none; /* 移除最大宽度限制，利用 flex 布局 */
+  max-width: 200px; /* 恢复最大宽度限制 */
 }
 
 .table-name {
+  font-weight: 600; /* 恢复字重 */
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex-shrink: 0;
-  max-width: none;
-  font-weight: normal; /* 普通字重，不像之前那么重 */
+  max-width: 100px; /* 恢复最大宽度 */
 }
 
 .table-item.active .table-name {
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .table-comment {
-  color: #94a3b8;
+  color: #909399;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
   min-width: 0;
-  margin-left: 4px;
+  margin-left: 0;
 }
 
 .table-meta-tags {
-  display: none; /* 默认隐藏元数据，鼠标悬停显示 */
+  display: flex; /* 恢复一直显示 */
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  margin-left: auto; /* 推到最右边 */
+  margin-left: 0;
 }
 
 .table-item:hover .table-meta-tags,
@@ -2493,19 +2506,23 @@ onUnmounted(() => {
 }
 
 .row-count {
-  font-size: 10px;
-  color: #64748b;
-  padding: 0 4px;
-  background-color: #f1f5f9;
-  border-radius: 2px;
-  min-width: auto;
+  font-size: 11px;
+  color: #475569;
+  font-weight: 500;
+  padding: 2px 6px;
+  background-color: rgba(102, 126, 234, 0.1);
+  border-radius: 4px;
+  min-width: 35px;
+  text-align: center;
 }
 
 .lineage-count {
-  font-size: 10px;
-  padding: 0 4px;
-  border-radius: 2px;
-  min-width: auto;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 5px;
+  border-radius: 4px;
+  min-width: 28px;
+  text-align: center;
 }
 
 .lineage-count.upstream {
