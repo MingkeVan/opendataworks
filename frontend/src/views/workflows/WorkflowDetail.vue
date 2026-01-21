@@ -80,25 +80,32 @@
              >
                删除
              </el-button>
-             <el-button
-               v-if="workflow?.workflow"
-               link
-               type="primary"
-               @click="openEditDrawer(workflow.workflow)"
-             >
-               编辑
-             </el-button>
           </div>
         </div>
       </template>
 
       <div class="content" v-loading="loading">
-        <!-- Basic Info Section (Moved out of tabs) -->
-        <!-- Basic Info Section (Moved out of tabs) -->
+        <!-- Basic Info Section with Inline Editing -->
         <div class="basic-info-section">
           <div class="section-title">基本信息</div>
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="名称">{{ workflow?.workflow?.workflowName }}</el-descriptions-item>
+            <!-- Editable Name Field -->
+            <el-descriptions-item label="名称">
+              <div v-if="!isEditingName" class="editable-field" @click="startEditName">
+                <span>{{ workflow?.workflow?.workflowName }}</span>
+                <el-icon class="edit-icon"><Edit /></el-icon>
+              </div>
+              <div v-else class="edit-field">
+                <el-input 
+                  v-model="editingName" 
+                  size="small" 
+                  maxlength="100"
+                  style="width: 200px; margin-right: 8px;"
+                />
+                <el-button size="small" type="primary" :loading="savingField" @click="saveNameField">确认</el-button>
+                <el-button size="small" @click="cancelEditName">取消</el-button>
+              </div>
+            </el-descriptions-item>
             <el-descriptions-item label="项目">{{ workflow?.workflow?.projectCode }}</el-descriptions-item>
             <el-descriptions-item label="Dolphin 流程编码">
               <el-link 
@@ -112,7 +119,25 @@
               </el-link>
               <span v-else>{{ workflow?.workflow?.workflowCode || '-' }}</span>
             </el-descriptions-item>
-            <el-descriptions-item label="描述" :span="2">{{ workflow?.workflow?.description || '-' }}</el-descriptions-item>
+            <!-- Editable Description Field -->
+            <el-descriptions-item label="描述" :span="2">
+              <div v-if="!isEditingDescription" class="editable-field" @click="startEditDescription">
+                <span>{{ workflow?.workflow?.description || '-' }}</span>
+                <el-icon class="edit-icon"><Edit /></el-icon>
+              </div>
+              <div v-else class="edit-field">
+                <el-input 
+                  v-model="editingDescription" 
+                  type="textarea"
+                  :rows="2"
+                  size="small" 
+                  maxlength="300"
+                  style="width: 400px; margin-right: 8px;"
+                />
+                <el-button size="small" type="primary" :loading="savingField" @click="saveDescriptionField">确认</el-button>
+                <el-button size="small" @click="cancelEditDescription">取消</el-button>
+              </div>
+            </el-descriptions-item>
             <el-descriptions-item label="创建时间">{{ formatDateTime(workflow?.workflow?.createdAt) }}</el-descriptions-item>
             <el-descriptions-item label="更新时间">{{ formatDateTime(workflow?.workflow?.updatedAt) }}</el-descriptions-item>
           </el-descriptions>
@@ -121,10 +146,11 @@
         <el-tabs v-model="activeTab" class="detail-tabs">
           <el-tab-pane label="Tasks" name="tasks">
           <div class="tab-content">
-            <TaskTable 
+            <WorkflowTaskManager 
               v-if="workflow?.workflow?.id" 
               :workflow-id="workflow.workflow.id"
-              :embedded="true"
+              :workflow-task-ids="workflowTaskIds"
+              @update="loadWorkflowDetail"
             />
           </div>
         </el-tab-pane>
@@ -212,27 +238,19 @@
         </el-tabs>
       </div>
     </el-card>
-
-    <WorkflowCreateDrawer
-      v-model="createDrawerVisible"
-      :workflow-id="editingWorkflowId"
-      @created="loadWorkflowDetail"
-      @updated="handleUpdateSuccess"
-    />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, Link, Delete } from '@element-plus/icons-vue'
+import { ArrowLeft, Link, Delete, Edit } from '@element-plus/icons-vue'
 import { workflowApi } from '@/api/workflow'
 import { taskApi } from '@/api/task'
 import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import TaskTable from '../tasks/TaskTable.vue'
-import WorkflowCreateDrawer from './WorkflowCreateDrawer.vue'
+import WorkflowTaskManager from './WorkflowTaskManager.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -241,9 +259,87 @@ const workflow = ref(null)
 const activeTab = ref('tasks')
 const dolphinWebuiUrl = ref('')
 const pendingApprovalFlags = reactive({})
-const createDrawerVisible = ref(false)
-const editingWorkflowId = ref(null)
 const actionLoading = reactive({})
+
+// Inline editing states
+const isEditingName = ref(false)
+const isEditingDescription = ref(false)
+const editingName = ref('')
+const editingDescription = ref('')
+const savingField = ref(false)
+
+// Computed workflow task IDs
+const workflowTaskIds = computed(() => {
+  const relations = workflow.value?.taskRelations || []
+  return relations.map(r => Number(r.taskId)).filter(id => Number.isFinite(id))
+})
+
+// Inline edit methods
+const startEditName = () => {
+  editingName.value = workflow.value?.workflow?.workflowName || ''
+  isEditingName.value = true
+}
+
+const cancelEditName = () => {
+  isEditingName.value = false
+  editingName.value = ''
+}
+
+const saveNameField = async () => {
+  if (!editingName.value.trim()) {
+    ElMessage.warning('名称不能为空')
+    return
+  }
+  savingField.value = true
+  try {
+    const wf = workflow.value?.workflow
+    await workflowApi.update(wf.id, {
+      workflowName: editingName.value.trim(),
+      description: wf.description,
+      tasks: workflowTaskIds.value.map(taskId => ({ taskId })),
+      operator: 'portal-ui'
+    })
+    ElMessage.success('名称更新成功')
+    isEditingName.value = false
+    loadWorkflowDetail()
+  } catch (error) {
+    console.error('更新名称失败', error)
+    ElMessage.error(error?.response?.data?.message || '更新失败')
+  } finally {
+    savingField.value = false
+  }
+}
+
+const startEditDescription = () => {
+  editingDescription.value = workflow.value?.workflow?.description || ''
+  isEditingDescription.value = true
+}
+
+const cancelEditDescription = () => {
+  isEditingDescription.value = false
+  editingDescription.value = ''
+}
+
+const saveDescriptionField = async () => {
+  savingField.value = true
+  try {
+    const wf = workflow.value?.workflow
+    await workflowApi.update(wf.id, {
+      workflowName: wf.workflowName,
+      description: editingDescription.value,
+      tasks: workflowTaskIds.value.map(taskId => ({ taskId })),
+      operator: 'portal-ui'
+    })
+    ElMessage.success('描述更新成功')
+    isEditingDescription.value = false
+    loadWorkflowDetail()
+  } catch (error) {
+    console.error('更新描述失败', error)
+    ElMessage.error(error?.response?.data?.message || '更新失败')
+  } finally {
+    savingField.value = false
+  }
+}
 
 const loadWorkflowDetail = async () => {
   const id = route.params.id
@@ -628,19 +724,6 @@ const handleDelete = async (row) => {
   }
 }
 
-const openEditDrawer = (workflow) => {
-  if (!workflow?.id) return
-  editingWorkflowId.value = workflow.id
-  createDrawerVisible.value = true
-}
-
-const handleUpdateSuccess = (workflowId) => {
-  createDrawerVisible.value = false
-  if (workflow.value?.workflow?.id === workflowId) {
-    loadWorkflowDetail()
-  }
-}
-
 const buildDolphinInstanceUrl = (instance) => {
   const wf = workflow.value?.workflow
   if (!wf || !dolphinWebuiUrl.value) {
@@ -700,5 +783,36 @@ onMounted(() => {
   font-weight: bold;
   margin-bottom: 12px;
   color: #303133;
+}
+
+.editable-field {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.editable-field:hover {
+  background-color: #f5f7fa;
+}
+
+.editable-field .edit-icon {
+  margin-left: 8px;
+  color: #909399;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.editable-field:hover .edit-icon {
+  opacity: 1;
+}
+
+.edit-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 }
 </style>

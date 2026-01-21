@@ -2,11 +2,11 @@
   <div class="task-table">
     <div class="toolbar" v-if="showToolbar">
       <div class="filters">
-        <el-select v-model="filters.taskType" placeholder="任务类型" clearable style="width: 150px; margin-right: 10px">
+        <el-select v-model="filters.taskType" size="small" placeholder="任务类型" clearable style="width: 150px; margin-right: 10px">
           <el-option label="批任务" value="batch" />
           <el-option label="流任务" value="stream" />
         </el-select>
-        <el-select v-model="filters.status" placeholder="状态" clearable style="width: 150px; margin-right: 10px">
+        <el-select v-model="filters.status" size="small" placeholder="状态" clearable style="width: 150px; margin-right: 10px">
           <el-option label="草稿" value="draft" />
           <el-option label="已发布" value="published" />
           <el-option label="运行中" value="running" />
@@ -14,6 +14,7 @@
         <el-select
           v-if="!workflowId"
           v-model="filters.workflowId"
+          size="small"
           placeholder="所属工作流"
           clearable
           filterable
@@ -29,26 +30,29 @@
         </el-select>
         <el-input
           v-model.trim="filters.taskName"
+          size="small"
           placeholder="任务名称"
           clearable
           style="width: 180px; margin-right: 10px"
         />
         <el-input
           v-model.trim="filters.upstreamTaskId"
+          size="small"
           placeholder="上游任务ID"
           clearable
           style="width: 150px; margin-right: 10px"
         />
         <el-input
           v-model.trim="filters.downstreamTaskId"
+          size="small"
           placeholder="下游任务ID"
           clearable
           style="width: 150px; margin-right: 10px"
         />
-        <el-button type="primary" @click="handleFilter">查询</el-button>
-        <el-button @click="resetFilters">重置</el-button>
+        <el-button type="primary" size="small" @click="handleFilter">查询</el-button>
+        <el-button size="small" @click="resetFilters">重置</el-button>
       </div>
-      <el-button type="primary" @click="openCreateDrawer">
+      <el-button type="primary" size="small" @click="openCreateDrawer">
         <el-icon><Plus /></el-icon>
         新建任务
       </el-button>
@@ -57,7 +61,7 @@
 
 
     <el-table 
-      :data="tableData" 
+      :data="filteredTableData" 
       style="width: 100%" 
       :style="{ marginTop: (embedded || workflowId) ? '0' : '20px' }"
       v-loading="loading"
@@ -142,7 +146,15 @@
           <el-button link type="info" @click="openDolphinTask(row)" v-if="row.executionStatus && row.executionStatus.dolphinTaskUrl">
             查看任务
           </el-button>
-          <el-popconfirm title="确定删除吗?" @confirm="handleDelete(row.id)">
+          <el-button 
+            v-if="showRemoveAction" 
+            link 
+            type="warning"
+            @click="handleRemove(row.id)"
+          >
+            移除
+          </el-button>
+          <el-popconfirm v-if="!hideDeleteAction" title="确定删除吗?" @confirm="handleDelete(row.id)">
             <template #reference>
               <el-button link type="danger">删除</el-button>
             </template>
@@ -167,7 +179,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { taskApi } from '@/api/task'
@@ -186,8 +198,26 @@ const props = defineProps({
   embedded: {
     type: Boolean,
     default: false
+  },
+  externalData: {
+    type: Array,
+    default: null
+  },
+  additionalData: {
+    type: Array,
+    default: () => []
+  },
+  showRemoveAction: {
+    type: Boolean,
+    default: false
+  },
+  hideDeleteAction: {
+    type: Boolean,
+    default: false
   }
 })
+
+const emit = defineEmits(['remove'])
 
 const loading = ref(false)
 const tableData = ref([])
@@ -212,7 +242,50 @@ const dolphinWebuiUrl = ref('')
 const workflowOptions = ref([])
 const workflowOptionsLoading = ref(false)
 
+// Computed filtered data for local filtering (when using externalData)
+const filteredTableData = computed(() => {
+  // If using full external data mode, apply local filters
+  if (props.externalData !== null) {
+    let data = tableData.value
+    
+    // Filter by task type
+    if (filters.taskType) {
+      data = data.filter(task => task.taskType === filters.taskType)
+    }
+    // Filter by status
+    if (filters.status) {
+      data = data.filter(task => task.status === filters.status)
+    }
+    // Filter by task name (partial match)
+    if (filters.taskName) {
+      const searchName = filters.taskName.toLowerCase()
+      data = data.filter(task => task.taskName?.toLowerCase().includes(searchName))
+    }
+    
+    return data
+  }
+  
+  // Normal mode: prepend additionalData to tableData
+  if (props.additionalData.length > 0) {
+    // Mark additional data rows and prepend to API data
+    const additionalWithFlag = props.additionalData.map(item => ({
+      ...item,
+      _isNew: true
+    }))
+    return [...additionalWithFlag, ...tableData.value]
+  }
+  
+  return tableData.value
+})
+
 const loadData = async () => {
+  // If external data is provided, use it directly
+  if (props.externalData !== null) {
+    tableData.value = props.externalData
+    pagination.total = props.externalData.length
+    return
+  }
+  
   loading.value = true
   try {
     const res = await taskApi.list({
@@ -341,6 +414,10 @@ const handleDelete = async (id) => {
   }
 }
 
+const handleRemove = (taskId) => {
+  emit('remove', taskId)
+}
+
 const getStatusType = (status) => {
   const types = {
     draft: 'info',
@@ -433,6 +510,18 @@ onMounted(async () => {
 
 watch(() => props.workflowId, () => {
   loadData()
+})
+
+watch(() => props.externalData, (newData) => {
+  if (newData !== null) {
+    tableData.value = newData
+    pagination.total = newData.length
+  }
+}, { deep: true })
+
+// Expose refresh method for parent component
+defineExpose({
+  refresh: loadData
 })
 </script>
 
