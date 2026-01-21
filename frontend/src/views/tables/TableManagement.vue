@@ -81,76 +81,12 @@
 
           <!-- 数据库列表 -->
           <div class="database-list" v-loading="loading">
-            <el-collapse v-model="activeDatabase" accordion>
-              <el-collapse-item
-                v-for="db in databases"
+            <div class="database-tree">
+              <div 
+                v-for="db in databases" 
                 :key="db"
-                :name="db"
-                @click="handleDatabaseClick(db)"
+                class="database-node"
               >
-                <template #title>
-                  <div class="database-title">
-                    <el-icon><Folder /></el-icon>
-                    <span class="db-name">{{ db }}</span>
-                    <el-badge
-                      :value="getTableCount(db)"
-                      class="table-count-badge"
-                      type="info"
-                    />
-                  </div>
-                </template>
-
-                <!-- 表列表 -->
-                <div class="table-list">
-                  <template v-if="getTablesForDatabase(db).length">
-                    <div
-                      v-for="item in getTablesForDatabase(db)"
-                      :key="item.id"
-                      class="table-item"
-                      :class="{ active: selectedTable?.id === item.id }"
-                      @click.stop="handleTableClick(item)"
-                    >
-                      <!-- 数据量进度条背景 -->
-                      <div
-                        class="table-progress-bg"
-                        :style="{ width: getTableProgressWidth(db, item) }"
-                      ></div>
-
-                      <div class="table-content">
-                        <el-icon class="table-icon"><Document /></el-icon>
-                        <div class="table-info">
-                          <span class="table-name" :title="item.tableName">
-                            {{ item.tableName }}
-                          </span>
-                          <span v-if="item.tableComment" class="table-comment" :title="item.tableComment">
-                            {{ item.tableComment }}
-                          </span>
-                        </div>
-                        <div class="table-meta-tags">
-                          <span class="row-count" :title="`数据量: ${formatNumber(getTableRowCount(item))} 行`">
-                            {{ formatRowCount(getTableRowCount(item)) }}
-                          </span>
-                          <span class="storage-size" :title="`存储大小: ${formatStorageSize(getTableStorageSize(item))}`">
-                            {{ formatStorageSize(getTableStorageSize(item)) }}
-                          </span>
-                          <span v-if="getUpstreamCount(item.id) > 0" class="lineage-count upstream" :title="`上游表: ${getUpstreamCount(item.id)} 个`">
-                            ↑{{ getUpstreamCount(item.id) }}
-                          </span>
-                          <span v-if="getDownstreamCount(item.id) > 0" class="lineage-count downstream" :title="`下游表: ${getDownstreamCount(item.id)} 个`">
-                            ↓{{ getDownstreamCount(item.id) }}
-                          </span>
-                          <el-tag
-                            v-if="item.layer"
-                            size="small"
-                            :type="getLayerType(item.layer)"
-                            class="layer-tag"
-                          >
-                            {{ item.layer }}
-                          </el-tag>
-                        </div>
-                      </div>
-                    </div>
-                  </template>
                   <el-empty
                     v-else
                     description="暂无表"
@@ -980,7 +916,12 @@ const databases = ref([])
 const tablesByDatabase = ref({})
 const lineageCache = ref({})
 const lineage = ref({ upstreamTables: [], downstreamTables: [] })
-const activeDatabase = ref('')
+// 使用对象模拟 Set，记录展开的数据库: { dbName: true }
+const expandedDatabases = ref({})
+// 记录每个数据库加载的表数量（用于无限滚动）
+const visibleTableCounts = ref({})
+// 记录每个数据库是否正在加载表
+const databaseLoading = ref({})
 const searchKeyword = ref('')
 const selectedTable = ref(null)
 const fields = ref([])
@@ -1162,8 +1103,8 @@ const loadLineageForTable = async (tableId) => {
   }
 }
 
-// 获取指定数据库的表列表
-const getTablesForDatabase = (database) => {
+// 获取指定数据库的表列表（过滤后）
+const getFilteredTables = (database) => {
   const tables = tablesByDatabase.value[database] || []
   if (!searchKeyword.value) return tables
   return tables.filter(
@@ -1174,9 +1115,76 @@ const getTablesForDatabase = (database) => {
   )
 }
 
+// 获取用于显示的表列表（切片）
+const getDisplayedTables = (database) => {
+  const tables = getFilteredTables(database)
+  const count = visibleTableCounts.value[database] || 20
+  return tables.slice(0, count)
+}
+
+// 是否还有更多表需要加载
+const hasMoreTables = (database) => {
+  const tables = getFilteredTables(database)
+  const count = visibleTableCounts.value[database] || 20
+  return tables.length > count
+}
+
+// 根据数据库获取表列表（兼容旧代码，直接返回过滤后的全量数据，用于计数等）
+const getTablesForDatabase = (database) => {
+  return getFilteredTables(database)
+}
+
 // 获取表数量
 const getTableCount = (database) => {
-  return getTablesForDatabase(database).length
+  return getFilteredTables(database).length
+}
+
+// 加载更多表
+const handleLoadMore = (database) => {
+  const currentCount = visibleTableCounts.value[database] || 20
+  visibleTableCounts.value[database] = currentCount + 20
+}
+
+// 切换数据库展开/折叠
+const toggleDatabase = async (database) => {
+  if (expandedDatabases.value[database]) {
+    // 折叠
+    delete expandedDatabases.value[database]
+  } else {
+    // 展开
+    expandedDatabases.value[database] = true
+    // 初始化显示数量
+    if (!visibleTableCounts.value[database]) {
+      visibleTableCounts.value[database] = 20
+    }
+    // 如果没有加载过表数据，则加载
+    if (!tablesByDatabase.value[database]) {
+      await loadTablesForDatabase(database)
+    }
+  }
+}
+
+// 加载指定数据库的表
+const loadTablesForDatabase = async (database) => {
+  databaseLoading.value[database] = true
+  try {
+    const tables = await tableApi.listByDatabase(
+      database,
+      sortField.value,
+      sortOrder.value
+    )
+    tablesByDatabase.value = {
+      ...tablesByDatabase.value,
+      [database]: tables
+    }
+    // 预加载血缘信息
+    loadLineageForTables(tables)
+  } catch (error) {
+    console.error(`加载数据库 ${database} 的表失败:`, error)
+    ElMessage.error(`加载数据库 ${database} 的表失败`)
+  } finally {
+    databaseLoading.value[database] = false
+  }
 }
 
 const normalizeSegment = (value) =>
@@ -1430,13 +1438,15 @@ const handleTableClick = async (table) => {
   // 切换表时清空DDL和预览数据
   tableDdl.value = ''
   previewData.value = []
-  if (String(route.query.tableId || '') !== String(targetTable.id)) {
+  
+  if (String(route.query.tableId || '') !== String(targetTable.id) || route.query.database !== targetTable.dbName) {
     suppressRouteSync.value = true
     router.replace({
       path: route.path,
       query: {
         ...route.query,
-        tableId: targetTable.id
+        tableId: targetTable.id,
+        database: targetTable.dbName
       }
     })
       .catch(() => {})
@@ -1449,6 +1459,21 @@ const handleTableClick = async (table) => {
 
 const syncSelectionFromRoute = async () => {
   const tableIdParam = route.query.tableId
+  const databaseParam = route.query.database
+  
+  // 优先展开路由中指定的数据库
+  if (databaseParam) {
+    if (!expandedDatabases.value[databaseParam]) {
+      expandedDatabases.value[databaseParam] = true
+      if (!visibleTableCounts.value[databaseParam]) {
+        visibleTableCounts.value[databaseParam] = 20
+      }
+      if (!tablesByDatabase.value[databaseParam]) {
+        await loadTablesForDatabase(databaseParam)
+      }
+    }
+  }
+
   if (!tableIdParam) return
 
   const numericId = Number(tableIdParam)
@@ -1458,16 +1483,23 @@ const syncSelectionFromRoute = async () => {
   }
 
   try {
-    const tableInfo = await tableApi.getById(numericId)
-    if (tableInfo?.dbName) {
-      if (!databases.value.includes(tableInfo.dbName)) {
-        databases.value.push(tableInfo.dbName)
-      }
-      activeDatabase.value = tableInfo.dbName
-      if (!tablesByDatabase.value[tableInfo.dbName]) {
-        await loadTablesForDatabase(tableInfo.dbName)
+    // 如果没有指定数据库，尝试通过ID获取详情后展开（虽然通常会有database参数）
+    let dbToExpand = databaseParam
+    let tableInfo = null
+    
+    if (!dbToExpand) {
+      tableInfo = await tableApi.getById(numericId)
+      if (tableInfo?.dbName) {
+        dbToExpand = tableInfo.dbName
+        if (!expandedDatabases.value[dbToExpand]) {
+          expandedDatabases.value[dbToExpand] = true
+          if (!tablesByDatabase.value[dbToExpand]) {
+            await loadTablesForDatabase(dbToExpand)
+          }
+        }
       }
     }
+
     await loadTableDetail(numericId, tableInfo)
   } catch (error) {
     console.error('根据路由加载表失败:', error)
@@ -2012,10 +2044,56 @@ watch(
   }
 )
 
+const observer = ref(null)
+
+// 设置无限滚动观察器
+const setupObserver = () => {
+  if (observer.value) {
+    observer.value.disconnect()
+  }
+
+  observer.value = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        const db = entry.target.dataset.db
+        if (db) {
+          handleLoadMore(db)
+        }
+      }
+    })
+  }, {
+    root: null, // viewport
+    rootMargin: '100px', // 提前加载
+    threshold: 0.1
+  })
+
+  // 观察所有加载更多触点
+  nextTick(() => {
+    const triggers = document.querySelectorAll('.load-more-trigger')
+    triggers.forEach(trigger => {
+      observer.value.observe(trigger)
+    })
+  })
+}
+
+// 监听展开状态变化，重置观察器
+watch(() => expandedDatabases.value, () => {
+  nextTick(() => {
+    setupObserver()
+  })
+}, { deep: true })
+
 onMounted(async () => {
   await loadDatabases()
   await loadBusinessDomainOptions()
   await syncSelectionFromRoute()
+  setupObserver()
+})
+
+onUnmounted(() => {
+  if (observer.value) {
+    observer.value.disconnect()
+  }
 })
 </script>
 
@@ -2127,11 +2205,107 @@ onMounted(async () => {
   border-radius: 8px;
 }
 
+/* 数据库树形列表 */
+.database-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.database-node {
+  display: flex;
+  flex-direction: column;
+}
+
+.database-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  color: #334155;
+}
+
+.database-header:hover {
+  background-color: #f1f5f9;
+}
+
+.database-header.active {
+  background-color: #eef2ff;
+  color: #4f46e5;
+}
+
+.database-header.is-active-db {
+  /* 当选中了该数据库下的表，但未展开时的高亮（可选） */
+  color: #4f46e5;
+  font-weight: 500;
+}
+
+.arrow-icon {
+  font-size: 12px;
+  color: #94a3b8;
+  transition: transform 0.2s ease;
+}
+
+.arrow-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.folder-icon {
+  color: #64748b;
+  font-size: 16px;
+}
+
+.database-header.active .folder-icon {
+  color: #6366f1;
+}
+
+.database-header .db-name {
+  font-weight: 500;
+  font-size: 14px;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.database-header .loading-icon {
+  margin-left: 8px;
+  color: #6366f1;
+}
+
+.database-children {
+  padding-left: 20px; /* 缩进 */
+  overflow: hidden;
+}
+
 .table-list {
   padding: 4px 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* 加载更多触点 */
+.load-more-trigger {
+  display: flex;
+  justify-content: center;
+  padding: 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.load-more-trigger .el-button {
+  font-size: 12px;
+}
+
+.empty-tables {
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #94a3b8;
 }
 
 .table-item {
