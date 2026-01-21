@@ -28,6 +28,12 @@
           />
         </el-select>
         <el-input
+          v-model.trim="filters.taskName"
+          placeholder="任务名称"
+          clearable
+          style="width: 180px; margin-right: 10px"
+        />
+        <el-input
           v-model.trim="filters.upstreamTaskId"
           placeholder="上游任务ID"
           clearable
@@ -58,6 +64,7 @@
       :border="embedded"
       :size="embedded ? 'small' : 'default'"
     >
+      <el-table-column prop="id" label="任务ID" width="90" />
       <el-table-column prop="taskName" label="任务名称" width="200" />
       <el-table-column prop="taskCode" label="任务编码" width="150" />
       <el-table-column prop="taskType" label="类型" width="100">
@@ -196,6 +203,7 @@ const filters = reactive({
   taskType: '',
   status: '',
   workflowId: null,
+  taskName: '',
   upstreamTaskId: '',
   downstreamTaskId: ''
 })
@@ -229,6 +237,9 @@ const buildListFilters = () => {
   }
   if (filters.status) {
     params.status = filters.status
+  }
+  if (filters.taskName) {
+    params.taskName = filters.taskName
   }
   const workflowId = props.workflowId || parseNumericFilter(filters.workflowId)
   if (workflowId) {
@@ -290,6 +301,7 @@ const handleFilter = () => {
 const resetFilters = () => {
   filters.taskType = ''
   filters.status = ''
+  filters.taskName = ''
   filters.workflowId = null
   filters.upstreamTaskId = ''
   filters.downstreamTaskId = ''

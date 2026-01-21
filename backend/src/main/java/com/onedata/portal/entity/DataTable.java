@@ -59,6 +59,8 @@ public class DataTable {
 
     private Long storageSize;
 
+    private LocalDateTime dorisCreateTime;
+
     private Long rowCount;
 
     private LocalDateTime lastUpdated;

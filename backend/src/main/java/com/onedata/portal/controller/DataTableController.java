@@ -94,11 +94,10 @@ public class DataTableController {
      */
     @GetMapping("/options")
     public Result<List<TableOption>> searchTableOptions(
-        @RequestParam String keyword,
-        @RequestParam(required = false) Integer limit,
-        @RequestParam(required = false) String layer,
-        @RequestParam(required = false) String dbName
-    ) {
+            @RequestParam String keyword,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String layer,
+            @RequestParam(required = false) String dbName) {
         return Result.success(dataTableService.searchTableOptions(keyword, limit, layer, dbName));
     }
 
@@ -131,7 +130,8 @@ public class DataTableController {
      * 更新字段
      */
     @PutMapping("/{id}/fields/{fieldId}")
-    public Result<DataField> updateField(@PathVariable Long id, @PathVariable Long fieldId, @RequestBody DataField field) {
+    public Result<DataField> updateField(@PathVariable Long id, @PathVariable Long fieldId,
+            @RequestBody DataField field) {
         field.setId(fieldId);
         field.setTableId(id);
         return Result.success(dataTableService.updateField(field));
@@ -186,6 +186,103 @@ public class DataTableController {
     public Result<Void> delete(@PathVariable Long id) {
         dataTableService.delete(id);
         return Result.success();
+    }
+
+    /**
+     * 修改表注释（同时更新Doris和本地）
+     */
+    @RequireAuth
+    @PutMapping("/{id}/comment")
+    public Result<Void> updateTableComment(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body,
+            @RequestParam(required = false) Long clusterId) {
+        String comment = body.get("comment");
+        if (comment == null) {
+            return Result.fail("注释内容不能为空");
+        }
+
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return Result.fail("表不存在");
+        }
+
+        String database;
+        String actualTableName;
+
+        if (table.getDbName() != null && !table.getDbName().isEmpty()) {
+            database = table.getDbName();
+            actualTableName = table.getTableName().contains(".")
+                    ? table.getTableName().split("\\.", 2)[1]
+                    : table.getTableName();
+        } else if (table.getTableName().contains(".")) {
+            String[] parts = table.getTableName().split("\\.", 2);
+            database = parts[0];
+            actualTableName = parts[1];
+        } else {
+            return Result.fail("表未配置数据库名，请先设置 dbName 字段");
+        }
+
+        try {
+            // 更新Doris表注释
+            dorisConnectionService.alterTableComment(clusterId, database, actualTableName, comment);
+
+            // 更新本地表注释
+            table.setTableComment(comment);
+            dataTableService.update(table);
+
+            return Result.success();
+        } catch (Exception e) {
+            return Result.fail("修改表注释失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 软删除表（重命名为 tableName_deprecated_时间戳）
+     */
+    @RequireAuth
+    @PostMapping("/{id}/soft-delete")
+    public Result<Void> softDeleteTable(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long clusterId) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return Result.fail("表不存在");
+        }
+
+        String database;
+        String actualTableName;
+
+        if (table.getDbName() != null && !table.getDbName().isEmpty()) {
+            database = table.getDbName();
+            actualTableName = table.getTableName().contains(".")
+                    ? table.getTableName().split("\\.", 2)[1]
+                    : table.getTableName();
+        } else if (table.getTableName().contains(".")) {
+            String[] parts = table.getTableName().split("\\.", 2);
+            database = parts[0];
+            actualTableName = parts[1];
+        } else {
+            return Result.fail("表未配置数据库名，请先设置 dbName 字段");
+        }
+
+        try {
+            // 生成新表名
+            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+            String newTableName = actualTableName + "_deprecated_" + timestamp;
+
+            // 在Doris中重命名表
+            dorisConnectionService.renameTable(clusterId, database, actualTableName, newTableName);
+
+            // 更新本地记录
+            table.setTableName(newTableName);
+            table.setStatus("deprecated");
+            dataTableService.update(table);
+
+            return Result.success();
+        } catch (Exception e) {
+            return Result.fail("删除表失败: " + e.getMessage());
+        }
     }
 
     /**
@@ -526,7 +623,8 @@ public class DataTableController {
             @PathVariable String database,
             @RequestParam(required = false) Long clusterId) {
         try {
-            DorisMetadataSyncService.SyncResult result = dorisMetadataSyncService.syncDatabase(clusterId, database, null);
+            DorisMetadataSyncService.SyncResult result = dorisMetadataSyncService.syncDatabase(clusterId, database,
+                    null);
 
             Map<String, Object> response = new java.util.HashMap<>();
             response.put("success", result.getErrors().isEmpty());
@@ -578,7 +676,8 @@ public class DataTableController {
         }
 
         try {
-            DorisMetadataSyncService.SyncResult result = dorisMetadataSyncService.syncTable(clusterId, database, actualTableName);
+            DorisMetadataSyncService.SyncResult result = dorisMetadataSyncService.syncTable(clusterId, database,
+                    actualTableName);
 
             Map<String, Object> response = new java.util.HashMap<>();
             response.put("success", result.getErrors().isEmpty());

@@ -16,7 +16,6 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.*;
 
-
 /**
  * Doris 连接服务
  */
@@ -43,8 +42,9 @@ public class DorisConnectionService {
         DorisCluster cluster = resolveCluster(clusterId);
         String targetDb = StringUtils.hasText(database) ? database : dorisJdbcProperties.getDefaultDatabase();
         try (Connection connection = getConnection(cluster, database);
-             Statement statement = connection.createStatement()) {
-            log.info("Executing SQL on Doris cluster {} (db={}): {}", cluster.getClusterName(), targetDb, abbreviate(sql));
+                Statement statement = connection.createStatement()) {
+            log.info("Executing SQL on Doris cluster {} (db={}): {}", cluster.getClusterName(), targetDb,
+                    abbreviate(sql));
             statement.execute(sql);
         } catch (SQLException e) {
             log.error("Failed to execute SQL on Doris cluster {} (db={})", cluster.getClusterName(), targetDb, e);
@@ -89,13 +89,13 @@ public class DorisConnectionService {
     private Connection getConnection(DorisCluster cluster, String database) throws SQLException {
         String targetDb = StringUtils.hasText(database) ? database : dorisJdbcProperties.getDefaultDatabase();
         String url = buildJdbcUrl(cluster, targetDb);
-        
+
         // 尝试从用户上下文获取用户ID
         String userId = UserContextHolder.getCurrentUserId();
-        
+
         String username;
         String password;
-        
+
         if (userId != null && StringUtils.hasText(database)) {
             // 有用户上下文且指定了数据库，使用用户映射的Doris凭据
             try {
@@ -105,7 +105,8 @@ public class DorisConnectionService {
                 log.debug("Using user-mapped Doris credential for user {} on database {}", userId, database);
             } catch (Exception e) {
                 // 如果获取用户凭据失败，记录警告并使用集群默认凭据
-                log.warn("Failed to get user-mapped credential for user {} on database {}, falling back to cluster default: {}", 
+                log.warn(
+                        "Failed to get user-mapped credential for user {} on database {}, falling back to cluster default: {}",
                         userId, database, e.getMessage());
                 username = cluster.getUsername();
                 password = cluster.getPassword() == null ? "" : cluster.getPassword();
@@ -120,7 +121,7 @@ public class DorisConnectionService {
                 log.debug("No database specified, using cluster default credential");
             }
         }
-        
+
         Connection connection = DriverManager.getConnection(url, username, password);
         applySessionCharset(connection);
         return connection;
@@ -143,11 +144,10 @@ public class DorisConnectionService {
             }
         } else {
             cluster = dorisClusterMapper.selectOne(
-                new LambdaQueryWrapper<DorisCluster>()
-                    .eq(DorisCluster::getIsDefault, 1)
-                    .eq(DorisCluster::getStatus, "active")
-                    .last("LIMIT 1")
-            );
+                    new LambdaQueryWrapper<DorisCluster>()
+                            .eq(DorisCluster::getIsDefault, 1)
+                            .eq(DorisCluster::getStatus, "active")
+                            .last("LIMIT 1"));
             if (cluster == null) {
                 throw new RuntimeException("未配置默认的 Doris 集群");
             }
@@ -173,22 +173,25 @@ public class DorisConnectionService {
     private Optional<TableRuntimeStats> queryTableStats(Connection connection, String database, String tableName) {
         String sql = String.format("SHOW TABLE STATS `%s`.`%s`", database, tableName);
         try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
+                ResultSet rs = stmt.executeQuery(sql)) {
             if (rs.next()) {
                 Map<String, Object> row = extractRow(rs);
                 TableRuntimeStats stats = new TableRuntimeStats();
                 stats.setRowCount(getLong(row, "RowCount", "row_count", "rows"));
                 stats.setDataSize(getLong(row, "DataSize", "data_size"));
-                stats.setLastUpdate(toTimestamp(row, "UpdateTime", "update_time", "LastAnalyzeTime", "last_update_time"));
+                stats.setLastUpdate(
+                        toTimestamp(row, "UpdateTime", "update_time", "LastAnalyzeTime", "last_update_time"));
                 return Optional.of(stats);
             }
         } catch (SQLException e) {
-            log.debug("SHOW TABLE STATS not available for {}.{}, fallback to information_schema.table_stats", database, tableName);
+            log.debug("SHOW TABLE STATS not available for {}.{}, fallback to information_schema.table_stats", database,
+                    tableName);
         }
         return Optional.empty();
     }
 
-    private Optional<TableRuntimeStats> queryTableStatsFallback(Connection connection, String database, String tableName) {
+    private Optional<TableRuntimeStats> queryTableStatsFallback(Connection connection, String database,
+            String tableName) {
         String sql = "SELECT row_count, data_size, update_time FROM information_schema.table_stats WHERE table_schema = ? AND table_name = ?";
         try (PreparedStatement stmt = connection.prepareStatement(sql)) {
             stmt.setString(1, database);
@@ -203,7 +206,8 @@ public class DorisConnectionService {
                 }
             }
         } catch (SQLException e) {
-            log.debug("information_schema.table_stats not accessible for {}.{}, reason={}", database, tableName, e.getMessage());
+            log.debug("information_schema.table_stats not accessible for {}.{}, reason={}", database, tableName,
+                    e.getMessage());
         }
         return Optional.empty();
     }
@@ -294,14 +298,17 @@ public class DorisConnectionService {
         } catch (SQLException primaryEx) {
             String fallbackCharset = dorisJdbcProperties.getSessionCharsetFallback();
             if (!StringUtils.hasText(fallbackCharset) || fallbackCharset.equalsIgnoreCase(primaryCharset)) {
-                log.warn("Failed to set Doris session charset to {}. reason={}", primaryCharset, primaryEx.getMessage());
+                log.warn("Failed to set Doris session charset to {}. reason={}", primaryCharset,
+                        primaryEx.getMessage());
                 return;
             }
-            log.warn("Doris does not support {} charset, fallback to {}. reason={}", primaryCharset, fallbackCharset, primaryEx.getMessage());
+            log.warn("Doris does not support {} charset, fallback to {}. reason={}", primaryCharset, fallbackCharset,
+                    primaryEx.getMessage());
             try (Statement fallback = connection.createStatement()) {
                 fallback.execute("SET NAMES " + fallbackCharset);
             } catch (SQLException secondaryEx) {
-                log.warn("Failed to set Doris session charset to {}. reason={}", fallbackCharset, secondaryEx.getMessage());
+                log.warn("Failed to set Doris session charset to {}. reason={}", fallbackCharset,
+                        secondaryEx.getMessage());
             }
         }
     }
@@ -312,6 +319,27 @@ public class DorisConnectionService {
         }
         String trimmed = sql.replaceAll("\\s+", " ").trim();
         return trimmed.length() > 200 ? trimmed.substring(0, 200) + "..." : trimmed;
+    }
+
+    /**
+     * 修改表注释
+     */
+    public void alterTableComment(Long clusterId, String database, String tableName, String comment) {
+        // Doris 修改表注释的语法: ALTER TABLE db.table MODIFY COMMENT 'xxx'
+        String escapedComment = comment.replace("'", "''");
+        String sql = String.format("ALTER TABLE `%s`.`%s` MODIFY COMMENT '%s'", database, tableName, escapedComment);
+        execute(clusterId, database, sql);
+        log.info("Altered table comment for {}.{}", database, tableName);
+    }
+
+    /**
+     * 重命名表
+     */
+    public void renameTable(Long clusterId, String database, String oldTableName, String newTableName) {
+        // Doris 重命名表的语法: ALTER TABLE db.old_table RENAME new_table
+        String sql = String.format("ALTER TABLE `%s`.`%s` RENAME `%s`", database, oldTableName, newTableName);
+        execute(clusterId, database, sql);
+        log.info("Renamed table {}.{} to {}.{}", database, oldTableName, database, newTableName);
     }
 
     /**
@@ -334,7 +362,7 @@ public class DorisConnectionService {
                 "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?";
 
         try (Connection connection = getConnection(cluster, null);
-             PreparedStatement stmt = connection.prepareStatement(sql)) {
+                PreparedStatement stmt = connection.prepareStatement(sql)) {
 
             stmt.setString(1, database);
             stmt.setString(2, tableName);
@@ -403,7 +431,7 @@ public class DorisConnectionService {
                 "ORDER BY TABLE_NAME";
 
         try (Connection connection = getConnection(cluster, null);
-             PreparedStatement stmt = connection.prepareStatement(sql)) {
+                PreparedStatement stmt = connection.prepareStatement(sql)) {
 
             stmt.setString(1, database);
 
@@ -468,7 +496,7 @@ public class DorisConnectionService {
         // 查询副本和分桶信息（从 SHOW CREATE TABLE 中解析）
         String showCreateSql = "SHOW CREATE TABLE " + database + "." + tableName;
         try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(showCreateSql)) {
+                ResultSet rs = stmt.executeQuery(showCreateSql)) {
             if (rs.next()) {
                 String createTableSql = rs.getString(2);
 
@@ -514,8 +542,8 @@ public class DorisConnectionService {
         String showCreateSql = "SHOW CREATE TABLE `" + database + "`.`" + tableName + "`";
 
         try (Connection connection = getConnection(cluster, null);
-             Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(showCreateSql)) {
+                Statement stmt = connection.createStatement();
+                ResultSet rs = stmt.executeQuery(showCreateSql)) {
 
             if (rs.next()) {
                 return rs.getString(2);
@@ -540,8 +568,8 @@ public class DorisConnectionService {
         String sql = "SELECT * FROM `" + database + "`.`" + tableName + "` LIMIT " + maxLimit;
 
         try (Connection connection = getConnection(cluster, database);
-             Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
+                Statement stmt = connection.createStatement();
+                ResultSet rs = stmt.executeQuery(sql)) {
 
             ResultSetMetaData metaData = rs.getMetaData();
             int columnCount = metaData.getColumnCount();
@@ -596,8 +624,8 @@ public class DorisConnectionService {
         String sql = "SHOW DATABASES";
 
         try (Connection connection = getConnection(cluster, null);
-             Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
+                Statement stmt = connection.createStatement();
+                ResultSet rs = stmt.executeQuery(sql)) {
 
             while (rs.next()) {
                 String dbName = rs.getString(1);
@@ -622,10 +650,10 @@ public class DorisConnectionService {
         List<Map<String, Object>> tables = new ArrayList<>();
 
         String sql = "SELECT TABLE_NAME, TABLE_COMMENT, CREATE_TIME, UPDATE_TIME, TABLE_ROWS, DATA_LENGTH " +
-                     "FROM information_schema.tables WHERE TABLE_SCHEMA = ?";
+                "FROM information_schema.tables WHERE TABLE_SCHEMA = ?";
 
         try (Connection connection = getConnection(cluster, null);
-             PreparedStatement stmt = connection.prepareStatement(sql)) {
+                PreparedStatement stmt = connection.prepareStatement(sql)) {
 
             stmt.setString(1, database);
 
@@ -656,11 +684,12 @@ public class DorisConnectionService {
         DorisCluster cluster = resolveCluster(clusterId);
         List<Map<String, Object>> columns = new ArrayList<>();
 
-        String sql = "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, ORDINAL_POSITION, COLUMN_KEY " +
-                     "FROM information_schema.columns WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION";
+        String sql = "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, ORDINAL_POSITION, COLUMN_KEY "
+                +
+                "FROM information_schema.columns WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION";
 
         try (Connection connection = getConnection(cluster, null);
-             PreparedStatement stmt = connection.prepareStatement(sql)) {
+                PreparedStatement stmt = connection.prepareStatement(sql)) {
 
             stmt.setString(1, database);
             stmt.setString(2, tableName);
@@ -697,8 +726,8 @@ public class DorisConnectionService {
         String showCreateSql = "SHOW CREATE TABLE `" + database + "`.`" + tableName + "`";
 
         try (Connection connection = getConnection(cluster, null);
-             Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(showCreateSql)) {
+                Statement stmt = connection.createStatement();
+                ResultSet rs = stmt.executeQuery(showCreateSql)) {
 
             if (rs.next()) {
                 String createTableSql = rs.getString(2);

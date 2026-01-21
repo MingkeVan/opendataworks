@@ -67,11 +67,16 @@ public class DataTaskService {
             int pageSize,
             String taskType,
             String status,
+            String taskName,
             Long workflowId,
             Long upstreamTaskId,
             Long downstreamTaskId) {
         Page<DataTask> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<DataTask> wrapper = new LambdaQueryWrapper<>();
+
+        if (StringUtils.hasText(taskName)) {
+            wrapper.like(DataTask::getTaskName, taskName);
+        }
 
         if (taskType != null && !taskType.isEmpty()) {
             wrapper.eq(DataTask::getTaskType, taskType);
@@ -249,7 +254,8 @@ public class DataTaskService {
         // 检查任务名称是否已被其他任务使用
         if (!StringUtils.hasText(task.getTaskName())) {
             // taskName 为空时不检查
-        } else if (!task.getTaskName().equals(exists.getTaskName()) && isTaskNameExists(task.getTaskName(), task.getId())) {
+        } else if (!task.getTaskName().equals(exists.getTaskName())
+                && isTaskNameExists(task.getTaskName(), task.getId())) {
             throw new BusinessException("任务名称已存在: " + task.getTaskName());
         }
 
@@ -734,7 +740,6 @@ public class DataTaskService {
         tableTaskRelationMapper.hardDeleteByTaskId(taskId);
     }
 
-    
     private String resolveWorkflowDisplayName(DataTask task) {
         if (task == null) {
             return "legacy-workflow";

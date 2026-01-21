@@ -41,26 +41,59 @@ public class DorisMetadataSyncService {
         private int deletedFields = 0;
         private List<String> errors = new ArrayList<>();
 
-        public void addNewTable() { newTables++; }
-        public void addUpdatedTable() { updatedTables++; }
-        public void addNewField() { newFields++; }
-        public void addUpdatedField() { updatedFields++; }
-        public void addDeletedField() { deletedFields++; }
-        public void addError(String error) { errors.add(error); }
+        public void addNewTable() {
+            newTables++;
+        }
 
-        public int getNewTables() { return newTables; }
-        public int getUpdatedTables() { return updatedTables; }
-        public int getNewFields() { return newFields; }
-        public int getUpdatedFields() { return updatedFields; }
-        public int getDeletedFields() { return deletedFields; }
-        public List<String> getErrors() { return errors; }
+        public void addUpdatedTable() {
+            updatedTables++;
+        }
+
+        public void addNewField() {
+            newFields++;
+        }
+
+        public void addUpdatedField() {
+            updatedFields++;
+        }
+
+        public void addDeletedField() {
+            deletedFields++;
+        }
+
+        public void addError(String error) {
+            errors.add(error);
+        }
+
+        public int getNewTables() {
+            return newTables;
+        }
+
+        public int getUpdatedTables() {
+            return updatedTables;
+        }
+
+        public int getNewFields() {
+            return newFields;
+        }
+
+        public int getUpdatedFields() {
+            return updatedFields;
+        }
+
+        public int getDeletedFields() {
+            return deletedFields;
+        }
+
+        public List<String> getErrors() {
+            return errors;
+        }
 
         @Override
         public String toString() {
             return String.format(
-                "SyncResult{newTables=%d, updatedTables=%d, newFields=%d, updatedFields=%d, deletedFields=%d, errors=%d}",
-                newTables, updatedTables, newFields, updatedFields, deletedFields, errors.size()
-            );
+                    "SyncResult{newTables=%d, updatedTables=%d, newFields=%d, updatedFields=%d, deletedFields=%d, errors=%d}",
+                    newTables, updatedTables, newFields, updatedFields, deletedFields, errors.size());
         }
     }
 
@@ -86,18 +119,31 @@ public class DorisMetadataSyncService {
             statisticsSynced++;
         }
 
-        public List<TableDifference> getTableDifferences() { return tableDifferences; }
-        public List<String> getErrors() { return errors; }
-        public int getTotalDifferences() { return totalDifferences; }
-        public int getStatisticsSynced() { return statisticsSynced; }
-        public boolean hasDifferences() { return totalDifferences > 0; }
+        public List<TableDifference> getTableDifferences() {
+            return tableDifferences;
+        }
+
+        public List<String> getErrors() {
+            return errors;
+        }
+
+        public int getTotalDifferences() {
+            return totalDifferences;
+        }
+
+        public int getStatisticsSynced() {
+            return statisticsSynced;
+        }
+
+        public boolean hasDifferences() {
+            return totalDifferences > 0;
+        }
 
         @Override
         public String toString() {
             return String.format(
-                "AuditResult{totalDifferences=%d, statisticsSynced=%d, errors=%d}",
-                totalDifferences, statisticsSynced, errors.size()
-            );
+                    "AuditResult{totalDifferences=%d, statisticsSynced=%d, errors=%d}",
+                    totalDifferences, statisticsSynced, errors.size());
         }
     }
 
@@ -117,14 +163,33 @@ public class DorisMetadataSyncService {
             this.type = type;
         }
 
-        public void addChange(String change) { changes.add(change); }
-        public void addFieldDifference(FieldDifference diff) { fieldDifferences.add(diff); }
+        public void addChange(String change) {
+            changes.add(change);
+        }
 
-        public String getDatabase() { return database; }
-        public String getTableName() { return tableName; }
-        public DifferenceType getType() { return type; }
-        public List<String> getChanges() { return changes; }
-        public List<FieldDifference> getFieldDifferences() { return fieldDifferences; }
+        public void addFieldDifference(FieldDifference diff) {
+            fieldDifferences.add(diff);
+        }
+
+        public String getDatabase() {
+            return database;
+        }
+
+        public String getTableName() {
+            return tableName;
+        }
+
+        public DifferenceType getType() {
+            return type;
+        }
+
+        public List<String> getChanges() {
+            return changes;
+        }
+
+        public List<FieldDifference> getFieldDifferences() {
+            return fieldDifferences;
+        }
     }
 
     /**
@@ -147,18 +212,26 @@ public class DorisMetadataSyncService {
             changes.put(field, diff);
         }
 
-        public String getFieldName() { return fieldName; }
-        public DifferenceType getType() { return type; }
-        public Map<String, Object> getChanges() { return changes; }
+        public String getFieldName() {
+            return fieldName;
+        }
+
+        public DifferenceType getType() {
+            return type;
+        }
+
+        public Map<String, Object> getChanges() {
+            return changes;
+        }
     }
 
     /**
      * 差异类型
      */
     public enum DifferenceType {
-        NEW,      // Doris 有但平台没有
-        UPDATED,  // 两边都有但信息不同
-        REMOVED   // 平台有但 Doris 没有（冗余）
+        NEW, // Doris 有但平台没有
+        UPDATED, // 两边都有但信息不同
+        REMOVED // 平台有但 Doris 没有（冗余）
     }
 
     /**
@@ -171,8 +244,8 @@ public class DorisMetadataSyncService {
         try {
             // 获取所有数据库
             List<String> databases = dorisConnectionService.getAllDatabases(clusterId).stream()
-                .filter(db -> !IGNORED_DATABASES.contains(db))
-                .collect(Collectors.toList());
+                    .filter(db -> !IGNORED_DATABASES.contains(db))
+                    .collect(Collectors.toList());
             log.info("Found {} databases to audit (filtered)", databases.size());
 
             for (String database : databases) {
@@ -208,12 +281,11 @@ public class DorisMetadataSyncService {
 
         // 获取本地已存在的表
         List<DataTable> localTables = dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getDbName, database)
-        );
+                new LambdaQueryWrapper<DataTable>()
+                        .eq(DataTable::getDbName, database));
 
         Map<String, DataTable> localTableMap = localTables.stream()
-            .collect(Collectors.toMap(DataTable::getTableName, t -> t));
+                .collect(Collectors.toMap(DataTable::getTableName, t -> t));
 
         Set<String> dorisTableNames = new HashSet<>();
 
@@ -279,17 +351,19 @@ public class DorisMetadataSyncService {
             DorisConnectionService.TableRuntimeStats runtimeStats = null;
             if (StringUtils.hasText(localTable.getDbName())) {
                 runtimeStats = dorisConnectionService
-                    .getTableRuntimeStats(clusterId, localTable.getDbName(), localTable.getTableName())
-                    .orElse(null);
+                        .getTableRuntimeStats(clusterId, localTable.getDbName(), localTable.getTableName())
+                        .orElse(null);
             }
 
             if (runtimeStats != null) {
-                if (runtimeStats.getRowCount() != null && !Objects.equals(runtimeStats.getRowCount(), localTable.getRowCount())) {
+                if (runtimeStats.getRowCount() != null
+                        && !Objects.equals(runtimeStats.getRowCount(), localTable.getRowCount())) {
                     localTable.setRowCount(runtimeStats.getRowCount());
                     updated = true;
                 }
 
-                if (runtimeStats.getDataSize() != null && !Objects.equals(runtimeStats.getDataSize(), localTable.getStorageSize())) {
+                if (runtimeStats.getDataSize() != null
+                        && !Objects.equals(runtimeStats.getDataSize(), localTable.getStorageSize())) {
                     localTable.setStorageSize(runtimeStats.getDataSize());
                     updated = true;
                 }
@@ -342,19 +416,21 @@ public class DorisMetadataSyncService {
      * 比对单个表的结构差异（只比对结构，不比对统计信息）
      */
     private TableDifference compareTable(Long clusterId, String database, String tableName,
-                                        Map<String, Object> dorisTable, DataTable localTable) {
+            Map<String, Object> dorisTable, DataTable localTable) {
         TableDifference diff = new TableDifference(database, tableName, DifferenceType.UPDATED);
 
         try {
             // 获取表的详细信息
-            Map<String, Object> tableCreateInfo = dorisConnectionService.getTableCreateInfo(clusterId, database, tableName);
-            List<Map<String, Object>> dorisColumns = dorisConnectionService.getColumnsInTable(clusterId, database, tableName);
+            Map<String, Object> tableCreateInfo = dorisConnectionService.getTableCreateInfo(clusterId, database,
+                    tableName);
+            List<Map<String, Object>> dorisColumns = dorisConnectionService.getColumnsInTable(clusterId, database,
+                    tableName);
 
             // 比对表注释
             String dorisComment = (String) dorisTable.get("tableComment");
             if (!Objects.equals(dorisComment, localTable.getTableComment())) {
                 diff.addChange(String.format("表注释不同: 平台='%s', Doris='%s'",
-                    localTable.getTableComment(), dorisComment));
+                        localTable.getTableComment(), dorisComment));
             }
 
             // 比对分桶数
@@ -362,7 +438,7 @@ public class DorisMetadataSyncService {
                 Integer dorisBucketNum = (Integer) tableCreateInfo.get("bucketNum");
                 if (!Objects.equals(dorisBucketNum, localTable.getBucketNum())) {
                     diff.addChange(String.format("分桶数不同: 平台=%d, Doris=%d",
-                        localTable.getBucketNum(), dorisBucketNum));
+                            localTable.getBucketNum(), dorisBucketNum));
                 }
             }
 
@@ -371,7 +447,7 @@ public class DorisMetadataSyncService {
                 Integer dorisReplicationNum = (Integer) tableCreateInfo.get("replicationNum");
                 if (!Objects.equals(dorisReplicationNum, localTable.getReplicaNum())) {
                     diff.addChange(String.format("副本数不同: 平台=%d, Doris=%d",
-                        localTable.getReplicaNum(), dorisReplicationNum));
+                            localTable.getReplicaNum(), dorisReplicationNum));
                 }
             }
 
@@ -380,7 +456,7 @@ public class DorisMetadataSyncService {
                 String dorisPartitionField = (String) tableCreateInfo.get("partitionField");
                 if (!Objects.equals(dorisPartitionField, localTable.getPartitionField())) {
                     diff.addChange(String.format("分区字段不同: 平台='%s', Doris='%s'",
-                        localTable.getPartitionField(), dorisPartitionField));
+                            localTable.getPartitionField(), dorisPartitionField));
                 }
             }
 
@@ -401,12 +477,11 @@ public class DorisMetadataSyncService {
     private void compareTableFields(Long tableId, List<Map<String, Object>> dorisColumns, TableDifference tableDiff) {
         // 获取本地字段
         List<DataField> localFields = dataFieldMapper.selectList(
-            new LambdaQueryWrapper<DataField>()
-                .eq(DataField::getTableId, tableId)
-        );
+                new LambdaQueryWrapper<DataField>()
+                        .eq(DataField::getTableId, tableId));
 
         Map<String, DataField> localFieldMap = localFields.stream()
-            .collect(Collectors.toMap(DataField::getFieldName, f -> f));
+                .collect(Collectors.toMap(DataField::getFieldName, f -> f));
 
         Set<String> dorisFieldNames = new HashSet<>();
 
@@ -473,8 +548,8 @@ public class DorisMetadataSyncService {
         try {
             // 获取所有数据库
             List<String> databases = dorisConnectionService.getAllDatabases(clusterId).stream()
-                .filter(db -> !IGNORED_DATABASES.contains(db))
-                .collect(Collectors.toList());
+                    .filter(db -> !IGNORED_DATABASES.contains(db))
+                    .collect(Collectors.toList());
             log.info("Found {} databases to sync", databases.size());
 
             for (String database : databases) {
@@ -512,12 +587,11 @@ public class DorisMetadataSyncService {
 
         // 获取本地已存在的表
         List<DataTable> localTables = dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getDbName, database)
-        );
+                new LambdaQueryWrapper<DataTable>()
+                        .eq(DataTable::getDbName, database));
 
         Map<String, DataTable> localTableMap = localTables.stream()
-            .collect(Collectors.toMap(DataTable::getTableName, t -> t));
+                .collect(Collectors.toMap(DataTable::getTableName, t -> t));
 
         // 遍历 Doris 中的表
         for (Map<String, Object> dorisTable : dorisTables) {
@@ -546,7 +620,7 @@ public class DorisMetadataSyncService {
      * 同步新表
      */
     private void syncNewTable(Long clusterId, String database, String tableName,
-                              Map<String, Object> dorisTable, SyncResult result) {
+            Map<String, Object> dorisTable, SyncResult result) {
         log.info("Syncing new table: {}.{}", database, tableName);
 
         // 获取表的详细信息
@@ -604,6 +678,12 @@ public class DorisMetadataSyncService {
             newTable.setLastUpdated(updateTime.toLocalDateTime());
         }
 
+        // 同步Doris创建时间
+        Timestamp createTime = (Timestamp) dorisTable.get("createTime");
+        if (createTime != null) {
+            newTable.setDorisCreateTime(createTime.toLocalDateTime());
+        }
+
         dataTableMapper.insert(newTable);
         result.addNewTable();
 
@@ -615,7 +695,7 @@ public class DorisMetadataSyncService {
      * 同步已存在的表
      */
     private void syncExistingTable(Long clusterId, String database, String tableName,
-                                   Map<String, Object> dorisTable, DataTable localTable, SyncResult result) {
+            Map<String, Object> dorisTable, DataTable localTable, SyncResult result) {
         log.debug("Syncing existing table: {}.{}", database, tableName);
 
         // 获取表的详细信息
@@ -720,6 +800,15 @@ public class DorisMetadataSyncService {
         localTable.setIsSynced(1);
         localTable.setSyncTime(LocalDateTime.now());
 
+        // 同步Doris创建时间（如果本地还没有记录）
+        if (localTable.getDorisCreateTime() == null) {
+            Timestamp createTime = (Timestamp) dorisTable.get("createTime");
+            if (createTime != null) {
+                localTable.setDorisCreateTime(createTime.toLocalDateTime());
+                updated = true;
+            }
+        }
+
         if (updated) {
             dataTableMapper.updateById(localTable);
             result.addUpdatedTable();
@@ -755,12 +844,11 @@ public class DorisMetadataSyncService {
     private void syncTableFieldsIncremental(Long tableId, List<Map<String, Object>> dorisColumns, SyncResult result) {
         // 获取本地已存在的字段
         List<DataField> localFields = dataFieldMapper.selectList(
-            new LambdaQueryWrapper<DataField>()
-                .eq(DataField::getTableId, tableId)
-        );
+                new LambdaQueryWrapper<DataField>()
+                        .eq(DataField::getTableId, tableId));
 
         Map<String, DataField> localFieldMap = localFields.stream()
-            .collect(Collectors.toMap(DataField::getFieldName, f -> f));
+                .collect(Collectors.toMap(DataField::getFieldName, f -> f));
 
         Set<String> dorisFieldNames = new HashSet<>();
 
@@ -855,9 +943,9 @@ public class DorisMetadataSyncService {
             // 获取 Doris 中的表信息
             List<Map<String, Object>> tables = dorisConnectionService.getTablesInDatabase(clusterId, database);
             Map<String, Object> dorisTable = tables.stream()
-                .filter(t -> tableName.equals(t.get("tableName")))
-                .findFirst()
-                .orElse(null);
+                    .filter(t -> tableName.equals(t.get("tableName")))
+                    .findFirst()
+                    .orElse(null);
 
             if (dorisTable == null) {
                 result.addError("表 " + database + "." + tableName + " 在 Doris 中不存在");
@@ -866,10 +954,9 @@ public class DorisMetadataSyncService {
 
             // 获取本地表
             DataTable localTable = dataTableMapper.selectOne(
-                new LambdaQueryWrapper<DataTable>()
-                    .eq(DataTable::getDbName, database)
-                    .eq(DataTable::getTableName, tableName)
-            );
+                    new LambdaQueryWrapper<DataTable>()
+                            .eq(DataTable::getDbName, database)
+                            .eq(DataTable::getTableName, tableName));
 
             if (localTable == null) {
                 syncNewTable(clusterId, database, tableName, dorisTable, result);

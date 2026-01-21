@@ -123,6 +123,20 @@ export const tableApi = {
     return request.delete(`/v1/tables/${id}`)
   },
 
+  // 修改表注释（同时更新Doris）
+  updateComment(id, comment, clusterId = null) {
+    return request.put(`/v1/tables/${id}/comment`, { comment }, {
+      params: { clusterId }
+    })
+  },
+
+  // 软删除表（重命名为 deprecated）
+  softDelete(id, clusterId = null) {
+    return request.post(`/v1/tables/${id}/soft-delete`, null, {
+      params: { clusterId }
+    })
+  },
+
   // 稽核/比对 Doris 元数据（只检查差异，不同步）
   auditMetadata(clusterId = null) {
     return request.post('/v1/tables/audit-metadata', null, {

@@ -18,6 +18,7 @@
         <el-input
           v-model="form.task.taskName"
           placeholder="请输入任务名称"
+          :disabled="isWriteTask"
           @input="handleTaskNameInput"
           @blur="handleTaskNameBlur"
         >
@@ -33,6 +34,9 @@
             </el-icon>
           </template>
         </el-input>
+        <div v-if="isWriteTask" class="hint-text">
+          写入任务名称自动使用目标表名
+        </div>
         <div v-if="taskNameError" class="error-text">
           {{ taskNameError }}
         </div>
@@ -264,6 +268,7 @@ const taskNameError = ref('')
 const taskNameChecking = ref(false)
 const originalTaskName = ref('')
 const workflowOptions = ref([])
+const isWriteTask = ref(false)
 
 const fetchWorkflowOptions = async () => {
     try {
@@ -501,6 +506,12 @@ const open = async (id = null, initialData = {}) => {
         await ensureTableOptionsLoaded([tableId])
         if (initialData.relation === 'write') {
            form.outputTableIds = [tableId]
+           // 写入任务自动填充表名作为任务名称
+           isWriteTask.value = true
+           const tableInfo = tableOptionCache[tableId]
+           if (tableInfo && tableInfo.tableName) {
+             form.task.taskName = tableInfo.tableName
+           }
         } else if (initialData.relation === 'read') {
            form.inputTableIds = [tableId]
         }
@@ -632,6 +643,7 @@ const resetForm = () => {
     // 重置任务名称检查状态
     taskNameError.value = ''
     originalTaskName.value = ''
+    isWriteTask.value = false
 }
 
 const handleNodeTypeChange = (newType) => {
@@ -673,6 +685,12 @@ defineExpose({
 
 .error-text {
   color: #f56c6c;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.hint-text {
+  color: #909399;
   font-size: 12px;
   margin-top: 4px;
 }

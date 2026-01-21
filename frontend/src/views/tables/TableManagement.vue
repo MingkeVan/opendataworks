@@ -201,9 +201,14 @@
                         </el-button>
                       </div>
                     </template>
-                    <el-button v-else type="primary" @click="startEditing">
-                      编辑表信息
-                    </el-button>
+                    <div v-else class="action-buttons">
+                      <el-button type="primary" @click="startEditing">
+                        编辑表信息
+                      </el-button>
+                      <el-button type="danger" @click="handleSoftDelete" :loading="deleteLoading">
+                        删除表
+                      </el-button>
+                    </div>
                   </div>
 
                   <template v-if="isEditing">
@@ -373,7 +378,7 @@
                             {{ selectedTable.owner || '-' }}
                           </el-descriptions-item>
                           <el-descriptions-item label="创建时间">
-                            {{ formatDateTime(selectedTable.createdAt) }}
+                            {{ formatDateTime(selectedTable.dorisCreateTime || selectedTable.createdAt) }}
                           </el-descriptions-item>
                         </el-descriptions>
                       </el-col>
@@ -1020,6 +1025,7 @@ const auditLoading = ref(false)
 const syncLoading = ref(false)
 const auditResult = ref(null)
 const differenceDialogVisible = ref(false)
+const deleteLoading = ref(false)
 
 const taskDrawerRef = ref(null)
 
@@ -1342,6 +1348,45 @@ const handleEditSubmit = async () => {
     ElMessage.error('更新失败')
   } finally {
     editSubmitting.value = false
+  }
+}
+
+// 软删除表（重命名为deprecated）
+const handleSoftDelete = async () => {
+  if (!selectedTable.value) return
+  
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除表 "${selectedTable.value.tableName}" 吗？\n表将被重命名为 "${selectedTable.value.tableName}_deprecated_时间戳" 格式，数据不会丢失。`,
+      '删除确认',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+  
+  deleteLoading.value = true
+  try {
+    await tableApi.softDelete(selectedTable.value.id)
+    ElMessage.success('表已删除（重命名为deprecated）')
+    
+    // 刷新当前数据库的表列表
+    if (selectedTable.value.dbName) {
+      await loadTablesForDatabase(selectedTable.value.dbName)
+    }
+    
+    // 清空选中状态
+    selectedTable.value = null
+    activeTab.value = 'basic'
+  } catch (error) {
+    console.error('删除失败:', error)
+    ElMessage.error('删除失败: ' + (error.message || '未知错误'))
+  } finally {
+    deleteLoading.value = false
   }
 }
 
@@ -2371,7 +2416,7 @@ onMounted(async () => {
 
 .lineage-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 8px;
   border: 1px solid #e2e8f0;
@@ -2389,15 +2434,15 @@ onMounted(async () => {
 
 .table-info-mini {
   flex: 1;
-  overflow: hidden;
+  min-width: 0;
 }
 
 .table-info-mini .table-name {
   font-weight: 600;
   font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
+  white-space: normal;
+  line-height: 1.4;
 }
 
 .table-info-mini .table-desc {
