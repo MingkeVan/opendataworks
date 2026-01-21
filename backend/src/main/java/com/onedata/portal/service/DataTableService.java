@@ -47,7 +47,8 @@ public class DataTableService {
     /**
      * 分页查询表列表
      */
-    public Page<DataTable> list(int pageNum, int pageSize, String layer, String keyword, String sortField, String sortOrder) {
+    public Page<DataTable> list(int pageNum, int pageSize, String layer, String keyword, String sortField,
+            String sortOrder) {
         Page<DataTable> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<>();
 
@@ -59,6 +60,9 @@ public class DataTableService {
                     .or().like(DataTable::getTableComment, keyword));
         }
 
+        // 排除已软删除的表
+        wrapper.ne(DataTable::getStatus, "deprecated");
+
         // 应用排序
         applySorting(wrapper, sortField, sortOrder);
 
@@ -69,13 +73,15 @@ public class DataTableService {
      * 获取所有数据库列表
      */
     public List<String> listDatabases() {
-        List<DataTable> allTables = dataTableMapper.selectList(null);
+        List<DataTable> allTables = dataTableMapper.selectList(
+                new LambdaQueryWrapper<DataTable>()
+                        .ne(DataTable::getStatus, "deprecated"));
         return allTables.stream()
-            .map(DataTable::getDbName)
-            .filter(dbName -> dbName != null && !dbName.isEmpty())
-            .distinct()
-            .sorted()
-            .collect(Collectors.toList());
+                .map(DataTable::getDbName)
+                .filter(dbName -> dbName != null && !dbName.isEmpty())
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     /**
@@ -84,6 +90,7 @@ public class DataTableService {
     public List<DataTable> listByDatabase(String database, String sortField, String sortOrder) {
         LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(DataTable::getDbName, database);
+        wrapper.ne(DataTable::getStatus, "deprecated");
 
         // 应用排序
         applySorting(wrapper, sortField, sortOrder);
@@ -104,28 +111,40 @@ public class DataTableService {
 
         switch (sortField) {
             case "tableName":
-                if (isAsc) wrapper.orderByAsc(DataTable::getTableName);
-                else wrapper.orderByDesc(DataTable::getTableName);
+                if (isAsc)
+                    wrapper.orderByAsc(DataTable::getTableName);
+                else
+                    wrapper.orderByDesc(DataTable::getTableName);
                 break;
             case "createdAt":
-                if (isAsc) wrapper.orderByAsc(DataTable::getCreatedAt);
-                else wrapper.orderByDesc(DataTable::getCreatedAt);
+                if (isAsc)
+                    wrapper.orderByAsc(DataTable::getCreatedAt);
+                else
+                    wrapper.orderByDesc(DataTable::getCreatedAt);
                 break;
             case "updatedAt":
-                if (isAsc) wrapper.orderByAsc(DataTable::getUpdatedAt);
-                else wrapper.orderByDesc(DataTable::getUpdatedAt);
+                if (isAsc)
+                    wrapper.orderByAsc(DataTable::getUpdatedAt);
+                else
+                    wrapper.orderByDesc(DataTable::getUpdatedAt);
                 break;
             case "lastUpdated":
-                if (isAsc) wrapper.orderByAsc(DataTable::getLastUpdated);
-                else wrapper.orderByDesc(DataTable::getLastUpdated);
+                if (isAsc)
+                    wrapper.orderByAsc(DataTable::getLastUpdated);
+                else
+                    wrapper.orderByDesc(DataTable::getLastUpdated);
                 break;
             case "rowCount":
-                if (isAsc) wrapper.orderByAsc(DataTable::getRowCount);
-                else wrapper.orderByDesc(DataTable::getRowCount);
+                if (isAsc)
+                    wrapper.orderByAsc(DataTable::getRowCount);
+                else
+                    wrapper.orderByDesc(DataTable::getRowCount);
                 break;
             case "storageSize":
-                if (isAsc) wrapper.orderByAsc(DataTable::getStorageSize);
-                else wrapper.orderByDesc(DataTable::getStorageSize);
+                if (isAsc)
+                    wrapper.orderByAsc(DataTable::getStorageSize);
+                else
+                    wrapper.orderByDesc(DataTable::getStorageSize);
                 break;
             default:
                 wrapper.orderByDesc(DataTable::getCreatedAt);
@@ -144,9 +163,8 @@ public class DataTableService {
      */
     public DataTable getByTableName(String tableName) {
         return dataTableMapper.selectOne(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getTableName, tableName)
-        );
+                new LambdaQueryWrapper<DataTable>()
+                        .eq(DataTable::getTableName, tableName));
     }
 
     /**
@@ -179,10 +197,9 @@ public class DataTableService {
         String newTableName = dataTable.getTableName();
         if (StringUtils.hasText(newTableName) && !newTableName.equals(exists.getTableName())) {
             DataTable duplicate = dataTableMapper.selectOne(
-                new LambdaQueryWrapper<DataTable>()
-                    .eq(DataTable::getTableName, newTableName)
-                    .ne(DataTable::getId, dataTable.getId())
-            );
+                    new LambdaQueryWrapper<DataTable>()
+                            .eq(DataTable::getTableName, newTableName)
+                            .ne(DataTable::getId, dataTable.getId()));
             if (duplicate != null) {
                 throw new RuntimeException("表名已存在: " + newTableName);
             }
@@ -207,10 +224,9 @@ public class DataTableService {
      */
     public List<DataTable> listAll() {
         return dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getStatus, "active")
-                .orderByAsc(DataTable::getLayer, DataTable::getTableName)
-        );
+                new LambdaQueryWrapper<DataTable>()
+                        .eq(DataTable::getStatus, "active")
+                        .orderByAsc(DataTable::getLayer, DataTable::getTableName));
     }
 
     /**
@@ -226,7 +242,7 @@ public class DataTableService {
 
         LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<>();
         wrapper.and(w -> w.like(DataTable::getTableName, trimmed)
-            .or().like(DataTable::getTableComment, trimmed));
+                .or().like(DataTable::getTableComment, trimmed));
 
         if (StringUtils.hasText(layer)) {
             wrapper.eq(DataTable::getLayer, layer.trim());
@@ -236,14 +252,16 @@ public class DataTableService {
             wrapper.eq(DataTable::getDbName, dbName.trim());
         }
 
+        wrapper.ne(DataTable::getStatus, "deprecated");
+
         wrapper.orderByAsc(DataTable::getTableName);
 
         Page<DataTable> page = new Page<>(1, pageSize);
         Page<DataTable> result = dataTableMapper.selectPage(page, wrapper);
 
         return result.getRecords().stream()
-            .map(this::toTableOption)
-            .collect(Collectors.toList());
+                .map(this::toTableOption)
+                .collect(Collectors.toList());
     }
 
     private TableOption toTableOption(DataTable table) {
@@ -261,10 +279,9 @@ public class DataTableService {
      */
     public List<DataField> listFields(Long tableId) {
         return dataFieldMapper.selectList(
-            new LambdaQueryWrapper<DataField>()
-                .eq(DataField::getTableId, tableId)
-                .orderByAsc(DataField::getFieldOrder, DataField::getId)
-        );
+                new LambdaQueryWrapper<DataField>()
+                        .eq(DataField::getTableId, tableId)
+                        .orderByAsc(DataField::getFieldOrder, DataField::getId));
     }
 
     /**
@@ -274,10 +291,9 @@ public class DataTableService {
     public DataField createField(DataField field) {
         // 检查字段名是否已存在
         DataField exists = dataFieldMapper.selectOne(
-            new LambdaQueryWrapper<DataField>()
-                .eq(DataField::getTableId, field.getTableId())
-                .eq(DataField::getFieldName, field.getFieldName())
-        );
+                new LambdaQueryWrapper<DataField>()
+                        .eq(DataField::getTableId, field.getTableId())
+                        .eq(DataField::getFieldName, field.getFieldName()));
         if (exists != null) {
             throw new RuntimeException("字段名已存在: " + field.getFieldName());
         }
@@ -301,11 +317,10 @@ public class DataTableService {
         String newFieldName = field.getFieldName();
         if (StringUtils.hasText(newFieldName) && !newFieldName.equals(exists.getFieldName())) {
             DataField duplicate = dataFieldMapper.selectOne(
-                new LambdaQueryWrapper<DataField>()
-                    .eq(DataField::getTableId, field.getTableId())
-                    .eq(DataField::getFieldName, newFieldName)
-                    .ne(DataField::getId, field.getId())
-            );
+                    new LambdaQueryWrapper<DataField>()
+                            .eq(DataField::getTableId, field.getTableId())
+                            .eq(DataField::getFieldName, newFieldName)
+                            .ne(DataField::getId, field.getId()));
             if (duplicate != null) {
                 throw new RuntimeException("字段名已存在: " + newFieldName);
             }
@@ -331,23 +346,22 @@ public class DataTableService {
     public TableRelatedTasksResponse getRelatedTasks(Long tableId) {
         TableRelatedTasksResponse response = new TableRelatedTasksResponse();
         List<TableTaskRelation> relations = tableTaskRelationMapper.selectList(
-            new LambdaQueryWrapper<TableTaskRelation>()
-                .eq(TableTaskRelation::getTableId, tableId)
-        );
+                new LambdaQueryWrapper<TableTaskRelation>()
+                        .eq(TableTaskRelation::getTableId, tableId));
         if (relations.isEmpty()) {
             return response;
         }
 
         Set<Long> taskIds = relations.stream()
-            .map(TableTaskRelation::getTaskId)
-            .collect(Collectors.toSet());
+                .map(TableTaskRelation::getTaskId)
+                .collect(Collectors.toSet());
         if (taskIds.isEmpty()) {
             return response;
         }
 
         List<DataTask> tasks = dataTaskMapper.selectBatchIds(taskIds);
         Map<Long, DataTask> taskMap = tasks.stream()
-            .collect(Collectors.toMap(DataTask::getId, t -> t));
+                .collect(Collectors.toMap(DataTask::getId, t -> t));
 
         for (TableTaskRelation relation : relations) {
             DataTask task = taskMap.get(relation.getTaskId());
@@ -375,50 +389,46 @@ public class DataTableService {
 
         // 1. 找到所有写入当前表的任务（这些任务读取的表是上游表）
         List<TableTaskRelation> writeRelations = tableTaskRelationMapper.selectList(
-            new LambdaQueryWrapper<TableTaskRelation>()
-                .eq(TableTaskRelation::getTableId, tableId)
-                .eq(TableTaskRelation::getRelationType, "write")
-        );
+                new LambdaQueryWrapper<TableTaskRelation>()
+                        .eq(TableTaskRelation::getTableId, tableId)
+                        .eq(TableTaskRelation::getRelationType, "write"));
 
         Set<Long> writeTasks = writeRelations.stream()
-            .map(TableTaskRelation::getTaskId)
-            .collect(Collectors.toSet());
+                .map(TableTaskRelation::getTaskId)
+                .collect(Collectors.toSet());
 
         // 2. 找到所有从当前表读取的任务（这些任务写入的表是下游表）
         List<TableTaskRelation> readRelations = tableTaskRelationMapper.selectList(
-            new LambdaQueryWrapper<TableTaskRelation>()
-                .eq(TableTaskRelation::getTableId, tableId)
-                .eq(TableTaskRelation::getRelationType, "read")
-        );
+                new LambdaQueryWrapper<TableTaskRelation>()
+                        .eq(TableTaskRelation::getTableId, tableId)
+                        .eq(TableTaskRelation::getRelationType, "read"));
 
         Set<Long> readTasks = readRelations.stream()
-            .map(TableTaskRelation::getTaskId)
-            .collect(Collectors.toSet());
+                .map(TableTaskRelation::getTaskId)
+                .collect(Collectors.toSet());
 
         // 3. 获取上游表ID（写入任务读取的表）
         Set<Long> upstreamIds = new LinkedHashSet<>();
         if (!writeTasks.isEmpty()) {
             List<TableTaskRelation> upstreamRelations = tableTaskRelationMapper.selectList(
-                new LambdaQueryWrapper<TableTaskRelation>()
-                    .in(TableTaskRelation::getTaskId, writeTasks)
-                    .eq(TableTaskRelation::getRelationType, "read")
-            );
+                    new LambdaQueryWrapper<TableTaskRelation>()
+                            .in(TableTaskRelation::getTaskId, writeTasks)
+                            .eq(TableTaskRelation::getRelationType, "read"));
             upstreamIds = upstreamRelations.stream()
-                .map(TableTaskRelation::getTableId)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+                    .map(TableTaskRelation::getTableId)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
         }
 
         // 4. 获取下游表ID（读取任务写入的表）
         Set<Long> downstreamIds = new LinkedHashSet<>();
         if (!readTasks.isEmpty()) {
             List<TableTaskRelation> downstreamRelations = tableTaskRelationMapper.selectList(
-                new LambdaQueryWrapper<TableTaskRelation>()
-                    .in(TableTaskRelation::getTaskId, readTasks)
-                    .eq(TableTaskRelation::getRelationType, "write")
-            );
+                    new LambdaQueryWrapper<TableTaskRelation>()
+                            .in(TableTaskRelation::getTaskId, readTasks)
+                            .eq(TableTaskRelation::getRelationType, "write"));
             downstreamIds = downstreamRelations.stream()
-                .map(TableTaskRelation::getTableId)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+                    .map(TableTaskRelation::getTableId)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
         }
 
         // 5. 查询表详情
@@ -430,9 +440,12 @@ public class DataTableService {
             return response;
         }
 
-        List<DataTable> tables = dataTableMapper.selectBatchIds(allIds);
+        List<DataTable> tables = dataTableMapper.selectList(
+                new LambdaQueryWrapper<DataTable>()
+                        .in(DataTable::getId, allIds)
+                        .ne(DataTable::getStatus, "deprecated"));
         Map<Long, DataTable> tableMap = tables.stream()
-            .collect(Collectors.toMap(DataTable::getId, t -> t));
+                .collect(Collectors.toMap(DataTable::getId, t -> t));
 
         // 6. 构建响应
         for (Long id : upstreamIds) {
@@ -461,11 +474,10 @@ public class DataTableService {
         info.setScheduleCron(task.getScheduleCron());
 
         TaskExecutionLog lastLog = taskExecutionLogMapper.selectOne(
-            new LambdaQueryWrapper<TaskExecutionLog>()
-                .eq(TaskExecutionLog::getTaskId, task.getId())
-                .orderByDesc(TaskExecutionLog::getStartTime)
-                .last("LIMIT 1")
-        );
+                new LambdaQueryWrapper<TaskExecutionLog>()
+                        .eq(TaskExecutionLog::getTaskId, task.getId())
+                        .orderByDesc(TaskExecutionLog::getStartTime)
+                        .last("LIMIT 1"));
         if (lastLog != null) {
             LocalDateTime executedAt = lastLog.getEndTime() != null ? lastLog.getEndTime() : lastLog.getStartTime();
             info.setLastExecuted(executedAt);
