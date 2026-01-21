@@ -109,6 +109,7 @@
                       :key="item.id"
                       class="table-item"
                       :class="{ active: selectedTable?.id === item.id }"
+                      :ref="(el) => observeEl(el, 'table-item', item.id)"
                       @click.stop="handleTableClick(item)"
                     >
                       <!-- 数据量进度条背景 -->
@@ -156,6 +157,7 @@
                     <div 
                       v-if="hasMoreTables(db)" 
                       class="load-more-trigger"
+                      :ref="(el) => observeEl(el, 'load-more', db)"
                       :data-db="db"
                     >
                        <el-button link type="primary" :loading="true">加载更多...</el-button>
@@ -1139,19 +1141,6 @@ const loadTablesForDatabase = async (database) => {
   try {
     const tables = await tableApi.listByDatabase(database, sortField.value, sortOrder.value)
     tablesByDatabase.value[database] = tables
-
-    // 异步预加载血缘信息，不阻塞当前流程
-    setTimeout(() => {
-      // 分批加载以避免瞬间请求过多
-      const batchSize = 5
-      for (let i = 0; i < tables.length; i += batchSize) {
-        const batch = tables.slice(i, i + batchSize)
-        // 每一批之间稍微延迟
-        setTimeout(() => {
-          batch.forEach(table => loadLineageForTable(table.id))
-        }, (i / batchSize) * 200)
-      }
-    }, 0)
   } catch (error) {
     console.error('加载表列表失败:', error)
   } finally {
@@ -1548,7 +1537,16 @@ const syncSelectionFromRoute = async () => {
 
 const observer = ref(null)
 
-// 设置无限滚动观察器
+// 注册观察元素
+const observeEl = (el, type, id) => {
+  if (el && observer.value) {
+    el.dataset.type = type
+    el.dataset.id = id
+    observer.value.observe(el)
+  }
+}
+
+// 设置无限滚动和血缘加载观察器
 const setupObserver = () => {
   if (observer.value) {
     observer.value.disconnect()
@@ -1557,9 +1555,14 @@ const setupObserver = () => {
   observer.value = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       if (entry.isIntersecting) {
-        const db = entry.target.dataset.db
-        if (db) {
-          handleLoadMore(db)
+        const type = entry.target.dataset.type
+        const id = entry.target.dataset.id
+        
+        if (type === 'load-more') {
+           handleLoadMore(id)
+        } else if (type === 'table-item') {
+           loadLineageForTable(Number(id))
+           observer.value.unobserve(entry.target)
         }
       }
     })
@@ -1568,22 +1571,10 @@ const setupObserver = () => {
     rootMargin: '100px', // 提前加载
     threshold: 0.1
   })
-
-  // 观察所有加载更多触点
-  nextTick(() => {
-    const triggers = document.querySelectorAll('.load-more-trigger')
-    triggers.forEach(trigger => {
-      observer.value.observe(trigger)
-    })
-  })
 }
 
-// 监听展开状态变化，重置观察器
-watch(() => activeDatabase.value, () => {
-  nextTick(() => {
-    setupObserver()
-  })
-})
+// 移除 watch activeDatabase，因为使用 :ref 自动绑定
+
 
 onMounted(async () => {
   await loadDatabases()

@@ -159,11 +159,12 @@ public class DataTableService {
     }
 
     /**
-     * 根据表名获取表信息
+     * 根据数据库和表名获取表信息
      */
-    public DataTable getByTableName(String tableName) {
+    public DataTable getByDbAndTableName(String dbName, String tableName) {
         return dataTableMapper.selectOne(
                 new LambdaQueryWrapper<DataTable>()
+                        .eq(DataTable::getDbName, dbName)
                         .eq(DataTable::getTableName, tableName));
     }
 
@@ -172,10 +173,10 @@ public class DataTableService {
      */
     @Transactional
     public DataTable create(DataTable dataTable) {
-        // 检查表名是否已存在
-        DataTable exists = getByTableName(dataTable.getTableName());
+        // 检查表名是否已存在（在同一数据库下）
+        DataTable exists = getByDbAndTableName(dataTable.getDbName(), dataTable.getTableName());
         if (exists != null) {
-            throw new RuntimeException("表名已存在: " + dataTable.getTableName());
+            throw new RuntimeException("该数据库下已存在同名表: " + dataTable.getTableName());
         }
 
         dataTableMapper.insert(dataTable);
@@ -195,13 +196,15 @@ public class DataTableService {
 
         // 检查表名是否发生变化且是否重复
         String newTableName = dataTable.getTableName();
-        if (StringUtils.hasText(newTableName) && !newTableName.equals(exists.getTableName())) {
+        String newDbName = dataTable.getDbName();
+        if (StringUtils.hasText(newTableName)) {
             DataTable duplicate = dataTableMapper.selectOne(
                     new LambdaQueryWrapper<DataTable>()
+                            .eq(DataTable::getDbName, newDbName)
                             .eq(DataTable::getTableName, newTableName)
                             .ne(DataTable::getId, dataTable.getId()));
             if (duplicate != null) {
-                throw new RuntimeException("表名已存在: " + newTableName);
+                throw new RuntimeException("该数据库下已存在同名表: " + newTableName);
             }
         }
 
