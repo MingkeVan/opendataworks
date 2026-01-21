@@ -79,7 +79,7 @@
             </el-select>
           </div>
 
-          <!-- 数据库列表 -->
+            <!-- 数据库列表 -->
           <div class="database-list" v-loading="loading">
             <div class="database-tree">
               <div 
@@ -87,14 +87,90 @@
                 :key="db"
                 class="database-node"
               >
-                  <el-empty
-                    v-else
-                    description="暂无表"
-                    :image-size="60"
+                <!-- 数据库头部 -->
+                <div 
+                  class="database-header" 
+                  :class="{ active: expandedDatabases[db], 'is-active-db': selectedTable?.dbName === db }"
+                  @click="toggleDatabase(db)"
+                >
+                  <el-icon class="arrow-icon" :class="{ expanded: expandedDatabases[db] }">
+                    <ArrowRight />
+                  </el-icon>
+                  <el-icon class="folder-icon">
+                    <component :is="expandedDatabases[db] ? 'FolderOpened' : 'Folder'" />
+                  </el-icon>
+                  <span class="db-name" :title="db">{{ db }}</span>
+                  <el-badge
+                    :value="getTableCount(db)"
+                    class="table-count-badge"
+                    type="info"
+                    v-if="getTableCount(db) > 0"
                   />
+                  <!-- 加载状态 -->
+                  <el-icon v-if="databaseLoading[db]" class="is-loading loading-icon"><Loading /></el-icon>
                 </div>
-              </el-collapse-item>
-            </el-collapse>
+
+                <!-- 表列表容器 -->
+                <div v-show="expandedDatabases[db]" class="database-children">
+                  <!-- 表列表 -->
+                  <div class="table-list">
+                    <template v-if="getTablesForDatabase(db).length">
+                      <div
+                        v-for="item in getDisplayedTables(db)"
+                        :key="item.id"
+                        class="table-item"
+                        :class="{ active: selectedTable?.id === item.id }"
+                        @click.stop="handleTableClick(item)"
+                      >
+                        <!-- 数据量进度条背景 -->
+                        <div
+                          class="table-progress-bg"
+                          :style="{ width: getTableProgressWidth(db, item) }"
+                        ></div>
+
+                        <div class="table-content">
+                          <el-icon class="table-icon"><Document /></el-icon>
+                          <div class="table-info">
+                            <span class="table-name" :title="item.tableName">
+                              {{ item.tableName }}
+                            </span>
+                            <span v-if="item.tableComment" class="table-comment" :title="item.tableComment">
+                              {{ item.tableComment }}
+                            </span>
+                          </div>
+                          <div class="table-meta-tags">
+                            <span class="row-count" :title="`数据量: ${formatNumber(getTableRowCount(item))} 行`">
+                              {{ formatRowCount(getTableRowCount(item)) }}
+                            </span>
+                            <span class="storage-size" :title="`存储大小: ${formatStorageSize(getTableStorageSize(item))}`">
+                              {{ formatStorageSize(getTableStorageSize(item)) }}
+                            </span>
+                            <span v-if="getUpstreamCount(item.id) > 0" class="lineage-count upstream" :title="`上游表: ${getUpstreamCount(item.id)} 个`">
+                              ↑{{ getUpstreamCount(item.id) }}
+                            </span>
+                            <span v-if="getDownstreamCount(item.id) > 0" class="lineage-count downstream" :title="`下游表: ${getDownstreamCount(item.id)} 个`">
+                              ↓{{ getDownstreamCount(item.id) }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <!-- 加载更多触点 -->
+                      <div 
+                        v-if="hasMoreTables(db)" 
+                        class="load-more-trigger"
+                        :data-db="db"
+                      >
+                         <el-button link type="primary" :loading="true">加载更多...</el-button>
+                      </div>
+                    </template>
+                    <div v-else-if="!databaseLoading[db]" class="empty-tables">
+                      暂无表数据
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
             <el-empty
               v-if="databases.length === 0"
               description="暂无数据库"
