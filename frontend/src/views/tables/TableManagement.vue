@@ -1452,6 +1452,46 @@ const loadDatabases = async () => {
 
 // ... handleTableClick ...
 
+// 处理表点击
+const handleTableClick = async (table) => {
+  // 如果是点击的不同数据库的表，需要先找到对应的表ID
+  let targetTable = table
+  if (typeof table.id === 'number') {
+    targetTable = table
+  } else {
+    // 如果是从血缘关系点击过来的，需要重新获取完整信息
+    const fullTable = await tableApi.getById(table.id)
+    targetTable = fullTable
+  }
+
+  selectedTable.value = targetTable
+  activeTab.value = 'basic'
+  isEditing.value = false
+  if (editFormRef.value) {
+    editFormRef.value.clearValidate()
+  }
+  // 切换表时清空DDL和预览数据
+  tableDdl.value = ''
+  previewData.value = []
+  
+  if (String(route.query.tableId || '') !== String(targetTable.id) || route.query.database !== targetTable.dbName) {
+    suppressRouteSync.value = true
+    router.replace({
+      path: route.path,
+      query: {
+        ...route.query,
+        tableId: targetTable.id,
+        database: targetTable.dbName
+      }
+    })
+      .catch(() => {})
+      .finally(() => {
+        suppressRouteSync.value = false
+      })
+  }
+  await loadTableDetail(targetTable.id)
+}
+
 const syncSelectionFromRoute = async () => {
   const tableIdParam = route.query.tableId
   const databaseParam = route.query.database
