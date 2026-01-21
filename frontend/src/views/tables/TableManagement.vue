@@ -2443,6 +2443,7 @@ onMounted(async () => {
   word-break: break-all;
   white-space: normal;
   line-height: 1.4;
+  max-width: none;
 }
 
 .table-info-mini .table-desc {
