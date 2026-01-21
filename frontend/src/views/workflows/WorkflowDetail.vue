@@ -235,6 +235,60 @@
             </el-table>
             <el-empty v-else description="暂无发布记录" />
           </el-tab-pane>
+          <el-tab-pane label="全局变量" name="globals">
+            <div class="global-params-section">
+                <div class="params-header">
+                    <el-button type="primary" size="small" @click="addGlobalParam">
+                        <el-icon><Plus /></el-icon> 添加变量
+                    </el-button>
+                    <el-button type="success" size="small" @click="saveGlobalParams" :loading="savingParams">
+                        保存配置
+                    </el-button>
+                </div>
+                <el-table :data="globalParamsList" border size="small" style="width: 100%; margin-top: 10px">
+                    <el-table-column label="变量名 (Prop)" prop="prop" width="200">
+                        <template #default="{ row }">
+                            <el-input v-model="row.prop" placeholder="prop" size="small" />
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="方向 (Direct)" prop="direct" width="120">
+                        <template #default="{ row }">
+                            <el-select v-model="row.direct" size="small">
+                                <el-option label="IN" value="IN" />
+                                <el-option label="OUT" value="OUT" />
+                            </el-select>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="类型 (Type)" prop="type" width="120">
+                        <template #default="{ row }">
+                            <el-select v-model="row.type" size="small">
+                                <el-option label="VARCHAR" value="VARCHAR" />
+                                <el-option label="INTEGER" value="INTEGER" />
+                                <el-option label="LONG" value="LONG" />
+                                <el-option label="FLOAT" value="FLOAT" />
+                                <el-option label="DOUBLE" value="DOUBLE" />
+                                <el-option label="DATE" value="DATE" />
+                                <el-option label="TIME" value="TIME" />
+                                <el-option label="TIMESTAMP" value="TIMESTAMP" />
+                                <el-option label="BOOLEAN" value="BOOLEAN" />
+                            </el-select>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="变量值 (Value)" prop="value">
+                        <template #default="{ row }">
+                            <el-input v-model="row.value" placeholder="value" size="small" />
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="操作" width="80" align="center">
+                        <template #default="{ $index }">
+                            <el-button type="danger" link @click="removeGlobalParam($index)">
+                                <el-icon><Delete /></el-icon>
+                            </el-button>
+                        </template>
+                    </el-table-column>
+                </el-table>
+            </div>
+          </el-tab-pane>
         </el-tabs>
       </div>
     </el-card>
@@ -245,7 +299,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, Link, Delete, Edit } from '@element-plus/icons-vue'
+import { ArrowLeft, Link, Delete, Edit, Plus } from '@element-plus/icons-vue'
 import { workflowApi } from '@/api/workflow'
 import { taskApi } from '@/api/task'
 import dayjs from 'dayjs'
@@ -262,11 +316,13 @@ const pendingApprovalFlags = reactive({})
 const actionLoading = reactive({})
 
 // Inline editing states
-const isEditingName = ref(false)
-const isEditingDescription = ref(false)
 const editingName = ref('')
 const editingDescription = ref('')
 const savingField = ref(false)
+
+// Global params state
+const globalParamsList = ref([])
+const savingParams = ref(false)
 
 // Computed workflow task IDs
 const workflowTaskIds = computed(() => {
@@ -297,6 +353,7 @@ const saveNameField = async () => {
       workflowName: editingName.value.trim(),
       description: wf.description,
       tasks: workflowTaskIds.value.map(taskId => ({ taskId })),
+      globalParams: wf.globalParams,
       operator: 'portal-ui'
     })
     ElMessage.success('名称更新成功')
@@ -328,6 +385,7 @@ const saveDescriptionField = async () => {
       workflowName: wf.workflowName,
       description: editingDescription.value,
       tasks: workflowTaskIds.value.map(taskId => ({ taskId })),
+      globalParams: wf.globalParams,
       operator: 'portal-ui'
     })
     ElMessage.success('描述更新成功')
@@ -339,6 +397,40 @@ const saveDescriptionField = async () => {
   } finally {
     savingField.value = false
   }
+}
+
+const addGlobalParam = () => {
+    globalParamsList.value.push({
+        prop: '',
+        direct: 'IN',
+        type: 'VARCHAR',
+        value: ''
+    })
+}
+
+const removeGlobalParam = (index) => {
+    globalParamsList.value.splice(index, 1)
+}
+
+const saveGlobalParams = async () => {
+    savingParams.value = true
+    try {
+        const wf = workflow.value?.workflow
+        await workflowApi.update(wf.id, {
+            workflowName: wf.workflowName,
+            description: wf.description,
+            tasks: workflowTaskIds.value.map(taskId => ({ taskId })),
+            globalParams: JSON.stringify(globalParamsList.value),
+            operator: 'portal-ui'
+        })
+        ElMessage.success('全局变量保存成功')
+        loadWorkflowDetail()
+    } catch (error) {
+        console.error('保存全局变量失败', error)
+        ElMessage.error(error?.response?.data?.message || '保存失败')
+    } finally {
+        savingParams.value = false
+    }
 }
 
 const loadWorkflowDetail = async () => {
@@ -356,6 +448,19 @@ const loadWorkflowDetail = async () => {
         // Fallback or error handling if needed, but based on WorkflowList: workflowDetail.value = await workflowApi.detail(workflowId)
         workflow.value = { workflow: res } // Wrap it if it's flat
     }
+    
+    // Parse global params
+    if (workflow.value?.workflow?.globalParams) {
+        try {
+            globalParamsList.value = JSON.parse(workflow.value.workflow.globalParams)
+        } catch (e) {
+            console.error('Failed to parse global params', e)
+            globalParamsList.value = []
+        }
+    } else {
+        globalParamsList.value = []
+    }
+
     syncPendingFlag(workflow.value?.workflow?.id, workflow.value?.publishRecords || [])
   } catch (error) {
     console.error('加载工作流详情失败', error)

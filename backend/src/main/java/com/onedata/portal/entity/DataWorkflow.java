@@ -45,6 +45,11 @@ public class DataWorkflow {
 
     private String updatedBy;
 
+    /**
+     * 全局参数 (JSON format: [{"prop": "key", "value": "val", ...}])
+     */
+    private String globalParams;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

@@ -18,6 +18,11 @@ public class WorkflowDefinitionRequest {
 
     private String definitionJson;
 
+    /**
+     * 全局参数
+     */
+    private String globalParams;
+
     private List<WorkflowTaskBinding> tasks;
 
     private String operator;

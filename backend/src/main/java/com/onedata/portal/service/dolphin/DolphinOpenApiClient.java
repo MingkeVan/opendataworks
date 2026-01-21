@@ -189,6 +189,7 @@ public class DolphinOpenApiClient {
             String taskRelationJson,
             String taskDefinitionJson,
             String locations,
+            String globalParams,
             Long existingCode) {
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
         formData.add("name", name);
@@ -202,6 +203,11 @@ public class DolphinOpenApiClient {
         } else {
             // Provide empty locations to avoid errors if required
             formData.add("locations", "[]");
+        }
+        if (StringUtils.hasText(globalParams)) {
+            formData.add("globalParams", globalParams);
+        } else {
+            formData.add("globalParams", "[]");
         }
 
         try {

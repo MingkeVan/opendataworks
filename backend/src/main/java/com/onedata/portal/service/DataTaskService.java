@@ -510,7 +510,8 @@ public class DataTaskService {
                     workflowName,
                     definitions,
                     relations,
-                    locations);
+                    locations,
+                    null);
             log.info("工作流同步成功: actualWorkflowCode={}", actualWorkflowCode);
 
             // 更新所有 dolphin 任务的 dolphinProcessCode

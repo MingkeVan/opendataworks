@@ -132,7 +132,8 @@ public class DolphinSchedulerService {
             String workflowName,
             List<Map<String, Object>> tasks,
             List<TaskRelationPayload> relations,
-            List<TaskLocationPayload> locations) {
+            List<TaskLocationPayload> locations,
+            String globalParams) {
         Long projectCode = getProjectCode();
         if (projectCode == null) {
             throw new IllegalStateException("Cannot sync workflow: Project not found");
@@ -157,6 +158,7 @@ public class DolphinSchedulerService {
                     relationJson,
                     taskJson,
                     locationJson,
+                    globalParams,
                     workflowCode > 0 ? workflowCode : null);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialize workflow data", e);
@@ -648,14 +650,14 @@ public class DolphinSchedulerService {
         }
 
         public static TaskParams datax(Long sourceDatasourceId, Long targetDatasourceId,
-                                       String sourceTable, String targetTable,
-                                       String customJson) {
+                String sourceTable, String targetTable,
+                String customJson) {
             return new TaskParams(null, sourceDatasourceId, null, null,
-                                 targetDatasourceId, sourceTable, targetTable, customJson);
+                    targetDatasourceId, sourceTable, targetTable, customJson);
         }
 
         private TaskParams(String rawScript, Long datasourceId, String datasourceType, String sql,
-                          Long targetDatasourceId, String sourceTable, String targetTable, String customJson) {
+                Long targetDatasourceId, String sourceTable, String targetTable, String customJson) {
             this.rawScript = rawScript;
             this.datasource = datasourceId;
             this.sql = sql;

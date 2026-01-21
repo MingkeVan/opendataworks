@@ -127,6 +127,7 @@ public class WorkflowService {
         workflow.setDefinitionJson(defaultJson(request.getDefinitionJson()));
         workflow.setEntryTaskIds(toJson(orderTaskIds(topology.getEntryTaskIds(), taskIdsInOrder)));
         workflow.setExitTaskIds(toJson(orderTaskIds(topology.getExitTaskIds(), taskIdsInOrder)));
+        workflow.setGlobalParams(request.getGlobalParams());
         workflow.setStatus("draft");
         workflow.setPublishStatus("never");
         workflow.setProjectCode(resolveProjectCode(request.getProjectCode()));
@@ -177,6 +178,7 @@ public class WorkflowService {
         workflow.setDefinitionJson(defaultJson(request.getDefinitionJson()));
         workflow.setEntryTaskIds(toJson(orderTaskIds(topology.getEntryTaskIds(), taskIdsInOrder)));
         workflow.setExitTaskIds(toJson(orderTaskIds(topology.getExitTaskIds(), taskIdsInOrder)));
+        workflow.setGlobalParams(request.getGlobalParams());
         workflow.setUpdatedBy(request.getOperator());
         workflow.setUpdatedAt(LocalDateTime.now());
         if (workflow.getProjectCode() == null || workflow.getProjectCode() == 0) {

@@ -227,7 +227,8 @@ public class WorkflowDeployService {
                 workflow.getWorkflowName(),
                 definitions,
                 relationPayloads,
-                locationPayloads);
+                locationPayloads,
+                workflow.getGlobalParams());
 
         updateTaskProcessCode(orderedTasks, deployedCode);
 

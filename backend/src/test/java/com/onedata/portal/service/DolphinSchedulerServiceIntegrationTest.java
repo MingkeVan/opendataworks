@@ -80,7 +80,7 @@ class DolphinSchedulerServiceIntegrationTest {
         mockProject.setCode(123456L);
         when(openApiClient.getProject(anyString())).thenReturn(mockProject);
         when(openApiClient.createOrUpdateProcessDefinition(anyLong(), anyString(), anyString(), anyString(),
-                anyString(), anyString(), anyString(), anyString(), any()))
+                anyString(), anyString(), anyString(), anyString(), nullable(String.class), any()))
                 .thenReturn(999L); // Return mock workflow code
 
         // Step 1: Build task definitions
@@ -142,12 +142,13 @@ class DolphinSchedulerServiceIntegrationTest {
                 TEST_WORKFLOW_NAME,
                 tasks,
                 relations,
-                locations);
+                locations,
+                null);
 
         assertEquals(999L, workflowCode);
         verify(openApiClient, times(1)).getProject("test-project");
         verify(openApiClient, times(1)).createOrUpdateProcessDefinition(eq(123456L), eq(TEST_WORKFLOW_NAME), any(),
-                any(), any(), any(), any(), any(), isNull());
+                any(), any(), any(), any(), any(), isNull(), isNull());
 
         System.out.println("✅ Workflow synced successfully (Mocked)");
 
