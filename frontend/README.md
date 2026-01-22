@@ -179,7 +179,7 @@ const newTask = await taskApi.create({
     datasourceType: 'DORIS',      // ⭐ 数据源类型
     taskSql: 'SELECT * FROM table',
     priority: 5,
-    timeoutSeconds: 3600
+    timeoutSeconds: 60
   },
   inputTableIds: [1, 2],
   outputTableIds: [3]

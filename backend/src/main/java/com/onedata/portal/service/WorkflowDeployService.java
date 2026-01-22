@@ -172,7 +172,7 @@ public class WorkflowDeployService {
                     priority,
                     coalesce(attr.getRetryTimes(), task.getRetryTimes(), 1),
                     coalesce(attr.getRetryInterval(), task.getRetryInterval(), 1),
-                    coalesce(attr.getTimeoutSeconds(), task.getTimeoutSeconds(), 1),
+                    coalesce(attr.getTimeoutSeconds(), task.getTimeoutSeconds(), 60),
                     nodeType,
                     datasourceId,
                     realDatasourceType != null ? realDatasourceType : task.getDatasourceType());
