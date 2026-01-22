@@ -130,7 +130,7 @@ const loadData = async () => {
 }
 
 const goCreate = () => {
-  router.push('/tables/create')
+  router.push({ path: '/datastudio-new', query: { create: '1' } })
 }
 
 const goDetail = (id) => {

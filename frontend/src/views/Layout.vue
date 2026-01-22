@@ -19,13 +19,9 @@
             <el-icon><DataBoard /></el-icon>
             <span>控制台</span>
           </el-menu-item>
-          <el-menu-item index="/tables">
-            <el-icon><Grid /></el-icon>
-            <span>表管理</span>
-          </el-menu-item>
-          <el-menu-item index="/query">
-            <el-icon><Search /></el-icon>
-            <span>数据查询</span>
+          <el-menu-item index="/datastudio-new">
+            <el-icon><DataLine /></el-icon>
+            <span>datastudio</span>
           </el-menu-item>
           <el-menu-item index="/domains">
             <el-icon><Collection /></el-icon>
@@ -49,7 +45,7 @@
           </el-menu-item>
           <el-menu-item index="/settings">
             <el-icon><Setting /></el-icon>
-            <span>配置管理</span>
+            <span>管理员</span>
           </el-menu-item>
         </el-menu>
       </div>
@@ -64,7 +60,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { DataBoard, Grid, Connection, Monitor, Collection, Warning, Search, Setting, Share } from '@element-plus/icons-vue'
+import { DataBoard, DataLine, Connection, Monitor, Collection, Warning, Setting, Share } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => {
@@ -72,11 +68,8 @@ const activeMenu = computed(() => {
   if (path.startsWith('/dashboard')) {
     return '/dashboard'
   }
-  if (path.startsWith('/tables')) {
-    return '/tables'
-  }
-  if (path.startsWith('/query')) {
-    return '/query'
+  if (path.startsWith('/datastudio-new')) {
+    return '/datastudio-new'
   }
   if (path.startsWith('/domains')) {
     return '/domains'

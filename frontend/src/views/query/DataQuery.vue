@@ -300,7 +300,7 @@ import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { dorisClusterApi } from '@/api/doris'
 import { dataQueryApi } from '@/api/query'
-import { 
+import {
   DataBoard, Connection, Coin, Memo, ArrowRight, VideoPlay, RefreshRight, 
   List, TrendCharts, Clock, Timer, Files, Warning, Download,
   Histogram, DataLine, PieChart, DataAnalysis, Plus
@@ -580,6 +580,7 @@ function formatDate(s) {
   display: flex;
   flex-direction: column;
 }
+
 
 .unified-card {
   flex: 1;
