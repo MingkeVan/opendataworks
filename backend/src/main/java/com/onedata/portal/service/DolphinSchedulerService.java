@@ -460,7 +460,7 @@ public class DolphinSchedulerService {
         payload.put("taskType", nodeType == null ? "SHELL" : nodeType);
         payload.put("timeout", timeoutSeconds);
         payload.put("timeoutFlag", timeoutSeconds > 0 ? "OPEN" : "CLOSE");
-        payload.put("timeoutNotifyStrategy", "");
+        payload.put("timeoutNotifyStrategy", "FAILED");
 
         // Added missing fields based on user payload
         payload.put("cpuQuota", -1);
@@ -661,8 +661,8 @@ public class DolphinSchedulerService {
             this.rawScript = rawScript;
             this.datasource = datasourceId;
             this.sql = sql;
-            // SQL type: 0=NON_QUERY, 1=QUERY (as string)
-            this.sqlType = sql != null && sql.trim().toUpperCase().startsWith("SELECT") ? "1" : "0";
+            // SQL type: 0=QUERY, 1=NON_QUERY (as string). Default to NON_QUERY.
+            this.sqlType = sql != null && sql.trim().toUpperCase().startsWith("SELECT") ? "0" : "1";
             this.displayRows = 10;
             // Don't default to MYSQL - let DolphinScheduler infer type from datasource name
             this.type = datasourceType;

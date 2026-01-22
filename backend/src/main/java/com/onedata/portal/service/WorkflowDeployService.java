@@ -170,9 +170,9 @@ public class WorkflowDeployService {
                     task.getTaskDesc(),
                     sqlOrScript,
                     priority,
-                    coalesce(attr.getRetryTimes(), task.getRetryTimes(), 0),
+                    coalesce(attr.getRetryTimes(), task.getRetryTimes(), 1),
                     coalesce(attr.getRetryInterval(), task.getRetryInterval(), 1),
-                    coalesce(attr.getTimeoutSeconds(), task.getTimeoutSeconds(), 0),
+                    coalesce(attr.getTimeoutSeconds(), task.getTimeoutSeconds(), 1),
                     nodeType,
                     datasourceId,
                     realDatasourceType != null ? realDatasourceType : task.getDatasourceType());
