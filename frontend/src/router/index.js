@@ -13,34 +13,22 @@ const routes = [
         meta: { title: '控制台' }
       },
       {
-        path: '/tables',
-        name: 'Tables',
-        component: () => import('@/views/tables/TableManagement.vue'),
-        meta: { title: '表管理' }
+        path: '/datastudio-new',
+        name: 'DataStudioNew',
+        component: () => import('@/views/datastudio/DataStudioNew.vue'),
+        meta: { title: 'datastudio' }
       },
       {
-        path: '/tables/list',
-        name: 'TableList',
-        component: () => import('@/views/tables/TableList.vue'),
-        meta: { title: '表列表（旧版）' }
+        path: '/tables',
+        redirect: '/datastudio-new'
       },
       {
         path: '/tables/create',
-        name: 'TableCreate',
-        component: () => import('@/views/tables/TableCreate.vue'),
-        meta: { title: '新建表' }
-      },
-      {
-        path: '/tables/:id(\\d+)',
-        name: 'TableDetail',
-        component: () => import('@/views/tables/TableDetail.vue'),
-        meta: { title: '表详情' }
+        redirect: { path: '/datastudio-new', query: { create: '1' } }
       },
       {
         path: '/query',
-        name: 'DataQuery',
-        component: () => import('@/views/query/DataQuery.vue'),
-        meta: { title: '数据查询' }
+        redirect: '/datastudio-new'
       },
       {
         path: '/domains',
@@ -87,7 +75,7 @@ const routes = [
         path: '/settings',
         name: 'Settings',
         component: () => import('@/views/settings/ConfigurationManagement.vue'),
-        meta: { title: '配置管理' }
+        meta: { title: '管理员' }
       }
     ]
   }

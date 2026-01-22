@@ -1756,7 +1756,7 @@ const formatCellValue = (value) => {
 
 // 跳转到创建页面
 const goCreate = () => {
-  router.push('/tables/create')
+  router.push({ path: '/datastudio-new', query: { create: '1' } })
 }
 
 // 比对 Doris 元数据
@@ -2148,6 +2148,7 @@ onMounted(async () => {
   gap: 8px;
   height: calc(100vh - 92px);
 }
+
 
 /* 左侧面板 */
 .left-panel {

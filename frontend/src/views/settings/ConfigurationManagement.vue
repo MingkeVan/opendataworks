@@ -8,6 +8,9 @@
       <el-tab-pane label="Doris 集群" name="doris">
         <DorisClusterManagement />
       </el-tab-pane>
+      <el-tab-pane label="元数据比对" name="metadata">
+        <MetadataSync />
+      </el-tab-pane>
       <el-tab-pane label="Dolphin 配置" name="dolphin">
         <DolphinConfig />
       </el-tab-pane>
@@ -18,6 +21,7 @@
 <script setup>
 import { ref } from 'vue'
 import DorisClusterManagement from './DorisClusterManagement.vue'
+import MetadataSync from './MetadataSync.vue'
 import DolphinConfig from './DolphinConfig.vue'
 
 const activeTab = ref('doris')
