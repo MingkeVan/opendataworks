@@ -6,10 +6,12 @@ import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.mapper.DorisClusterMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -56,6 +58,9 @@ public class DorisClusterService {
     public DorisCluster create(DorisCluster cluster) {
         validate(cluster, true);
         handleDefaultFlag(cluster, null);
+        if (cluster.getAutoSync() != null && cluster.getAutoSync() == 1) {
+            cluster.setLastSyncTime(LocalDateTime.now());
+        }
         dorisClusterMapper.insert(cluster);
         log.info("Created Doris cluster: {}", cluster.getClusterName());
         return cluster;
@@ -72,6 +77,24 @@ public class DorisClusterService {
         }
         if (!StringUtils.hasText(cluster.getPassword())) {
             cluster.setPassword(exists.getPassword());
+        }
+        if (!StringUtils.hasText(cluster.getSourceType())) {
+            cluster.setSourceType(exists.getSourceType());
+        }
+        if (cluster.getAutoSync() == null) {
+            cluster.setAutoSync(exists.getAutoSync());
+        }
+        if (cluster.getSyncCron() == null) {
+            cluster.setSyncCron(exists.getSyncCron());
+        }
+        if (cluster.getLastSyncTime() == null) {
+            cluster.setLastSyncTime(exists.getLastSyncTime());
+        }
+
+        if ((exists.getAutoSync() == null || exists.getAutoSync() != 1) && cluster.getAutoSync() != null
+                && cluster.getAutoSync() == 1) {
+            // 开启自动同步时，将 lastSyncTime 置为当前时间作为调度基准
+            cluster.setLastSyncTime(LocalDateTime.now());
         }
         validate(cluster, false);
         cluster.setId(id);
@@ -114,6 +137,14 @@ public class DorisClusterService {
         if (!StringUtils.hasText(cluster.getClusterName())) {
             throw new RuntimeException("集群名称不能为空");
         }
+        if (!StringUtils.hasText(cluster.getSourceType())) {
+            cluster.setSourceType("DORIS");
+        } else {
+            cluster.setSourceType(cluster.getSourceType().trim().toUpperCase());
+        }
+        if (!"DORIS".equals(cluster.getSourceType()) && !"MYSQL".equals(cluster.getSourceType())) {
+            throw new RuntimeException("数据源类型不支持: " + cluster.getSourceType());
+        }
         if (!StringUtils.hasText(cluster.getFeHost())) {
             throw new RuntimeException("FE Host 不能为空");
         }
@@ -131,6 +162,22 @@ public class DorisClusterService {
         }
         if (!StringUtils.hasText(cluster.getStatus())) {
             cluster.setStatus("active");
+        }
+        if (cluster.getAutoSync() == null) {
+            cluster.setAutoSync(0);
+        }
+        if (cluster.getAutoSync() == 1) {
+            if (!StringUtils.hasText(cluster.getSyncCron())) {
+                throw new RuntimeException("开启自动同步时必须配置同步 Cron");
+            }
+            try {
+                CronExpression.parse(cluster.getSyncCron().trim());
+            } catch (Exception e) {
+                throw new RuntimeException("同步 Cron 表达式不合法: " + e.getMessage());
+            }
+            cluster.setSyncCron(cluster.getSyncCron().trim());
+        } else if (StringUtils.hasText(cluster.getSyncCron())) {
+            cluster.setSyncCron(cluster.getSyncCron().trim());
         }
     }
 
