@@ -21,27 +21,27 @@
           </el-menu-item>
           <el-menu-item index="/datastudio-new">
             <el-icon><DataLine /></el-icon>
-            <span>datastudio</span>
-          </el-menu-item>
-          <el-menu-item index="/domains">
-            <el-icon><Collection /></el-icon>
-            <span>域管理</span>
+            <span>Data Studio</span>
           </el-menu-item>
           <el-menu-item index="/workflows">
             <el-icon><Share /></el-icon>
-            <span>工作流管理</span>
+            <span>任务调度</span>
+          </el-menu-item>
+          <el-menu-item index="/domains">
+            <el-icon><Collection /></el-icon>
+            <span>数据建模</span>
           </el-menu-item>
           <el-menu-item index="/lineage">
             <el-icon><Connection /></el-icon>
-            <span>血缘关系</span>
-          </el-menu-item>
-          <el-menu-item index="/monitor">
-            <el-icon><Monitor /></el-icon>
-            <span>执行监控</span>
+            <span>数据血缘</span>
           </el-menu-item>
           <el-menu-item index="/inspection">
             <el-icon><Warning /></el-icon>
-            <span>数据巡检</span>
+            <span>数据质量</span>
+          </el-menu-item>
+          <el-menu-item index="/integration">
+            <el-icon><Link /></el-icon>
+            <span>数据集成</span>
           </el-menu-item>
           <el-menu-item index="/settings">
             <el-icon><Setting /></el-icon>
@@ -60,7 +60,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { DataBoard, DataLine, Connection, Monitor, Collection, Warning, Setting, Share } from '@element-plus/icons-vue'
+import { DataBoard, DataLine, Connection, Collection, Warning, Setting, Share, Link } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => {
@@ -71,20 +71,20 @@ const activeMenu = computed(() => {
   if (path.startsWith('/datastudio-new')) {
     return '/datastudio-new'
   }
-  if (path.startsWith('/domains')) {
-    return '/domains'
-  }
   if (path.startsWith('/workflows') || path.startsWith('/tasks')) {
     return '/workflows'
+  }
+  if (path.startsWith('/domains')) {
+    return '/domains'
   }
   if (path.startsWith('/lineage')) {
     return '/lineage'
   }
-  if (path.startsWith('/monitor')) {
-    return '/monitor'
-  }
   if (path.startsWith('/inspection')) {
     return '/inspection'
+  }
+  if (path.startsWith('/integration')) {
+    return '/integration'
   }
   if (path.startsWith('/settings')) {
     return '/settings'

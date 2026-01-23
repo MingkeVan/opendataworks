@@ -1,6 +1,6 @@
 <template>
   <div class="domain-management" v-loading="loading">
-    <el-page-header content="域管理" class="page-header" />
+    <el-page-header content="数据建模" class="page-header" />
 
     <el-row :gutter="20">
       <el-col :span="12">

@@ -33,7 +33,7 @@
     <el-card shadow="never" class="chart-card">
       <template #header>
         <div class="card-header">
-          <span>数据血缘关系图</span>
+          <span>数据血缘图</span>
           <div class="graph-controls">
             <el-radio-group v-model="currentLayout" size="small" @change="handleLayoutChange">
               <el-radio-button label="dagre">层级图 (Dagre)</el-radio-button>

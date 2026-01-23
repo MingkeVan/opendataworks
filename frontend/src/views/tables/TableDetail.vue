@@ -3,7 +3,7 @@
     <el-page-header content="表详情" @back="goBack" class="page-header">
       <template #extra>
         <el-button type="primary" link @click="goLineage" :disabled="!table">
-          查看血缘关系
+          查看数据血缘
         </el-button>
       </template>
     </el-page-header>

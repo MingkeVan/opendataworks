@@ -16,7 +16,7 @@ const routes = [
         path: '/datastudio-new',
         name: 'DataStudioNew',
         component: () => import('@/views/datastudio/DataStudioNew.vue'),
-        meta: { title: 'datastudio' }
+        meta: { title: 'Data Studio' }
       },
       {
         path: '/tables',
@@ -34,13 +34,13 @@ const routes = [
         path: '/domains',
         name: 'Domains',
         component: () => import('@/views/domains/DomainManagement.vue'),
-        meta: { title: '域管理' }
+        meta: { title: '数据建模' }
       },
       {
         path: '/workflows',
         name: 'Workflows',
         component: () => import('@/views/workflows/WorkflowManagement.vue'),
-        meta: { title: '工作流管理' }
+        meta: { title: '任务调度' }
       },
       {
         path: '/workflows/:id(\\d+)',
@@ -57,19 +57,23 @@ const routes = [
         path: '/lineage',
         name: 'Lineage',
         component: () => import('@/views/lineage/LineageView.vue'),
-        meta: { title: '血缘关系' }
+        meta: { title: '数据血缘' }
       },
       {
         path: '/monitor',
-        name: 'Monitor',
-        component: () => import('@/views/executions/ExecutionMonitor.vue'),
-        meta: { title: '执行监控' }
+        redirect: { path: '/workflows', query: { tab: 'monitor' } }
       },
       {
         path: '/inspection',
         name: 'Inspection',
         component: () => import('@/views/inspection/InspectionView.vue'),
-        meta: { title: '数据巡检' }
+        meta: { title: '数据质量' }
+      },
+      {
+        path: '/integration',
+        name: 'Integration',
+        component: () => import('@/views/integration/DataIntegration.vue'),
+        meta: { title: '数据集成' }
       },
       {
         path: '/settings',

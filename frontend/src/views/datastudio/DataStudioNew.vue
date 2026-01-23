@@ -539,7 +539,7 @@
 
                   <div class="lineage-panel">
                     <div class="lineage-header">
-                      <span>血缘关系</span>
+                      <span>数据血缘</span>
                       <el-button type="primary" link size="small" @click="goLineage(tab.id)">
                         查看完整血缘
                       </el-button>
@@ -912,7 +912,7 @@ const loadLineageForTable = async (tableId) => {
     const lineageData = await tableApi.getLineage(tableId)
     lineageCache[tableId] = lineageData || { upstreamTables: [], downstreamTables: [] }
   } catch (error) {
-    console.error('加载血缘关系失败', error)
+    console.error('加载数据血缘失败', error)
   }
 }
 
