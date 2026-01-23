@@ -410,34 +410,49 @@
                             </div>
                           </div>
 
-                          <el-form
-                            v-if="tabStates[tab.id].metaEditing"
-                            :model="tabStates[tab.id].metaForm"
-                            label-width="90px"
-                            class="meta-form"
-                          >
-                            <el-form-item label="表名">
-                              <el-input v-model="tabStates[tab.id].metaForm.tableName" />
-                            </el-form-item>
-                            <el-form-item label="表注释">
-                              <el-input v-model="tabStates[tab.id].metaForm.tableComment" />
-                            </el-form-item>
-                            <el-form-item label="分层">
-                              <el-select v-model="tabStates[tab.id].metaForm.layer" placeholder="选择分层">
+                          <el-descriptions :column="1" border size="small" class="meta-descriptions">
+                            <el-descriptions-item label="表名">
+                              <el-input
+                                v-if="tabStates[tab.id].metaEditing"
+                                v-model="tabStates[tab.id].metaForm.tableName"
+                                size="small"
+                                class="meta-input"
+                              />
+                              <span v-else>{{ tabStates[tab.id].table.tableName || '-' }}</span>
+                            </el-descriptions-item>
+                            <el-descriptions-item label="表注释">
+                              <el-input
+                                v-if="tabStates[tab.id].metaEditing"
+                                v-model="tabStates[tab.id].metaForm.tableComment"
+                                size="small"
+                                class="meta-input"
+                              />
+                              <span v-else>{{ tabStates[tab.id].table.tableComment || '-' }}</span>
+                            </el-descriptions-item>
+                            <el-descriptions-item label="分层">
+                              <el-select
+                                v-if="tabStates[tab.id].metaEditing"
+                                v-model="tabStates[tab.id].metaForm.layer"
+                                size="small"
+                                placeholder="选择分层"
+                                class="meta-input"
+                              >
                                 <el-option v-for="item in layerOptions" :key="item.value" :label="item.label" :value="item.value" />
                               </el-select>
-                            </el-form-item>
-                            <el-form-item label="负责人">
-                              <el-input v-model="tabStates[tab.id].metaForm.owner" />
-                            </el-form-item>
-                          </el-form>
-
-                          <el-descriptions v-else :column="1" border size="small">
-                            <el-descriptions-item label="表名">{{ tabStates[tab.id].table.tableName || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="表注释">{{ tabStates[tab.id].table.tableComment || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="分层">{{ tabStates[tab.id].table.layer || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="负责人">{{ tabStates[tab.id].table.owner || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="数据库">{{ tabStates[tab.id].table.dbName || '-' }}</el-descriptions-item>
+                              <span v-else>{{ tabStates[tab.id].table.layer || '-' }}</span>
+                            </el-descriptions-item>
+                            <el-descriptions-item label="负责人">
+                              <el-input
+                                v-if="tabStates[tab.id].metaEditing"
+                                v-model="tabStates[tab.id].metaForm.owner"
+                                size="small"
+                                class="meta-input"
+                              />
+                              <span v-else>{{ tabStates[tab.id].table.owner || '-' }}</span>
+                            </el-descriptions-item>
+                            <el-descriptions-item label="数据库">
+                              <span>{{ tabStates[tab.id].table.dbName || '-' }}</span>
+                            </el-descriptions-item>
                           </el-descriptions>
 
                           <div class="section-divider"></div>
@@ -445,77 +460,198 @@
                           <div class="section-header small">
                             <span>Doris 配置</span>
                           </div>
-                          <el-descriptions :column="1" border size="small">
+                          <el-descriptions :column="1" border size="small" class="meta-descriptions">
                             <el-descriptions-item label="表模型">{{ tabStates[tab.id].table.tableModel || '-' }}</el-descriptions-item>
                             <el-descriptions-item label="主键列">{{ tabStates[tab.id].table.keyColumns || '-' }}</el-descriptions-item>
                             <el-descriptions-item label="分区字段">{{ tabStates[tab.id].table.partitionColumn || '-' }}</el-descriptions-item>
                             <el-descriptions-item label="分桶字段">{{ tabStates[tab.id].table.distributionColumn || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="分桶数">{{ tabStates[tab.id].table.bucketNum || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="副本数">{{ tabStates[tab.id].table.replicaNum || '-' }}</el-descriptions-item>
+                            <el-descriptions-item label="分桶数">
+                              <el-input-number
+                                v-if="tabStates[tab.id].metaEditing"
+                                v-model="tabStates[tab.id].metaForm.bucketNum"
+                                :min="1"
+                                size="small"
+                                controls-position="right"
+                                class="meta-input"
+                              />
+                              <span v-else>{{ tabStates[tab.id].table.bucketNum || '-' }}</span>
+                            </el-descriptions-item>
+                            <el-descriptions-item label="副本数">
+                              <template v-if="tabStates[tab.id].metaEditing">
+                                <div class="replica-edit">
+                                  <el-input-number
+                                    v-model="tabStates[tab.id].metaForm.replicaNum"
+                                    :min="1"
+                                    size="small"
+                                    controls-position="right"
+                                    class="meta-input"
+                                  />
+                                  <span v-if="isReplicaWarning(tabStates[tab.id].metaForm.replicaNum)" class="replica-warning">
+                                    <el-icon><Warning /></el-icon>
+                                    建议≥3
+                                  </span>
+                                </div>
+                              </template>
+                              <span v-else :class="['replica-value', { 'replica-danger': isReplicaWarning(tabStates[tab.id].table.replicaNum) }]">
+                                <el-icon v-if="isReplicaWarning(tabStates[tab.id].table.replicaNum)" class="warning-icon"><Warning /></el-icon>
+                                {{ tabStates[tab.id].table.replicaNum || '-' }}
+                              </span>
+                            </el-descriptions-item>
                           </el-descriptions>
                         </div>
                       </el-tab-pane>
 
-                      <el-tab-pane name="columns" label="列信息">
-                        <div class="meta-section meta-section-fill">
-                          <div v-if="tabStates[tab.id].fields.length" class="meta-table">
-                            <el-table
-                              :data="tabStates[tab.id].fields"
-                              border
-                              size="small"
-                              height="100%"
-                            >
-                              <el-table-column label="字段名" width="140">
+      <el-tab-pane name="columns" label="列信息">
+        <div class="meta-section meta-section-fill">
+          <div class="section-header">
+            <span>字段定义</span>
+            <div class="section-actions">
+              <el-button
+                v-if="!tabStates[tab.id].fieldsEditing"
+                type="primary"
+                size="small"
+                @click="startFieldsEdit(tab.id)"
+              >
+                编辑
+              </el-button>
+              <template v-else>
+                <el-button size="small" @click="cancelFieldsEdit(tab.id)" :disabled="tabStates[tab.id].fieldSubmitting">
+                  取消
+                </el-button>
+                <el-button
+                  type="primary"
+                  size="small"
+                  :loading="tabStates[tab.id].fieldSubmitting"
+                  @click="saveFieldsEdit(tab.id)"
+                >
+                  保存修改
+                </el-button>
+              </template>
+            </div>
+          </div>
+          <div v-if="getFieldRows(tab.id).length" class="meta-table">
+            <el-table
+              :data="getFieldRows(tab.id)"
+              border
+              size="small"
+              height="100%"
+            >
+              <el-table-column label="字段名" width="170">
+                <template #default="{ row }">
+                  <el-input
+                    v-if="tabStates[tab.id].fieldsEditing"
+                    v-model="row.fieldName"
+                    size="small"
+                    placeholder="字段名"
+                  />
+                  <span v-else>{{ row.fieldName }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="类型" width="150">
+                <template #default="{ row }">
+                  <el-input
+                    v-if="tabStates[tab.id].fieldsEditing"
+                    v-model="row.fieldType"
+                    size="small"
+                    placeholder="VARCHAR(255)"
+                  />
+                  <span v-else>{{ row.fieldType }}</span>
+                </template>
+              </el-table-column>
+                              <el-table-column label="长度" width="70">
                                 <template #default="{ row }">
-                                  <el-input
-                                    v-if="row._editing"
-                                    v-model="row.fieldName"
-                                    size="small"
-                                  />
-                                  <span v-else>{{ row.fieldName }}</span>
+                                  <span>{{ getVarcharLength(row) }}</span>
                                 </template>
                               </el-table-column>
-                              <el-table-column label="类型" width="120">
-                                <template #default="{ row }">
-                                  <el-input
-                                    v-if="row._editing"
-                                    v-model="row.fieldType"
-                                    size="small"
-                                  />
-                                  <span v-else>{{ row.fieldType }}</span>
+              <el-table-column label="可为空" width="90">
+                <template #default="{ row }">
+                  <el-switch
+                    v-if="tabStates[tab.id].fieldsEditing"
+                    v-model="row.isNullable"
+                    :active-value="1"
+                    :inactive-value="0"
+                    size="small"
+                  />
+                  <el-tag v-else :type="row.isNullable ? 'success' : 'danger'" size="small">
+                                    {{ row.isNullable ? '是' : '否' }}
+                                  </el-tag>
                                 </template>
                               </el-table-column>
-                              <el-table-column label="注释">
-                                <template #default="{ row }">
-                                  <el-input
-                                    v-if="row._editing"
-                                    v-model="row.fieldComment"
-                                    size="small"
-                                  />
-                                  <span v-else>{{ row.fieldComment || '-' }}</span>
-                                </template>
-                              </el-table-column>
-                              <el-table-column label="操作" width="100">
-                                <template #default="{ row }">
-                                  <template v-if="row._editing">
-                                    <el-button link type="primary" size="small" @click="saveField(tab.id, row)">保存</el-button>
-                                    <el-button link size="small" @click="cancelFieldEdit(row)">取消</el-button>
+              <el-table-column label="主键" width="80">
+                <template #default="{ row }">
+                  <el-switch
+                    v-if="tabStates[tab.id].fieldsEditing"
+                    v-model="row.isPrimary"
+                    :active-value="1"
+                    :inactive-value="0"
+                    size="small"
+                  />
+                  <template v-else>
+                    <el-tag v-if="row.isPrimary" type="info" size="small">是</el-tag>
+                                    <span v-else>-</span>
                                   </template>
-                                  <el-button v-else link type="primary" size="small" @click="editField(row)">编辑</el-button>
                                 </template>
                               </el-table-column>
-                            </el-table>
-                          </div>
-                          <el-empty v-else description="暂无字段" :image-size="60" />
-                        </div>
-                      </el-tab-pane>
+              <el-table-column label="默认值" width="120">
+                <template #default="{ row }">
+                  <el-input
+                    v-if="tabStates[tab.id].fieldsEditing"
+                    v-model="row.defaultValue"
+                    size="small"
+                    placeholder="可选"
+                  />
+                  <span v-else>{{ row.defaultValue || '-' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="注释" min-width="150">
+                <template #default="{ row }">
+                  <el-input
+                    v-if="tabStates[tab.id].fieldsEditing"
+                    v-model="row.fieldComment"
+                    size="small"
+                    placeholder="字段注释"
+                  />
+                  <span v-else>{{ row.fieldComment || '-' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="tabStates[tab.id].fieldsEditing" label="操作" width="150" fixed="right">
+                <template #default="{ row }">
+                  <el-button link type="primary" size="small" @click="addField(tab.id, row)">
+                    新增
+                  </el-button>
+                  <el-popconfirm
+                    width="240"
+                    confirm-button-text="确定"
+                    cancel-button-text="取消"
+                    :title="`确定删除字段「${row.fieldName || '未命名'}」吗？`"
+                    @confirm="removeField(tab.id, row)"
+                  >
+                    <template #reference>
+                      <el-button link type="danger" size="small">删除</el-button>
+                    </template>
+                  </el-popconfirm>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+          <el-empty v-else description="暂无字段" :image-size="60">
+            <template #default>
+              <el-button
+                v-if="tabStates[tab.id].fieldsEditing"
+                type="primary"
+                size="small"
+                @click="addField(tab.id)"
+              >
+                新增字段
+              </el-button>
+            </template>
+          </el-empty>
+        </div>
+      </el-tab-pane>
 
                       <el-tab-pane name="ddl" label="DDL">
-                        <div class="meta-section meta-section-fill">
+                        <div class="meta-section meta-section-fill" v-loading="tabStates[tab.id].ddlLoading">
                           <div class="ddl-header">
-                            <el-button size="small" @click="loadDdl(tab.id)" :loading="tabStates[tab.id].ddlLoading">
-                              加载 DDL
-                            </el-button>
                             <el-button
                               size="small"
                               :disabled="!tabStates[tab.id].ddl"
@@ -530,7 +666,7 @@
                             resize="none"
                             readonly
                             class="ddl-textarea"
-                            placeholder="点击「加载 DDL」按钮获取建表语句"
+                            placeholder="加载中或暂无 DDL"
                           />
                         </div>
                       </el-tab-pane>
@@ -847,6 +983,18 @@ const formatRowCount = (rowCount) => {
   return (rowCount / 1000000000).toFixed(1) + 'B'
 }
 
+const getVarcharLength = (row) => {
+  const fieldType = row?.fieldType || ''
+  const match = String(fieldType).match(/varchar\s*\((\d+)\)/i)
+  return match ? match[1] : '-'
+}
+
+const isReplicaWarning = (value) => {
+  if (value === null || value === undefined || value === '') return false
+  const num = Number(value)
+  return Number.isFinite(num) && num > 0 && num < 3
+}
+
 const formatStorageSize = (size) => {
   if (size === null || size === undefined) return '-'
   if (size === 0) return '0 B'
@@ -904,6 +1052,12 @@ const getUpstreamCount = (tableId) => {
 const getDownstreamCount = (tableId) => {
   if (!tableId) return 0
   return lineageCache[tableId]?.downstreamTables?.length || 0
+}
+
+const getFieldRows = (tabId) => {
+  const state = tabStates[tabId]
+  if (!state) return []
+  return state.fieldsEditing ? state.fieldsDraft : state.fields
 }
 
 const loadLineageForTable = async (tableId) => {
@@ -982,9 +1136,15 @@ const createTabState = (table) => {
       tableName: table.tableName || '',
       tableComment: table.tableComment || '',
       layer: table.layer || '',
-      owner: table.owner || ''
+      owner: table.owner || '',
+      bucketNum: table.bucketNum ?? '',
+      replicaNum: table.replicaNum ?? ''
     },
     metaOriginal: {},
+    fieldSubmitting: false,
+    fieldsEditing: false,
+    fieldsDraft: [],
+    fieldsRemoved: [],
     fields: [],
     ddl: '',
     ddlLoading: false,
@@ -1090,10 +1250,15 @@ const loadTabData = async (tabId) => {
       tableName: state.table.tableName || '',
       tableComment: state.table.tableComment || '',
       layer: state.table.layer || '',
-      owner: state.table.owner || ''
+      owner: state.table.owner || '',
+      bucketNum: state.table.bucketNum ?? '',
+      replicaNum: state.table.replicaNum ?? ''
     }
     state.metaOriginal = { ...state.metaForm }
     state.fields = Array.isArray(fieldList) ? fieldList : []
+    state.fieldsEditing = false
+    state.fieldsDraft = []
+    state.fieldsRemoved = []
     state.lineage = {
       upstreamTables: lineageData?.upstreamTables || [],
       downstreamTables: lineageData?.downstreamTables || []
@@ -1425,13 +1590,24 @@ const cancelMetaEdit = (tabId) => {
 const saveMetaEdit = async (tabId) => {
   const state = tabStates[tabId]
   if (!state?.table?.id) return
+  try {
+    await ElMessageBox.confirm('确认保存表信息与 Doris 配置的修改吗？', '提示', {
+      type: 'warning',
+      confirmButtonText: '确认',
+      cancelButtonText: '取消'
+    })
+  } catch (error) {
+    return
+  }
   state.metaSaving = true
   try {
     const payload = {
       tableName: state.metaForm.tableName,
       tableComment: state.metaForm.tableComment,
       layer: state.metaForm.layer,
-      owner: state.metaForm.owner
+      owner: state.metaForm.owner,
+      bucketNum: state.metaForm.bucketNum,
+      replicaNum: state.metaForm.replicaNum
     }
     const updated = await tableApi.update(state.table.id, payload)
     state.table = { ...state.table, ...updated }
@@ -1439,12 +1615,15 @@ const saveMetaEdit = async (tabId) => {
       tableName: state.table.tableName || '',
       tableComment: state.table.tableComment || '',
       layer: state.table.layer || '',
-      owner: state.table.owner || ''
+      owner: state.table.owner || '',
+      bucketNum: state.table.bucketNum ?? '',
+      replicaNum: state.table.replicaNum ?? ''
     }
     state.metaOriginal = { ...state.metaForm }
     state.metaEditing = false
     updateTableCache(state.table)
-    const tab = openTabs.value.find((item) => String(item.id) === String(tabId))
+    const newKey = syncTabKey(tabId, state.table)
+    const tab = openTabs.value.find((item) => String(item.id) === String(newKey))
     if (tab) {
       tab.tableName = state.table.tableName
       tab.dbName = state.table.dbName
@@ -1467,37 +1646,172 @@ const updateTableCache = (updated) => {
   tableStore[updated.dbName] = next
 }
 
-const editField = (row) => {
-  row._editing = true
-  row._backup = { ...row }
+const refreshFields = async (tabId) => {
+  const state = tabStates[tabId]
+  if (!state?.table?.id) return
+  try {
+    const fieldList = await tableApi.getFields(state.table.id)
+    state.fields = Array.isArray(fieldList) ? fieldList : []
+  } catch (error) {
+    console.error('刷新字段失败', error)
+  }
 }
 
-const cancelFieldEdit = (row) => {
-  if (!row._backup) {
-    row._editing = false
+const syncTabKey = (oldKey, updatedTable) => {
+  const newKey = getTableKey(updatedTable, updatedTable?.dbName || '')
+  if (!newKey || newKey === oldKey) return oldKey
+  const oldIndex = openTabs.value.findIndex((tab) => String(tab.id) === String(oldKey))
+  const existingIndex = openTabs.value.findIndex((tab) => String(tab.id) === String(newKey))
+  if (existingIndex !== -1 && existingIndex !== oldIndex) {
+    if (oldIndex !== -1) {
+      openTabs.value.splice(oldIndex, 1)
+    }
+    delete tabStates[oldKey]
+    activeTab.value = String(newKey)
+    selectedTableKey.value = String(newKey)
+    return newKey
+  }
+  if (oldIndex !== -1) {
+    openTabs.value[oldIndex].id = newKey
+  }
+  tabStates[newKey] = tabStates[oldKey]
+  if (oldKey !== newKey) {
+    delete tabStates[oldKey]
+    delete tableRefs.value[oldKey]
+  }
+  if (String(activeTab.value) === String(oldKey)) {
+    activeTab.value = String(newKey)
+  }
+  selectedTableKey.value = String(newKey)
+  return newKey
+}
+
+const startFieldsEdit = (tabId) => {
+  const state = tabStates[tabId]
+  if (!state) return
+  state.fieldsEditing = true
+  state.fieldsDraft = state.fields.map((item) => ({ ...item }))
+  state.fieldsRemoved = []
+}
+
+const cancelFieldsEdit = (tabId) => {
+  const state = tabStates[tabId]
+  if (!state) return
+  state.fieldsEditing = false
+  state.fieldsDraft = []
+  state.fieldsRemoved = []
+}
+
+const addField = (tabId, afterRow = null) => {
+  const state = tabStates[tabId]
+  if (!state) return
+  const newRow = {
+    id: null,
+    fieldName: '',
+    fieldType: '',
+    fieldOrder: 0,
+    isNullable: 1,
+    isPrimary: 0,
+    defaultValue: '',
+    fieldComment: ''
+  }
+  if (!afterRow) {
+    state.fieldsDraft.unshift(newRow)
     return
   }
-  Object.assign(row, row._backup)
-  row._editing = false
-  row._backup = null
+  const index = state.fieldsDraft.indexOf(afterRow)
+  if (index === -1) {
+    state.fieldsDraft.unshift(newRow)
+    return
+  }
+  state.fieldsDraft.splice(index + 1, 0, newRow)
 }
 
-const saveField = async (tabId, row) => {
+const removeField = (tabId, row) => {
   const state = tabStates[tabId]
-  if (!state?.table?.id || !row?.id) return
-  try {
-    const payload = {
-      fieldName: row.fieldName,
-      fieldType: row.fieldType,
-      fieldComment: row.fieldComment
+  if (!state) return
+  if (row?.id) {
+    state.fieldsRemoved = [...new Set([...(state.fieldsRemoved || []), row.id])]
+  }
+  state.fieldsDraft = state.fieldsDraft.filter((item) => item !== row)
+}
+
+const buildFieldPayload = (row) => ({
+  fieldName: (row.fieldName || '').trim(),
+  fieldType: (row.fieldType || '').trim(),
+  fieldComment: row.fieldComment || '',
+  isNullable: row.isNullable ?? 1,
+  isPrimary: row.isPrimary ?? 0,
+  defaultValue: row.defaultValue || '',
+  fieldOrder: row.fieldOrder || 0
+})
+
+const isFieldChanged = (next, original) => {
+  if (!original) return true
+  const payload = buildFieldPayload(next)
+  return (
+    payload.fieldName !== (original.fieldName || '') ||
+    payload.fieldType !== (original.fieldType || '') ||
+    payload.fieldComment !== (original.fieldComment || '') ||
+    Number(payload.isNullable ?? 1) !== Number(original.isNullable ?? 1) ||
+    Number(payload.isPrimary ?? 0) !== Number(original.isPrimary ?? 0) ||
+    payload.defaultValue !== (original.defaultValue || '') ||
+    Number(payload.fieldOrder || 0) !== Number(original.fieldOrder || 0)
+  )
+}
+
+const saveFieldsEdit = async (tabId) => {
+  const state = tabStates[tabId]
+  if (!state?.table?.id) return
+  const draft = state.fieldsDraft || []
+  const removedIds = [...new Set(state.fieldsRemoved || [])]
+  for (const row of draft) {
+    const payload = buildFieldPayload(row)
+    if (!payload.fieldName || !payload.fieldType) {
+      ElMessage.warning('请填写字段名和类型')
+      return
     }
-    const updated = await tableApi.updateField(state.table.id, row.id, payload)
-    Object.assign(row, updated || payload)
-    row._editing = false
-    row._backup = null
-    ElMessage.success('字段已更新')
+  }
+  const originalMap = new Map(state.fields.map((item) => [item.id, item]))
+  const createList = draft.filter((row) => !row.id)
+  const updateList = draft.filter((row) => row.id && isFieldChanged(row, originalMap.get(row.id)))
+  if (!createList.length && !updateList.length && !removedIds.length) {
+    ElMessage.info('暂无字段变更')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认保存字段变更（新增 ${createList.length}、修改 ${updateList.length}、删除 ${removedIds.length}）吗？`,
+      '提示',
+      {
+        type: 'warning',
+        confirmButtonText: '确认',
+        cancelButtonText: '取消'
+      }
+    )
   } catch (error) {
-    ElMessage.error('字段更新失败')
+    return
+  }
+  state.fieldSubmitting = true
+  try {
+    for (const row of createList) {
+      await tableApi.createField(state.table.id, buildFieldPayload(row))
+    }
+    for (const row of updateList) {
+      await tableApi.updateField(state.table.id, row.id, buildFieldPayload(row))
+    }
+    for (const id of removedIds) {
+      await tableApi.deleteField(state.table.id, id)
+    }
+    await refreshFields(tabId)
+    state.fieldsEditing = false
+    state.fieldsDraft = []
+    state.fieldsRemoved = []
+    ElMessage.success('字段已保存')
+  } catch (error) {
+    ElMessage.error('字段保存失败')
+  } finally {
+    state.fieldSubmitting = false
   }
 }
 
@@ -1615,6 +1929,16 @@ watch(
     if (!activeTab.value) return
     await nextTick()
     renderChart(activeTab.value)
+  }
+)
+
+watch(
+  () => [activeTab.value, tabStates[activeTab.value]?.metaTab],
+  ([tabId, metaTab]) => {
+    if (!tabId || metaTab !== 'ddl') return
+    const state = tabStates[tabId]
+    if (!state || state.ddlLoading || state.ddl) return
+    loadDdl(tabId)
   }
 )
 
@@ -2335,12 +2659,57 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+.meta-descriptions :deep(.el-descriptions__content) {
+  width: 100%;
+}
+
+.meta-input {
+  width: 100%;
+}
+
+.replica-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.replica-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #ef4444;
+}
+
+.replica-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.replica-danger {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+.warning-icon {
+  font-size: 12px;
+}
+
 .section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-weight: 600;
   color: #1f2f3d;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .section-header.small {
@@ -2352,10 +2721,6 @@ onBeforeUnmount(() => {
   height: 1px;
   background: #eef1f6;
   margin: 12px 0;
-}
-
-.meta-form :deep(.el-form-item) {
-  margin-bottom: 10px;
 }
 
 .ddl-header {
