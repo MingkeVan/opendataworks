@@ -178,6 +178,36 @@ public class DolphinOpenApiClient {
     }
 
     /**
+     * List task groups.
+     */
+    public DolphinPageData<DolphinTaskGroup> listTaskGroups(Integer pageNo,
+            Integer pageSize,
+            String name,
+            Integer status) {
+        try {
+            MultiValueMap<String, String> queryParams = new LinkedMultiValueMap<>();
+            queryParams.add("pageNo", String.valueOf(pageNo != null ? pageNo : 1));
+            queryParams.add("pageSize", String.valueOf(pageSize != null ? pageSize : 100));
+            if (StringUtils.hasText(name)) {
+                queryParams.add("name", name);
+            }
+            if (status != null) {
+                queryParams.add("status", String.valueOf(status));
+            }
+
+            JsonNode data = getWithParams("/task-group/list-paging", queryParams);
+            if (data == null) {
+                return new DolphinPageData<>();
+            }
+            return objectMapper.readerFor(new TypeReference<DolphinPageData<DolphinTaskGroup>>() {
+            }).readValue(data);
+        } catch (Exception e) {
+            log.warn("Failed to list task groups", e);
+            return new DolphinPageData<>();
+        }
+    }
+
+    /**
      * Create or update process definition.
      * Note: DS 3.x uses different endpoints for create and update.
      */

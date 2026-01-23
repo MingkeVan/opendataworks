@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.onedata.portal.dto.DolphinDatasourceOption;
+import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.TableTaskRelation;
@@ -117,6 +118,12 @@ public class WorkflowDeployService {
                 .collect(Collectors.toMap(DolphinDatasourceOption::getName, opt -> opt,
                         (v1, v2) -> v1));
 
+        // Fetch task groups once
+        List<DolphinTaskGroupOption> allTaskGroups = dolphinSchedulerService.listTaskGroups(null);
+        Map<String, DolphinTaskGroupOption> taskGroupMap = allTaskGroups.stream()
+                .collect(Collectors.toMap(DolphinTaskGroupOption::getName, opt -> opt,
+                        (v1, v2) -> v1));
+
         Map<Integer, Integer> levelOffsets = new HashMap<>(); // Track Y offset per level
         Map<Long, WorkflowTaskRelation> bindingByTaskId = bindings.stream()
                 .collect(Collectors.toMap(WorkflowTaskRelation::getTaskId, b -> b));
@@ -163,6 +170,28 @@ public class WorkflowDeployService {
                         task.getDatasourceName(), task.getTaskName()));
             }
 
+            Integer taskGroupId = null;
+            String groupName = StringUtils.hasText(task.getTaskGroupName())
+                    ? task.getTaskGroupName()
+                    : workflow.getTaskGroupName();
+            if (StringUtils.hasText(groupName)) {
+                DolphinTaskGroupOption group = taskGroupMap.get(groupName);
+                if (group == null) {
+                    log.debug("Task group {} not found in cache, refreshing...", groupName);
+                    List<DolphinTaskGroupOption> refreshed = dolphinSchedulerService.listTaskGroups(groupName);
+                    group = refreshed.stream()
+                            .filter(g -> Objects.equals(g.getName(), groupName))
+                            .findFirst()
+                            .orElse(null);
+                }
+                if (group == null) {
+                    throw new IllegalStateException(String.format(
+                            "Task group '%s' not found for task '%s'. Please check if the task group exists in DolphinScheduler.",
+                            groupName, task.getTaskName()));
+                }
+                taskGroupId = group.getId();
+            }
+
             Map<String, Object> definition = dolphinSchedulerService.buildTaskDefinition(
                     task.getDolphinTaskCode(),
                     version,
@@ -175,7 +204,9 @@ public class WorkflowDeployService {
                     coalesce(attr.getTimeoutSeconds(), task.getTimeoutSeconds(), 60),
                     nodeType,
                     datasourceId,
-                    realDatasourceType != null ? realDatasourceType : task.getDatasourceType());
+                    realDatasourceType != null ? realDatasourceType : task.getDatasourceType(),
+                    taskGroupId,
+                    null);
             definitions.add(definition);
 
             List<DataTask> upstreams = resolveUpstreamTasks(task, orderedTasks, readTables, writeTables);

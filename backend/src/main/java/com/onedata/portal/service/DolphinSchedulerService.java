@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.dto.DolphinDatasourceOption;
+import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.dolphin.*;
 import com.onedata.portal.service.dolphin.DolphinOpenApiClient;
 import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
@@ -402,7 +403,7 @@ public class DolphinSchedulerService {
             int retryInterval,
             int timeoutSeconds) {
         return buildTaskDefinition(taskCode, taskVersion, taskName, description, rawScript,
-                taskPriority, retryTimes, retryInterval, timeoutSeconds, "SHELL", null, null);
+                taskPriority, retryTimes, retryInterval, timeoutSeconds, "SHELL", null, null, null, null);
     }
 
     /**
@@ -419,10 +420,12 @@ public class DolphinSchedulerService {
             int timeoutSeconds,
             String nodeType,
             Long datasourceId,
-            String datasourceType) {
+            String datasourceType,
+            Integer taskGroupId,
+            Integer taskGroupPriority) {
         return buildTaskDefinition(taskCode, taskVersion, taskName, description, rawScript,
                 taskPriority, retryTimes, retryInterval, timeoutSeconds, nodeType,
-                datasourceId, datasourceType, null, null, null, null);
+                datasourceId, datasourceType, null, null, null, null, taskGroupId, taskGroupPriority);
     }
 
     /**
@@ -443,7 +446,9 @@ public class DolphinSchedulerService {
             Long targetDatasourceId,
             String sourceTable,
             String targetTable,
-            String customJson) {
+            String customJson,
+            Integer taskGroupId,
+            Integer taskGroupPriority) {
         Map<String, Object> payload = new HashMap<>();
         payload.put("code", taskCode);
         payload.put("name", taskName);
@@ -467,6 +472,8 @@ public class DolphinSchedulerService {
         payload.put("memoryMax", -1);
         payload.put("taskExecuteType", "BATCH");
         payload.put("isCache", "NO");
+        payload.put("taskGroupId", taskGroupId == null ? 0 : taskGroupId);
+        payload.put("taskGroupPriority", taskGroupPriority == null ? 0 : taskGroupPriority);
 
         try {
             if ("SQL".equalsIgnoreCase(nodeType)) {
@@ -540,6 +547,42 @@ public class DolphinSchedulerService {
             return result;
         } catch (Exception ex) {
             log.warn("Failed to load datasources from DolphinScheduler: {}", ex.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Retrieve task group options from DolphinScheduler OpenAPI.
+     */
+    public List<DolphinTaskGroupOption> listTaskGroups(String keyword) {
+        try {
+            DolphinPageData<DolphinTaskGroup> page = openApiClient.listTaskGroups(1, 200, keyword, null);
+            if (page == null || page.getTotalList() == null) {
+                return Collections.emptyList();
+            }
+            List<DolphinTaskGroupOption> result = new ArrayList<>();
+            for (DolphinTaskGroup group : page.getTotalList()) {
+                if (group == null) {
+                    continue;
+                }
+                if (!StringUtils.hasText(group.getName())) {
+                    continue;
+                }
+                if (StringUtils.hasText(keyword) && !group.getName().contains(keyword)) {
+                    continue;
+                }
+                DolphinTaskGroupOption option = new DolphinTaskGroupOption();
+                option.setId(group.getId());
+                option.setName(group.getName());
+                option.setDescription(group.getDescription());
+                option.setGroupSize(group.getGroupSize());
+                option.setUseSize(group.getUseSize());
+                option.setStatus(group.getStatus());
+                result.add(option);
+            }
+            return result;
+        } catch (Exception ex) {
+            log.warn("Failed to load task groups from DolphinScheduler: {}", ex.getMessage());
             return Collections.emptyList();
         }
     }

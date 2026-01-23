@@ -28,6 +28,8 @@ public class DataTask {
 
     private String datasourceType; // datasource type: MYSQL, DORIS, etc.
 
+    private String taskGroupName; // Dolphin task group name (null = inherit workflow default)
+
     // DataX-specific fields
     private String targetDatasourceName; // target datasource for DataX
 

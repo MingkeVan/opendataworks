@@ -28,6 +28,24 @@
           />
         </el-form-item>
 
+        <el-form-item label="默认任务组">
+          <el-select
+            v-model="form.taskGroupName"
+            placeholder="可选"
+            clearable
+            filterable
+            :loading="taskGroupsLoading"
+            @visible-change="handleTaskGroupDropdown"
+          >
+            <el-option
+              v-for="group in taskGroupOptions"
+              :key="group.id"
+              :label="group.name"
+              :value="group.name"
+            />
+          </el-select>
+        </el-form-item>
+
         <el-form-item label="关联任务">
           <el-select
             v-model="form.selectedTaskIds"
@@ -122,6 +140,8 @@ const submitting = ref(false)
 const drawerLoading = ref(false)
 const tasksLoading = ref(false)
 const taskOptions = ref([])
+const taskGroupsLoading = ref(false)
+const taskGroupOptions = ref([])
 const workflowNumericId = computed(() => {
   if (props.workflowId === null || props.workflowId === undefined || props.workflowId === '') {
     return null
@@ -136,6 +156,7 @@ const drawerTitle = computed(() => (isEditMode.value ? '编辑工作流' : '新�
 const form = reactive({
   workflowName: '',
   description: '',
+  taskGroupName: '',
   selectedTaskIds: []
 })
 
@@ -165,6 +186,9 @@ const initialize = async () => {
     if (!taskOptions.value.length) {
       await loadTaskOptions()
     }
+    if (!taskGroupOptions.value.length) {
+      await loadTaskGroupOptions()
+    }
     const targetId = workflowNumericId.value
     if (isEditMode.value && targetId !== null) {
       await loadWorkflowForEdit(targetId)
@@ -177,6 +201,7 @@ const initialize = async () => {
 const resetForm = () => {
   form.workflowName = ''
   form.description = ''
+  form.taskGroupName = ''
   form.selectedTaskIds = []
   formRef.value?.clearValidate()
 }
@@ -200,6 +225,25 @@ const loadTaskOptions = async () => {
     ElMessage.error('加载任务列表失败，请稍后重试')
   } finally {
     tasksLoading.value = false
+  }
+}
+
+const handleTaskGroupDropdown = async (visible) => {
+  if (visible && !taskGroupOptions.value.length) {
+    await loadTaskGroupOptions()
+  }
+}
+
+const loadTaskGroupOptions = async () => {
+  taskGroupsLoading.value = true
+  try {
+    const res = await taskApi.fetchTaskGroups()
+    taskGroupOptions.value = res || []
+  } catch (error) {
+    console.error('加载任务组失败', error)
+    ElMessage.error('加载任务组失败，请稍后重试')
+  } finally {
+    taskGroupsLoading.value = false
   }
 }
 
@@ -246,6 +290,7 @@ const loadWorkflowForEdit = async (workflowId) => {
     }
     form.workflowName = detail.workflow.workflowName || ''
     form.description = detail.workflow.description || ''
+    form.taskGroupName = detail.workflow.taskGroupName || ''
     const relations = Array.isArray(detail.taskRelations) ? detail.taskRelations : []
     const taskIds = relations
       .map((relation) => Number(relation.taskId))
@@ -275,6 +320,7 @@ const handleSubmit = async () => {
     const payload = {
       workflowName: form.workflowName.trim(),
       description: form.description,
+      taskGroupName: form.taskGroupName || null,
       tasks: buildTaskPayload(),
       operator: 'portal-ui'
     }

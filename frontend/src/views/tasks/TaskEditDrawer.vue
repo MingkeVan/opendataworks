@@ -591,8 +591,9 @@ const handleSave = async () => {
 
   loading.value = true
   try {
+    const { taskGroupName, ...taskPayload } = form.task
     const payload = {
-      task: { ...form.task },
+      task: taskPayload,
       inputTableIds: form.inputTableIds,
       outputTableIds: form.outputTableIds
     }

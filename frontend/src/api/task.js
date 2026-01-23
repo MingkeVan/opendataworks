@@ -63,5 +63,10 @@ export const taskApi = {
     return request.get('/v1/dolphin/datasources', { params })
   },
 
+  // 获取 Dolphin 任务组列表
+  fetchTaskGroups(params = {}) {
+    return request.get('/v1/dolphin/task-groups', { params })
+  },
+
 
 }

@@ -100,6 +100,8 @@ class DolphinSchedulerServiceIntegrationTest {
                 3600,
                 "SHELL",
                 null,
+                null,
+                null,
                 null);
 
         Map<String, Object> task2 = service.buildTaskDefinition(
@@ -113,6 +115,8 @@ class DolphinSchedulerServiceIntegrationTest {
                 1,
                 3600,
                 "SHELL",
+                null,
+                null,
                 null,
                 null);
 
