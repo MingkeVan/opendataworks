@@ -36,15 +36,15 @@
             </el-button>
           </div>
           <div class="sort-row">
-            <el-select v-model="sortField" size="small" class="sort-select">
-              <el-option label="表名" value="tableName" />
-              <el-option label="创建时间" value="createdAt" />
-              <el-option label="数据量" value="rowCount" />
-            </el-select>
-            <el-select v-model="sortOrder" size="small" class="sort-select">
-              <el-option label="升序" value="asc" />
-              <el-option label="降序" value="desc" />
-            </el-select>
+            <el-radio-group v-model="sortField" size="small" class="sort-group">
+              <el-radio-button label="tableName">表名</el-radio-button>
+              <el-radio-button label="createdAt">创建时间</el-radio-button>
+              <el-radio-button label="rowCount">数据量</el-radio-button>
+            </el-radio-group>
+            <el-radio-group v-model="sortOrder" size="small" class="sort-group">
+              <el-radio-button label="asc">升序</el-radio-button>
+              <el-radio-button label="desc">降序</el-radio-button>
+            </el-radio-group>
           </div>
         </div>
 
@@ -74,7 +74,7 @@
                   :key="getTableKey(table, db) || table.id || table.tableName"
                   class="table-item"
                   :class="{ active: selectedTableKey === getTableKey(table, db) }"
-                  :ref="(el) => setTableRef(getTableKey(table, db), el)"
+                  :ref="(el) => setTableRef(getTableKey(table, db), el, table.id)"
                   @click="openTableTab(table, db)"
                 >
                   <div
@@ -457,59 +457,61 @@
                       </el-tab-pane>
 
                       <el-tab-pane name="columns" label="列信息">
-                        <div class="meta-section">
-                          <el-table
-                            :data="tabStates[tab.id].fields"
-                            border
-                            size="small"
-                            height="240"
-                          >
-                            <el-table-column label="字段名" width="140">
-                              <template #default="{ row }">
-                                <el-input
-                                  v-if="row._editing"
-                                  v-model="row.fieldName"
-                                  size="small"
-                                />
-                                <span v-else>{{ row.fieldName }}</span>
-                              </template>
-                            </el-table-column>
-                            <el-table-column label="类型" width="120">
-                              <template #default="{ row }">
-                                <el-input
-                                  v-if="row._editing"
-                                  v-model="row.fieldType"
-                                  size="small"
-                                />
-                                <span v-else>{{ row.fieldType }}</span>
-                              </template>
-                            </el-table-column>
-                            <el-table-column label="注释">
-                              <template #default="{ row }">
-                                <el-input
-                                  v-if="row._editing"
-                                  v-model="row.fieldComment"
-                                  size="small"
-                                />
-                                <span v-else>{{ row.fieldComment || '-' }}</span>
-                              </template>
-                            </el-table-column>
-                            <el-table-column label="操作" width="100">
-                              <template #default="{ row }">
-                                <template v-if="row._editing">
-                                  <el-button link type="primary" size="small" @click="saveField(tab.id, row)">保存</el-button>
-                                  <el-button link size="small" @click="cancelFieldEdit(row)">取消</el-button>
+                        <div class="meta-section meta-section-fill">
+                          <div v-if="tabStates[tab.id].fields.length" class="meta-table">
+                            <el-table
+                              :data="tabStates[tab.id].fields"
+                              border
+                              size="small"
+                              height="100%"
+                            >
+                              <el-table-column label="字段名" width="140">
+                                <template #default="{ row }">
+                                  <el-input
+                                    v-if="row._editing"
+                                    v-model="row.fieldName"
+                                    size="small"
+                                  />
+                                  <span v-else>{{ row.fieldName }}</span>
                                 </template>
-                                <el-button v-else link type="primary" size="small" @click="editField(row)">编辑</el-button>
-                              </template>
-                            </el-table-column>
-                          </el-table>
-                          <el-empty v-if="!tabStates[tab.id].fields.length" description="暂无字段" :image-size="60" />
+                              </el-table-column>
+                              <el-table-column label="类型" width="120">
+                                <template #default="{ row }">
+                                  <el-input
+                                    v-if="row._editing"
+                                    v-model="row.fieldType"
+                                    size="small"
+                                  />
+                                  <span v-else>{{ row.fieldType }}</span>
+                                </template>
+                              </el-table-column>
+                              <el-table-column label="注释">
+                                <template #default="{ row }">
+                                  <el-input
+                                    v-if="row._editing"
+                                    v-model="row.fieldComment"
+                                    size="small"
+                                  />
+                                  <span v-else>{{ row.fieldComment || '-' }}</span>
+                                </template>
+                              </el-table-column>
+                              <el-table-column label="操作" width="100">
+                                <template #default="{ row }">
+                                  <template v-if="row._editing">
+                                    <el-button link type="primary" size="small" @click="saveField(tab.id, row)">保存</el-button>
+                                    <el-button link size="small" @click="cancelFieldEdit(row)">取消</el-button>
+                                  </template>
+                                  <el-button v-else link type="primary" size="small" @click="editField(row)">编辑</el-button>
+                                </template>
+                              </el-table-column>
+                            </el-table>
+                          </div>
+                          <el-empty v-else description="暂无字段" :image-size="60" />
                         </div>
                       </el-tab-pane>
 
                       <el-tab-pane name="ddl" label="DDL">
-                        <div class="meta-section">
+                        <div class="meta-section meta-section-fill">
                           <div class="ddl-header">
                             <el-button size="small" @click="loadDdl(tab.id)" :loading="tabStates[tab.id].ddlLoading">
                               加载 DDL
@@ -525,9 +527,10 @@
                           <el-input
                             v-model="tabStates[tab.id].ddl"
                             type="textarea"
-                            :rows="8"
                             resize="none"
                             readonly
+                            class="ddl-textarea"
+                            placeholder="点击「加载 DDL」按钮获取建表语句"
                           />
                         </div>
                       </el-tab-pane>
@@ -661,7 +664,7 @@ const clusterOptions = ref([])
 const clusterId = ref(null)
 const route = useRoute()
 const router = useRouter()
-const sidebarWidth = ref(300)
+const sidebarWidth = ref(360)
 const isResizing = ref(false)
 let resizeMoveHandler = null
 let resizeUpHandler = null
@@ -696,6 +699,7 @@ const tableRefs = ref({})
 const chartRefs = ref({})
 const chartInstances = new Map()
 const taskDrawerRef = ref(null)
+const tableObserver = ref(null)
 
 const layerOptions = [
   { label: 'ODS - 原始数据层', value: 'ODS' },
@@ -786,9 +790,15 @@ const getDisplayedTables = (database) => {
 
 const getTableCount = (database) => getFilteredTables(database).length
 
-const setTableRef = (key, el) => {
+const setTableRef = (key, el, tableId) => {
   if (!key || !el) return
   tableRefs.value[key] = el
+  if (tableId) {
+    el.dataset.tableId = String(tableId)
+  }
+  if (tableObserver.value) {
+    tableObserver.value.observe(el)
+  }
 }
 
 const setLeftPaneRef = (key, el) => {
@@ -894,6 +904,50 @@ const getUpstreamCount = (tableId) => {
 const getDownstreamCount = (tableId) => {
   if (!tableId) return 0
   return lineageCache[tableId]?.downstreamTables?.length || 0
+}
+
+const loadLineageForTable = async (tableId) => {
+  if (!tableId || lineageCache[tableId]) return
+  try {
+    const lineageData = await tableApi.getLineage(tableId)
+    lineageCache[tableId] = lineageData || { upstreamTables: [], downstreamTables: [] }
+  } catch (error) {
+    console.error('加载血缘关系失败', error)
+  }
+}
+
+const observeExistingTableRefs = () => {
+  if (!tableObserver.value) return
+  Object.values(tableRefs.value).forEach((el) => {
+    const tableId = el?.dataset?.tableId
+    if (tableId) {
+      tableObserver.value.observe(el)
+    }
+  })
+}
+
+const setupTableObserver = () => {
+  if (tableObserver.value) {
+    tableObserver.value.disconnect()
+  }
+  tableObserver.value = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return
+        const tableId = Number(entry.target.dataset.tableId)
+        if (Number.isFinite(tableId)) {
+          loadLineageForTable(tableId)
+        }
+        tableObserver.value?.unobserve(entry.target)
+      })
+    },
+    {
+      root: null,
+      rootMargin: '100px',
+      threshold: 0.1
+    }
+  )
+  observeExistingTableRefs()
 }
 
 const createTabState = (table) => {
@@ -1597,6 +1651,7 @@ watch(
 )
 
 onMounted(() => {
+  setupTableObserver()
   loadClusters()
   loadDatabases()
   fetchHistory()
@@ -1612,6 +1667,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
   chartInstances.forEach((instance) => instance.dispose())
   chartInstances.clear()
+  if (tableObserver.value) {
+    tableObserver.value.disconnect()
+  }
   if (resizeMoveHandler) {
     window.removeEventListener('mousemove', resizeMoveHandler)
     resizeMoveHandler = null
@@ -1706,11 +1764,31 @@ onBeforeUnmount(() => {
 
 .sort-row {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
 }
 
-.sort-select {
-  flex: 1;
+.sort-group {
+  display: inline-flex;
+  flex-wrap: nowrap;
+}
+
+.sort-group :deep(.el-radio-button__inner) {
+  padding: 4px 10px;
+}
+
+.sort-group :deep(.el-radio-button__inner) {
+  text-align: center;
+  border-radius: 6px;
+}
+
+.sort-group :deep(.el-radio-button:first-child .el-radio-button__inner) {
+  border-radius: 6px 0 0 6px;
+}
+
+.sort-group :deep(.el-radio-button:last-child .el-radio-button__inner) {
+  border-radius: 0 6px 6px 0;
 }
 
 
@@ -1838,7 +1916,7 @@ onBeforeUnmount(() => {
   gap: 8px;
   flex: 1;
   min-width: 0;
-  max-width: 180px;
+  max-width: 240px;
 }
 
 .table-name {
@@ -1849,7 +1927,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   flex-shrink: 0;
-  max-width: 90px;
+  max-width: 140px;
 }
 
 .table-comment {
@@ -1867,6 +1945,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+  margin-left: auto;
+  justify-content: flex-end;
 }
 
 .row-count {
@@ -2229,12 +2309,30 @@ onBeforeUnmount(() => {
 :deep(.meta-tabs .el-tabs__content) {
   height: 100%;
   padding: 12px;
+  box-sizing: border-box;
+}
+
+:deep(.meta-tabs .el-tab-pane) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .meta-section {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.meta-section-fill {
+  flex: 1;
+  min-height: 0;
+}
+
+.meta-table {
+  flex: 1;
+  min-height: 0;
 }
 
 .section-header {
@@ -2263,6 +2361,17 @@ onBeforeUnmount(() => {
 .ddl-header {
   display: flex;
   gap: 8px;
+}
+
+.ddl-textarea {
+  flex: 1;
+  min-height: 0;
+  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+.ddl-textarea :deep(.el-textarea__inner) {
+  height: 100% !important;
+  min-height: 160px;
 }
 
 .lineage-panel {
