@@ -23,6 +23,11 @@ public class WorkflowDefinitionRequest {
      */
     private String globalParams;
 
+    /**
+     * 默认任务组（DolphinScheduler Task Group）
+     */
+    private String taskGroupName;
+
     private List<WorkflowTaskBinding> tasks;
 
     private String operator;

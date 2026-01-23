@@ -128,6 +128,7 @@ public class WorkflowService {
         workflow.setEntryTaskIds(toJson(orderTaskIds(topology.getEntryTaskIds(), taskIdsInOrder)));
         workflow.setExitTaskIds(toJson(orderTaskIds(topology.getExitTaskIds(), taskIdsInOrder)));
         workflow.setGlobalParams(request.getGlobalParams());
+        workflow.setTaskGroupName(request.getTaskGroupName());
         workflow.setStatus("draft");
         workflow.setPublishStatus("never");
         workflow.setProjectCode(resolveProjectCode(request.getProjectCode()));
@@ -179,6 +180,7 @@ public class WorkflowService {
         workflow.setEntryTaskIds(toJson(orderTaskIds(topology.getEntryTaskIds(), taskIdsInOrder)));
         workflow.setExitTaskIds(toJson(orderTaskIds(topology.getExitTaskIds(), taskIdsInOrder)));
         workflow.setGlobalParams(request.getGlobalParams());
+        workflow.setTaskGroupName(request.getTaskGroupName());
         workflow.setUpdatedBy(request.getOperator());
         workflow.setUpdatedAt(LocalDateTime.now());
         if (workflow.getProjectCode() == null || workflow.getProjectCode() == 0) {
@@ -208,6 +210,7 @@ public class WorkflowService {
         snapshot.put("workflowId", workflow.getId());
         snapshot.put("workflowName", workflow.getWorkflowName());
         snapshot.put("definitionJson", workflow.getDefinitionJson());
+        snapshot.put("taskGroupName", workflow.getTaskGroupName());
         snapshot.put("tasks", request.getTasks());
         snapshot.put("updatedBy", request.getOperator());
         String snapshotJson = toJson(snapshot);

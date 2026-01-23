@@ -1504,15 +1504,15 @@ const renderChart = (tabId) => {
   const container = chartRefs.value[tabId]
   if (!container) return
 
+  const shouldRender = canRenderChart(tabId)
   let instance = chartInstances.get(tabId)
+  if (!shouldRender) {
+    instance?.clear()
+    return
+  }
   if (!instance) {
     instance = echarts.init(container)
     chartInstances.set(tabId, instance)
-  }
-
-  if (!canRenderChart(tabId)) {
-    instance.clear()
-    return
   }
 
   if (state.chart.type === 'pie') {
@@ -1538,6 +1538,7 @@ const renderChart = (tabId) => {
         }
       ]
     })
+    instance.resize()
     return
   }
 
@@ -1548,15 +1549,16 @@ const renderChart = (tabId) => {
     data: state.queryResult.rows.map((row) => Number(row[key] || 0)),
     smooth: state.chart.type === 'line'
   }))
-    instance.clear()
-    instance.setOption({
-      tooltip: { trigger: 'axis' },
-      legend: { bottom: 0 },
-      grid: { top: 40, left: 50, right: 30, bottom: 60, containLabel: true },
-      xAxis: { type: 'category', data: xData },
+  instance.clear()
+  instance.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { bottom: 0 },
+    grid: { top: 40, left: 50, right: 30, bottom: 60, containLabel: true },
+    xAxis: { type: 'category', data: xData },
     yAxis: { type: 'value' },
     series
   })
+  instance.resize()
 }
 
 const disposeChart = (tabId) => {
@@ -1568,9 +1570,10 @@ const disposeChart = (tabId) => {
 }
 
 const handleResize = () => {
-  if (!activeTab.value) return
-  const instance = chartInstances.get(activeTab.value)
-  instance?.resize()
+  const tabId = activeTab.value
+  if (!tabId) return
+  if (tabStates[tabId]?.resultTab !== 'chart') return
+  chartInstances.get(tabId)?.resize()
 }
 
 const startMetaEdit = (tabId) => {
@@ -1926,9 +1929,11 @@ watch(
     tabStates[activeTab.value]?.queryResult?.rows?.length
   ],
   async () => {
-    if (!activeTab.value) return
+    const tabId = activeTab.value
+    if (!tabId) return
+    if (tabStates[tabId]?.resultTab !== 'chart') return
     await nextTick()
-    renderChart(activeTab.value)
+    renderChart(tabId)
   }
 )
 

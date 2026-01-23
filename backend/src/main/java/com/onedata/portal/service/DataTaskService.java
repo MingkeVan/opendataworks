@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.onedata.portal.dto.DolphinDatasourceOption;
+import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.SqlQueryRequest;
 import com.onedata.portal.dto.SqlQueryResponse;
 import com.onedata.portal.dto.TaskExecutionStatus;
@@ -393,6 +394,11 @@ public class DataTaskService {
         List<DolphinSchedulerService.TaskRelationPayload> relations = new ArrayList<>();
         List<DolphinSchedulerService.TaskLocationPayload> locations = new ArrayList<>();
 
+        List<DolphinTaskGroupOption> allTaskGroups = dolphinSchedulerService.listTaskGroups(null);
+        Map<String, DolphinTaskGroupOption> taskGroupMap = allTaskGroups.stream()
+                .collect(Collectors.toMap(DolphinTaskGroupOption::getName, opt -> opt,
+                        (v1, v2) -> v1));
+
         int index = 0;
         for (DataTask dataTask : dolphinTasks) {
             String priority = mapPriority(dataTask.getPriority());
@@ -454,6 +460,25 @@ public class DataTaskService {
                 }
             }
 
+            Integer taskGroupId = null;
+            if (StringUtils.hasText(dataTask.getTaskGroupName())) {
+                String groupName = dataTask.getTaskGroupName();
+                DolphinTaskGroupOption group = taskGroupMap.get(groupName);
+                if (group == null) {
+                    List<DolphinTaskGroupOption> refreshed = dolphinSchedulerService.listTaskGroups(groupName);
+                    group = refreshed.stream()
+                            .filter(g -> Objects.equals(g.getName(), groupName))
+                            .findFirst()
+                            .orElse(null);
+                }
+                if (group == null) {
+                    throw new IllegalStateException(String.format(
+                            "Task group '%s' not found for task '%s'. Please check if the task group exists in DolphinScheduler.",
+                            groupName, dataTask.getTaskName()));
+                }
+                taskGroupId = group.getId();
+            }
+
             Map<String, Object> definition = dolphinSchedulerService.buildTaskDefinition(
                     dataTask.getDolphinTaskCode(),
                     version,
@@ -470,7 +495,9 @@ public class DataTaskService {
                     targetDatasourceId,
                     dataTask.getSourceTable(),
                     dataTask.getTargetTable(),
-                    dataTask.getColumnMapping());
+                    dataTask.getColumnMapping(),
+                    taskGroupId,
+                    null);
             definitions.add(definition);
 
             List<DataTask> upstreamTasks = resolveUpstreamTasks(dataTask.getId(), taskMap);

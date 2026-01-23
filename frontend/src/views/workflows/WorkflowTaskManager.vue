@@ -211,7 +211,9 @@ const saveWorkflow = async () => {
     await workflowApi.update(props.workflowId, {
       workflowName: wf.workflowName,
       description: wf.description,
+      taskGroupName: wf.taskGroupName || null,
       tasks: allTaskIds.map(taskId => ({ taskId })),
+      globalParams: wf.globalParams,
       operator: 'portal-ui'
     })
     
