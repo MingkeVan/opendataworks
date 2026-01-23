@@ -3,7 +3,7 @@
     <el-card class="header-card">
       <template #header>
         <div class="card-header">
-          <span>任务执行监控</span>
+          <span>执行监控</span>
           <div class="header-actions">
             <el-button type="primary" :icon="Refresh" @click="refreshData">刷新</el-button>
           </div>

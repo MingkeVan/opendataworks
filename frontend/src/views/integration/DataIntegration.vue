@@ -1,19 +1,19 @@
 <template>
-  <div class="configuration-management">
+  <div class="data-integration">
     <div class="page-header">
-      <h2>配置管理</h2>
+      <h2>数据集成</h2>
     </div>
 
-    <DolphinConfig />
+    <DataSourceManagement />
   </div>
 </template>
 
 <script setup>
-import DolphinConfig from './DolphinConfig.vue'
+import DataSourceManagement from '@/views/settings/DataSourceManagement.vue'
 </script>
 
 <style scoped>
-.configuration-management {
+.data-integration {
   padding: 20px;
   height: 100%;
   display: flex;
@@ -31,3 +31,4 @@ import DolphinConfig from './DolphinConfig.vue'
   color: #1a1a1a;
 }
 </style>
+

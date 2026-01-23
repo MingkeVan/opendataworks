@@ -418,7 +418,7 @@
 
                     <!-- 血缘关系 -->
                     <div class="lineage-section">
-                      <h3>血缘关系</h3>
+                      <h3>数据血缘</h3>
                       <el-row :gutter="20">
                         <el-col :span="12">
                           <el-card shadow="never" class="lineage-card">
