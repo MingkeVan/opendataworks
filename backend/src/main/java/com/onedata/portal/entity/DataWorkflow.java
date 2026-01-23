@@ -50,6 +50,11 @@ public class DataWorkflow {
      */
     private String globalParams;
 
+    /**
+     * 默认任务组（DolphinScheduler Task Group）
+     */
+    private String taskGroupName;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

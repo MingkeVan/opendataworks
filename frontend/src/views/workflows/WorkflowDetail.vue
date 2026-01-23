@@ -88,7 +88,7 @@
         <!-- Basic Info Section with Inline Editing -->
         <div class="basic-info-section">
           <div class="section-title">基本信息</div>
-          <el-descriptions :column="2" border>
+            <el-descriptions :column="2" border>
             <!-- Editable Name Field -->
             <el-descriptions-item label="名称">
               <div v-if="!isEditingName" class="editable-field" @click="startEditName">
@@ -107,6 +107,32 @@
               </div>
             </el-descriptions-item>
             <el-descriptions-item label="项目">{{ workflow?.workflow?.projectCode }}</el-descriptions-item>
+            <el-descriptions-item label="默认任务组">
+              <div v-if="!isEditingTaskGroup" class="editable-field" @click="startEditTaskGroup">
+                <span>{{ workflow?.workflow?.taskGroupName || '-' }}</span>
+                <el-icon class="edit-icon"><Edit /></el-icon>
+              </div>
+              <div v-else class="edit-field">
+                <el-select
+                  v-model="editingTaskGroup"
+                  size="small"
+                  clearable
+                  filterable
+                  :loading="taskGroupsLoading"
+                  style="width: 200px; margin-right: 8px;"
+                  @visible-change="handleTaskGroupDropdown"
+                >
+                  <el-option
+                    v-for="group in taskGroupOptions"
+                    :key="group.id"
+                    :label="group.name"
+                    :value="group.name"
+                  />
+                </el-select>
+                <el-button size="small" type="primary" :loading="savingField" @click="saveTaskGroupField">确认</el-button>
+                <el-button size="small" @click="cancelEditTaskGroup">取消</el-button>
+              </div>
+            </el-descriptions-item>
             <el-descriptions-item label="Dolphin 流程编码">
               <el-link 
                 v-if="canJumpToDolphin(workflow?.workflow)" 
@@ -316,9 +342,16 @@ const pendingApprovalFlags = reactive({})
 const actionLoading = reactive({})
 
 // Inline editing states
+const isEditingName = ref(false)
+const isEditingDescription = ref(false)
+const isEditingTaskGroup = ref(false)
 const editingName = ref('')
 const editingDescription = ref('')
+const editingTaskGroup = ref('')
 const savingField = ref(false)
+
+const taskGroupsLoading = ref(false)
+const taskGroupOptions = ref([])
 
 // Global params state
 const globalParamsList = ref([])
@@ -352,6 +385,7 @@ const saveNameField = async () => {
     await workflowApi.update(wf.id, {
       workflowName: editingName.value.trim(),
       description: wf.description,
+      taskGroupName: wf.taskGroupName || null,
       tasks: workflowTaskIds.value.map(taskId => ({ taskId })),
       globalParams: wf.globalParams,
       operator: 'portal-ui'
@@ -361,6 +395,62 @@ const saveNameField = async () => {
     loadWorkflowDetail()
   } catch (error) {
     console.error('更新名称失败', error)
+    ElMessage.error(error?.response?.data?.message || '更新失败')
+  } finally {
+    savingField.value = false
+  }
+}
+
+const loadTaskGroupOptions = async () => {
+  if (taskGroupOptions.value.length) {
+    return
+  }
+  taskGroupsLoading.value = true
+  try {
+    const res = await taskApi.fetchTaskGroups()
+    taskGroupOptions.value = res || []
+  } catch (error) {
+    console.error('加载任务组失败', error)
+    ElMessage.error('加载任务组失败，请稍后重试')
+  } finally {
+    taskGroupsLoading.value = false
+  }
+}
+
+const handleTaskGroupDropdown = async (visible) => {
+  if (visible && !taskGroupOptions.value.length) {
+    await loadTaskGroupOptions()
+  }
+}
+
+const startEditTaskGroup = async () => {
+  editingTaskGroup.value = workflow.value?.workflow?.taskGroupName || ''
+  isEditingTaskGroup.value = true
+  await loadTaskGroupOptions()
+}
+
+const cancelEditTaskGroup = () => {
+  isEditingTaskGroup.value = false
+  editingTaskGroup.value = ''
+}
+
+const saveTaskGroupField = async () => {
+  savingField.value = true
+  try {
+    const wf = workflow.value?.workflow
+    await workflowApi.update(wf.id, {
+      workflowName: wf.workflowName,
+      description: wf.description,
+      taskGroupName: editingTaskGroup.value || null,
+      tasks: workflowTaskIds.value.map(taskId => ({ taskId })),
+      globalParams: wf.globalParams,
+      operator: 'portal-ui'
+    })
+    ElMessage.success('任务组更新成功')
+    isEditingTaskGroup.value = false
+    loadWorkflowDetail()
+  } catch (error) {
+    console.error('更新任务组失败', error)
     ElMessage.error(error?.response?.data?.message || '更新失败')
   } finally {
     savingField.value = false
@@ -384,6 +474,7 @@ const saveDescriptionField = async () => {
     await workflowApi.update(wf.id, {
       workflowName: wf.workflowName,
       description: editingDescription.value,
+      taskGroupName: wf.taskGroupName || null,
       tasks: workflowTaskIds.value.map(taskId => ({ taskId })),
       globalParams: wf.globalParams,
       operator: 'portal-ui'
@@ -419,6 +510,7 @@ const saveGlobalParams = async () => {
         await workflowApi.update(wf.id, {
             workflowName: wf.workflowName,
             description: wf.description,
+            taskGroupName: wf.taskGroupName || null,
             tasks: workflowTaskIds.value.map(taskId => ({ taskId })),
             globalParams: JSON.stringify(globalParamsList.value),
             operator: 'portal-ui'
