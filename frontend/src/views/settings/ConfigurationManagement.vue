@@ -5,11 +5,8 @@
     </div>
 
     <el-tabs v-model="activeTab" class="config-tabs">
-      <el-tab-pane label="Doris 集群" name="doris">
-        <DorisClusterManagement />
-      </el-tab-pane>
-      <el-tab-pane label="元数据比对" name="metadata">
-        <MetadataSync />
+      <el-tab-pane label="数据源" name="datasource">
+        <DataSourceManagement />
       </el-tab-pane>
       <el-tab-pane label="Dolphin 配置" name="dolphin">
         <DolphinConfig />
@@ -20,11 +17,10 @@
 
 <script setup>
 import { ref } from 'vue'
-import DorisClusterManagement from './DorisClusterManagement.vue'
-import MetadataSync from './MetadataSync.vue'
+import DataSourceManagement from './DataSourceManagement.vue'
 import DolphinConfig from './DolphinConfig.vue'
 
-const activeTab = ref('doris')
+const activeTab = ref('datasource')
 </script>
 
 <style scoped>
