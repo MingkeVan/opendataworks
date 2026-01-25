@@ -13,22 +13,26 @@ const routes = [
         meta: { title: '控制台' }
       },
       {
-        path: '/datastudio-new',
-        name: 'DataStudioNew',
+        path: '/datastudio',
+        name: 'DataStudio',
         component: () => import('@/views/datastudio/DataStudioNew.vue'),
         meta: { title: 'Data Studio' }
       },
       {
+        path: '/datastudio-new',
+        redirect: (to) => ({ path: '/datastudio', query: to.query, hash: to.hash })
+      },
+      {
         path: '/tables',
-        redirect: '/datastudio-new'
+        redirect: '/datastudio'
       },
       {
         path: '/tables/create',
-        redirect: { path: '/datastudio-new', query: { create: '1' } }
+        redirect: { path: '/datastudio', query: { create: '1' } }
       },
       {
         path: '/query',
-        redirect: '/datastudio-new'
+        redirect: '/datastudio'
       },
       {
         path: '/domains',

@@ -19,7 +19,7 @@
             <el-icon><DataBoard /></el-icon>
             <span>控制台</span>
           </el-menu-item>
-          <el-menu-item index="/datastudio-new">
+          <el-menu-item index="/datastudio">
             <el-icon><DataLine /></el-icon>
             <span>Data Studio</span>
           </el-menu-item>
@@ -68,8 +68,8 @@ const activeMenu = computed(() => {
   if (path.startsWith('/dashboard')) {
     return '/dashboard'
   }
-  if (path.startsWith('/datastudio-new')) {
-    return '/datastudio-new'
+  if (path.startsWith('/datastudio')) {
+    return '/datastudio'
   }
   if (path.startsWith('/workflows') || path.startsWith('/tasks')) {
     return '/workflows'

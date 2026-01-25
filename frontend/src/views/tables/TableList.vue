@@ -29,6 +29,20 @@
         </el-button>
       </div>
 
+      <div class="sort-bar">
+        <el-radio-group v-model="sortField" size="small" @change="handleSortChange">
+          <el-radio-button label="createdAt">创建时间</el-radio-button>
+          <el-radio-button label="lastUpdated">更新时间</el-radio-button>
+          <el-radio-button label="tableName">表名</el-radio-button>
+          <el-radio-button label="rowCount">数据量</el-radio-button>
+          <el-radio-button label="storageSize">存储大小</el-radio-button>
+        </el-radio-group>
+        <el-radio-group v-model="sortOrder" size="small" @change="handleSortChange">
+          <el-radio-button label="desc">降序</el-radio-button>
+          <el-radio-button label="asc">升序</el-radio-button>
+        </el-radio-group>
+      </div>
+
       <el-table :data="tableData" style="width: 100%; margin-top: 20px" v-loading="loading">
         <el-table-column prop="tableName" label="表名" width="220">
           <template #default="{ row }">
@@ -101,6 +115,8 @@ const router = useRouter()
 
 const loading = ref(false)
 const tableData = ref([])
+const sortField = ref('createdAt')
+const sortOrder = ref('desc')
 const pagination = reactive({
   pageNum: 1,
   pageSize: 20,
@@ -118,7 +134,9 @@ const loadData = async () => {
     const res = await tableApi.list({
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize,
-      ...filters
+      ...filters,
+      sortField: sortField.value,
+      sortOrder: sortOrder.value
     })
     tableData.value = res.records
     pagination.total = res.total
@@ -129,8 +147,13 @@ const loadData = async () => {
   }
 }
 
+const handleSortChange = () => {
+  pagination.pageNum = 1
+  loadData()
+}
+
 const goCreate = () => {
-  router.push({ path: '/datastudio-new', query: { create: '1' } })
+  router.push({ path: '/datastudio', query: { create: '1' } })
 }
 
 const goDetail = (id) => {
@@ -177,6 +200,16 @@ onMounted(() => {
 .filters {
   display: flex;
   align-items: center;
+}
+
+.sort-bar {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .link {

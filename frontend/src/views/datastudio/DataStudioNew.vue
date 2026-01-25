@@ -1,5 +1,5 @@
 <template>
-  <div :class="['data-studio', { 'is-resizing': isResizing }]">
+  <div :class="['data-studio', { 'is-resizing': isResizing }, `tree-style-${treeStyle}`]">
     <div class="studio-layout">
       <!-- Left: Database Tree -->
       <aside class="studio-sidebar" :style="{ width: `${sidebarWidth}px` }">
@@ -30,6 +30,13 @@
             <el-radio-group v-model="sortOrder" size="small" class="sort-group">
               <el-radio-button label="asc">升序</el-radio-button>
               <el-radio-button label="desc">降序</el-radio-button>
+            </el-radio-group>
+          </div>
+          <div class="tree-style-row">
+            <el-radio-group v-model="treeStyle" size="small" class="tree-style-group">
+              <el-radio-button label="a">A 简洁</el-radio-button>
+              <el-radio-button label="b">B 卡片</el-radio-button>
+              <el-radio-button label="c">C 连线</el-radio-button>
             </el-radio-group>
           </div>
         </div>
@@ -943,6 +950,7 @@ const lineageCache = reactive({})
 const searchKeyword = ref('')
 const sortField = ref('tableName')
 const sortOrder = ref('asc')
+const treeStyle = ref('b')
 
 const selectedTableKey = ref('')
 const suppressRouteSync = ref(false)
@@ -2359,7 +2367,15 @@ watch(
   }
 )
 
+watch(treeStyle, (value) => {
+  localStorage.setItem('odwTreeStyle', value)
+})
+
 onMounted(() => {
+  const savedTreeStyle = localStorage.getItem('odwTreeStyle')
+  if (savedTreeStyle === 'a' || savedTreeStyle === 'b' || savedTreeStyle === 'c') {
+    treeStyle.value = savedTreeStyle
+  }
   setupTableObserver()
   loadClusters()
   fetchHistory()
@@ -2468,9 +2484,12 @@ onBeforeUnmount(() => {
 
 .sort-row {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .sort-group {
@@ -2478,21 +2497,14 @@ onBeforeUnmount(() => {
   flex-wrap: nowrap;
 }
 
-.sort-group :deep(.el-radio-button__inner) {
-  padding: 4px 10px;
+.tree-style-row {
+  display: flex;
+  justify-content: flex-end;
 }
 
-.sort-group :deep(.el-radio-button__inner) {
-  text-align: center;
-  border-radius: 6px;
-}
-
-.sort-group :deep(.el-radio-button:first-child .el-radio-button__inner) {
-  border-radius: 6px 0 0 6px;
-}
-
-.sort-group :deep(.el-radio-button:last-child .el-radio-button__inner) {
-  border-radius: 0 6px 6px 0;
+.tree-style-group {
+  display: inline-flex;
+  flex-wrap: nowrap;
 }
 
 
@@ -2625,6 +2637,121 @@ onBeforeUnmount(() => {
 
 .table-item.active .table-progress-bg {
   background: linear-gradient(90deg, rgba(102, 126, 234, 0.18) 0%, rgba(102, 126, 234, 0.06) 100%);
+}
+
+.data-studio.tree-style-a .schema-list {
+  padding: 4px 0 6px 10px;
+}
+
+.data-studio.tree-style-a .table-list {
+  gap: 2px;
+}
+
+.data-studio.tree-style-a .table-item {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.data-studio.tree-style-a .table-item:hover {
+  border-color: transparent;
+  background-color: var(--el-fill-color-light);
+  transform: none;
+  box-shadow: none;
+}
+
+.data-studio.tree-style-a .table-item.active {
+  border-color: transparent;
+  background-color: rgba(64, 158, 255, 0.12);
+  box-shadow: none;
+}
+
+.data-studio.tree-style-a .table-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: var(--el-color-primary);
+  border-radius: 2px;
+  z-index: 1;
+}
+
+.data-studio.tree-style-a .table-progress-bg,
+.data-studio.tree-style-a .table-item:hover .table-progress-bg,
+.data-studio.tree-style-a .table-item.active .table-progress-bg {
+  background: transparent;
+}
+
+.data-studio.tree-style-a .table-content {
+  z-index: 2;
+}
+
+.data-studio.tree-style-c .schema-list {
+  position: relative;
+  padding: 4px 0 6px 18px;
+}
+
+.data-studio.tree-style-c .schema-list::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--el-border-color-lighter);
+}
+
+.data-studio.tree-style-c .table-item {
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  padding-left: 18px;
+  box-shadow: none;
+  transform: none;
+}
+
+.data-studio.tree-style-c .table-item::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 10px;
+  height: 1px;
+  background: var(--el-border-color-lighter);
+  transform: translateY(-50%);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.data-studio.tree-style-c .table-item:hover {
+  border-color: transparent;
+  background-color: var(--el-fill-color-light);
+  transform: none;
+  box-shadow: none;
+}
+
+.data-studio.tree-style-c .table-item.active {
+  border-color: transparent;
+  background-color: rgba(64, 158, 255, 0.12);
+  box-shadow: none;
+}
+
+.data-studio.tree-style-c .table-item.active::before {
+  background: var(--el-color-primary);
+}
+
+.data-studio.tree-style-c .table-progress-bg,
+.data-studio.tree-style-c .table-item:hover .table-progress-bg,
+.data-studio.tree-style-c .table-item.active .table-progress-bg {
+  background: transparent;
+}
+
+.data-studio.tree-style-c .table-content {
+  z-index: 2;
 }
 
 .table-content {

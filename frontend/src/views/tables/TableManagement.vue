@@ -1756,7 +1756,7 @@ const formatCellValue = (value) => {
 
 // 跳转到创建页面
 const goCreate = () => {
-  router.push({ path: '/datastudio-new', query: { create: '1' } })
+  router.push({ path: '/datastudio', query: { create: '1' } })
 }
 
 // 比对 Doris 元数据
