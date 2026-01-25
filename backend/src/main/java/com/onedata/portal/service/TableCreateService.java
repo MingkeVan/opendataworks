@@ -56,7 +56,7 @@ public class TableCreateService {
         validateRequest(request);
         TableNameComponentsWrapper components = buildComponents(request);
 
-        ensureTableNotExists(components.getTableName());
+        ensureTableNotExists(components.getTableName(), request.getDbName(), request.getDorisClusterId());
 
         String ddl = StringUtils.hasText(request.getDorisDdl())
             ? request.getDorisDdl().trim()
@@ -78,11 +78,16 @@ public class TableCreateService {
         return dataTableMapper.selectById(dataTable.getId());
     }
 
-    private void ensureTableNotExists(String tableName) {
-        DataTable exists = dataTableMapper.selectOne(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getTableName, tableName)
-        );
+    private void ensureTableNotExists(String tableName, String dbName, Long clusterId) {
+        LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<DataTable>()
+            .eq(DataTable::getTableName, tableName);
+        if (StringUtils.hasText(dbName)) {
+            wrapper.eq(DataTable::getDbName, dbName);
+        }
+        if (clusterId != null) {
+            wrapper.eq(DataTable::getClusterId, clusterId);
+        }
+        DataTable exists = dataTableMapper.selectOne(wrapper);
         if (exists != null) {
             throw new RuntimeException("表名已存在: " + tableName);
         }
@@ -119,6 +124,7 @@ public class TableCreateService {
 
     private DataTable buildDataTableEntity(TableCreateRequest request, TableNameComponentsWrapper components, String ddl) {
         DataTable table = new DataTable();
+        table.setClusterId(request.getDorisClusterId());
         table.setTableName(components.getTableName());
         table.setTableComment(request.getTableComment());
         table.setLayer(components.getLayer());

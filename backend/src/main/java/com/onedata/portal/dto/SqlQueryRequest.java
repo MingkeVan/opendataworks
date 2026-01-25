@@ -16,8 +16,9 @@ public class SqlQueryRequest {
     private Long clusterId;
 
     /**
-     * 目标数据库，可为空表示使用默认 database
+     * 目标数据库（必填）
      */
+    @NotBlank(message = "数据库不能为空")
     private String database;
 
     /**

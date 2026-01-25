@@ -430,12 +430,13 @@ function handleTableChange(val) {
 
 async function executeQuery() {
   if (!queryForm.sql.trim()) return ElMessage.warning('请输入 SQL')
+  if (!queryForm.database) return ElMessage.warning('请选择数据库')
   
   queryLoading.value = true
   try {
     const res = await dataQueryApi.execute({
        clusterId: queryForm.clusterId,
-       database: queryForm.database || undefined,
+       database: queryForm.database,
        sql: queryForm.sql,
        limit: queryForm.limit
     })

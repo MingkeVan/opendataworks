@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.UnsupportedEncodingException;
@@ -29,6 +30,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 数据表管理 Controller
@@ -55,8 +57,9 @@ public class DataTableController {
             @RequestParam(required = false) String layer,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String sortField,
-            @RequestParam(required = false) String sortOrder) {
-        Page<DataTable> page = dataTableService.list(pageNum, pageSize, layer, keyword, sortField, sortOrder);
+            @RequestParam(required = false) String sortOrder,
+            @RequestParam(required = false) Long clusterId) {
+        Page<DataTable> page = dataTableService.list(pageNum, pageSize, layer, keyword, sortField, sortOrder, clusterId);
         return Result.success(PageResult.of(page.getTotal(), page.getRecords()));
     }
 
@@ -64,8 +67,8 @@ public class DataTableController {
      * 获取所有数据库列表（用于左侧导航）
      */
     @GetMapping("/databases")
-    public Result<List<String>> listDatabases() {
-        List<String> databases = dataTableService.listDatabases();
+    public Result<List<String>> listDatabases(@RequestParam(required = false) Long clusterId) {
+        List<String> databases = dataTableService.listDatabases(clusterId);
         return Result.success(databases);
     }
 
@@ -76,8 +79,9 @@ public class DataTableController {
     public Result<List<DataTable>> listByDatabase(
             @RequestParam String database,
             @RequestParam(required = false) String sortField,
-            @RequestParam(required = false) String sortOrder) {
-        List<DataTable> tables = dataTableService.listByDatabase(database, sortField, sortOrder);
+            @RequestParam(required = false) String sortOrder,
+            @RequestParam(required = false) Long clusterId) {
+        List<DataTable> tables = dataTableService.listByDatabase(database, sortField, sortOrder, clusterId);
         return Result.success(tables);
     }
 
@@ -97,8 +101,9 @@ public class DataTableController {
             @RequestParam String keyword,
             @RequestParam(required = false) Integer limit,
             @RequestParam(required = false) String layer,
-            @RequestParam(required = false) String dbName) {
-        return Result.success(dataTableService.searchTableOptions(keyword, limit, layer, dbName));
+            @RequestParam(required = false) String dbName,
+            @RequestParam(required = false) Long clusterId) {
+        return Result.success(dataTableService.searchTableOptions(keyword, limit, layer, dbName, clusterId));
     }
 
     /**
@@ -121,9 +126,21 @@ public class DataTableController {
      * 新增字段
      */
     @PostMapping("/{id}/fields")
-    public Result<DataField> createField(@PathVariable Long id, @RequestBody DataField field) {
+    public Result<DataField> createField(@PathVariable Long id, @RequestBody DataField field,
+            @RequestParam(required = false) Long clusterId) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return Result.fail("表不存在");
+        }
+        if (isDorisTable(table) && clusterId == null) {
+            return Result.fail("请指定 Doris 集群");
+        }
         field.setTableId(id);
-        return Result.success(dataTableService.createField(field));
+        try {
+            return Result.success(dataTableService.createField(table, field, clusterId));
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
     }
 
     /**
@@ -131,19 +148,43 @@ public class DataTableController {
      */
     @PutMapping("/{id}/fields/{fieldId}")
     public Result<DataField> updateField(@PathVariable Long id, @PathVariable Long fieldId,
-            @RequestBody DataField field) {
+            @RequestBody DataField field,
+            @RequestParam(required = false) Long clusterId) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return Result.fail("表不存在");
+        }
+        if (isDorisTable(table) && clusterId == null) {
+            return Result.fail("请指定 Doris 集群");
+        }
         field.setId(fieldId);
         field.setTableId(id);
-        return Result.success(dataTableService.updateField(field));
+        try {
+            return Result.success(dataTableService.updateField(table, field, clusterId));
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
     }
 
     /**
      * 删除字段
      */
     @DeleteMapping("/{id}/fields/{fieldId}")
-    public Result<Void> deleteField(@PathVariable Long id, @PathVariable Long fieldId) {
-        dataTableService.deleteField(fieldId);
-        return Result.success();
+    public Result<Void> deleteField(@PathVariable Long id, @PathVariable Long fieldId,
+            @RequestParam(required = false) Long clusterId) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return Result.fail("表不存在");
+        }
+        if (isDorisTable(table) && clusterId == null) {
+            return Result.fail("请指定 Doris 集群");
+        }
+        try {
+            dataTableService.deleteField(table, fieldId, clusterId);
+            return Result.success();
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
     }
 
     /**
@@ -174,9 +215,127 @@ public class DataTableController {
      * 更新表
      */
     @PutMapping("/{id}")
-    public Result<DataTable> update(@PathVariable Long id, @RequestBody DataTable dataTable) {
+    public Result<DataTable> update(@PathVariable Long id, @RequestBody DataTable dataTable,
+            @RequestParam(required = false) Long clusterId) {
+        DataTable existing = dataTableService.getById(id);
+        if (existing == null) {
+            return Result.fail("表不存在");
+        }
+        boolean syncDoris = isDorisTable(existing);
+        if (syncDoris && clusterId == null) {
+            return Result.fail("请指定 Doris 集群");
+        }
+        TableRef tableRef = null;
+        String oldTableName = null;
+        if (syncDoris) {
+            tableRef = resolveTableRef(existing);
+            if (tableRef == null) {
+                return Result.fail("表未配置数据库名，请先设置 dbName 字段");
+            }
+            oldTableName = tableRef.tableName;
+        }
+
+        dataTable.setId(id);
+        String newTableName = StringUtils.hasText(dataTable.getTableName())
+                ? dataTable.getTableName()
+                : existing.getTableName();
+        String newActualName = extractActualTableName(tableRef != null ? tableRef.database : existing.getDbName(),
+                newTableName);
+        if (syncDoris) {
+            try {
+                if (StringUtils.hasText(newTableName) && !Objects.equals(oldTableName, newActualName)) {
+                    dorisConnectionService.renameTable(clusterId, tableRef.database, oldTableName, newActualName);
+                }
+                if (StringUtils.hasText(dataTable.getTableComment())
+                        && !Objects.equals(existing.getTableComment(), dataTable.getTableComment())) {
+                    dorisConnectionService.alterTableComment(clusterId, tableRef.database, newActualName,
+                            dataTable.getTableComment());
+                }
+                if (dataTable.getBucketNum() != null && !Objects.equals(existing.getBucketNum(), dataTable.getBucketNum())) {
+                    if (!StringUtils.hasText(existing.getDistributionColumn())) {
+                        return Result.fail("缺少分桶字段，无法同步分桶数到 Doris");
+                    }
+                    dorisConnectionService.modifyDistribution(
+                            clusterId,
+                            tableRef.database,
+                            newActualName,
+                            existing.getDistributionColumn(),
+                            dataTable.getBucketNum());
+                }
+                if (dataTable.getReplicaNum() != null && !Objects.equals(existing.getReplicaNum(), dataTable.getReplicaNum())) {
+                    dorisConnectionService.setReplicationNum(clusterId, tableRef.database, newActualName,
+                            dataTable.getReplicaNum());
+                }
+            } catch (Exception e) {
+                return Result.fail("同步 Doris 失败: " + e.getMessage());
+            }
+        }
         dataTable.setId(id);
         return Result.success(dataTableService.update(dataTable));
+    }
+
+    private boolean isDorisTable(DataTable table) {
+        if (table == null) {
+            return false;
+        }
+        if (table.getIsSynced() != null && table.getIsSynced() == 1) {
+            return true;
+        }
+        return StringUtils.hasText(table.getTableModel())
+                || isPositive(table.getBucketNum())
+                || isPositive(table.getReplicaNum())
+                || StringUtils.hasText(table.getDistributionColumn())
+                || StringUtils.hasText(table.getKeyColumns())
+                || StringUtils.hasText(table.getPartitionField());
+    }
+
+    private boolean isPositive(Integer value) {
+        return value != null && value > 0;
+    }
+
+    private TableRef resolveTableRef(DataTable table) {
+        if (table == null) {
+            return null;
+        }
+        String database = table.getDbName();
+        String tableName = table.getTableName();
+        if (StringUtils.hasText(database)) {
+            String actual = extractActualTableName(database, tableName);
+            if (!StringUtils.hasText(actual)) {
+                return null;
+            }
+            return new TableRef(database, actual);
+        }
+        if (StringUtils.hasText(tableName) && tableName.contains(".")) {
+            String[] parts = tableName.split("\\.", 2);
+            if (parts.length == 2 && StringUtils.hasText(parts[0]) && StringUtils.hasText(parts[1])) {
+                return new TableRef(parts[0], parts[1]);
+            }
+        }
+        return null;
+    }
+
+    private String extractActualTableName(String database, String tableName) {
+        if (!StringUtils.hasText(tableName)) {
+            return null;
+        }
+        if (tableName.contains(".")) {
+            String[] parts = tableName.split("\\.", 2);
+            if (parts.length == 2 && StringUtils.hasText(parts[1])) {
+                return parts[1];
+            }
+        }
+        return tableName;
+    }
+
+    private static class TableRef {
+        private final String database;
+        private final String tableName;
+
+        private TableRef(String database, String tableName) {
+            this.database = database;
+            this.tableName = tableName;
+        }
     }
 
     /**
@@ -433,6 +592,33 @@ public class DataTableController {
             return Result.fail("表未配置数据库名，请先设置 dbName 字段");
         }
 
+        try {
+            String ddl = dorisConnectionService.getTableDdl(clusterId, database, actualTableName);
+            return Result.success(ddl);
+        } catch (Exception e) {
+            return Result.fail("获取建表语句失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 根据数据库与表名获取表的建表语句（DDL）
+     */
+    @RequireAuth
+    @GetMapping("/ddl/by-name")
+    public Result<String> getTableDdlByName(
+            @RequestParam Long clusterId,
+            @RequestParam String database,
+            @RequestParam String tableName) {
+        if (clusterId == null) {
+            return Result.fail("请指定数据源");
+        }
+        if (!StringUtils.hasText(database) || !StringUtils.hasText(tableName)) {
+            return Result.fail("数据库和表名不能为空");
+        }
+        String actualTableName = extractActualTableName(database, tableName);
+        if (!StringUtils.hasText(actualTableName)) {
+            return Result.fail("表名无效");
+        }
         try {
             String ddl = dorisConnectionService.getTableDdl(clusterId, database, actualTableName);
             return Result.success(ddl);

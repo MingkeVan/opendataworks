@@ -4,8 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.onedata.portal.entity.DataField;
 import com.onedata.portal.entity.DataTable;
+import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.mapper.DataFieldMapper;
 import com.onedata.portal.mapper.DataTableMapper;
+import com.onedata.portal.mapper.DorisClusterMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,7 @@ import java.util.stream.Collectors;
 public class DorisMetadataSyncService {
 
     private final DorisConnectionService dorisConnectionService;
+    private final DorisClusterMapper dorisClusterMapper;
     private final DataTableMapper dataTableMapper;
     private final DataFieldMapper dataFieldMapper;
 
@@ -249,6 +252,7 @@ public class DorisMetadataSyncService {
      * 稽核指定集群的所有元数据（只比对不同步）
      */
     public AuditResult auditAllMetadata(Long clusterId) {
+        resolveCluster(clusterId);
         AuditResult result = new AuditResult();
         log.info("Starting metadata audit for cluster: {}", clusterId);
 
@@ -293,7 +297,8 @@ public class DorisMetadataSyncService {
         // 获取本地已存在的表
         List<DataTable> localTables = dataTableMapper.selectList(
                 new LambdaQueryWrapper<DataTable>()
-                        .eq(DataTable::getDbName, database));
+                        .eq(DataTable::getDbName, database)
+                        .eq(DataTable::getClusterId, clusterId));
 
         Map<String, DataTable> localTableMap = localTables.stream()
                 .collect(Collectors.toMap(DataTable::getTableName, t -> t));
@@ -553,6 +558,8 @@ public class DorisMetadataSyncService {
      */
     @Transactional(rollbackFor = Exception.class)
     public SyncResult syncAllMetadata(Long clusterId) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        boolean isDoris = isDorisCluster(cluster);
         SyncResult result = new SyncResult();
         log.info("Starting metadata sync for cluster: {}", clusterId);
 
@@ -565,7 +572,7 @@ public class DorisMetadataSyncService {
 
             for (String database : databases) {
                 try {
-                    syncDatabase(clusterId, database, result);
+                    syncDatabaseInternal(clusterId, database, result, isDoris);
                 } catch (Exception e) {
                     log.error("Failed to sync database: {}", database, e);
                     result.addError("同步数据库 " + database + " 失败: " + e.getMessage());
@@ -586,6 +593,12 @@ public class DorisMetadataSyncService {
      */
     @Transactional(rollbackFor = Exception.class)
     public SyncResult syncDatabase(Long clusterId, String database, SyncResult result) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        boolean isDoris = isDorisCluster(cluster);
+        return syncDatabaseInternal(clusterId, database, result, isDoris);
+    }
+
+    private SyncResult syncDatabaseInternal(Long clusterId, String database, SyncResult result, boolean isDoris) {
         if (result == null) {
             result = new SyncResult();
         }
@@ -599,7 +612,8 @@ public class DorisMetadataSyncService {
         // 获取本地已存在的表
         List<DataTable> localTables = dataTableMapper.selectList(
                 new LambdaQueryWrapper<DataTable>()
-                        .eq(DataTable::getDbName, database));
+                        .eq(DataTable::getDbName, database)
+                        .eq(DataTable::getClusterId, clusterId));
 
         Map<String, DataTable> localTableMap = localTables.stream()
                 .collect(Collectors.toMap(DataTable::getTableName, t -> t));
@@ -613,10 +627,10 @@ public class DorisMetadataSyncService {
 
                 if (localTable == null) {
                     // 新表：插入元数据
-                    syncNewTable(clusterId, database, tableName, dorisTable, result);
+                    syncNewTable(clusterId, database, tableName, dorisTable, result, isDoris);
                 } else {
                     // 已存在表：更新元数据
-                    syncExistingTable(clusterId, database, tableName, dorisTable, localTable, result);
+                    syncExistingTable(clusterId, database, tableName, dorisTable, localTable, result, isDoris);
                 }
             } catch (Exception e) {
                 log.error("Failed to sync table {}.{}", database, tableName, e);
@@ -649,7 +663,7 @@ public class DorisMetadataSyncService {
      * 同步新表
      */
     private void syncNewTable(Long clusterId, String database, String tableName,
-            Map<String, Object> dorisTable, SyncResult result) {
+            Map<String, Object> dorisTable, SyncResult result, boolean isDoris) {
         log.info("Syncing new table: {}.{}", database, tableName);
 
         // 获取表的详细信息
@@ -658,6 +672,7 @@ public class DorisMetadataSyncService {
 
         // 创建表记录
         DataTable newTable = new DataTable();
+        newTable.setClusterId(clusterId);
         newTable.setTableName(tableName);
         newTable.setDbName(database);
 
@@ -665,30 +680,32 @@ public class DorisMetadataSyncService {
         newTable.setTableComment(tableComment != null ? tableComment : "");
 
         newTable.setStatus("active");
-        newTable.setIsSynced(1);
+        newTable.setIsSynced(isDoris ? 1 : 0);
         newTable.setSyncTime(LocalDateTime.now());
 
-        // 从建表语句中解析的信息
-        if (tableCreateInfo.containsKey("bucketNum")) {
-            newTable.setBucketNum((Integer) tableCreateInfo.get("bucketNum"));
-        }
-        if (tableCreateInfo.containsKey("replicationNum")) {
-            newTable.setReplicaNum((Integer) tableCreateInfo.get("replicationNum"));
-        }
-        if (tableCreateInfo.containsKey("partitionField")) {
-            newTable.setPartitionField((String) tableCreateInfo.get("partitionField"));
-        }
-        if (tableCreateInfo.containsKey("distributionColumn")) {
-            newTable.setDistributionColumn((String) tableCreateInfo.get("distributionColumn"));
-        }
-        if (tableCreateInfo.containsKey("keyColumns")) {
-            newTable.setKeyColumns((String) tableCreateInfo.get("keyColumns"));
-        }
-        if (tableCreateInfo.containsKey("tableModel")) {
-            newTable.setTableModel((String) tableCreateInfo.get("tableModel"));
-        }
-        if (tableCreateInfo.containsKey("createTableSql")) {
-            newTable.setDorisDdl((String) tableCreateInfo.get("createTableSql"));
+        if (isDoris) {
+            // 从建表语句中解析的信息（仅 Doris）
+            if (tableCreateInfo.containsKey("bucketNum")) {
+                newTable.setBucketNum((Integer) tableCreateInfo.get("bucketNum"));
+            }
+            if (tableCreateInfo.containsKey("replicationNum")) {
+                newTable.setReplicaNum((Integer) tableCreateInfo.get("replicationNum"));
+            }
+            if (tableCreateInfo.containsKey("partitionField")) {
+                newTable.setPartitionField((String) tableCreateInfo.get("partitionField"));
+            }
+            if (tableCreateInfo.containsKey("distributionColumn")) {
+                newTable.setDistributionColumn((String) tableCreateInfo.get("distributionColumn"));
+            }
+            if (tableCreateInfo.containsKey("keyColumns")) {
+                newTable.setKeyColumns((String) tableCreateInfo.get("keyColumns"));
+            }
+            if (tableCreateInfo.containsKey("tableModel")) {
+                newTable.setTableModel((String) tableCreateInfo.get("tableModel"));
+            }
+            if (tableCreateInfo.containsKey("createTableSql")) {
+                newTable.setDorisDdl((String) tableCreateInfo.get("createTableSql"));
+            }
         }
 
         // 从统计信息中获取的信息
@@ -724,7 +741,7 @@ public class DorisMetadataSyncService {
      * 同步已存在的表
      */
     private void syncExistingTable(Long clusterId, String database, String tableName,
-            Map<String, Object> dorisTable, DataTable localTable, SyncResult result) {
+            Map<String, Object> dorisTable, DataTable localTable, SyncResult result, boolean isDoris) {
         log.debug("Syncing existing table: {}.{}", database, tableName);
 
         // 获取表的详细信息
@@ -733,6 +750,12 @@ public class DorisMetadataSyncService {
 
         boolean updated = false;
 
+        // 同步数据源
+        if (!Objects.equals(localTable.getClusterId(), clusterId)) {
+            localTable.setClusterId(clusterId);
+            updated = true;
+        }
+
         // 更新表注释
         String tableComment = (String) dorisTable.get("tableComment");
         if (tableComment != null && !tableComment.equals(localTable.getTableComment())) {
@@ -740,65 +763,96 @@ public class DorisMetadataSyncService {
             updated = true;
         }
 
-        // 更新分桶数
-        if (tableCreateInfo.containsKey("bucketNum")) {
-            Integer bucketNum = (Integer) tableCreateInfo.get("bucketNum");
-            if (!Objects.equals(bucketNum, localTable.getBucketNum())) {
-                localTable.setBucketNum(bucketNum);
+        if (isDoris) {
+            // 更新分桶数
+            if (tableCreateInfo.containsKey("bucketNum")) {
+                Integer bucketNum = (Integer) tableCreateInfo.get("bucketNum");
+                if (!Objects.equals(bucketNum, localTable.getBucketNum())) {
+                    localTable.setBucketNum(bucketNum);
+                    updated = true;
+                }
+            }
+
+            // 更新副本数
+            if (tableCreateInfo.containsKey("replicationNum")) {
+                Integer replicationNum = (Integer) tableCreateInfo.get("replicationNum");
+                if (!Objects.equals(replicationNum, localTable.getReplicaNum())) {
+                    localTable.setReplicaNum(replicationNum);
+                    updated = true;
+                }
+            }
+
+            // 更新分区字段
+            if (tableCreateInfo.containsKey("partitionField")) {
+                String partitionField = (String) tableCreateInfo.get("partitionField");
+                if (!Objects.equals(partitionField, localTable.getPartitionField())) {
+                    localTable.setPartitionField(partitionField);
+                    updated = true;
+                }
+            }
+
+            // 更新分桶字段
+            if (tableCreateInfo.containsKey("distributionColumn")) {
+                String distributionColumn = (String) tableCreateInfo.get("distributionColumn");
+                if (!Objects.equals(distributionColumn, localTable.getDistributionColumn())) {
+                    localTable.setDistributionColumn(distributionColumn);
+                    updated = true;
+                }
+            }
+
+            // 更新 Key 列
+            if (tableCreateInfo.containsKey("keyColumns")) {
+                String keyColumns = (String) tableCreateInfo.get("keyColumns");
+                if (!Objects.equals(keyColumns, localTable.getKeyColumns())) {
+                    localTable.setKeyColumns(keyColumns);
+                    updated = true;
+                }
+            }
+
+            // 更新表模型
+            if (tableCreateInfo.containsKey("tableModel")) {
+                String tableModel = (String) tableCreateInfo.get("tableModel");
+                if (!Objects.equals(tableModel, localTable.getTableModel())) {
+                    localTable.setTableModel(tableModel);
+                    updated = true;
+                }
+            }
+
+            // 更新 DDL
+            if (tableCreateInfo.containsKey("createTableSql")) {
+                String createTableSql = (String) tableCreateInfo.get("createTableSql");
+                if (!Objects.equals(createTableSql, localTable.getDorisDdl())) {
+                    localTable.setDorisDdl(createTableSql);
+                    updated = true;
+                }
+            }
+        } else {
+            if (localTable.getBucketNum() != null) {
+                localTable.setBucketNum(null);
                 updated = true;
             }
-        }
-
-        // 更新副本数
-        if (tableCreateInfo.containsKey("replicationNum")) {
-            Integer replicationNum = (Integer) tableCreateInfo.get("replicationNum");
-            if (!Objects.equals(replicationNum, localTable.getReplicaNum())) {
-                localTable.setReplicaNum(replicationNum);
+            if (localTable.getReplicaNum() != null) {
+                localTable.setReplicaNum(null);
                 updated = true;
             }
-        }
-
-        // 更新分区字段
-        if (tableCreateInfo.containsKey("partitionField")) {
-            String partitionField = (String) tableCreateInfo.get("partitionField");
-            if (!Objects.equals(partitionField, localTable.getPartitionField())) {
-                localTable.setPartitionField(partitionField);
+            if (StringUtils.hasText(localTable.getPartitionField())) {
+                localTable.setPartitionField(null);
                 updated = true;
             }
-        }
-
-        // 更新分桶字段
-        if (tableCreateInfo.containsKey("distributionColumn")) {
-            String distributionColumn = (String) tableCreateInfo.get("distributionColumn");
-            if (!Objects.equals(distributionColumn, localTable.getDistributionColumn())) {
-                localTable.setDistributionColumn(distributionColumn);
+            if (StringUtils.hasText(localTable.getDistributionColumn())) {
+                localTable.setDistributionColumn(null);
                 updated = true;
             }
-        }
-
-        // 更新 Key 列
-        if (tableCreateInfo.containsKey("keyColumns")) {
-            String keyColumns = (String) tableCreateInfo.get("keyColumns");
-            if (!Objects.equals(keyColumns, localTable.getKeyColumns())) {
-                localTable.setKeyColumns(keyColumns);
+            if (StringUtils.hasText(localTable.getKeyColumns())) {
+                localTable.setKeyColumns(null);
                 updated = true;
             }
-        }
-
-        // 更新表模型
-        if (tableCreateInfo.containsKey("tableModel")) {
-            String tableModel = (String) tableCreateInfo.get("tableModel");
-            if (!Objects.equals(tableModel, localTable.getTableModel())) {
-                localTable.setTableModel(tableModel);
+            if (StringUtils.hasText(localTable.getTableModel())) {
+                localTable.setTableModel(null);
                 updated = true;
             }
-        }
-
-        // 更新 DDL
-        if (tableCreateInfo.containsKey("createTableSql")) {
-            String createTableSql = (String) tableCreateInfo.get("createTableSql");
-            if (!Objects.equals(createTableSql, localTable.getDorisDdl())) {
-                localTable.setDorisDdl(createTableSql);
+            if (StringUtils.hasText(localTable.getDorisDdl())) {
+                localTable.setDorisDdl(null);
                 updated = true;
             }
         }
@@ -826,8 +880,13 @@ public class DorisMetadataSyncService {
         }
 
         // 更新同步状态
-        localTable.setIsSynced(1);
+        Integer synced = isDoris ? 1 : 0;
+        if (!Objects.equals(synced, localTable.getIsSynced())) {
+            localTable.setIsSynced(synced);
+            updated = true;
+        }
         localTable.setSyncTime(LocalDateTime.now());
+        updated = true;
 
         // 同步Doris创建时间（如果本地还没有记录）
         if (localTable.getDorisCreateTime() == null) {
@@ -965,6 +1024,12 @@ public class DorisMetadataSyncService {
      */
     @Transactional(rollbackFor = Exception.class)
     public SyncResult syncTable(Long clusterId, String database, String tableName) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        boolean isDoris = isDorisCluster(cluster);
+        return syncTableInternal(clusterId, database, tableName, isDoris);
+    }
+
+    private SyncResult syncTableInternal(Long clusterId, String database, String tableName, boolean isDoris) {
         SyncResult result = new SyncResult();
         log.info("Syncing table: {}.{}", database, tableName);
 
@@ -985,12 +1050,13 @@ public class DorisMetadataSyncService {
             DataTable localTable = dataTableMapper.selectOne(
                     new LambdaQueryWrapper<DataTable>()
                             .eq(DataTable::getDbName, database)
-                            .eq(DataTable::getTableName, tableName));
+                            .eq(DataTable::getTableName, tableName)
+                            .eq(DataTable::getClusterId, clusterId));
 
             if (localTable == null) {
-                syncNewTable(clusterId, database, tableName, dorisTable, result);
+                syncNewTable(clusterId, database, tableName, dorisTable, result, isDoris);
             } else {
-                syncExistingTable(clusterId, database, tableName, dorisTable, localTable, result);
+                syncExistingTable(clusterId, database, tableName, dorisTable, localTable, result, isDoris);
             }
 
             log.info("Table sync completed: {}", result);
@@ -1000,6 +1066,24 @@ public class DorisMetadataSyncService {
         }
 
         return result;
+    }
+
+    private DorisCluster resolveCluster(Long clusterId) {
+        if (clusterId == null) {
+            throw new RuntimeException("请指定数据源");
+        }
+        DorisCluster cluster = dorisClusterMapper.selectById(clusterId);
+        if (cluster == null) {
+            throw new RuntimeException("未找到指定的数据源: " + clusterId);
+        }
+        return cluster;
+    }
+
+    private boolean isDorisCluster(DorisCluster cluster) {
+        if (cluster == null || !StringUtils.hasText(cluster.getSourceType())) {
+            return true;
+        }
+        return "DORIS".equalsIgnoreCase(cluster.getSourceType());
     }
 
     private String truncateComment(String comment) {

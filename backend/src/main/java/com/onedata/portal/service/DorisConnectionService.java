@@ -6,6 +6,7 @@ import com.onedata.portal.context.UserContextHolder;
 import com.onedata.portal.dto.DorisCredential;
 import com.onedata.portal.dto.TableStatistics;
 import com.onedata.portal.entity.DorisCluster;
+import com.onedata.portal.entity.DataField;
 import com.onedata.portal.mapper.DorisClusterMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +16,7 @@ import org.springframework.util.StringUtils;
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
  * Doris 连接服务
@@ -27,6 +29,9 @@ public class DorisConnectionService {
     private final DorisClusterMapper dorisClusterMapper;
     private final DorisJdbcProperties dorisJdbcProperties;
     private final UserMappingService userMappingService;
+    private static final Pattern NUMERIC_PATTERN = Pattern.compile("^-?\\d+(\\.\\d+)?$");
+    private static final Set<String> SYSTEM_DATABASES = new HashSet<>(
+            Arrays.asList("information_schema", "mysql", "performance_schema", "sys"));
 
     /**
      * 执行 SQL (主要用于创建表等 DDL)
@@ -136,21 +141,12 @@ public class DorisConnectionService {
     }
 
     private DorisCluster resolveCluster(Long clusterId) {
-        DorisCluster cluster;
-        if (clusterId != null) {
-            cluster = dorisClusterMapper.selectById(clusterId);
-            if (cluster == null) {
-                throw new RuntimeException("未找到指定的 Doris 集群: " + clusterId);
-            }
-        } else {
-            cluster = dorisClusterMapper.selectOne(
-                    new LambdaQueryWrapper<DorisCluster>()
-                            .eq(DorisCluster::getIsDefault, 1)
-                            .eq(DorisCluster::getStatus, "active")
-                            .last("LIMIT 1"));
-            if (cluster == null) {
-                throw new RuntimeException("未配置默认的 Doris 集群");
-            }
+        if (clusterId == null) {
+            throw new RuntimeException("请指定 Doris 集群");
+        }
+        DorisCluster cluster = dorisClusterMapper.selectById(clusterId);
+        if (cluster == null) {
+            throw new RuntimeException("未找到指定的 Doris 集群: " + clusterId);
         }
         return cluster;
     }
@@ -340,6 +336,134 @@ public class DorisConnectionService {
         String sql = String.format("ALTER TABLE `%s`.`%s` RENAME `%s`", database, oldTableName, newTableName);
         execute(clusterId, database, sql);
         log.info("Renamed table {}.{} to {}.{}", database, oldTableName, database, newTableName);
+    }
+
+    /**
+     * 添加列
+     */
+    public void addColumn(Long clusterId, String database, String tableName, String columnDefinition) {
+        String sql = String.format("ALTER TABLE `%s`.`%s` ADD COLUMN %s", database, tableName, columnDefinition);
+        execute(clusterId, database, sql);
+    }
+
+    /**
+     * 修改列（类型/注释/默认值等）
+     */
+    public void modifyColumn(Long clusterId, String database, String tableName, String columnDefinition) {
+        String sql = String.format("ALTER TABLE `%s`.`%s` MODIFY COLUMN %s", database, tableName, columnDefinition);
+        execute(clusterId, database, sql);
+    }
+
+    /**
+     * 修改列注释（构造完整列定义）
+     */
+    public void modifyColumnComment(Long clusterId, String database, String tableName, String columnName, String comment) {
+        String escapedComment = comment != null ? escapeSingleQuote(comment) : "";
+        String sql = String.format("ALTER TABLE `%s`.`%s` MODIFY COLUMN `%s` COMMENT '%s'",
+                database, tableName, columnName, escapedComment);
+        execute(clusterId, database, sql);
+    }
+
+    /**
+     * 删除列
+     */
+    public void dropColumn(Long clusterId, String database, String tableName, String columnName) {
+        String sql = String.format("ALTER TABLE `%s`.`%s` DROP COLUMN `%s`", database, tableName, columnName);
+        execute(clusterId, database, sql);
+    }
+
+    /**
+     * 重命名列
+     */
+    public void renameColumn(Long clusterId, String database, String tableName, String oldName, String newName) {
+        String sql = String.format("ALTER TABLE `%s`.`%s` RENAME COLUMN `%s` `%s`",
+                database, tableName, oldName, newName);
+        execute(clusterId, database, sql);
+    }
+
+    /**
+     * 修改分布（分桶数）
+     */
+    public void modifyDistribution(Long clusterId, String database, String tableName, String distributionColumn, Integer bucketNum) {
+        String columns = wrapColumnList(distributionColumn);
+        String sql = String.format("ALTER TABLE `%s`.`%s` MODIFY DISTRIBUTION DISTRIBUTED BY HASH(%s) BUCKETS %d",
+                database, tableName, columns, bucketNum);
+        execute(clusterId, database, sql);
+    }
+
+    /**
+     * 修改副本数
+     */
+    public void setReplicationNum(Long clusterId, String database, String tableName, Integer replicaNum) {
+        String sql = String.format("ALTER TABLE `%s`.`%s` SET (\"replication_num\" = \"%d\")",
+                database, tableName, replicaNum);
+        execute(clusterId, database, sql);
+    }
+
+    /**
+     * 生成 Doris 列定义
+     */
+    public String buildColumnDefinition(DataField field, boolean isKey) {
+        StringBuilder builder = new StringBuilder();
+        String fieldName = field.getFieldName();
+        String fieldType = field.getFieldType();
+        builder.append(wrapColumn(fieldName)).append(" ").append(fieldType);
+        if (field.getIsNullable() != null && field.getIsNullable() == 0) {
+            builder.append(" NOT NULL");
+        } else {
+            builder.append(" NULL");
+        }
+        if (StringUtils.hasText(field.getDefaultValue())) {
+            builder.append(" DEFAULT ").append(formatDefaultValue(field.getDefaultValue()));
+        }
+        if (StringUtils.hasText(field.getFieldComment())) {
+            builder.append(" COMMENT '").append(escapeSingleQuote(field.getFieldComment())).append("'");
+        }
+        return builder.toString();
+    }
+
+    private String wrapColumn(String column) {
+        return "`" + column + "`";
+    }
+
+    private String wrapColumnList(String columns) {
+        if (!StringUtils.hasText(columns)) {
+            return "";
+        }
+        String[] parts = columns.split(",");
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            String name = parts[i].trim();
+            if (!StringUtils.hasText(name)) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(", ");
+            }
+            builder.append(wrapColumn(name));
+        }
+        return builder.toString();
+    }
+
+    private String formatDefaultValue(String defaultValue) {
+        String value = defaultValue.trim();
+        if ("null".equalsIgnoreCase(value)) {
+            return "NULL";
+        }
+        if ("current_timestamp".equalsIgnoreCase(value) || value.toUpperCase().startsWith("NOW(")) {
+            return value;
+        }
+        if (NUMERIC_PATTERN.matcher(value).matches()) {
+            return value;
+        }
+        if (value.startsWith("'") && value.endsWith("'")) {
+            return value;
+        }
+        return "'" + escapeSingleQuote(value) + "'";
+    }
+
+    private String escapeSingleQuote(String input) {
+        return input.replace("'", "''");
     }
 
     /**
@@ -630,7 +754,7 @@ public class DorisConnectionService {
             while (rs.next()) {
                 String dbName = rs.getString(1);
                 // 过滤掉系统数据库
-                if (!"information_schema".equals(dbName) && !"mysql".equals(dbName)) {
+                if (!SYSTEM_DATABASES.contains(dbName)) {
                     databases.add(dbName);
                 }
             }
@@ -684,9 +808,12 @@ public class DorisConnectionService {
         DorisCluster cluster = resolveCluster(clusterId);
         List<Map<String, Object>> columns = new ArrayList<>();
 
-        String sql = "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, ORDINAL_POSITION, COLUMN_KEY "
-                +
-                "FROM information_schema.columns WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION";
+        boolean isMysql = "MYSQL".equalsIgnoreCase(cluster.getSourceType());
+        String sql = isMysql
+                ? "SELECT COLUMN_NAME, COLUMN_TYPE AS DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, ORDINAL_POSITION, COLUMN_KEY "
+                + "FROM information_schema.columns WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION"
+                : "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, ORDINAL_POSITION, COLUMN_KEY "
+                + "FROM information_schema.columns WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION";
 
         try (Connection connection = getConnection(cluster, null);
                 PreparedStatement stmt = connection.prepareStatement(sql)) {
@@ -732,6 +859,9 @@ public class DorisConnectionService {
             if (rs.next()) {
                 String createTableSql = rs.getString(2);
                 info.put("createTableSql", createTableSql);
+                if ("MYSQL".equalsIgnoreCase(cluster.getSourceType())) {
+                    return info;
+                }
 
                 // 解析副本数
                 if (createTableSql.contains("\"replication_num\"")) {

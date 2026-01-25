@@ -43,15 +43,19 @@ public class DataTableService {
     private final DataTaskMapper dataTaskMapper;
     private final TaskExecutionLogMapper taskExecutionLogMapper;
     private final DataLineageMapper dataLineageMapper;
+    private final DorisConnectionService dorisConnectionService;
 
     /**
      * 分页查询表列表
      */
     public Page<DataTable> list(int pageNum, int pageSize, String layer, String keyword, String sortField,
-            String sortOrder) {
+            String sortOrder, Long clusterId) {
         Page<DataTable> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<>();
 
+        if (clusterId != null) {
+            wrapper.eq(DataTable::getClusterId, clusterId);
+        }
         if (layer != null && !layer.isEmpty()) {
             wrapper.eq(DataTable::getLayer, layer);
         }
@@ -72,10 +76,13 @@ public class DataTableService {
     /**
      * 获取所有数据库列表
      */
-    public List<String> listDatabases() {
-        List<DataTable> allTables = dataTableMapper.selectList(
-                new LambdaQueryWrapper<DataTable>()
-                        .ne(DataTable::getStatus, "deprecated"));
+    public List<String> listDatabases(Long clusterId) {
+        LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<DataTable>()
+                .ne(DataTable::getStatus, "deprecated");
+        if (clusterId != null) {
+            wrapper.eq(DataTable::getClusterId, clusterId);
+        }
+        List<DataTable> allTables = dataTableMapper.selectList(wrapper);
         return allTables.stream()
                 .map(DataTable::getDbName)
                 .filter(dbName -> dbName != null && !dbName.isEmpty())
@@ -87,10 +94,13 @@ public class DataTableService {
     /**
      * 根据数据库获取表列表
      */
-    public List<DataTable> listByDatabase(String database, String sortField, String sortOrder) {
+    public List<DataTable> listByDatabase(String database, String sortField, String sortOrder, Long clusterId) {
         LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(DataTable::getDbName, database);
         wrapper.ne(DataTable::getStatus, "deprecated");
+        if (clusterId != null) {
+            wrapper.eq(DataTable::getClusterId, clusterId);
+        }
 
         // 应用排序
         applySorting(wrapper, sortField, sortOrder);
@@ -161,11 +171,14 @@ public class DataTableService {
     /**
      * 根据数据库和表名获取表信息
      */
-    public DataTable getByDbAndTableName(String dbName, String tableName) {
-        return dataTableMapper.selectOne(
-                new LambdaQueryWrapper<DataTable>()
-                        .eq(DataTable::getDbName, dbName)
-                        .eq(DataTable::getTableName, tableName));
+    public DataTable getByDbAndTableName(Long clusterId, String dbName, String tableName) {
+        LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<DataTable>()
+                .eq(DataTable::getDbName, dbName)
+                .eq(DataTable::getTableName, tableName);
+        if (clusterId != null) {
+            wrapper.eq(DataTable::getClusterId, clusterId);
+        }
+        return dataTableMapper.selectOne(wrapper);
     }
 
     /**
@@ -174,7 +187,7 @@ public class DataTableService {
     @Transactional
     public DataTable create(DataTable dataTable) {
         // 检查表名是否已存在（在同一数据库下）
-        DataTable exists = getByDbAndTableName(dataTable.getDbName(), dataTable.getTableName());
+        DataTable exists = getByDbAndTableName(dataTable.getClusterId(), dataTable.getDbName(), dataTable.getTableName());
         if (exists != null) {
             throw new RuntimeException("该数据库下已存在同名表: " + dataTable.getTableName());
         }
@@ -197,12 +210,16 @@ public class DataTableService {
         // 检查表名是否发生变化且是否重复
         String newTableName = dataTable.getTableName();
         String newDbName = dataTable.getDbName();
+        Long targetClusterId = dataTable.getClusterId() != null ? dataTable.getClusterId() : exists.getClusterId();
         if (StringUtils.hasText(newTableName)) {
-            DataTable duplicate = dataTableMapper.selectOne(
-                    new LambdaQueryWrapper<DataTable>()
-                            .eq(DataTable::getDbName, newDbName)
-                            .eq(DataTable::getTableName, newTableName)
-                            .ne(DataTable::getId, dataTable.getId()));
+            LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<DataTable>()
+                    .eq(DataTable::getDbName, newDbName)
+                    .eq(DataTable::getTableName, newTableName)
+                    .ne(DataTable::getId, dataTable.getId());
+            if (targetClusterId != null) {
+                wrapper.eq(DataTable::getClusterId, targetClusterId);
+            }
+            DataTable duplicate = dataTableMapper.selectOne(wrapper);
             if (duplicate != null) {
                 throw new RuntimeException("该数据库下已存在同名表: " + newTableName);
             }
@@ -236,6 +253,13 @@ public class DataTableService {
      * 远程搜索表选项
      */
     public List<TableOption> searchTableOptions(String keyword, Integer limit, String layer, String dbName) {
+        return searchTableOptions(keyword, limit, layer, dbName, null);
+    }
+
+    /**
+     * 远程搜索表选项
+     */
+    public List<TableOption> searchTableOptions(String keyword, Integer limit, String layer, String dbName, Long clusterId) {
         if (!StringUtils.hasText(keyword)) {
             return Collections.emptyList();
         }
@@ -253,6 +277,10 @@ public class DataTableService {
 
         if (StringUtils.hasText(dbName)) {
             wrapper.eq(DataTable::getDbName, dbName.trim());
+        }
+
+        if (clusterId != null) {
+            wrapper.eq(DataTable::getClusterId, clusterId);
         }
 
         wrapper.ne(DataTable::getStatus, "deprecated");
@@ -291,7 +319,7 @@ public class DataTableService {
      * 创建字段
      */
     @Transactional
-    public DataField createField(DataField field) {
+    public DataField createField(DataTable table, DataField field, Long clusterId) {
         // 检查字段名是否已存在
         DataField exists = dataFieldMapper.selectOne(
                 new LambdaQueryWrapper<DataField>()
@@ -299,6 +327,25 @@ public class DataTableService {
                         .eq(DataField::getFieldName, field.getFieldName()));
         if (exists != null) {
             throw new RuntimeException("字段名已存在: " + field.getFieldName());
+        }
+        if (!StringUtils.hasText(field.getFieldName()) || !StringUtils.hasText(field.getFieldType())) {
+            throw new RuntimeException("字段名和类型不能为空");
+        }
+
+        if (isDorisTable(table)) {
+            TableRef tableRef = resolveTableRef(table);
+            if (tableRef == null) {
+                throw new RuntimeException("表未配置数据库名，请先设置 dbName 字段");
+            }
+            if (isAggregateTable(table)) {
+                throw new RuntimeException("AGGREGATE 表字段变更需指定聚合方式，暂不支持同步");
+            }
+            boolean isKey = isKeyColumn(table, field);
+            if (isKey) {
+                throw new RuntimeException("Doris 不支持在线新增主键列");
+            }
+            String columnDef = dorisConnectionService.buildColumnDefinition(field, isKey);
+            dorisConnectionService.addColumn(clusterId, tableRef.database, tableRef.tableName, columnDef);
         }
 
         dataFieldMapper.insert(field);
@@ -310,14 +357,13 @@ public class DataTableService {
      * 更新字段
      */
     @Transactional
-    public DataField updateField(DataField field) {
+    public DataField updateField(DataTable table, DataField field, Long clusterId) {
         DataField exists = dataFieldMapper.selectById(field.getId());
         if (exists == null) {
             throw new RuntimeException("字段不存在");
         }
 
-        // 检查字段名是否重复
-        String newFieldName = field.getFieldName();
+        String newFieldName = StringUtils.hasText(field.getFieldName()) ? field.getFieldName() : exists.getFieldName();
         if (StringUtils.hasText(newFieldName) && !newFieldName.equals(exists.getFieldName())) {
             DataField duplicate = dataFieldMapper.selectOne(
                     new LambdaQueryWrapper<DataField>()
@@ -329,18 +375,203 @@ public class DataTableService {
             }
         }
 
-        dataFieldMapper.updateById(field);
-        log.info("Updated field: {}", field.getFieldName());
-        return field;
+        DataField toUpdate = mergeField(exists, field);
+
+        if (isDorisTable(table)) {
+            TableRef tableRef = resolveTableRef(table);
+            if (tableRef == null) {
+                throw new RuntimeException("表未配置数据库名，请先设置 dbName 字段");
+            }
+            if (!Objects.equals(exists.getIsPrimary(), toUpdate.getIsPrimary())) {
+                throw new RuntimeException("Doris 不支持在线修改主键列");
+            }
+            boolean nameChanged = !Objects.equals(exists.getFieldName(), toUpdate.getFieldName());
+            if (isAggregateTable(table)) {
+                if (nameChanged || hasNonCommentChanges(exists, toUpdate)) {
+                    throw new RuntimeException("AGGREGATE 表字段变更需指定聚合方式，暂不支持同步");
+                }
+                if (onlyCommentChanged(exists, toUpdate)) {
+                    dorisConnectionService.modifyColumnComment(clusterId, tableRef.database, tableRef.tableName,
+                            toUpdate.getFieldName(), toUpdate.getFieldComment());
+                }
+            } else {
+                if (nameChanged) {
+                    dorisConnectionService.renameColumn(clusterId, tableRef.database, tableRef.tableName,
+                            exists.getFieldName(), toUpdate.getFieldName());
+                }
+                if (isColumnChanged(exists, toUpdate)) {
+                    boolean isKey = isKeyColumn(table, toUpdate);
+                    String columnDef = dorisConnectionService.buildColumnDefinition(toUpdate, isKey);
+                    dorisConnectionService.modifyColumn(clusterId, tableRef.database, tableRef.tableName, columnDef);
+                }
+            }
+        }
+
+        dataFieldMapper.updateById(toUpdate);
+        log.info("Updated field: {}", toUpdate.getFieldName());
+        return toUpdate;
     }
 
     /**
      * 删除字段
      */
     @Transactional
-    public void deleteField(Long fieldId) {
+    public void deleteField(DataTable table, Long fieldId, Long clusterId) {
+        DataField exists = dataFieldMapper.selectById(fieldId);
+        if (exists == null) {
+            throw new RuntimeException("字段不存在");
+        }
+        if (isDorisTable(table)) {
+            TableRef tableRef = resolveTableRef(table);
+            if (tableRef == null) {
+                throw new RuntimeException("表未配置数据库名，请先设置 dbName 字段");
+            }
+            dorisConnectionService.dropColumn(clusterId, tableRef.database, tableRef.tableName, exists.getFieldName());
+        }
         dataFieldMapper.deleteById(fieldId);
         log.info("Deleted field: {}", fieldId);
+    }
+
+    private boolean isDorisTable(DataTable table) {
+        if (table == null) {
+            return false;
+        }
+        if (table.getIsSynced() != null && table.getIsSynced() == 1) {
+            return true;
+        }
+        return StringUtils.hasText(table.getTableModel())
+                || isPositive(table.getBucketNum())
+                || isPositive(table.getReplicaNum())
+                || StringUtils.hasText(table.getDistributionColumn())
+                || StringUtils.hasText(table.getKeyColumns())
+                || StringUtils.hasText(table.getPartitionField());
+    }
+
+    private boolean isPositive(Integer value) {
+        return value != null && value > 0;
+    }
+
+    private boolean isAggregateTable(DataTable table) {
+        return table != null && StringUtils.hasText(table.getTableModel())
+                && "AGGREGATE".equalsIgnoreCase(table.getTableModel());
+    }
+
+    private boolean isKeyColumn(DataTable table, DataField field) {
+        if (field != null && field.getIsPrimary() != null && field.getIsPrimary() == 1) {
+            return true;
+        }
+        if (table == null || !StringUtils.hasText(table.getKeyColumns()) || field == null
+                || !StringUtils.hasText(field.getFieldName())) {
+            return false;
+        }
+        String[] keys = table.getKeyColumns().split(",");
+        for (String key : keys) {
+            if (field.getFieldName().equalsIgnoreCase(key.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isColumnChanged(DataField oldField, DataField newField) {
+        if (oldField == null || newField == null) {
+            return false;
+        }
+        return !Objects.equals(normalize(oldField.getFieldType()), normalize(newField.getFieldType()))
+                || !Objects.equals(normalize(oldField.getFieldComment()), normalize(newField.getFieldComment()))
+                || !Objects.equals(normalize(oldField.getDefaultValue()), normalize(newField.getDefaultValue()))
+                || !Objects.equals(normalize(oldField.getIsNullable()), normalize(newField.getIsNullable()))
+                || !Objects.equals(normalize(oldField.getIsPrimary()), normalize(newField.getIsPrimary()));
+    }
+
+    private boolean hasNonCommentChanges(DataField oldField, DataField newField) {
+        if (oldField == null || newField == null) {
+            return false;
+        }
+        return !Objects.equals(normalize(oldField.getFieldType()), normalize(newField.getFieldType()))
+                || !Objects.equals(normalize(oldField.getDefaultValue()), normalize(newField.getDefaultValue()))
+                || !Objects.equals(normalize(oldField.getIsNullable()), normalize(newField.getIsNullable()))
+                || !Objects.equals(normalize(oldField.getIsPrimary()), normalize(newField.getIsPrimary()));
+    }
+
+    private boolean onlyCommentChanged(DataField oldField, DataField newField) {
+        if (oldField == null || newField == null) {
+            return false;
+        }
+        return Objects.equals(normalize(oldField.getFieldType()), normalize(newField.getFieldType()))
+                && Objects.equals(normalize(oldField.getDefaultValue()), normalize(newField.getDefaultValue()))
+                && Objects.equals(normalize(oldField.getIsNullable()), normalize(newField.getIsNullable()))
+                && Objects.equals(normalize(oldField.getIsPrimary()), normalize(newField.getIsPrimary()))
+                && !Objects.equals(normalize(oldField.getFieldComment()), normalize(newField.getFieldComment()));
+    }
+
+    private Object normalize(Object value) {
+        if (value instanceof String) {
+            return ((String) value).trim();
+        }
+        return value;
+    }
+
+    private DataField mergeField(DataField exists, DataField incoming) {
+        DataField next = new DataField();
+        next.setId(exists.getId());
+        next.setTableId(exists.getTableId());
+        next.setFieldName(StringUtils.hasText(incoming.getFieldName()) ? incoming.getFieldName() : exists.getFieldName());
+        next.setFieldType(StringUtils.hasText(incoming.getFieldType()) ? incoming.getFieldType() : exists.getFieldType());
+        next.setFieldComment(incoming.getFieldComment() != null ? incoming.getFieldComment() : exists.getFieldComment());
+        next.setIsNullable(incoming.getIsNullable() != null ? incoming.getIsNullable() : exists.getIsNullable());
+        next.setIsPrimary(incoming.getIsPrimary() != null ? incoming.getIsPrimary() : exists.getIsPrimary());
+        next.setIsPartition(incoming.getIsPartition() != null ? incoming.getIsPartition() : exists.getIsPartition());
+        next.setDefaultValue(incoming.getDefaultValue() != null ? incoming.getDefaultValue() : exists.getDefaultValue());
+        next.setFieldOrder(incoming.getFieldOrder() != null ? incoming.getFieldOrder() : exists.getFieldOrder());
+        next.setCreatedAt(exists.getCreatedAt());
+        next.setUpdatedAt(LocalDateTime.now());
+        return next;
+    }
+
+    private TableRef resolveTableRef(DataTable table) {
+        if (table == null) {
+            return null;
+        }
+        String database = table.getDbName();
+        String tableName = table.getTableName();
+        if (StringUtils.hasText(database)) {
+            String actual = extractActualTableName(database, tableName);
+            if (!StringUtils.hasText(actual)) {
+                return null;
+            }
+            return new TableRef(database, actual);
+        }
+        if (StringUtils.hasText(tableName) && tableName.contains(".")) {
+            String[] parts = tableName.split("\\.", 2);
+            if (parts.length == 2 && StringUtils.hasText(parts[0]) && StringUtils.hasText(parts[1])) {
+                return new TableRef(parts[0], parts[1]);
+            }
+        }
+        return null;
+    }
+
+    private String extractActualTableName(String database, String tableName) {
+        if (!StringUtils.hasText(tableName)) {
+            return null;
+        }
+        if (tableName.contains(".")) {
+            String[] parts = tableName.split("\\.", 2);
+            if (parts.length == 2 && StringUtils.hasText(parts[1])) {
+                return parts[1];
+            }
+        }
+        return tableName;
+    }
+
+    private static class TableRef {
+        private final String database;
+        private final String tableName;
+
+        private TableRef(String database, String tableName) {
+            this.database = database;
+            this.tableName = tableName;
+        }
     }
 
     /**

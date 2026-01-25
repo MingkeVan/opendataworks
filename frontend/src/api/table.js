@@ -1,5 +1,8 @@
 import request from '@/utils/request'
 
+const withCluster = (clusterId) =>
+  clusterId === null || clusterId === undefined ? {} : { params: { clusterId } }
+
 export const tableApi = {
   // 获取表列表
   list(params) {
@@ -12,14 +15,21 @@ export const tableApi = {
   },
 
   // 获取所有数据库列表
-  listDatabases() {
-    return request.get('/v1/tables/databases')
+  listDatabases(clusterId = null) {
+    return request.get('/v1/tables/databases', {
+      params: clusterId === null || clusterId === undefined ? {} : { clusterId }
+    })
   },
 
   // 根据数据库获取表列表
-  listByDatabase(database, sortField, sortOrder) {
+  listByDatabase(database, sortField, sortOrder, clusterId = null) {
     return request.get('/v1/tables/by-database', {
-      params: { database, sortField, sortOrder }
+      params: {
+        database,
+        sortField,
+        sortOrder,
+        ...(clusterId === null || clusterId === undefined ? {} : { clusterId })
+      }
     })
   },
 
@@ -34,18 +44,18 @@ export const tableApi = {
   },
 
   // 创建字段
-  createField(tableId, data) {
-    return request.post(`/v1/tables/${tableId}/fields`, data)
+  createField(tableId, data, clusterId = null) {
+    return request.post(`/v1/tables/${tableId}/fields`, data, withCluster(clusterId))
   },
 
   // 更新字段
-  updateField(tableId, fieldId, data) {
-    return request.put(`/v1/tables/${tableId}/fields/${fieldId}`, data)
+  updateField(tableId, fieldId, data, clusterId = null) {
+    return request.put(`/v1/tables/${tableId}/fields/${fieldId}`, data, withCluster(clusterId))
   },
 
   // 删除字段
-  deleteField(tableId, fieldId) {
-    return request.delete(`/v1/tables/${tableId}/fields/${fieldId}`)
+  deleteField(tableId, fieldId, clusterId = null) {
+    return request.delete(`/v1/tables/${tableId}/fields/${fieldId}`, withCluster(clusterId))
   },
 
   // 获取表关联任务
@@ -101,6 +111,13 @@ export const tableApi = {
     })
   },
 
+  // 根据表名获取表的DDL（建表语句）
+  getTableDdlByName(clusterId, database, tableName) {
+    return request.get('/v1/tables/ddl/by-name', {
+      params: { clusterId, database, tableName }
+    })
+  },
+
   // 预览表数据
   previewTableData(id, clusterId = null, limit = 100) {
     return request.get(`/v1/tables/${id}/preview`, {
@@ -114,8 +131,8 @@ export const tableApi = {
   },
 
   // 更新表
-  update(id, data) {
-    return request.put(`/v1/tables/${id}`, data)
+  update(id, data, clusterId = null) {
+    return request.put(`/v1/tables/${id}`, data, withCluster(clusterId))
   },
 
   // 删除表
