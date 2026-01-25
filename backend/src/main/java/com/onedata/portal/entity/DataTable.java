@@ -14,6 +14,9 @@ public class DataTable {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    @TableField("cluster_id")
+    private Long clusterId;
+
     private String tableName;
 
     private String tableComment;

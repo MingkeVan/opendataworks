@@ -54,6 +54,9 @@ public class DataQueryService {
      * 执行查询
      */
     public SqlQueryResponse executeQuery(SqlQueryRequest request) {
+        if (!StringUtils.hasText(request.getDatabase())) {
+            throw new RuntimeException("数据库不能为空");
+        }
         validateSql(request.getSql());
         int limit = resolveLimit(request.getLimit());
 

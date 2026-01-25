@@ -4,20 +4,6 @@
       <!-- Left: Database Tree -->
       <aside class="studio-sidebar" :style="{ width: `${sidebarWidth}px` }">
         <div class="sidebar-controls">
-          <el-select
-            v-model="clusterId"
-            size="small"
-            class="cluster-select"
-            placeholder="选择集群"
-            clearable
-          >
-            <el-option
-              v-for="item in clusterOptions"
-              :key="item.id"
-              :label="item.clusterName"
-              :value="item.id"
-            />
-          </el-select>
           <div class="search-row">
             <el-input
               v-model="searchKeyword"
@@ -49,73 +35,111 @@
         </div>
 
         <div class="db-tree" v-loading="dbLoading">
-          <el-collapse v-model="activeDatabase" accordion @change="handleDatabaseChange">
+          <el-collapse v-model="activeSource" accordion @change="handleSourceChange">
             <el-collapse-item
-              v-for="db in databases"
-              :key="db"
-              :name="db"
+              v-for="source in dataSources"
+              :key="source.id"
+              :name="String(source.id)"
             >
               <template #title>
-                <div class="db-title">
+                <div class="source-title">
                   <el-icon class="db-toggle">
-                    <ArrowDown v-if="activeDatabase === db" />
+                    <ArrowDown v-if="String(activeSource) === String(source.id)" />
                     <ArrowRight v-else />
                   </el-icon>
-                  <el-icon class="db-icon"><Coin /></el-icon>
-                  <span class="db-name">{{ db }}</span>
-                  <el-badge :value="getTableCount(db)" type="info" class="db-count" />
-                  <el-icon v-if="databaseLoading[db]" class="is-loading loading-icon"><Loading /></el-icon>
+                  <el-icon class="source-icon"><Document /></el-icon>
+                  <span class="db-name">{{ source.clusterName }}</span>
+                  <el-tag size="small" class="source-type" :type="source.sourceType === 'MYSQL' ? 'success' : 'warning'">
+                    {{ source.sourceType || 'DORIS' }}
+                  </el-tag>
+                  <el-icon v-if="schemaLoading[String(source.id)]" class="is-loading loading-icon"><Loading /></el-icon>
                 </div>
               </template>
 
-              <div class="table-list">
-                <div
-                  v-for="table in getDisplayedTables(db)"
-                  :key="getTableKey(table, db) || table.id || table.tableName"
-                  class="table-item"
-                  :class="{ active: selectedTableKey === getTableKey(table, db) }"
-                  :ref="(el) => setTableRef(getTableKey(table, db), el, table.id)"
-                  @click="openTableTab(table, db)"
+              <div class="schema-list">
+                <el-collapse
+                  v-model="activeSchema[String(source.id)]"
+                  accordion
+                  @change="(schema) => handleSchemaChange(source.id, schema)"
                 >
-                  <div
-                    class="table-progress-bg"
-                    :style="{ width: getProgressWidth(db, table) }"
-                  ></div>
-                  <div class="table-content">
-                    <el-icon class="table-icon"><Grid /></el-icon>
-                    <div class="table-info">
-                      <span class="table-name" :title="table.tableName">
-                        {{ table.tableName }}
-                      </span>
-                      <span v-if="table.tableComment" class="table-comment" :title="table.tableComment">
-                        {{ table.tableComment }}
-                      </span>
-                    </div>
-                    <div class="table-meta-tags">
-                      <span class="row-count" :title="`数据量: ${formatNumber(getTableRowCount(table))} 行`">
-                        {{ formatRowCount(getTableRowCount(table)) }}
-                      </span>
-                      <span class="storage-size" :title="`存储大小: ${formatStorageSize(getTableStorageSize(table))}`">
-                        {{ formatStorageSize(getTableStorageSize(table)) }}
-                      </span>
-                      <span v-if="getUpstreamCount(table.id) > 0" class="lineage-count upstream" :title="`上游表: ${getUpstreamCount(table.id)} 个`">
-                        ↑{{ getUpstreamCount(table.id) }}
-                      </span>
-                      <span v-if="getDownstreamCount(table.id) > 0" class="lineage-count downstream" :title="`下游表: ${getDownstreamCount(table.id)} 个`">
-                        ↓{{ getDownstreamCount(table.id) }}
-                      </span>
-                      <el-tag
-                        v-if="table.layer"
-                        size="small"
-                        :type="getLayerType(table.layer)"
-                        class="layer-tag"
+                  <el-collapse-item
+                    v-for="schema in schemaStore[String(source.id)] || []"
+                    :key="schema"
+                    :name="schema"
+                  >
+                    <template #title>
+                      <div class="db-title">
+                        <el-icon class="db-toggle">
+                          <ArrowDown v-if="activeSchema[String(source.id)] === schema" />
+                          <ArrowRight v-else />
+                        </el-icon>
+                        <el-icon class="db-icon"><Coin /></el-icon>
+                        <span class="db-name">{{ schema }}</span>
+                        <el-badge :value="getTableCount(source.id, schema)" type="info" class="db-count" />
+                        <el-icon
+                          v-if="tableLoading[`${String(source.id)}::${schema}`]"
+                          class="is-loading loading-icon"
+                        >
+                          <Loading />
+                        </el-icon>
+                      </div>
+                    </template>
+
+                    <div class="table-list">
+                      <div
+                        v-for="table in getDisplayedTables(source.id, schema)"
+                        :key="getTableKey(table, schema, source.id) || table.id || table.tableName"
+                        class="table-item"
+                        :class="{ active: selectedTableKey === getTableKey(table, schema, source.id) }"
+                        :ref="(el) => setTableRef(getTableKey(table, schema, source.id), el, table.id)"
+                        @click="openTableTab(table, schema, source.id)"
                       >
-                        {{ table.layer }}
-                      </el-tag>
+                        <div
+                          class="table-progress-bg"
+                          :style="{ width: getProgressWidth(source.id, schema, table) }"
+                        ></div>
+                        <div class="table-content">
+                          <el-icon class="table-icon"><Grid /></el-icon>
+                          <div class="table-info">
+                            <span class="table-name" :title="table.tableName">
+                              {{ table.tableName }}
+                            </span>
+                            <span v-if="table.tableComment" class="table-comment" :title="table.tableComment">
+                              {{ table.tableComment }}
+                            </span>
+                          </div>
+                          <div class="table-meta-tags">
+                            <span class="row-count" :title="`数据量: ${formatNumber(getTableRowCount(table))} 行`">
+                              {{ formatRowCount(getTableRowCount(table)) }}
+                            </span>
+                            <span class="storage-size" :title="`存储大小: ${formatStorageSize(getTableStorageSize(table))}`">
+                              {{ formatStorageSize(getTableStorageSize(table)) }}
+                            </span>
+                            <span v-if="getUpstreamCount(table.id) > 0" class="lineage-count upstream" :title="`上游表: ${getUpstreamCount(table.id)} 个`">
+                              ↑{{ getUpstreamCount(table.id) }}
+                            </span>
+                            <span v-if="getDownstreamCount(table.id) > 0" class="lineage-count downstream" :title="`下游表: ${getDownstreamCount(table.id)} 个`">
+                              ↓{{ getDownstreamCount(table.id) }}
+                            </span>
+                            <el-tag
+                              v-if="table.layer"
+                              size="small"
+                              :type="getLayerType(table.layer)"
+                              class="layer-tag"
+                            >
+                              {{ table.layer }}
+                            </el-tag>
+                          </div>
+                        </div>
+                      </div>
+                      <el-empty
+                        v-if="!getDisplayedTables(source.id, schema).length"
+                        description="暂无表"
+                        :image-size="60"
+                      />
                     </div>
-                  </div>
-                </div>
-                <el-empty v-if="!getDisplayedTables(db).length" description="暂无表" :image-size="60" />
+                  </el-collapse-item>
+                </el-collapse>
               </div>
             </el-collapse-item>
           </el-collapse>
@@ -143,7 +167,7 @@
               <template #label>
                 <div class="tab-label">
                   <span class="tab-title">{{ tab.tableName }}</span>
-                  <span class="tab-sub">{{ tab.dbName }}</span>
+                  <span class="tab-sub">{{ getTabSubtitle(tab) }}</span>
                 </div>
               </template>
 
@@ -379,16 +403,34 @@
                           <div class="section-header">
                             <span>表信息</span>
                             <div class="section-actions">
+                              <el-tooltip
+                                v-if="!tabStates[tab.id].metaEditing && isDorisTable(tabStates[tab.id].table) && !clusterId"
+                                content="请选择 Doris 集群后再编辑"
+                                placement="top"
+                              >
+                                <span>
+                                  <el-button type="primary" size="small" disabled>编辑</el-button>
+                                </span>
+                              </el-tooltip>
                               <el-button
-                                v-if="!tabStates[tab.id].metaEditing"
+                                v-else-if="!tabStates[tab.id].metaEditing"
                                 type="primary"
                                 size="small"
                                 @click="startMetaEdit(tab.id)"
                               >
                                 编辑
                               </el-button>
+                              <el-tooltip
+                                v-if="!tabStates[tab.id].metaEditing && isDorisTable(tabStates[tab.id].table) && !clusterId"
+                                content="请选择 Doris 集群后再删除"
+                                placement="top"
+                              >
+                                <span>
+                                  <el-button type="danger" plain size="small" disabled>删除表</el-button>
+                                </span>
+                              </el-tooltip>
                               <el-button
-                                v-if="!tabStates[tab.id].metaEditing"
+                                v-else-if="!tabStates[tab.id].metaEditing"
                                 type="danger"
                                 plain
                                 size="small"
@@ -410,112 +452,324 @@
                             </div>
                           </div>
 
-                          <el-form
-                            v-if="tabStates[tab.id].metaEditing"
-                            :model="tabStates[tab.id].metaForm"
-                            label-width="90px"
-                            class="meta-form"
-                          >
-                            <el-form-item label="表名">
-                              <el-input v-model="tabStates[tab.id].metaForm.tableName" />
-                            </el-form-item>
-                            <el-form-item label="表注释">
-                              <el-input v-model="tabStates[tab.id].metaForm.tableComment" />
-                            </el-form-item>
-                            <el-form-item label="分层">
-                              <el-select v-model="tabStates[tab.id].metaForm.layer" placeholder="选择分层">
+                          <el-descriptions :column="1" border size="small" class="meta-descriptions">
+                            <el-descriptions-item label="表名">
+                              <el-input
+                                v-if="tabStates[tab.id].metaEditing"
+                                v-model="tabStates[tab.id].metaForm.tableName"
+                                size="small"
+                                class="meta-input"
+                              />
+                              <span v-else>{{ tabStates[tab.id].table.tableName || '-' }}</span>
+                            </el-descriptions-item>
+                            <el-descriptions-item label="表注释">
+                              <el-input
+                                v-if="tabStates[tab.id].metaEditing"
+                                v-model="tabStates[tab.id].metaForm.tableComment"
+                                size="small"
+                                class="meta-input"
+                              />
+                              <span v-else>{{ tabStates[tab.id].table.tableComment || '-' }}</span>
+                            </el-descriptions-item>
+                            <el-descriptions-item label="分层">
+                              <el-select
+                                v-if="tabStates[tab.id].metaEditing"
+                                v-model="tabStates[tab.id].metaForm.layer"
+                                size="small"
+                                placeholder="选择分层"
+                                class="meta-input"
+                              >
                                 <el-option v-for="item in layerOptions" :key="item.value" :label="item.label" :value="item.value" />
                               </el-select>
-                            </el-form-item>
-                            <el-form-item label="负责人">
-                              <el-input v-model="tabStates[tab.id].metaForm.owner" />
-                            </el-form-item>
-                          </el-form>
-
-                          <el-descriptions v-else :column="1" border size="small">
-                            <el-descriptions-item label="表名">{{ tabStates[tab.id].table.tableName || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="表注释">{{ tabStates[tab.id].table.tableComment || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="分层">{{ tabStates[tab.id].table.layer || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="负责人">{{ tabStates[tab.id].table.owner || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="数据库">{{ tabStates[tab.id].table.dbName || '-' }}</el-descriptions-item>
+                              <span v-else>{{ tabStates[tab.id].table.layer || '-' }}</span>
+                            </el-descriptions-item>
+                            <el-descriptions-item label="负责人">
+                              <el-input
+                                v-if="tabStates[tab.id].metaEditing"
+                                v-model="tabStates[tab.id].metaForm.owner"
+                                size="small"
+                                class="meta-input"
+                              />
+                              <span v-else>{{ tabStates[tab.id].table.owner || '-' }}</span>
+                            </el-descriptions-item>
+                            <el-descriptions-item label="数据库">
+                              <span>{{ tabStates[tab.id].table.dbName || '-' }}</span>
+                            </el-descriptions-item>
                           </el-descriptions>
 
-                          <div class="section-divider"></div>
+                          <template v-if="isDorisTable(tabStates[tab.id].table)">
+                            <div class="section-divider"></div>
 
-                          <div class="section-header small">
-                            <span>Doris 配置</span>
-                          </div>
-                          <el-descriptions :column="1" border size="small">
-                            <el-descriptions-item label="表模型">{{ tabStates[tab.id].table.tableModel || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="主键列">{{ tabStates[tab.id].table.keyColumns || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="分区字段">{{ tabStates[tab.id].table.partitionColumn || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="分桶字段">{{ tabStates[tab.id].table.distributionColumn || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="分桶数">{{ tabStates[tab.id].table.bucketNum || '-' }}</el-descriptions-item>
-                            <el-descriptions-item label="副本数">{{ tabStates[tab.id].table.replicaNum || '-' }}</el-descriptions-item>
-                          </el-descriptions>
+                            <div class="section-header small">
+                              <span>Doris 配置</span>
+                            </div>
+                            <el-descriptions :column="1" border size="small" class="meta-descriptions">
+                              <el-descriptions-item label="表模型">{{ tabStates[tab.id].table.tableModel || '-' }}</el-descriptions-item>
+                              <el-descriptions-item label="主键列">{{ tabStates[tab.id].table.keyColumns || '-' }}</el-descriptions-item>
+                              <el-descriptions-item label="分区字段">{{ tabStates[tab.id].table.partitionColumn || '-' }}</el-descriptions-item>
+                              <el-descriptions-item label="分桶字段">{{ tabStates[tab.id].table.distributionColumn || '-' }}</el-descriptions-item>
+                              <el-descriptions-item label="分桶数">
+                                <el-input-number
+                                  v-if="tabStates[tab.id].metaEditing"
+                                  v-model="tabStates[tab.id].metaForm.bucketNum"
+                                  :min="1"
+                                  size="small"
+                                  controls-position="right"
+                                  class="meta-input"
+                                />
+                                <span v-else>{{ tabStates[tab.id].table.bucketNum || '-' }}</span>
+                              </el-descriptions-item>
+                              <el-descriptions-item label="副本数">
+                                <template v-if="tabStates[tab.id].metaEditing">
+                                  <div class="replica-edit">
+                                    <el-input-number
+                                      v-model="tabStates[tab.id].metaForm.replicaNum"
+                                      :min="1"
+                                      size="small"
+                                      controls-position="right"
+                                      class="meta-input"
+                                    />
+                                    <span v-if="isReplicaWarning(tabStates[tab.id].metaForm.replicaNum)" class="replica-warning">
+                                      <el-icon><Warning /></el-icon>
+                                      建议≥3
+                                    </span>
+                                  </div>
+                                </template>
+                                <span v-else :class="['replica-value', { 'replica-danger': isReplicaWarning(tabStates[tab.id].table.replicaNum) }]">
+                                  <el-icon v-if="isReplicaWarning(tabStates[tab.id].table.replicaNum)" class="warning-icon"><Warning /></el-icon>
+                                  {{ tabStates[tab.id].table.replicaNum || '-' }}
+                                </span>
+                              </el-descriptions-item>
+                            </el-descriptions>
+                          </template>
                         </div>
                       </el-tab-pane>
 
-                      <el-tab-pane name="columns" label="列信息">
-                        <div class="meta-section meta-section-fill">
-                          <div v-if="tabStates[tab.id].fields.length" class="meta-table">
-                            <el-table
-                              :data="tabStates[tab.id].fields"
-                              border
-                              size="small"
-                              height="100%"
-                            >
-                              <el-table-column label="字段名" width="140">
+      <el-tab-pane name="columns" label="列信息">
+        <div class="meta-section meta-section-fill">
+          <div class="section-header">
+            <div class="section-title">
+              <span>字段定义</span>
+              <el-tag
+                v-if="tabStates[tab.id].fieldsEditing && isAggregateTable(tabStates[tab.id].table)"
+                type="warning"
+                size="small"
+                effect="plain"
+              >
+                AGGREGATE 表仅支持修改注释
+              </el-tag>
+              <el-tag
+                v-if="tabStates[tab.id].fieldsEditing && isDorisTable(tabStates[tab.id].table)"
+                type="warning"
+                size="small"
+                effect="plain"
+              >
+                主键列不可在线修改
+              </el-tag>
+            </div>
+            <div class="section-actions">
+              <el-tooltip
+                v-if="!tabStates[tab.id].fieldsEditing && isDorisTable(tabStates[tab.id].table) && !clusterId"
+                content="请选择 Doris 集群后再编辑"
+                placement="top"
+              >
+                <span>
+                  <el-button type="primary" size="small" disabled>编辑</el-button>
+                </span>
+              </el-tooltip>
+              <el-button
+                v-else-if="!tabStates[tab.id].fieldsEditing"
+                type="primary"
+                size="small"
+                @click="startFieldsEdit(tab.id)"
+              >
+                编辑
+              </el-button>
+              <template v-else>
+                <el-button size="small" @click="cancelFieldsEdit(tab.id)" :disabled="tabStates[tab.id].fieldSubmitting">
+                  取消
+                </el-button>
+                <el-button
+                  type="primary"
+                  size="small"
+                  :loading="tabStates[tab.id].fieldSubmitting"
+                  @click="saveFieldsEdit(tab.id)"
+                >
+                  保存修改
+                </el-button>
+              </template>
+            </div>
+          </div>
+          <div v-if="getFieldRows(tab.id).length" class="meta-table">
+            <el-table
+              :data="getFieldRows(tab.id)"
+              border
+              size="small"
+              height="100%"
+            >
+              <el-table-column label="字段名" width="170">
+                <template #default="{ row }">
+                  <el-input
+                    v-if="tabStates[tab.id].fieldsEditing"
+                    v-model="row.fieldName"
+                    size="small"
+                    placeholder="字段名"
+                    :disabled="isAggregateTable(tabStates[tab.id].table)"
+                  />
+                  <span v-else>{{ row.fieldName }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="类型" width="150">
+                <template #default="{ row }">
+                  <el-input
+                    v-if="tabStates[tab.id].fieldsEditing"
+                    v-model="row.fieldType"
+                    size="small"
+                    placeholder="VARCHAR(255)"
+                    :disabled="isAggregateTable(tabStates[tab.id].table)"
+                  />
+                  <span v-else>{{ row.fieldType }}</span>
+                </template>
+              </el-table-column>
+                              <el-table-column label="长度" width="70">
                                 <template #default="{ row }">
-                                  <el-input
-                                    v-if="row._editing"
-                                    v-model="row.fieldName"
-                                    size="small"
-                                  />
-                                  <span v-else>{{ row.fieldName }}</span>
+                                  <span>{{ getVarcharLength(row) }}</span>
                                 </template>
                               </el-table-column>
-                              <el-table-column label="类型" width="120">
-                                <template #default="{ row }">
-                                  <el-input
-                                    v-if="row._editing"
-                                    v-model="row.fieldType"
-                                    size="small"
-                                  />
-                                  <span v-else>{{ row.fieldType }}</span>
-                                </template>
-                              </el-table-column>
-                              <el-table-column label="注释">
-                                <template #default="{ row }">
-                                  <el-input
-                                    v-if="row._editing"
-                                    v-model="row.fieldComment"
-                                    size="small"
-                                  />
-                                  <span v-else>{{ row.fieldComment || '-' }}</span>
-                                </template>
-                              </el-table-column>
-                              <el-table-column label="操作" width="100">
-                                <template #default="{ row }">
-                                  <template v-if="row._editing">
-                                    <el-button link type="primary" size="small" @click="saveField(tab.id, row)">保存</el-button>
-                                    <el-button link size="small" @click="cancelFieldEdit(row)">取消</el-button>
-                                  </template>
-                                  <el-button v-else link type="primary" size="small" @click="editField(row)">编辑</el-button>
-                                </template>
-                              </el-table-column>
-                            </el-table>
-                          </div>
-                          <el-empty v-else description="暂无字段" :image-size="60" />
-                        </div>
-                      </el-tab-pane>
+              <el-table-column label="可为空" width="90">
+                <template #default="{ row }">
+                  <el-switch
+                    v-if="tabStates[tab.id].fieldsEditing"
+                    v-model="row.isNullable"
+                    :active-value="1"
+                    :inactive-value="0"
+                    size="small"
+                    :disabled="isAggregateTable(tabStates[tab.id].table)"
+                  />
+                  <el-tag v-else :type="row.isNullable ? 'success' : 'danger'" size="small">
+                    {{ row.isNullable ? '是' : '否' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="主键" width="80">
+                <template #default="{ row }">
+                  <template v-if="tabStates[tab.id].fieldsEditing">
+                    <el-tooltip
+                      v-if="isDorisTable(tabStates[tab.id].table)"
+                      content="Doris 不支持在线修改主键列"
+                      placement="top"
+                    >
+                      <span>
+                        <el-switch
+                          v-model="row.isPrimary"
+                          :active-value="1"
+                          :inactive-value="0"
+                          size="small"
+                          disabled
+                        />
+                      </span>
+                    </el-tooltip>
+                    <el-switch
+                      v-else
+                      v-model="row.isPrimary"
+                      :active-value="1"
+                      :inactive-value="0"
+                      size="small"
+                      :disabled="isAggregateTable(tabStates[tab.id].table)"
+                    />
+                  </template>
+                  <template v-else>
+                    <el-tag v-if="row.isPrimary" type="info" size="small">是</el-tag>
+                    <span v-else>-</span>
+                  </template>
+                </template>
+              </el-table-column>
+              <el-table-column label="默认值" width="120">
+                <template #default="{ row }">
+                  <el-input
+                    v-if="tabStates[tab.id].fieldsEditing"
+                    v-model="row.defaultValue"
+                    size="small"
+                    placeholder="可选"
+                    :disabled="isAggregateTable(tabStates[tab.id].table)"
+                  />
+                  <span v-else>{{ row.defaultValue || '-' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="注释" min-width="150">
+                <template #default="{ row }">
+                  <el-input
+                    v-if="tabStates[tab.id].fieldsEditing"
+                    v-model="row.fieldComment"
+                    size="small"
+                    placeholder="字段注释"
+                  />
+                  <span v-else>{{ row.fieldComment || '-' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="tabStates[tab.id].fieldsEditing" label="操作" width="150" fixed="right">
+                <template #default="{ row }">
+                  <el-tooltip
+                    v-if="isAggregateTable(tabStates[tab.id].table)"
+                    content="AGGREGATE 表不支持新增字段"
+                    placement="top"
+                  >
+                    <span>
+                      <el-button link type="primary" size="small" disabled>新增</el-button>
+                    </span>
+                  </el-tooltip>
+                  <el-button
+                    v-else
+                    link
+                    type="primary"
+                    size="small"
+                    @click="addField(tab.id, row)"
+                  >
+                    新增
+                  </el-button>
+                  <el-popconfirm
+                    width="240"
+                    confirm-button-text="确定"
+                    cancel-button-text="取消"
+                    :title="`确定删除字段「${row.fieldName || '未命名'}」吗？`"
+                    @confirm="removeField(tab.id, row)"
+                  >
+                    <template #reference>
+                      <el-tooltip
+                        v-if="isAggregateTable(tabStates[tab.id].table)"
+                        content="AGGREGATE 表不支持删除字段"
+                        placement="top"
+                      >
+                        <span>
+                          <el-button link type="danger" size="small" disabled>删除</el-button>
+                        </span>
+                      </el-tooltip>
+                      <el-button v-else link type="danger" size="small">删除</el-button>
+                    </template>
+                  </el-popconfirm>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+          <el-empty v-else description="暂无字段" :image-size="60">
+            <template #default>
+              <el-button
+                v-if="tabStates[tab.id].fieldsEditing"
+                type="primary"
+                size="small"
+                @click="addField(tab.id)"
+                :disabled="isAggregateTable(tabStates[tab.id].table)"
+              >
+                新增字段
+              </el-button>
+            </template>
+          </el-empty>
+        </div>
+      </el-tab-pane>
 
                       <el-tab-pane name="ddl" label="DDL">
-                        <div class="meta-section meta-section-fill">
+                        <div class="meta-section meta-section-fill" v-loading="tabStates[tab.id].ddlLoading">
                           <div class="ddl-header">
-                            <el-button size="small" @click="loadDdl(tab.id)" :loading="tabStates[tab.id].ddlLoading">
-                              加载 DDL
-                            </el-button>
                             <el-button
                               size="small"
                               :disabled="!tabStates[tab.id].ddl"
@@ -530,7 +784,7 @@
                             resize="none"
                             readonly
                             class="ddl-textarea"
-                            placeholder="点击「加载 DDL」按钮获取建表语句"
+                            placeholder="加载中或暂无 DDL"
                           />
                         </div>
                       </el-tab-pane>
@@ -660,7 +914,6 @@ import { dataQueryApi } from '@/api/query'
 import CreateTableDrawer from '@/views/datastudio/CreateTableDrawer.vue'
 import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
 
-const clusterOptions = ref([])
 const clusterId = ref(null)
 const route = useRoute()
 const router = useRouter()
@@ -678,9 +931,12 @@ const historyLoading = ref(false)
 const createDrawerVisible = ref(false)
 
 const dbLoading = ref(false)
-const databases = ref([])
-const activeDatabase = ref('')
-const databaseLoading = reactive({})
+const dataSources = ref([])
+const activeSource = ref('')
+const schemaStore = reactive({})
+const schemaLoading = reactive({})
+const activeSchema = reactive({})
+const tableLoading = reactive({})
 const tableStore = reactive({})
 const lineageCache = reactive({})
 
@@ -710,54 +966,104 @@ const layerOptions = [
 ]
 
 const loadClusters = async () => {
-  try {
-    const clusters = await dorisClusterApi.list()
-    clusterOptions.value = clusters
-    if (!clusterId.value && clusters.length) {
-      const defaultCluster = clusters.find((item) => item.isDefault === 1) || clusters[0]
-      clusterId.value = defaultCluster?.id || null
-    }
-  } catch (error) {
-    console.error('加载集群失败', error)
-  }
-}
-
-const loadDatabases = async () => {
   dbLoading.value = true
   try {
-    databases.value = await tableApi.listDatabases()
-    if (!activeDatabase.value && databases.value.length) {
-      activeDatabase.value = databases.value[0]
-      await loadTables(activeDatabase.value)
+    const clusters = await dorisClusterApi.list()
+    dataSources.value = Array.isArray(clusters) ? clusters : []
+    if (!clusterId.value && dataSources.value.length) {
+      const defaultCluster =
+        dataSources.value.find((item) => item.isDefault === 1) || dataSources.value[0]
+      clusterId.value = defaultCluster?.id || null
+    }
+    if (!activeSource.value && dataSources.value.length) {
+      const defaultSource =
+        dataSources.value.find((item) => item.isDefault === 1) || dataSources.value[0]
+      activeSource.value = defaultSource?.id ? String(defaultSource.id) : ''
+      if (activeSource.value) {
+        await loadSchemas(activeSource.value)
+      }
     }
   } catch (error) {
-    ElMessage.error('加载数据库列表失败')
+    ElMessage.error('加载数据源失败')
   } finally {
     dbLoading.value = false
   }
 }
 
-const loadTables = async (database, force = false) => {
-  if (!database) return
-  if (tableStore[database] && !force) return
-  databaseLoading[database] = true
+const loadSchemas = async (sourceId, force = false) => {
+  if (!sourceId) return
+  const key = String(sourceId)
+  if (schemaStore[key] && !force) return
+  schemaLoading[key] = true
   try {
-    const tables = await tableApi.listByDatabase(database, sortField.value, sortOrder.value)
-    tableStore[database] = Array.isArray(tables) ? tables : []
+    const schemas = await dorisClusterApi.getDatabases(sourceId)
+    schemaStore[key] = Array.isArray(schemas) ? schemas : []
+    if (!activeSchema[key] && schemaStore[key].length) {
+      activeSchema[key] = schemaStore[key][0]
+      await loadTables(sourceId, activeSchema[key])
+    }
   } catch (error) {
-    ElMessage.error('加载表列表失败')
+    ElMessage.error('加载数据库列表失败')
   } finally {
-    databaseLoading[database] = false
+    schemaLoading[key] = false
   }
 }
 
-const handleDatabaseChange = async (database) => {
-  if (!database) return
-  await loadTables(database)
+const loadTables = async (sourceId, database, force = false) => {
+  if (!sourceId || !database) return
+  const sourceKey = String(sourceId)
+  tableStore[sourceKey] = tableStore[sourceKey] || {}
+  if (tableStore[sourceKey][database] && !force) return
+  const loadingKey = `${sourceKey}::${database}`
+  tableLoading[loadingKey] = true
+  try {
+    const [tables, metaTables] = await Promise.all([
+      dorisClusterApi.getTables(sourceId, database),
+      tableApi.listByDatabase(database, sortField.value, sortOrder.value, sourceId).catch(() => [])
+    ])
+    const metaList = Array.isArray(metaTables) ? metaTables : []
+    const metaMap = new Map(metaList.map((item) => [item.tableName, item]))
+    const list = (Array.isArray(tables) ? tables : []).map((item) => {
+      const tableName = item.tableName || item.TABLE_NAME || ''
+      const base = {
+        ...item,
+        sourceId: sourceKey,
+        dbName: database,
+        tableName,
+        tableComment: item.tableComment || item.TABLE_COMMENT || '',
+        rowCount: item.tableRows ?? item.table_rows ?? item.rowCount,
+        storageSize: item.dataLength ?? item.data_length ?? item.storageSize,
+        createdAt: item.createTime || item.CREATE_TIME || item.createdAt
+      }
+      const meta = metaMap.get(tableName)
+      if (!meta) return base
+      return {
+        ...meta,
+        ...base,
+        tableComment: base.tableComment || meta.tableComment
+      }
+    })
+    tableStore[sourceKey][database] = list
+  } catch (error) {
+    ElMessage.error('加载表列表失败')
+  } finally {
+    tableLoading[loadingKey] = false
+  }
 }
 
-const getFilteredTables = (database) => {
-  const list = tableStore[database] || []
+const handleSourceChange = async (sourceId) => {
+  if (!sourceId) return
+  await loadSchemas(sourceId)
+}
+
+const handleSchemaChange = async (sourceId, database) => {
+  if (!sourceId || !database) return
+  await loadTables(sourceId, database)
+}
+
+const getFilteredTables = (sourceId, database) => {
+  const sourceKey = String(sourceId || '')
+  const list = tableStore[sourceKey]?.[database] || []
   if (!searchKeyword.value) return list
   const keyword = searchKeyword.value.toLowerCase()
   return list.filter((item) => {
@@ -768,8 +1074,8 @@ const getFilteredTables = (database) => {
   })
 }
 
-const getDisplayedTables = (database) => {
-  const list = [...getFilteredTables(database)]
+const getDisplayedTables = (sourceId, database) => {
+  const list = [...getFilteredTables(sourceId, database)]
   const field = sortField.value
   const order = sortOrder.value
   list.sort((a, b) => {
@@ -788,7 +1094,7 @@ const getDisplayedTables = (database) => {
   return list
 }
 
-const getTableCount = (database) => getFilteredTables(database).length
+const getTableCount = (sourceId, database) => getFilteredTables(sourceId, database).length
 
 const setTableRef = (key, el, tableId) => {
   if (!key || !el) return
@@ -812,12 +1118,29 @@ const getLeftPaneStyle = (key) => {
   return { '--left-top': `${height}px` }
 }
 
-const getTableKey = (table, fallbackDb = '') => {
+const getTableKey = (table, fallbackDb = '', fallbackSource = '') => {
   if (!table) return ''
+  const sourceId = table.sourceId || table.clusterId || fallbackSource || ''
   const dbName = table.dbName || table.databaseName || table.database || fallbackDb || ''
   const tableName = table.tableName || ''
-  if (dbName && tableName) return `${dbName}.${tableName}`
-  return tableName || dbName
+  const core = dbName && tableName ? `${dbName}.${tableName}` : tableName || dbName
+  return sourceId ? `${sourceId}::${core}` : core
+}
+
+const getSourceName = (sourceId) => {
+  if (!sourceId) return ''
+  const source = dataSources.value.find((item) => String(item.id) === String(sourceId))
+  return source?.clusterName || source?.name || ''
+}
+
+const getTabSubtitle = (tab) => {
+  if (!tab) return ''
+  const sourceName = getSourceName(tab.sourceId)
+  const dbName = tab.dbName || ''
+  if (sourceName && dbName) {
+    return `${sourceName} / ${dbName}`
+  }
+  return sourceName || dbName || ''
 }
 
 const getLayerType = (layer) => {
@@ -847,6 +1170,51 @@ const formatRowCount = (rowCount) => {
   return (rowCount / 1000000000).toFixed(1) + 'B'
 }
 
+const ensureClusterSelected = (table) => {
+  if (isDorisTable(table) && !clusterId.value) {
+    ElMessage.warning('请选择 Doris 集群')
+    return false
+  }
+  return true
+}
+
+const getVarcharLength = (row) => {
+  const fieldType = row?.fieldType || ''
+  const match = String(fieldType).match(/varchar\s*\((\d+)\)/i)
+  return match ? match[1] : '-'
+}
+
+const isReplicaWarning = (value) => {
+  if (value === null || value === undefined || value === '') return false
+  const num = Number(value)
+  return Number.isFinite(num) && num > 0 && num < 3
+}
+
+const isAggregateTable = (table) => {
+  if (!table?.tableModel) return false
+  return String(table.tableModel).toUpperCase() === 'AGGREGATE'
+}
+
+const hasText = (value) => value !== null && value !== undefined && String(value).trim() !== ''
+const hasPositiveNumber = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) && num > 0
+}
+
+const isDorisTable = (table) => {
+  if (!table) return false
+  if (table.isSynced === 1) return true
+  return (
+    hasText(table.tableModel) ||
+    hasPositiveNumber(table.bucketNum) ||
+    hasPositiveNumber(table.replicaNum) ||
+    hasText(table.distributionColumn) ||
+    hasText(table.keyColumns) ||
+    hasText(table.partitionField) ||
+    hasText(table.partitionColumn)
+  )
+}
+
 const formatStorageSize = (size) => {
   if (size === null || size === undefined) return '-'
   if (size === 0) return '0 B'
@@ -871,21 +1239,22 @@ const formatDateTime = (value) => {
 }
 
 const getTableRowCount = (table) => {
-  if (!table || table.rowCount === null || table.rowCount === undefined) {
-    return 0
-  }
-  return Number(table.rowCount) || 0
+  if (!table) return 0
+  const value = table.rowCount ?? table.tableRows ?? table.table_rows
+  if (value === null || value === undefined) return 0
+  return Number(value) || 0
 }
 
 const getTableStorageSize = (table) => {
-  if (!table || table.storageSize === null || table.storageSize === undefined) {
-    return 0
-  }
-  return Number(table.storageSize) || 0
+  if (!table) return 0
+  const value = table.storageSize ?? table.dataLength ?? table.data_length
+  if (value === null || value === undefined) return 0
+  return Number(value) || 0
 }
 
-const getProgressWidth = (database, table) => {
-  const list = tableStore[database] || []
+const getProgressWidth = (sourceId, database, table) => {
+  const sourceKey = String(sourceId || '')
+  const list = tableStore[sourceKey]?.[database] || []
   if (!list.length) return '0%'
   const currentRowCount = getTableRowCount(table)
   const maxRowCount = Math.max(...list.map((item) => getTableRowCount(item)))
@@ -904,6 +1273,12 @@ const getUpstreamCount = (tableId) => {
 const getDownstreamCount = (tableId) => {
   if (!tableId) return 0
   return lineageCache[tableId]?.downstreamTables?.length || 0
+}
+
+const getFieldRows = (tabId) => {
+  const state = tabStates[tabId]
+  if (!state) return []
+  return state.fieldsEditing ? state.fieldsDraft : state.fields
 }
 
 const loadLineageForTable = async (tableId) => {
@@ -982,9 +1357,15 @@ const createTabState = (table) => {
       tableName: table.tableName || '',
       tableComment: table.tableComment || '',
       layer: table.layer || '',
-      owner: table.owner || ''
+      owner: table.owner || '',
+      bucketNum: table.bucketNum ?? '',
+      replicaNum: table.replicaNum ?? ''
     },
     metaOriginal: {},
+    fieldSubmitting: false,
+    fieldsEditing: false,
+    fieldsDraft: [],
+    fieldsRemoved: [],
     fields: [],
     ddl: '',
     ddlLoading: false,
@@ -993,9 +1374,13 @@ const createTabState = (table) => {
   })
 }
 
-const openTableTab = async (table, dbFallback = '') => {
+const openTableTab = async (table, dbFallback = '', sourceFallback = '') => {
   if (!table) return
-  const key = getTableKey(table, dbFallback)
+  const sourceId = table.sourceId || table.clusterId || sourceFallback
+  if (sourceId) {
+    clusterId.value = sourceId
+  }
+  const key = getTableKey(table, dbFallback, sourceId)
   if (!key) return
 
   selectedTableKey.value = key
@@ -1003,7 +1388,7 @@ const openTableTab = async (table, dbFallback = '') => {
   const existing = openTabs.value.find((item) => String(item.id) === key)
   if (existing) {
     activeTab.value = String(existing.id)
-    await focusTableInSidebar(table, key, dbFallback)
+    await focusTableInSidebar(table, key, dbFallback, sourceId)
     return
   }
 
@@ -1011,22 +1396,28 @@ const openTableTab = async (table, dbFallback = '') => {
   const tabItem = {
     id: key,
     tableName: table.tableName,
-    dbName: resolvedDb
+    dbName: resolvedDb,
+    sourceId
   }
-  tabStates[key] = createTabState({ ...table, dbName: resolvedDb })
+  tabStates[key] = createTabState({ ...table, dbName: resolvedDb, sourceId })
   openTabs.value.push(tabItem)
   activeTab.value = key
 
-  await focusTableInSidebar(table, key, dbFallback)
+  await focusTableInSidebar(table, key, dbFallback, sourceId)
   await loadTabData(key)
 }
 
-const focusTableInSidebar = async (table, key, dbFallback = '') => {
+const focusTableInSidebar = async (table, key, dbFallback = '', sourceFallback = '') => {
   if (!table) return
+  const sourceId = table.sourceId || table.clusterId || sourceFallback
   const dbName = table.dbName || table.databaseName || table.database || dbFallback
-  if (dbName) {
-    activeDatabase.value = dbName
-    await loadTables(dbName)
+  if (sourceId) {
+    activeSource.value = String(sourceId)
+    await loadSchemas(sourceId)
+  }
+  if (sourceId && dbName) {
+    activeSchema[String(sourceId)] = dbName
+    await loadTables(sourceId, dbName)
   }
   await nextTick()
   const ref = tableRefs.value[key]
@@ -1037,12 +1428,13 @@ const focusTableInSidebar = async (table, key, dbFallback = '') => {
 
 const updateRouteQuery = (payload) => {
   if (suppressRouteSync.value) return
-  const { dbName, tableId, tableName } = payload || {}
-  if (!dbName || (!tableId && !tableName)) return
+  const { dbName, tableId, tableName, sourceId } = payload || {}
+  if (!dbName || !sourceId || (!tableId && !tableName)) return
   router.replace({
     path: route.path,
     query: {
       ...route.query,
+      clusterId: sourceId,
       database: dbName,
       tableId: tableId ?? route.query.tableId,
       tableName: tableName ?? route.query.tableName
@@ -1058,10 +1450,13 @@ const clearCreateQuery = () => {
 }
 
 const syncFromRoute = async () => {
-  const { database, tableId, tableName } = route.query
-  if (!database || (!tableId && !tableName)) return
-  await loadTables(database, true)
-  const list = tableStore[database] || []
+  const { clusterId: routeClusterId, database, tableId, tableName } = route.query
+  if (!routeClusterId || !database || (!tableId && !tableName)) return
+  activeSource.value = String(routeClusterId)
+  activeSchema[String(routeClusterId)] = database
+  await loadSchemas(routeClusterId, true)
+  await loadTables(routeClusterId, database, true)
+  const list = tableStore[String(routeClusterId)]?.[database] || []
   let target = null
   if (tableId) {
     target = list.find((item) => String(item.id) === String(tableId))
@@ -1069,15 +1464,71 @@ const syncFromRoute = async () => {
   if (!target && tableName) {
     target = list.find((item) => item.tableName === tableName)
   }
+  if (!target && tableId) {
+    try {
+      const tableInfo = await tableApi.getById(tableId)
+      if (tableInfo) {
+        target = { ...tableInfo, sourceId: String(routeClusterId), dbName: database }
+      }
+    } catch (error) {
+      console.error('路由表加载失败', error)
+    }
+  }
   if (!target) return
   suppressRouteSync.value = true
-  await openTableTab(target, database)
+  await openTableTab(target, database, routeClusterId)
   suppressRouteSync.value = false
 }
 
 const loadTabData = async (tabId) => {
   const state = tabStates[tabId]
-  if (!state?.table?.id) return
+  if (!state?.table) return
+  if (!state.table.id && state.table.dbName && state.table.tableName) {
+    try {
+      const sourceId = state.table.sourceId || clusterId.value
+      const options = await tableApi.searchOptions({
+        keyword: state.table.tableName,
+        limit: 20,
+        dbName: state.table.dbName,
+        clusterId: sourceId || undefined
+      })
+      const match = (options || []).find((item) => item.tableName === state.table.tableName)
+      if (match?.id) {
+        state.table.id = match.id
+        state.table.tableComment = state.table.tableComment || match.tableComment
+        state.table.layer = state.table.layer || match.layer
+      }
+    } catch (error) {
+      console.error('解析表元数据失败', error)
+    }
+  }
+  if (!state.table.id) {
+    state.metaForm = {
+      tableName: state.table.tableName || '',
+      tableComment: state.table.tableComment || '',
+      layer: state.table.layer || '',
+      owner: state.table.owner || '',
+      bucketNum: state.table.bucketNum ?? '',
+      replicaNum: state.table.replicaNum ?? ''
+    }
+    state.metaOriginal = { ...state.metaForm }
+    state.fields = []
+    state.fieldsEditing = false
+    state.fieldsDraft = []
+    state.fieldsRemoved = []
+    state.lineage = {
+      upstreamTables: [],
+      downstreamTables: []
+    }
+    state.tasks = {
+      writeTasks: [],
+      readTasks: []
+    }
+    if (state.query.sql === '') {
+      state.query.sql = buildDefaultSql(state.table)
+    }
+    return
+  }
   try {
     const [tableInfo, fieldList, lineageData, tasksData] = await Promise.all([
       tableApi.getById(state.table.id),
@@ -1090,10 +1541,15 @@ const loadTabData = async (tabId) => {
       tableName: state.table.tableName || '',
       tableComment: state.table.tableComment || '',
       layer: state.table.layer || '',
-      owner: state.table.owner || ''
+      owner: state.table.owner || '',
+      bucketNum: state.table.bucketNum ?? '',
+      replicaNum: state.table.replicaNum ?? ''
     }
     state.metaOriginal = { ...state.metaForm }
     state.fields = Array.isArray(fieldList) ? fieldList : []
+    state.fieldsEditing = false
+    state.fieldsDraft = []
+    state.fieldsRemoved = []
     state.lineage = {
       upstreamTables: lineageData?.upstreamTables || [],
       downstreamTables: lineageData?.downstreamTables || []
@@ -1148,6 +1604,14 @@ const executeQuery = async (tabId) => {
   const state = tabStates[tabId]
   if (!state?.query?.sql?.trim()) {
     ElMessage.warning('请输入 SQL')
+    return
+  }
+  if (!state.table?.dbName) {
+    ElMessage.warning('请先选择数据库')
+    return
+  }
+  if (!clusterId.value) {
+    ElMessage.warning('请选择数据源')
     return
   }
   if (!isReadOnlySql(state.query.sql)) {
@@ -1238,6 +1702,8 @@ const applyHistory = (row, tabId) => {
   state.query.sql = row.sqlText || ''
   if (row.clusterId) {
     clusterId.value = row.clusterId
+    activeSource.value = String(row.clusterId)
+    loadSchemas(row.clusterId)
   }
 }
 
@@ -1253,18 +1719,33 @@ const handleDeleteTable = async () => {
     ElMessage.warning('请先选择要删除的表')
     return
   }
+  const dorisTable = isDorisTable(table)
+  if (dorisTable && !clusterId.value) {
+    ElMessage.warning('请选择 Doris 集群')
+    return
+  }
 
   try {
+    const message = dorisTable
+      ? `确定要删除表 “${table.tableName}” 吗？删除后将重命名为 deprecated_时间戳，数据不会丢失。`
+      : `确定要删除表 “${table.tableName}” 吗？将仅删除平台元数据记录。`
     await ElMessageBox.confirm(
-      `确定要删除表 “${table.tableName}” 吗？删除后将重命名为 deprecated_时间戳，数据不会丢失。`,
+      message,
       '删除表确认',
       { type: 'warning' }
     )
-    await tableApi.softDelete(table.id, clusterId.value || null)
+    if (dorisTable) {
+      await tableApi.softDelete(table.id, clusterId.value || null)
+    } else {
+      await tableApi.delete(table.id)
+    }
     ElMessage.success('删除表成功')
     const dbName = table.dbName || table.databaseName || table.database
     if (dbName) {
-      await loadTables(dbName, true)
+      const sourceId = table.sourceId || clusterId.value
+      if (sourceId) {
+        await loadTables(sourceId, dbName, true)
+      }
     }
     handleTabRemove(active)
   } catch (error) {
@@ -1276,16 +1757,19 @@ const handleDeleteTable = async () => {
 
 const handleCreateSuccess = async (result) => {
   createDrawerVisible.value = false
-  await loadDatabases()
+  await loadClusters()
   const tableId = result?.id || result?.tableId
   if (!tableId) return
   try {
     const table = await tableApi.getById(tableId)
     const dbName = table?.dbName || table?.databaseName || table?.database || ''
     if (dbName) {
-      await loadTables(dbName, true)
+      if (table?.sourceId || clusterId.value) {
+        const sourceId = table.sourceId || clusterId.value
+        await loadTables(sourceId, dbName, true)
+      }
     }
-    await openTableTab(table, dbName)
+    await openTableTab(table, dbName, table?.sourceId || clusterId.value)
   } catch (error) {
     console.error('加载新建表失败', error)
   }
@@ -1414,6 +1898,7 @@ const handleResize = () => {
 const startMetaEdit = (tabId) => {
   const state = tabStates[tabId]
   if (!state) return
+  if (!ensureClusterSelected(state.table)) return
   state.metaEditing = true
   state.metaForm = { ...state.metaForm }
 }
@@ -1428,26 +1913,41 @@ const cancelMetaEdit = (tabId) => {
 const saveMetaEdit = async (tabId) => {
   const state = tabStates[tabId]
   if (!state?.table?.id) return
+  if (!ensureClusterSelected(state.table)) return
+  try {
+    await ElMessageBox.confirm('确认保存表信息与 Doris 配置的修改吗？', '提示', {
+      type: 'warning',
+      confirmButtonText: '确认',
+      cancelButtonText: '取消'
+    })
+  } catch (error) {
+    return
+  }
   state.metaSaving = true
   try {
     const payload = {
       tableName: state.metaForm.tableName,
       tableComment: state.metaForm.tableComment,
       layer: state.metaForm.layer,
-      owner: state.metaForm.owner
+      owner: state.metaForm.owner,
+      bucketNum: state.metaForm.bucketNum,
+      replicaNum: state.metaForm.replicaNum
     }
-    const updated = await tableApi.update(state.table.id, payload)
+    const updated = await tableApi.update(state.table.id, payload, clusterId.value || null)
     state.table = { ...state.table, ...updated }
     state.metaForm = {
       tableName: state.table.tableName || '',
       tableComment: state.table.tableComment || '',
       layer: state.table.layer || '',
-      owner: state.table.owner || ''
+      owner: state.table.owner || '',
+      bucketNum: state.table.bucketNum ?? '',
+      replicaNum: state.table.replicaNum ?? ''
     }
     state.metaOriginal = { ...state.metaForm }
     state.metaEditing = false
     updateTableCache(state.table)
-    const tab = openTabs.value.find((item) => String(item.id) === String(tabId))
+    const newKey = syncTabKey(tabId, state.table)
+    const tab = openTabs.value.find((item) => String(item.id) === String(newKey))
     if (tab) {
       tab.tableName = state.table.tableName
       tab.dbName = state.table.dbName
@@ -1462,54 +1962,249 @@ const saveMetaEdit = async (tabId) => {
 
 const updateTableCache = (updated) => {
   if (!updated?.dbName) return
-  const list = tableStore[updated.dbName] || []
+  const sourceId = updated.sourceId || clusterId.value
+  if (!sourceId) return
+  const sourceKey = String(sourceId)
+  const list = tableStore[sourceKey]?.[updated.dbName] || []
   const idx = list.findIndex((item) => String(item.id) === String(updated.id))
   if (idx === -1) return
   const next = [...list]
   next[idx] = { ...next[idx], ...updated }
-  tableStore[updated.dbName] = next
+  tableStore[sourceKey][updated.dbName] = next
 }
 
-const editField = (row) => {
-  row._editing = true
-  row._backup = { ...row }
+const refreshFields = async (tabId) => {
+  const state = tabStates[tabId]
+  if (!state?.table?.id) return
+  try {
+    const fieldList = await tableApi.getFields(state.table.id)
+    state.fields = Array.isArray(fieldList) ? fieldList : []
+  } catch (error) {
+    console.error('刷新字段失败', error)
+  }
 }
 
-const cancelFieldEdit = (row) => {
-  if (!row._backup) {
-    row._editing = false
+const syncTabKey = (oldKey, updatedTable) => {
+  const newKey = getTableKey(updatedTable, updatedTable?.dbName || '', updatedTable?.sourceId || clusterId.value)
+  if (!newKey || newKey === oldKey) return oldKey
+  const oldIndex = openTabs.value.findIndex((tab) => String(tab.id) === String(oldKey))
+  const existingIndex = openTabs.value.findIndex((tab) => String(tab.id) === String(newKey))
+  if (existingIndex !== -1 && existingIndex !== oldIndex) {
+    if (oldIndex !== -1) {
+      openTabs.value.splice(oldIndex, 1)
+    }
+    delete tabStates[oldKey]
+    activeTab.value = String(newKey)
+    selectedTableKey.value = String(newKey)
+    return newKey
+  }
+  if (oldIndex !== -1) {
+    openTabs.value[oldIndex].id = newKey
+  }
+  tabStates[newKey] = tabStates[oldKey]
+  if (oldKey !== newKey) {
+    delete tabStates[oldKey]
+    delete tableRefs.value[oldKey]
+  }
+  if (String(activeTab.value) === String(oldKey)) {
+    activeTab.value = String(newKey)
+  }
+  selectedTableKey.value = String(newKey)
+  return newKey
+}
+
+const startFieldsEdit = (tabId) => {
+  const state = tabStates[tabId]
+  if (!state) return
+  if (!ensureClusterSelected(state.table)) return
+  state.fieldsEditing = true
+  state.fieldsDraft = state.fields.map((item) => ({ ...item }))
+  state.fieldsRemoved = []
+}
+
+const cancelFieldsEdit = (tabId) => {
+  const state = tabStates[tabId]
+  if (!state) return
+  state.fieldsEditing = false
+  state.fieldsDraft = []
+  state.fieldsRemoved = []
+}
+
+const addField = (tabId, afterRow = null) => {
+  const state = tabStates[tabId]
+  if (!state) return
+  if (isAggregateTable(state.table)) {
+    ElMessage.warning('AGGREGATE 表仅支持修改注释，无法新增字段')
     return
   }
-  Object.assign(row, row._backup)
-  row._editing = false
-  row._backup = null
+  const newRow = {
+    id: null,
+    fieldName: '',
+    fieldType: '',
+    fieldOrder: 0,
+    isNullable: 1,
+    isPrimary: 0,
+    defaultValue: '',
+    fieldComment: ''
+  }
+  if (!afterRow) {
+    state.fieldsDraft.unshift(newRow)
+    return
+  }
+  const index = state.fieldsDraft.indexOf(afterRow)
+  if (index === -1) {
+    state.fieldsDraft.unshift(newRow)
+    return
+  }
+  state.fieldsDraft.splice(index + 1, 0, newRow)
 }
 
-const saveField = async (tabId, row) => {
+const removeField = (tabId, row) => {
   const state = tabStates[tabId]
-  if (!state?.table?.id || !row?.id) return
-  try {
-    const payload = {
-      fieldName: row.fieldName,
-      fieldType: row.fieldType,
-      fieldComment: row.fieldComment
+  if (!state) return
+  if (isAggregateTable(state.table)) {
+    ElMessage.warning('AGGREGATE 表仅支持修改注释，无法删除字段')
+    return
+  }
+  if (row?.id) {
+    state.fieldsRemoved = [...new Set([...(state.fieldsRemoved || []), row.id])]
+  }
+  state.fieldsDraft = state.fieldsDraft.filter((item) => item !== row)
+}
+
+const buildFieldPayload = (row) => ({
+  fieldName: (row.fieldName || '').trim(),
+  fieldType: (row.fieldType || '').trim(),
+  fieldComment: row.fieldComment || '',
+  isNullable: row.isNullable ?? 1,
+  isPrimary: row.isPrimary ?? 0,
+  defaultValue: row.defaultValue || '',
+  fieldOrder: row.fieldOrder || 0
+})
+
+const isFieldChanged = (next, original) => {
+  if (!original) return true
+  const payload = buildFieldPayload(next)
+  return (
+    payload.fieldName !== (original.fieldName || '') ||
+    payload.fieldType !== (original.fieldType || '') ||
+    payload.fieldComment !== (original.fieldComment || '') ||
+    Number(payload.isNullable ?? 1) !== Number(original.isNullable ?? 1) ||
+    Number(payload.isPrimary ?? 0) !== Number(original.isPrimary ?? 0) ||
+    payload.defaultValue !== (original.defaultValue || '') ||
+    Number(payload.fieldOrder || 0) !== Number(original.fieldOrder || 0)
+  )
+}
+
+const isOnlyCommentChanged = (next, original) => {
+  if (!original) return false
+  const payload = buildFieldPayload(next)
+  return (
+    payload.fieldName === (original.fieldName || '') &&
+    payload.fieldType === (original.fieldType || '') &&
+    Number(payload.isNullable ?? 1) === Number(original.isNullable ?? 1) &&
+    Number(payload.isPrimary ?? 0) === Number(original.isPrimary ?? 0) &&
+    payload.defaultValue === (original.defaultValue || '') &&
+    Number(payload.fieldOrder || 0) === Number(original.fieldOrder || 0) &&
+    payload.fieldComment !== (original.fieldComment || '')
+  )
+}
+
+const saveFieldsEdit = async (tabId) => {
+  const state = tabStates[tabId]
+  if (!state?.table?.id) return
+  if (!ensureClusterSelected(state.table)) return
+  const draft = state.fieldsDraft || []
+  const removedIds = [...new Set(state.fieldsRemoved || [])]
+  for (const row of draft) {
+    const payload = buildFieldPayload(row)
+    if (!payload.fieldName || !payload.fieldType) {
+      ElMessage.warning('请填写字段名和类型')
+      return
     }
-    const updated = await tableApi.updateField(state.table.id, row.id, payload)
-    Object.assign(row, updated || payload)
-    row._editing = false
-    row._backup = null
-    ElMessage.success('字段已更新')
+  }
+  const originalMap = new Map(state.fields.map((item) => [item.id, item]))
+  const createList = draft.filter((row) => !row.id)
+  const updateList = draft.filter((row) => row.id && isFieldChanged(row, originalMap.get(row.id)))
+  if (isAggregateTable(state.table)) {
+    const invalidUpdates = updateList.filter(
+      (row) => !isOnlyCommentChanged(row, originalMap.get(row.id))
+    )
+    if (createList.length || removedIds.length || invalidUpdates.length) {
+      ElMessage.warning('AGGREGATE 表仅支持修改字段注释')
+      return
+    }
+  }
+  if (isDorisTable(state.table)) {
+    const primaryChanged = updateList.some((row) => {
+      const original = originalMap.get(row.id)
+      return Number(row.isPrimary ?? 0) !== Number(original?.isPrimary ?? 0)
+    })
+    const primaryAdded = createList.some((row) => Number(row.isPrimary ?? 0) === 1)
+    if (primaryChanged || primaryAdded) {
+      ElMessage.warning('Doris 不支持在线修改主键列')
+      return
+    }
+  }
+  if (!createList.length && !updateList.length && !removedIds.length) {
+    ElMessage.info('暂无字段变更')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认保存字段变更（新增 ${createList.length}、修改 ${updateList.length}、删除 ${removedIds.length}）吗？`,
+      '提示',
+      {
+        type: 'warning',
+        confirmButtonText: '确认',
+        cancelButtonText: '取消'
+      }
+    )
   } catch (error) {
-    ElMessage.error('字段更新失败')
+    return
+  }
+  state.fieldSubmitting = true
+  try {
+    for (const row of createList) {
+      await tableApi.createField(state.table.id, buildFieldPayload(row), clusterId.value || null)
+    }
+    for (const row of updateList) {
+      await tableApi.updateField(state.table.id, row.id, buildFieldPayload(row), clusterId.value || null)
+    }
+    for (const id of removedIds) {
+      await tableApi.deleteField(state.table.id, id, clusterId.value || null)
+    }
+    await refreshFields(tabId)
+    state.fieldsEditing = false
+    state.fieldsDraft = []
+    state.fieldsRemoved = []
+    ElMessage.success('字段已保存')
+  } catch (error) {
+    ElMessage.error('字段保存失败')
+  } finally {
+    state.fieldSubmitting = false
   }
 }
 
 const loadDdl = async (tabId) => {
   const state = tabStates[tabId]
-  if (!state?.table?.id) return
+  if (!state?.table) return
+  const sourceId = state.table.sourceId || clusterId.value
+  if (!sourceId) {
+    ElMessage.warning('请选择数据源')
+    return
+  }
+  const dbName = state.table.dbName || state.table.databaseName || state.table.database || ''
+  const tableName = state.table.tableName || ''
+  if (!dbName || !tableName) {
+    ElMessage.warning('缺少数据库或表名')
+    return
+  }
   state.ddlLoading = true
   try {
-    const ddl = await tableApi.getTableDdl(state.table.id, clusterId.value || null)
+    const ddl = state.table.id
+      ? await tableApi.getTableDdl(state.table.id, sourceId || null)
+      : await tableApi.getTableDdlByName(sourceId || null, dbName, tableName)
     state.ddl = ddl || ''
   } catch (error) {
     ElMessage.error('加载 DDL 失败')
@@ -1593,11 +2288,6 @@ const startLeftResize = (tabId, event) => {
   window.addEventListener('mouseup', resizeLeftUpHandler)
 }
 
-watch([sortField, sortOrder], async () => {
-  if (!activeDatabase.value) return
-  await loadTables(activeDatabase.value, true)
-})
-
 watch(
   () => [historyPager.pageNum, historyPager.pageSize],
   () => {
@@ -1624,14 +2314,28 @@ watch(
 )
 
 watch(
+  () => [activeTab.value, tabStates[activeTab.value]?.metaTab],
+  ([tabId, metaTab]) => {
+    if (!tabId || metaTab !== 'ddl') return
+    const state = tabStates[tabId]
+    if (!state || state.ddlLoading || state.ddl) return
+    loadDdl(tabId)
+  }
+)
+
+watch(
   () => activeTab.value,
   (value) => {
     if (!value) return
     const tab = openTabs.value.find((item) => String(item.id) === String(value))
     if (!tab) return
+    if (tab.sourceId) {
+      clusterId.value = tab.sourceId
+    }
     selectedTableKey.value = String(tab.id)
     updateRouteQuery({
       dbName: tab.dbName,
+      sourceId: tab.sourceId || tabStates[value]?.table?.sourceId || clusterId.value,
       tableId: tabStates[value]?.table?.id,
       tableName: tab.tableName
     })
@@ -1639,7 +2343,7 @@ watch(
 )
 
 watch(
-  () => [route.query.database, route.query.tableId, route.query.tableName],
+  () => [route.query.clusterId, route.query.database, route.query.tableId, route.query.tableName],
   async () => {
     if (suppressRouteSync.value) return
     await syncFromRoute()
@@ -1658,7 +2362,6 @@ watch(
 onMounted(() => {
   setupTableObserver()
   loadClusters()
-  loadDatabases()
   fetchHistory()
   syncFromRoute()
   if (route.query.create) {
@@ -1739,10 +2442,6 @@ onBeforeUnmount(() => {
 
 .data-studio.is-resizing {
   user-select: none;
-}
-
-.cluster-select {
-  width: 100%;
 }
 
 .sidebar-controls {
@@ -1826,6 +2525,12 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
+.source-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .db-toggle {
   color: #94a3b8;
   font-size: 12px;
@@ -1835,6 +2540,15 @@ onBeforeUnmount(() => {
   color: #3b82f6;
 }
 
+.source-icon {
+  color: #f59e0b;
+}
+
+.source-type {
+  margin-left: auto;
+  border-radius: 6px;
+}
+
 .db-name {
   font-weight: 600;
   color: #1f2f3d;
@@ -1842,6 +2556,18 @@ onBeforeUnmount(() => {
 
 .db-count {
   margin-left: auto;
+}
+
+.schema-list {
+  padding: 4px 0 6px 8px;
+}
+
+.schema-list :deep(.el-collapse-item__header) {
+  padding-left: 12px;
+}
+
+.schema-list :deep(.el-collapse-item__content) {
+  padding-left: 10px;
 }
 
 .loading-icon {
@@ -2340,12 +3066,64 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+.meta-descriptions :deep(.el-descriptions__content) {
+  width: 100%;
+}
+
+.meta-input {
+  width: 100%;
+}
+
+.replica-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.replica-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #ef4444;
+}
+
+.replica-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.replica-danger {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+.warning-icon {
+  font-size: 12px;
+}
+
 .section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-weight: 600;
   color: #1f2f3d;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .section-header.small {
@@ -2357,10 +3135,6 @@ onBeforeUnmount(() => {
   height: 1px;
   background: #eef1f6;
   margin: 12px 0;
-}
-
-.meta-form :deep(.el-form-item) {
-  margin-bottom: 10px;
 }
 
 .ddl-header {
