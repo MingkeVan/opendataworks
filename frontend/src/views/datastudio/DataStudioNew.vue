@@ -16,6 +16,10 @@
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
+            <el-button size="small" :loading="dbLoading" @click="refreshCatalog">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
             <el-button size="small" type="primary" @click="handleCreateTable">
               <el-icon><Plus /></el-icon>
               新建表
@@ -43,6 +47,7 @@
             lazy
             accordion
             highlight-current
+            :expand-on-click-node="false"
             :current-node-key="selectedTableKey"
             :filter-node-method="filterCatalogNode"
             :load="loadCatalogNode"
@@ -92,11 +97,30 @@
                     <el-tag size="small" class="source-type" :type="data.sourceType === 'MYSQL' ? 'success' : 'warning'">
                       {{ data.sourceType || 'DORIS' }}
                     </el-tag>
+                    <el-tooltip content="刷新数据源" placement="top">
+                      <el-icon
+                        :class="['refresh-icon', { 'is-disabled': dbLoading || schemaLoading[String(data.sourceId)] }]"
+                        @click.stop="refreshDatasourceNode(data)"
+                      >
+                        <Refresh />
+                      </el-icon>
+                    </el-tooltip>
                     <el-icon v-if="schemaLoading[String(data.sourceId)]" class="is-loading loading-icon"><Loading /></el-icon>
                   </div>
 
                   <div v-else-if="data.type === 'schema'" class="node-right">
                     <el-badge :value="getTableCount(data.sourceId, data.schemaName)" type="info" class="db-count" />
+                    <el-tooltip content="刷新数据库" placement="top">
+                      <el-icon
+                        :class="[
+                          'refresh-icon',
+                          { 'is-disabled': dbLoading || tableLoading[`${String(data.sourceId)}::${data.schemaName}`] }
+                        ]"
+                        @click.stop="refreshSchemaNode(data)"
+                      >
+                        <Refresh />
+                      </el-icon>
+                    </el-tooltip>
                     <el-icon v-if="tableLoading[`${String(data.sourceId)}::${data.schemaName}`]" class="is-loading loading-icon">
                       <Loading />
                     </el-icon>
@@ -883,6 +907,7 @@ import {
   Document,
   Grid,
   Loading,
+  Refresh,
   List,
   TrendCharts,
   Timer,
@@ -898,7 +923,7 @@ import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
 const clusterId = ref(null)
 const route = useRoute()
 const router = useRouter()
-const sidebarWidth = ref(360)
+const sidebarWidth = ref(540)
 const isResizing = ref(false)
 let resizeMoveHandler = null
 let resizeUpHandler = null
@@ -1656,6 +1681,63 @@ const openTableTab = async (table, dbFallback = '', sourceFallback = '') => {
   await loadTabData(key)
 }
 
+const refreshCatalog = async () => {
+  if (dbLoading.value) return
+  dbLoading.value = true
+  try {
+    const clusters = await dorisClusterApi.list()
+    dataSources.value = Array.isArray(clusters) ? clusters : []
+    const ids = new Set(dataSources.value.map((item) => String(item.id)))
+    if (clusterId.value && !ids.has(String(clusterId.value))) {
+      const fallback =
+        dataSources.value.find((item) => item.isDefault === 1) || dataSources.value[0] || null
+      clusterId.value = fallback?.id || null
+    }
+    if (activeSource.value && !ids.has(String(activeSource.value))) {
+      const fallback =
+        dataSources.value.find((item) => item.isDefault === 1) || dataSources.value[0] || null
+      activeSource.value = fallback?.id ? String(fallback.id) : ''
+    }
+    await nextTick()
+    const tree = catalogTreeRef.value
+    if (!tree) return
+    const loadedSources = dataSources.value
+      .map((item) => String(item.id))
+      .filter((sourceId) => tree.getNode(getDatasourceNodeKey(sourceId))?.loaded)
+
+    for (const sourceId of loadedSources) {
+      const ok = await loadSchemas(sourceId, true)
+      if (!ok) continue
+      const schemas = schemaStore[String(sourceId)] || []
+      for (const schemaName of schemas) {
+        if (tree.getNode(getSchemaNodeKey(sourceId, schemaName))?.loaded) {
+          await loadTables(sourceId, schemaName, true)
+        }
+      }
+    }
+  } catch (error) {
+    ElMessage.error('刷新目录失败')
+  } finally {
+    dbLoading.value = false
+  }
+}
+
+const refreshDatasourceNode = async (nodeData) => {
+  const sourceId = nodeData?.sourceId
+  if (!sourceId) return
+  if (dbLoading.value || schemaLoading[String(sourceId)]) return
+  await loadSchemas(sourceId, true)
+}
+
+const refreshSchemaNode = async (nodeData) => {
+  const sourceId = nodeData?.sourceId
+  const schemaName = nodeData?.schemaName
+  if (!sourceId || !schemaName) return
+  const key = `${String(sourceId)}::${schemaName}`
+  if (dbLoading.value || tableLoading[key]) return
+  await loadTables(sourceId, schemaName, true)
+}
+
 const focusTableInSidebar = async (table, key, dbFallback = '', sourceFallback = '') => {
   if (!table) return
   const sourceId = table.sourceId || table.clusterId || sourceFallback
@@ -1704,6 +1786,15 @@ const clearCreateQuery = () => {
 const syncFromRoute = async () => {
   const { clusterId: routeClusterId, database, tableId, tableName } = route.query
   if (!routeClusterId || !database || (!tableId && !tableName)) return
+  const currentTab = openTabs.value.find((item) => String(item.id) === String(activeTab.value))
+  if (currentTab) {
+    const sameSource = String(currentTab.sourceId || '') === String(routeClusterId)
+    const sameDb = String(currentTab.dbName || '') === String(database)
+    const sameName = !tableName || String(currentTab.tableName || '') === String(tableName)
+    const currentId = tabStates[String(currentTab.id)]?.table?.id
+    const sameId = !tableId || (currentId && String(currentId) === String(tableId))
+    if (sameSource && sameDb && sameName && sameId) return
+  }
   activeSource.value = String(routeClusterId)
   activeSchema[String(routeClusterId)] = database
   await loadSchemas(routeClusterId, true)
@@ -2495,7 +2586,7 @@ const startResize = (event) => {
 
   resizeMoveHandler = (moveEvent) => {
     const delta = moveEvent.clientX - startX
-    const next = Math.max(220, Math.min(420, startWidth + delta))
+    const next = Math.max(220, Math.min(840, startWidth + delta))
     sidebarWidth.value = next
   }
   resizeUpHandler = () => {
@@ -2780,6 +2871,22 @@ onBeforeUnmount(() => {
 
 .loading-icon {
   margin-left: 6px;
+}
+
+.refresh-icon {
+  cursor: pointer;
+  color: #64748b;
+  transition: color 0.15s ease;
+}
+
+.refresh-icon:hover {
+  color: #3b82f6;
+}
+
+.refresh-icon.is-disabled {
+  cursor: not-allowed;
+  color: #cbd5e1;
+  pointer-events: none;
 }
 
 .catalog-node {
