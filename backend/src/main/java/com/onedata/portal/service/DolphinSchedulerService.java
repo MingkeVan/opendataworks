@@ -7,6 +7,7 @@ import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.dto.DolphinDatasourceOption;
 import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.dolphin.*;
+import com.onedata.portal.dto.workflow.WorkflowBackfillRequest;
 import com.onedata.portal.service.dolphin.DolphinOpenApiClient;
 import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
 import lombok.Getter;
@@ -225,6 +226,91 @@ public class DolphinSchedulerService {
         String executionId = instanceId != null ? String.valueOf(instanceId) : "exec-" + System.currentTimeMillis();
         log.info("Started workflow instance for definition {} -> {}", workflowCode, executionId);
         return executionId;
+    }
+
+    /**
+     * 补数（COMPLEMENT_DATA）执行工作流。
+     *
+     * <p>
+     * DolphinScheduler 3.x 补数通过 executors/start-process-instance 接口实现，scheduleTime 参数传 JSON：
+     * 1) 范围：{"complementStartDate":"yyyy-MM-dd HH:mm:ss","complementEndDate":"yyyy-MM-dd HH:mm:ss"}
+     * 2) 列表：{"complementScheduleDateList":"...,..."}
+     * </p>
+     */
+    public String backfillProcessInstance(Long workflowCode, WorkflowBackfillRequest request) {
+        if (workflowCode == null) {
+            throw new IllegalArgumentException("workflowCode must not be null");
+        }
+        if (request == null) {
+            throw new IllegalArgumentException("request must not be null");
+        }
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            throw new IllegalStateException("Cannot backfill workflow: Project not found");
+        }
+
+        String scheduleTime = buildComplementScheduleTime(request);
+        String failureStrategy = StringUtils.hasText(request.getFailureStrategy())
+                ? request.getFailureStrategy()
+                : "CONTINUE";
+        String runMode = StringUtils.hasText(request.getRunMode())
+                ? request.getRunMode()
+                : "RUN_MODE_SERIAL";
+        String complementDependentMode = StringUtils.hasText(request.getComplementDependentMode())
+                ? request.getComplementDependentMode()
+                : "OFF_MODE";
+        boolean allLevelDependent = Boolean.TRUE.equals(request.getAllLevelDependent());
+        String executionOrder = StringUtils.hasText(request.getExecutionOrder())
+                ? request.getExecutionOrder()
+                : "DESC_ORDER";
+
+        DolphinConfig config = getConfig();
+        JsonNode data = openApiClient.startProcessInstanceRaw(
+                projectCode,
+                workflowCode,
+                scheduleTime,
+                failureStrategy,
+                "NONE",
+                null,
+                "COMPLEMENT_DATA",
+                config.getWorkerGroup(),
+                config.getTenantCode(),
+                runMode,
+                request.getExpectedParallelismNumber(),
+                complementDependentMode,
+                allLevelDependent,
+                executionOrder);
+
+        String triggerId = data != null ? data.asText() : null;
+        if (!StringUtils.hasText(triggerId)) {
+            triggerId = "trigger-" + System.currentTimeMillis();
+        }
+        log.info("Backfill workflow definition {} -> {}", workflowCode, triggerId);
+        return triggerId;
+    }
+
+    private String buildComplementScheduleTime(WorkflowBackfillRequest request) {
+        Map<String, String> payload = new HashMap<>();
+        String mode = StringUtils.hasText(request.getMode()) ? request.getMode() : "range";
+
+        if ("list".equalsIgnoreCase(mode)) {
+            if (!StringUtils.hasText(request.getScheduleDateList())) {
+                throw new IllegalArgumentException("scheduleDateList is required when mode=list");
+            }
+            payload.put("complementScheduleDateList", request.getScheduleDateList());
+        } else {
+            if (!StringUtils.hasText(request.getStartTime()) || !StringUtils.hasText(request.getEndTime())) {
+                throw new IllegalArgumentException("startTime/endTime is required when mode=range");
+            }
+            payload.put("complementStartDate", request.getStartTime());
+            payload.put("complementEndDate", request.getEndTime());
+        }
+
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize complement scheduleTime", e);
+        }
     }
 
     /**

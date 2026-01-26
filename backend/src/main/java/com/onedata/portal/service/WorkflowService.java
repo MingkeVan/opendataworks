@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowDetailResponse;
 import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
+import com.onedata.portal.dto.workflow.WorkflowBackfillRequest;
 import com.onedata.portal.dto.workflow.WorkflowQueryRequest;
 import com.onedata.portal.dto.workflow.WorkflowTaskBinding;
 import com.onedata.portal.dto.workflow.WorkflowTopologyResult;
@@ -157,11 +158,32 @@ public class WorkflowService {
         if (workflowCode == null || workflowCode <= 0) {
             throw new IllegalStateException("工作流尚未部署或缺少 Dolphin 编码");
         }
-        dolphinSchedulerService.setWorkflowReleaseState(workflowCode, "ONLINE");
+        if (!"online".equalsIgnoreCase(workflow.getStatus())) {
+            throw new IllegalStateException("工作流未上线，请先上线后再执行");
+        }
         return dolphinSchedulerService.startProcessInstance(
                 workflowCode,
                 null,
                 workflow.getWorkflowName());
+    }
+
+    public String backfillWorkflow(Long workflowId, WorkflowBackfillRequest request) {
+        DataWorkflow workflow = dataWorkflowMapper.selectById(workflowId);
+        if (workflow == null) {
+            throw new IllegalArgumentException("Workflow not found: " + workflowId);
+        }
+        Long workflowCode = workflow.getWorkflowCode();
+        if (workflowCode == null || workflowCode <= 0) {
+            throw new IllegalStateException("工作流尚未部署或缺少 Dolphin 编码");
+        }
+        if (request == null) {
+            throw new IllegalArgumentException("补数参数不能为空");
+        }
+
+        if (!"online".equalsIgnoreCase(workflow.getStatus())) {
+            throw new IllegalStateException("工作流未上线，请先上线后再补数");
+        }
+        return dolphinSchedulerService.backfillProcessInstance(workflowCode, request);
     }
 
     @Transactional

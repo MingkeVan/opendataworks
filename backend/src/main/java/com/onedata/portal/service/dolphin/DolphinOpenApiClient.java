@@ -301,19 +301,20 @@ public class DolphinOpenApiClient {
             String workerGroup,
             String tenantCode) {
         try {
-            String path = String.format("/projects/%d/executors/start-process-instance", projectCode);
-            MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
-            formData.add("processDefinitionCode", String.valueOf(processDefinitionCode));
-            formData.add("scheduleTime", scheduleTime != null ? scheduleTime : "");
-            formData.add("failureStrategy", failureStrategy != null ? failureStrategy : "CONTINUE");
-            formData.add("warningType", warningType != null ? warningType : "NONE");
-            formData.add("warningGroupId", warningGroupId != null ? warningGroupId : "0");
-            formData.add("execType", execType != null ? execType : "START_PROCESS");
-            formData.add("workerGroup", workerGroup != null ? workerGroup : "default");
-            formData.add("tenantCode", tenantCode != null ? tenantCode : "default");
-            formData.add("dryRun", "0");
-
-            JsonNode data = postForm(path, formData);
+            JsonNode data = startProcessInstanceRaw(projectCode,
+                    processDefinitionCode,
+                    scheduleTime,
+                    failureStrategy,
+                    warningType,
+                    warningGroupId,
+                    execType,
+                    workerGroup,
+                    tenantCode,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null);
             if (data == null) {
                 return null;
             }
@@ -327,6 +328,64 @@ public class DolphinOpenApiClient {
             return null;
         } catch (Exception e) {
             log.error("Failed to start process definition {}", processDefinitionCode, e);
+            throw new RuntimeException("Failed to start process: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Start process instance with extended options.
+     *
+     * <p>
+     * For DolphinScheduler 3.x, complement data (补数) is also triggered via
+     * this endpoint with execType=COMPLEMENT_DATA.
+     * </p>
+     */
+    public JsonNode startProcessInstanceRaw(long projectCode,
+            long processDefinitionCode,
+            String scheduleTime,
+            String failureStrategy,
+            String warningType,
+            String warningGroupId,
+            String execType,
+            String workerGroup,
+            String tenantCode,
+            String runMode,
+            Integer expectedParallelismNumber,
+            String complementDependentMode,
+            Boolean allLevelDependent,
+            String executionOrder) {
+        try {
+            String path = String.format("/projects/%d/executors/start-process-instance", projectCode);
+            MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+            formData.add("processDefinitionCode", String.valueOf(processDefinitionCode));
+            formData.add("scheduleTime", scheduleTime != null ? scheduleTime : "");
+            formData.add("failureStrategy", failureStrategy != null ? failureStrategy : "CONTINUE");
+            formData.add("warningType", warningType != null ? warningType : "NONE");
+            formData.add("warningGroupId", warningGroupId != null ? warningGroupId : "0");
+            formData.add("execType", execType != null ? execType : "START_PROCESS");
+            formData.add("workerGroup", workerGroup != null ? workerGroup : "default");
+            formData.add("tenantCode", tenantCode != null ? tenantCode : "default");
+            formData.add("dryRun", "0");
+
+            if (StringUtils.hasText(runMode)) {
+                formData.add("runMode", runMode);
+            }
+            if (expectedParallelismNumber != null) {
+                formData.add("expectedParallelismNumber", String.valueOf(expectedParallelismNumber));
+            }
+            if (StringUtils.hasText(complementDependentMode)) {
+                formData.add("complementDependentMode", complementDependentMode);
+            }
+            if (allLevelDependent != null) {
+                formData.add("allLevelDependent", String.valueOf(allLevelDependent));
+            }
+            if (StringUtils.hasText(executionOrder)) {
+                formData.add("executionOrder", executionOrder);
+            }
+
+            return postForm(path, formData);
+        } catch (Exception e) {
+            log.error("Failed to start process instance {}", processDefinitionCode, e);
             throw new RuntimeException("Failed to start process: " + e.getMessage());
         }
     }
