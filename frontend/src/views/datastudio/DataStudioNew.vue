@@ -921,6 +921,7 @@ const tableLoading = reactive({})
 const tableStore = reactive({})
 const lineageCache = reactive({})
 const activatedSources = reactive({})
+const datasourceActivationTasks = new Map()
 
 const catalogTreeRef = ref(null)
 const catalogTreeProps = {
@@ -985,9 +986,11 @@ const loadClusters = async () => {
         dataSources.value.find((item) => item.isDefault === 1) || dataSources.value[0]
       activeSource.value = defaultSource?.id ? String(defaultSource.id) : ''
       if (activeSource.value) {
-        await loadSchemas(activeSource.value)
-        await nextTick()
-        await ensureCatalogPathExpanded(activeSource.value, activeSchema[String(activeSource.value)])
+        const ok = await loadSchemas(activeSource.value)
+        if (ok) {
+          await nextTick()
+          await ensureCatalogPathExpanded(activeSource.value, activeSchema[String(activeSource.value)])
+        }
       }
     }
   } catch (error) {
@@ -997,12 +1000,54 @@ const loadClusters = async () => {
   }
 }
 
-const loadSchemas = async (sourceId, force = false) => {
-  if (!sourceId) return
+const getDatasourceById = (sourceId) => {
+  const id = String(sourceId || '')
+  const list = Array.isArray(dataSources.value) ? dataSources.value : []
+  return list.find((item) => String(item.id) === id) || null
+}
+
+const activateDatasource = async (sourceId) => {
+  if (!sourceId) return false
   const key = String(sourceId)
-  if (schemaStore[key] && !force) return
+  const source = getDatasourceById(key)
+  if (source?.status && source.status !== 'active') {
+    ElMessage.warning('数据源已停用')
+    return false
+  }
+  if (activatedSources[key]) return true
+  if (datasourceActivationTasks.has(key)) {
+    return datasourceActivationTasks.get(key)
+  }
+
+  const task = (async () => {
+    try {
+      await dorisClusterApi.testConnection(sourceId)
+      activatedSources[key] = true
+      return true
+    } catch (error) {
+      activatedSources[key] = false
+      ElMessage.error('数据源连接失败')
+      return false
+    } finally {
+      datasourceActivationTasks.delete(key)
+    }
+  })()
+
+  datasourceActivationTasks.set(key, task)
+  return task
+}
+
+const loadSchemas = async (sourceId, force = false) => {
+  if (!sourceId) return false
+  const key = String(sourceId)
+  if (schemaStore[key] && !force) {
+    activatedSources[key] = true
+    return true
+  }
   schemaLoading[key] = true
   try {
+    const activated = await activateDatasource(sourceId)
+    if (!activated) return false
     const schemas = await dorisClusterApi.getDatabases(sourceId)
     schemaStore[key] = Array.isArray(schemas) ? schemas : []
     activatedSources[key] = true
@@ -1011,21 +1056,25 @@ const loadSchemas = async (sourceId, force = false) => {
       activeSchema[key] = schemaStore[key][0]
       await loadTables(sourceId, activeSchema[key])
     }
+    return true
   } catch (error) {
     ElMessage.error('加载数据库列表失败')
+    return false
   } finally {
     schemaLoading[key] = false
   }
 }
 
 const loadTables = async (sourceId, database, force = false) => {
-  if (!sourceId || !database) return
+  if (!sourceId || !database) return false
   const sourceKey = String(sourceId)
   tableStore[sourceKey] = tableStore[sourceKey] || {}
-  if (tableStore[sourceKey][database] && !force) return
+  if (tableStore[sourceKey][database] && !force) return true
   const loadingKey = `${sourceKey}::${database}`
   tableLoading[loadingKey] = true
   try {
+    const activated = await activateDatasource(sourceId)
+    if (!activated) return false
     const [tables, metaTables] = await Promise.all([
       dorisClusterApi.getTables(sourceId, database),
       tableApi.listByDatabase(database, sortField.value, sortOrder.value, sourceId).catch(() => [])
@@ -1054,8 +1103,10 @@ const loadTables = async (sourceId, database, force = false) => {
     })
     tableStore[sourceKey][database] = list
     refreshSchemaChildrenInTree(sourceId, database)
+    return true
   } catch (error) {
     ElMessage.error('加载表列表失败')
+    return false
   } finally {
     tableLoading[loadingKey] = false
   }
@@ -1249,7 +1300,7 @@ const filterCatalogNode = (value, data) => {
   return String(data?.name || '').toLowerCase().includes(keyword)
 }
 
-const loadCatalogNode = async (node, resolve) => {
+const loadCatalogNode = async (node, resolve, reject) => {
   const data = node?.data
   if (!data?.type) {
     resolve([])
@@ -1257,7 +1308,11 @@ const loadCatalogNode = async (node, resolve) => {
   }
 
   if (data.type === 'datasource') {
-    await loadSchemas(data.sourceId)
+    const ok = await loadSchemas(data.sourceId)
+    if (!ok) {
+      reject?.()
+      return
+    }
     const schemas = schemaStore[String(data.sourceId)] || []
     resolve(schemas.map((schemaName) => buildSchemaNode(data.sourceId, schemaName)))
     nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
@@ -1265,7 +1320,11 @@ const loadCatalogNode = async (node, resolve) => {
   }
 
   if (data.type === 'schema') {
-    await loadTables(data.sourceId, data.schemaName)
+    const ok = await loadTables(data.sourceId, data.schemaName)
+    if (!ok) {
+      reject?.()
+      return
+    }
     resolve(buildTableChildren(data.sourceId, data.schemaName))
     nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
     return
@@ -1276,9 +1335,6 @@ const loadCatalogNode = async (node, resolve) => {
 
 const handleCatalogNodeClick = (data) => {
   if (!data) return
-  if (data.type === 'datasource') {
-    activatedSources[String(data.sourceId)] = true
-  }
   if (data.type === 'table') {
     openTableTab(data.table, data.schemaName, data.sourceId)
     return
