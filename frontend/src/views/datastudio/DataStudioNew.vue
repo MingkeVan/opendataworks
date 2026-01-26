@@ -65,11 +65,13 @@
                   <template v-if="data.type === 'datasource'">
                     <img
                       v-if="getDatasourceIconUrl(data.sourceType)"
-                      class="node-icon datasource-logo"
+                      :class="['node-icon', 'datasource-logo', { 'is-inactive': isDatasourceIconInactive(data) }]"
                       :src="getDatasourceIconUrl(data.sourceType)"
                       :alt="data.sourceType || 'datasource'"
                     />
-                    <el-icon v-else class="node-icon datasource"><Document /></el-icon>
+                    <el-icon v-else :class="['node-icon', 'datasource', { 'is-inactive': isDatasourceIconInactive(data) }]">
+                      <Document />
+                    </el-icon>
                   </template>
                   <el-icon v-else-if="data.type === 'schema'" class="node-icon schema"><Coin /></el-icon>
                   <el-icon v-else class="node-icon table"><Grid /></el-icon>
@@ -918,6 +920,7 @@ const activeSchema = reactive({})
 const tableLoading = reactive({})
 const tableStore = reactive({})
 const lineageCache = reactive({})
+const activatedSources = reactive({})
 
 const catalogTreeRef = ref(null)
 const catalogTreeProps = {
@@ -937,6 +940,7 @@ const catalogRoots = computed(() => {
     name: source.clusterName || source.name || `DataSource ${source.id}`,
     sourceId: String(source.id),
     sourceType: source.sourceType,
+    status: source.status,
     leaf: false
   }))
 })
@@ -1001,6 +1005,7 @@ const loadSchemas = async (sourceId, force = false) => {
   try {
     const schemas = await dorisClusterApi.getDatabases(sourceId)
     schemaStore[key] = Array.isArray(schemas) ? schemas : []
+    activatedSources[key] = true
     refreshDatasourceChildrenInTree(sourceId)
     if (!activeSchema[key] && schemaStore[key].length) {
       activeSchema[key] = schemaStore[key][0]
@@ -1141,6 +1146,12 @@ const buildSchemaNode = (sourceId, schemaName) => ({
   leaf: false
 })
 
+const isDatasourceIconInactive = (nodeData) => {
+  if (!nodeData || nodeData.type !== 'datasource') return false
+  if (nodeData.status && nodeData.status !== 'active') return true
+  return !activatedSources[String(nodeData.sourceId)]
+}
+
 const getDatasourceIconUrl = (sourceType) => {
   const type = String(sourceType || '').toUpperCase()
   if (type === 'MYSQL') return '/datasource-icons/mysql.svg'
@@ -1265,6 +1276,9 @@ const loadCatalogNode = async (node, resolve) => {
 
 const handleCatalogNodeClick = (data) => {
   if (!data) return
+  if (data.type === 'datasource') {
+    activatedSources[String(data.sourceId)] = true
+  }
   if (data.type === 'table') {
     openTableTab(data.table, data.schemaName, data.sourceId)
     return
@@ -2771,6 +2785,14 @@ onBeforeUnmount(() => {
   width: 16px;
   height: 16px;
   display: block;
+}
+
+.datasource-logo.is-inactive {
+  filter: grayscale(1) saturate(0) opacity(0.55);
+}
+
+.node-icon.datasource.is-inactive {
+  color: #94a3b8;
 }
 
 .node-icon.datasource {
