@@ -556,10 +556,14 @@ public class DolphinSchedulerService {
      */
     public List<DolphinTaskGroupOption> listTaskGroups(String keyword) {
         try {
+            Long currentProjectCode = getProjectCode();
             DolphinPageData<DolphinTaskGroup> page = openApiClient.listTaskGroups(1, 200, keyword, null);
             if (page == null || page.getTotalList() == null) {
                 return Collections.emptyList();
             }
+            boolean hasProjectCode = page.getTotalList().stream()
+                    .filter(Objects::nonNull)
+                    .anyMatch(group -> group.getProjectCode() != null);
             List<DolphinTaskGroupOption> result = new ArrayList<>();
             for (DolphinTaskGroup group : page.getTotalList()) {
                 if (group == null) {
@@ -571,8 +575,13 @@ public class DolphinSchedulerService {
                 if (StringUtils.hasText(keyword) && !group.getName().contains(keyword)) {
                     continue;
                 }
+                if (hasProjectCode && currentProjectCode != null
+                        && !Objects.equals(currentProjectCode, group.getProjectCode())) {
+                    continue;
+                }
                 DolphinTaskGroupOption option = new DolphinTaskGroupOption();
                 option.setId(group.getId());
+                option.setProjectCode(group.getProjectCode());
                 option.setName(group.getName());
                 option.setDescription(group.getDescription());
                 option.setGroupSize(group.getGroupSize());

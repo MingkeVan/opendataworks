@@ -11,12 +11,12 @@ import lombok.Data;
 public class DolphinTaskGroup {
 
     private Integer id;
+    private Long projectCode;
     private String name;
     private String description;
     private Integer groupSize;
     private Integer useSize;
-    private Integer status;
+    private String status;
     private String createTime;
     private String updateTime;
 }
-
