@@ -108,13 +108,13 @@
                       {{ formatStorageSize(getTableStorageSize(data.table)) }}
                     </span>
                     <span
-                      class="lineage-count upstream"
+                      :class="['lineage-count', 'upstream', { 'is-zero': getUpstreamCount(data.table?.id) === 0 }]"
                       :title="`上游表: ${getUpstreamCount(data.table?.id)} 个`"
                     >
                       ↑{{ getUpstreamCount(data.table?.id) }}
                     </span>
                     <span
-                      class="lineage-count downstream"
+                      :class="['lineage-count', 'downstream', { 'is-zero': getDownstreamCount(data.table?.id) === 0 }]"
                       :title="`下游表: ${getDownstreamCount(data.table?.id)} 个`"
                     >
                       ↓{{ getDownstreamCount(data.table?.id) }}
@@ -2906,6 +2906,11 @@ onBeforeUnmount(() => {
 .lineage-count.downstream {
   color: #f59e0b;
   background-color: rgba(245, 158, 11, 0.1);
+}
+
+.lineage-count.is-zero {
+  color: #94a3b8;
+  background-color: rgba(148, 163, 184, 0.16);
 }
 
 .layer-tag {
