@@ -29,6 +29,10 @@ export const workflowApi = {
     return request.post(`/v1/workflows/${id}/execute`)
   },
 
+  backfill(id, payload) {
+    return request.post(`/v1/workflows/${id}/backfill`, payload)
+  },
+
   delete(id) {
     return request.delete(`/v1/workflows/${id}`)
   }

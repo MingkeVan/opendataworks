@@ -127,6 +127,14 @@
             </el-button>
             <el-button
               link
+              type="primary"
+              :disabled="isBackfillDisabled(row)"
+              @click="openBackfill(row)"
+            >
+              补数
+            </el-button>
+            <el-button
+              link
               type="success"
               :loading="getActionLoading(row.id, 'online')"
               :disabled="isOnlineDisabled(row)"
@@ -183,6 +191,12 @@
       @created="handleCreateSuccess"
       @updated="handleUpdateSuccess"
     />
+
+    <WorkflowBackfillDialog
+      v-model="backfillDialogVisible"
+      :workflow="backfillTarget"
+      @submitted="handleBackfillSubmitted"
+    />
   </div>
 </template>
 
@@ -195,6 +209,7 @@ import { Search, Link, Plus } from '@element-plus/icons-vue'
 import { workflowApi } from '@/api/workflow'
 import { taskApi } from '@/api/task'
 import WorkflowCreateDrawer from './WorkflowCreateDrawer.vue'
+import WorkflowBackfillDialog from './WorkflowBackfillDialog.vue'
 
 const router = useRouter()
 const loading = ref(false)
@@ -220,6 +235,8 @@ const pendingApprovalFlags = reactive({})
 const createDrawerVisible = ref(false)
 const editingWorkflowId = ref(null)
 const actionLoading = reactive({})
+const backfillDialogVisible = ref(false)
+const backfillTarget = ref(null)
 
 const loadWorkflows = async () => {
   loading.value = true
@@ -440,6 +457,12 @@ const isExecuteDisabled = (row) => {
   return !row.workflowCode
 }
 
+const isBackfillDisabled = (row) => {
+  if (!row) return true
+  if (pendingApprovalFlags[row.id]) return true
+  return !row.workflowCode
+}
+
 const refreshAfterAction = (workflowId) => {
   loadWorkflows()
 }
@@ -470,6 +493,10 @@ const handleDeploy = async (row) => {
 
 const handleExecute = async (row) => {
   if (!row?.id) return
+  if (row.status !== 'online') {
+    ElMessage.warning('工作流未上线，请先上线后再执行')
+    return
+  }
   setActionLoading(row.id, 'execute', true)
   try {
     const executionId = await workflowApi.execute(row.id)
@@ -481,6 +508,19 @@ const handleExecute = async (row) => {
   } finally {
     setActionLoading(row.id, 'execute', false)
   }
+}
+
+const openBackfill = (row) => {
+  if (row?.status !== 'online') {
+    ElMessage.warning('工作流未上线，请先上线后再补数')
+    return
+  }
+  backfillTarget.value = row || null
+  backfillDialogVisible.value = true
+}
+
+const handleBackfillSubmitted = () => {
+  refreshAfterAction(backfillTarget.value?.id)
 }
 
 const handleOnline = async (row) => {

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
 import com.onedata.portal.dto.workflow.WorkflowApprovalRequest;
+import com.onedata.portal.dto.workflow.WorkflowBackfillRequest;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowDetailResponse;
 import com.onedata.portal.dto.workflow.WorkflowPublishRequest;
@@ -69,6 +70,12 @@ public class WorkflowController {
     public Result<String> execute(@PathVariable Long id) {
         String executionId = workflowService.executeWorkflow(id);
         return Result.success(executionId);
+    }
+
+    @PostMapping("/{id}/backfill")
+    public Result<String> backfill(@PathVariable Long id, @RequestBody WorkflowBackfillRequest request) {
+        String triggerId = workflowService.backfillWorkflow(id, request);
+        return Result.success(triggerId);
     }
 
     @DeleteMapping("/{id}")
