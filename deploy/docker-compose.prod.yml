@@ -16,7 +16,7 @@ services:
       - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
-      # 可选：在 ../database/mysql 中放置初始化 SQL
+      # 数据库初始化脚本：在 ../database/mysql 中放置 SQL 文件，容器首次启动时自动执行
       - ../database/mysql:/docker-entrypoint-initdb.d:ro
     networks:
       - opendataworks-network
@@ -62,7 +62,7 @@ services:
     env_file:
       - ./.env
     ports:
-      - "80:80"
+      - "8081:80"
     depends_on:
       - backend
     networks:

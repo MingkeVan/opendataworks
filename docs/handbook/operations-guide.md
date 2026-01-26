@@ -23,9 +23,9 @@ scripts/build/build-multiarch.sh --namespace your-registry
 
 - MySQL 卷：`mysql-data`
 - 后端日志卷：`backend-logs`
+- **数据库自动初始化**：MySQL 容器首次启动时，会自动执行 `deploy/database/mysql/` 目录下的初始化脚本，创建数据库和用户。无需手动创建数据库。表结构由后端服务的 Flyway 自动创建。
 - 环境变量重点：
   - `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE=opendataworks`, `MYSQL_USER=opendataworks`
-  - `SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/opendataworks`
   - `SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/opendataworks`
   - DolphinScheduler 配置请在系统管理界面进行
 - 需要扩展端口（如前端 80 → 8081）时，直接修改 `ports`。

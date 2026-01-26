@@ -22,6 +22,8 @@ cd opendataworks
 
 由于项目集成了 Flyway，您只需创建数据库和用户，无需手动导入表结构。
 
+> **💡 Docker 部署提示**: 如果使用 Docker Compose 部署（见下方"Docker 部署"章节），数据库和用户会自动创建，**无需手动执行以下步骤**。
+
 ```bash
 # 登录 MySQL
 mysql -u root -p
@@ -80,6 +82,8 @@ npm run dev
 
 ## Docker 部署
 
+使用 Docker Compose 部署时，数据库和用户会自动初始化，无需手动创建。
+
 ### 开发环境快速启动
 
 如果希望一次性在本机拉起完整环境（前端 + 后端 + MySQL），可使用开发环境 Compose：
@@ -95,6 +99,12 @@ docker compose -f deploy/docker-compose.dev.yml up -d
 # 前端: http://localhost:8081
 # 后端: http://localhost:8080/api
 ```
+
+**数据库自动初始化说明**：
+- MySQL 容器首次启动时，会自动执行 `deploy/database/mysql/` 目录下的初始化脚本
+- 数据库 `opendataworks` 和用户 `opendataworks` 会自动创建，字符集为 `utf8mb4`
+- 表结构由后端服务的 Flyway 自动创建（首次启动时）
+- 数据保存在 Docker volume 中，重启容器不会丢失数据，也不会重复执行初始化脚本
 
 ### 生产环境/离线部署
 

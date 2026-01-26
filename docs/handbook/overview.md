@@ -33,7 +33,7 @@ OpenDataWorks 是一个统一的数据资产门户，聚合了数据表建模、
 | **数据门户 (Portal)** | Spring Boot + Vue3 主应用，保存所有表/任务元数据 | repo: `opendataworks` |
 | **DolphinScheduler (OpenAPI)** | 调度引擎，由 Java 后端直接调用 OpenAPI 完成工作流管理 | 外部部署的 DolphinScheduler 集群 |
 | **Dinky Gateway** | 预留的流任务接口，将在 Phase 2 解锁 | 目录 `dinky/` (上游源码) |
-| **OpenDataWorks DB** | 统一数据库 `opendataworks`，默认账号 `opendataworks/opendataworks123` | Flyway 首次启动自动建表，账号配置见 `deploy/.env.example` |
+| **OpenDataWorks DB** | 统一数据库 `opendataworks`，默认账号 `opendataworks/opendataworks123` | Docker 部署时自动初始化数据库和用户；Flyway 首次启动自动建表；账号配置见 `deploy/.env.example` |
 | **业务域** | 组织视角 (tech、crm、trade …) | 写入 `business_domain` 表 |
 | **数据域** | 数据主题视角 (ops、user …) | 与业务域多对一关联 |
 | **数据分层** | ODS/DWD/DIM/DWS/ADS | 决定命名、统计周期、指标粒度 |
@@ -41,7 +41,9 @@ OpenDataWorks 是一个统一的数据资产门户，聚合了数据表建模、
 ## 快速进场指南
 
 1. **了解故事线**：阅读本文件 + [architecture.md](architecture.md)。
-2. **初始化数据库**：在 MySQL 中创建 `opendataworks` 库和账号（参考 quick-start），后端启动时由 Flyway 自动建表。
+2. **初始化数据库**：
+   - **Docker 部署**：数据库和用户会自动创建，无需手动操作（见 [quick-start](../guide/start/quick-start.md)）
+   - **手动部署**：在 MySQL 中创建 `opendataworks` 库和账号（参考 quick-start），后端启动时由 Flyway 自动建表
 3. **启动服务**：按照 [development-guide.md](development-guide.md) 依次启动后端、前端（DolphinScheduler 需要单独部署或指向现有集群）。
 4. **加载演示案例**：登录前端使用 `admin/admin123`（示例账号）体验表-任务-血缘的全链条。
 5. **扩展/定制**：参考 [operations-guide.md](operations-guide.md) 建立自己的部署方式，再查看 [features](features/) 下的专题文档做二次开发。
