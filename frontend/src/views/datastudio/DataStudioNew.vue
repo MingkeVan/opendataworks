@@ -108,18 +108,16 @@
                       {{ formatStorageSize(getTableStorageSize(data.table)) }}
                     </span>
                     <span
-                      v-if="data.table?.id && getUpstreamCount(data.table.id) > 0"
                       class="lineage-count upstream"
-                      :title="`上游表: ${getUpstreamCount(data.table.id)} 个`"
+                      :title="`上游表: ${getUpstreamCount(data.table?.id)} 个`"
                     >
-                      ↑{{ getUpstreamCount(data.table.id) }}
+                      ↑{{ getUpstreamCount(data.table?.id) }}
                     </span>
                     <span
-                      v-if="data.table?.id && getDownstreamCount(data.table.id) > 0"
                       class="lineage-count downstream"
-                      :title="`下游表: ${getDownstreamCount(data.table.id)} 个`"
+                      :title="`下游表: ${getDownstreamCount(data.table?.id)} 个`"
                     >
-                      ↓{{ getDownstreamCount(data.table.id) }}
+                      ↓{{ getDownstreamCount(data.table?.id) }}
                     </span>
                   </div>
                 </div>
