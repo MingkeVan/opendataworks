@@ -22,6 +22,9 @@ import DataSourceManagement from '@/views/settings/DataSourceManagement.vue'
 
 .page-header {
   margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .page-header h2 {
@@ -31,4 +34,3 @@ import DataSourceManagement from '@/views/settings/DataSourceManagement.vue'
   color: #1a1a1a;
 }
 </style>
-

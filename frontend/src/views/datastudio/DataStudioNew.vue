@@ -1,5 +1,5 @@
 <template>
-  <div :class="['data-studio', { 'is-resizing': isResizing }, `tree-style-${treeStyle}`]">
+  <div :class="['data-studio', { 'is-resizing': isResizing }]">
     <div class="studio-layout">
       <!-- Left: Database Tree -->
       <aside class="studio-sidebar" :style="{ width: `${sidebarWidth}px` }">
@@ -32,124 +32,92 @@
               <el-radio-button label="desc">降序</el-radio-button>
             </el-radio-group>
           </div>
-          <div class="tree-style-row">
-            <el-radio-group v-model="treeStyle" size="small" class="tree-style-group">
-              <el-radio-button label="a">A 简洁</el-radio-button>
-              <el-radio-button label="b">B 卡片</el-radio-button>
-              <el-radio-button label="c">C 连线</el-radio-button>
-            </el-radio-group>
-          </div>
         </div>
 
         <div class="db-tree" v-loading="dbLoading">
-          <el-collapse v-model="activeSource" accordion @change="handleSourceChange">
-            <el-collapse-item
-              v-for="source in dataSources"
-              :key="source.id"
-              :name="String(source.id)"
-            >
-              <template #title>
-                <div class="source-title">
-                  <el-icon class="db-toggle">
-                    <ArrowDown v-if="String(activeSource) === String(source.id)" />
-                    <ArrowRight v-else />
-                  </el-icon>
-                  <el-icon class="source-icon"><Document /></el-icon>
-                  <span class="db-name">{{ source.clusterName }}</span>
-                  <el-tag size="small" class="source-type" :type="source.sourceType === 'MYSQL' ? 'success' : 'warning'">
-                    {{ source.sourceType || 'DORIS' }}
-                  </el-tag>
-                  <el-icon v-if="schemaLoading[String(source.id)]" class="is-loading loading-icon"><Loading /></el-icon>
+          <el-tree
+            ref="catalogTreeRef"
+            :data="catalogRoots"
+            node-key="nodeKey"
+            :props="catalogTreeProps"
+            lazy
+            accordion
+            highlight-current
+            :current-node-key="selectedTableKey"
+            :filter-node-method="filterCatalogNode"
+            :load="loadCatalogNode"
+            class="catalog-tree"
+            @node-click="handleCatalogNodeClick"
+          >
+            <template #default="{ data }">
+              <div
+                class="catalog-node"
+                :class="`catalog-node--${data.type}`"
+                :ref="(el) => (data.type === 'table' ? setTableRef(data.nodeKey, el, data.table?.id) : null)"
+              >
+                <div
+                  v-if="data.type === 'table'"
+                  class="table-progress-bg"
+                  :style="{ width: getProgressWidth(data.sourceId, data.schemaName, data.table) }"
+                ></div>
+
+                <div class="catalog-node-row">
+                  <el-icon v-if="data.type === 'datasource'" class="node-icon datasource"><Document /></el-icon>
+                  <el-icon v-else-if="data.type === 'schema'" class="node-icon schema"><Coin /></el-icon>
+                  <el-icon v-else class="node-icon table"><Grid /></el-icon>
+
+	                  <div v-if="data.type === 'table'" class="table-main">
+	                    <div class="table-title">
+	                      <span class="table-name" :title="data.table?.tableName">
+	                        {{ data.table?.tableName }}
+	                      </span>
+	                    </div>
+	                    <div v-if="data.table?.tableComment" class="table-comment" :title="data.table.tableComment">
+	                      {{ data.table.tableComment }}
+	                    </div>
+	                  </div>
+                  <span v-else class="node-name">{{ data.name }}</span>
+
+                  <div v-if="data.type === 'datasource'" class="node-right">
+                    <el-tag size="small" class="source-type" :type="data.sourceType === 'MYSQL' ? 'success' : 'warning'">
+                      {{ data.sourceType || 'DORIS' }}
+                    </el-tag>
+                    <el-icon v-if="schemaLoading[String(data.sourceId)]" class="is-loading loading-icon"><Loading /></el-icon>
+                  </div>
+
+                  <div v-else-if="data.type === 'schema'" class="node-right">
+                    <el-badge :value="getTableCount(data.sourceId, data.schemaName)" type="info" class="db-count" />
+                    <el-icon v-if="tableLoading[`${String(data.sourceId)}::${data.schemaName}`]" class="is-loading loading-icon">
+                      <Loading />
+                    </el-icon>
+                  </div>
+
+                  <div v-else class="table-meta-tags">
+                    <span class="row-count" :title="`数据量: ${formatNumber(getTableRowCount(data.table))} 行`">
+                      {{ formatRowCount(getTableRowCount(data.table)) }}
+                    </span>
+                    <span class="storage-size" :title="`存储大小: ${formatStorageSize(getTableStorageSize(data.table))}`">
+                      {{ formatStorageSize(getTableStorageSize(data.table)) }}
+                    </span>
+                    <span
+                      v-if="data.table?.id && getUpstreamCount(data.table.id) > 0"
+                      class="lineage-count upstream"
+                      :title="`上游表: ${getUpstreamCount(data.table.id)} 个`"
+                    >
+                      ↑{{ getUpstreamCount(data.table.id) }}
+                    </span>
+                    <span
+                      v-if="data.table?.id && getDownstreamCount(data.table.id) > 0"
+                      class="lineage-count downstream"
+                      :title="`下游表: ${getDownstreamCount(data.table.id)} 个`"
+                    >
+                      ↓{{ getDownstreamCount(data.table.id) }}
+                    </span>
+                  </div>
                 </div>
-              </template>
-
-              <div class="schema-list">
-                <el-collapse
-                  v-model="activeSchema[String(source.id)]"
-                  accordion
-                  @change="(schema) => handleSchemaChange(source.id, schema)"
-                >
-                  <el-collapse-item
-                    v-for="schema in schemaStore[String(source.id)] || []"
-                    :key="schema"
-                    :name="schema"
-                  >
-                    <template #title>
-                      <div class="db-title">
-                        <el-icon class="db-toggle">
-                          <ArrowDown v-if="activeSchema[String(source.id)] === schema" />
-                          <ArrowRight v-else />
-                        </el-icon>
-                        <el-icon class="db-icon"><Coin /></el-icon>
-                        <span class="db-name">{{ schema }}</span>
-                        <el-badge :value="getTableCount(source.id, schema)" type="info" class="db-count" />
-                        <el-icon
-                          v-if="tableLoading[`${String(source.id)}::${schema}`]"
-                          class="is-loading loading-icon"
-                        >
-                          <Loading />
-                        </el-icon>
-                      </div>
-                    </template>
-
-                    <div class="table-list">
-                      <div
-                        v-for="table in getDisplayedTables(source.id, schema)"
-                        :key="getTableKey(table, schema, source.id) || table.id || table.tableName"
-                        class="table-item"
-                        :class="{ active: selectedTableKey === getTableKey(table, schema, source.id) }"
-                        :ref="(el) => setTableRef(getTableKey(table, schema, source.id), el, table.id)"
-                        @click="openTableTab(table, schema, source.id)"
-                      >
-                        <div
-                          class="table-progress-bg"
-                          :style="{ width: getProgressWidth(source.id, schema, table) }"
-                        ></div>
-                        <div class="table-content">
-                          <el-icon class="table-icon"><Grid /></el-icon>
-                          <div class="table-info">
-                            <span class="table-name" :title="table.tableName">
-                              {{ table.tableName }}
-                            </span>
-                            <span v-if="table.tableComment" class="table-comment" :title="table.tableComment">
-                              {{ table.tableComment }}
-                            </span>
-                          </div>
-                          <div class="table-meta-tags">
-                            <span class="row-count" :title="`数据量: ${formatNumber(getTableRowCount(table))} 行`">
-                              {{ formatRowCount(getTableRowCount(table)) }}
-                            </span>
-                            <span class="storage-size" :title="`存储大小: ${formatStorageSize(getTableStorageSize(table))}`">
-                              {{ formatStorageSize(getTableStorageSize(table)) }}
-                            </span>
-                            <span v-if="getUpstreamCount(table.id) > 0" class="lineage-count upstream" :title="`上游表: ${getUpstreamCount(table.id)} 个`">
-                              ↑{{ getUpstreamCount(table.id) }}
-                            </span>
-                            <span v-if="getDownstreamCount(table.id) > 0" class="lineage-count downstream" :title="`下游表: ${getDownstreamCount(table.id)} 个`">
-                              ↓{{ getDownstreamCount(table.id) }}
-                            </span>
-                            <el-tag
-                              v-if="table.layer"
-                              size="small"
-                              :type="getLayerType(table.layer)"
-                              class="layer-tag"
-                            >
-                              {{ table.layer }}
-                            </el-tag>
-                          </div>
-                        </div>
-                      </div>
-                      <el-empty
-                        v-if="!getDisplayedTables(source.id, schema).length"
-                        description="暂无表"
-                        :image-size="60"
-                      />
-                    </div>
-                  </el-collapse-item>
-                </el-collapse>
               </div>
-            </el-collapse-item>
-          </el-collapse>
+            </template>
+          </el-tree>
         </div>
       </aside>
 
@@ -894,13 +862,11 @@
 </template>
 
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import {
-  ArrowDown,
-  ArrowRight,
   Coin,
   Search,
   Clock,
@@ -947,10 +913,31 @@ const tableLoading = reactive({})
 const tableStore = reactive({})
 const lineageCache = reactive({})
 
+const catalogTreeRef = ref(null)
+const catalogTreeProps = {
+  children: 'children',
+  label: 'name',
+  isLeaf: 'leaf'
+}
+
+const getDatasourceNodeKey = (sourceId) => `ds:${String(sourceId)}`
+const getSchemaNodeKey = (sourceId, schemaName) => `schema:${String(sourceId)}::${schemaName}`
+
+const catalogRoots = computed(() => {
+  const list = Array.isArray(dataSources.value) ? dataSources.value : []
+  return list.map((source) => ({
+    nodeKey: getDatasourceNodeKey(source.id),
+    type: 'datasource',
+    name: source.clusterName || source.name || `DataSource ${source.id}`,
+    sourceId: String(source.id),
+    sourceType: source.sourceType,
+    leaf: false
+  }))
+})
+
 const searchKeyword = ref('')
 const sortField = ref('tableName')
 const sortOrder = ref('asc')
-const treeStyle = ref('b')
 
 const selectedTableKey = ref('')
 const suppressRouteSync = ref(false)
@@ -989,6 +976,8 @@ const loadClusters = async () => {
       activeSource.value = defaultSource?.id ? String(defaultSource.id) : ''
       if (activeSource.value) {
         await loadSchemas(activeSource.value)
+        await nextTick()
+        await ensureCatalogPathExpanded(activeSource.value, activeSchema[String(activeSource.value)])
       }
     }
   } catch (error) {
@@ -1006,6 +995,7 @@ const loadSchemas = async (sourceId, force = false) => {
   try {
     const schemas = await dorisClusterApi.getDatabases(sourceId)
     schemaStore[key] = Array.isArray(schemas) ? schemas : []
+    refreshDatasourceChildrenInTree(sourceId)
     if (!activeSchema[key] && schemaStore[key].length) {
       activeSchema[key] = schemaStore[key][0]
       await loadTables(sourceId, activeSchema[key])
@@ -1052,6 +1042,7 @@ const loadTables = async (sourceId, database, force = false) => {
       }
     })
     tableStore[sourceKey][database] = list
+    refreshSchemaChildrenInTree(sourceId, database)
   } catch (error) {
     ElMessage.error('加载表列表失败')
   } finally {
@@ -1133,6 +1124,173 @@ const getTableKey = (table, fallbackDb = '', fallbackSource = '') => {
   const tableName = table.tableName || ''
   const core = dbName && tableName ? `${dbName}.${tableName}` : tableName || dbName
   return sourceId ? `${sourceId}::${core}` : core
+}
+
+const buildSchemaNode = (sourceId, schemaName) => ({
+  nodeKey: getSchemaNodeKey(sourceId, schemaName),
+  type: 'schema',
+  name: schemaName,
+  sourceId: String(sourceId),
+  schemaName,
+  leaf: false
+})
+
+const buildTableNode = (table, sourceId, schemaName) => {
+  const key = getTableKey(table, schemaName, sourceId)
+  return {
+    nodeKey: key || `table:${String(sourceId)}::${schemaName}.${table?.tableName || ''}`,
+    type: 'table',
+    name: table?.tableName || '',
+    sourceId: String(sourceId),
+    schemaName,
+    table,
+    leaf: true
+  }
+}
+
+const parseTimeValue = (value) => {
+  if (!value) return 0
+  if (typeof value === 'number') return value
+  const text = String(value)
+  const parsed = Date.parse(text)
+  if (!Number.isNaN(parsed)) return parsed
+  const fallback = Date.parse(text.replace(' ', 'T'))
+  return Number.isNaN(fallback) ? 0 : fallback
+}
+
+const getTableSortValue = (table) => {
+  const field = sortField.value
+  if (field === 'rowCount') return getTableRowCount(table)
+  if (field === 'createdAt') return parseTimeValue(table?.createdAt ?? table?.createTime ?? table?.CREATE_TIME)
+  return String(table?.tableName || '').toLowerCase()
+}
+
+const getSortedTablesForTree = (sourceId, database) => {
+  const sourceKey = String(sourceId || '')
+  const list = [...(tableStore[sourceKey]?.[database] || [])]
+  const order = sortOrder.value
+  list.sort((a, b) => {
+    const aVal = getTableSortValue(a)
+    const bVal = getTableSortValue(b)
+    if (aVal === bVal) return 0
+    if (order === 'asc') return aVal > bVal ? 1 : -1
+    return aVal < bVal ? 1 : -1
+  })
+  return list
+}
+
+const buildTableChildren = (sourceId, database) => {
+  return getSortedTablesForTree(sourceId, database).map((table) => buildTableNode(table, sourceId, database))
+}
+
+const refreshDatasourceChildrenInTree = (sourceId) => {
+  const tree = catalogTreeRef.value
+  if (!tree || !sourceId) return
+  const key = getDatasourceNodeKey(sourceId)
+  const node = tree.getNode(key)
+  if (!node?.loaded) return
+  const schemas = schemaStore[String(sourceId)] || []
+  tree.updateKeyChildren(key, schemas.map((schemaName) => buildSchemaNode(sourceId, schemaName)))
+  nextTick(() => tree.filter(searchKeyword.value))
+}
+
+const refreshSchemaChildrenInTree = (sourceId, database) => {
+  const tree = catalogTreeRef.value
+  if (!tree || !sourceId || !database) return
+  const key = getSchemaNodeKey(sourceId, database)
+  const node = tree.getNode(key)
+  if (!node?.loaded) return
+  tree.updateKeyChildren(key, buildTableChildren(sourceId, database))
+  nextTick(() => tree.filter(searchKeyword.value))
+}
+
+const refreshLoadedSchemaNodesInTree = () => {
+  Object.keys(tableStore).forEach((sourceId) => {
+    const dbMap = tableStore[sourceId]
+    if (!dbMap || typeof dbMap !== 'object') return
+    Object.keys(dbMap).forEach((schemaName) => {
+      refreshSchemaChildrenInTree(sourceId, schemaName)
+    })
+  })
+}
+
+const filterCatalogNode = (value, data) => {
+  if (!value) return true
+  const keyword = String(value).toLowerCase()
+  if (data?.type === 'table') {
+    const name = String(data.table?.tableName || data.name || '').toLowerCase()
+    const comment = String(data.table?.tableComment || '').toLowerCase()
+    return name.includes(keyword) || comment.includes(keyword)
+  }
+  return String(data?.name || '').toLowerCase().includes(keyword)
+}
+
+const loadCatalogNode = async (node, resolve) => {
+  const data = node?.data
+  if (!data?.type) {
+    resolve([])
+    return
+  }
+
+  if (data.type === 'datasource') {
+    await loadSchemas(data.sourceId)
+    const schemas = schemaStore[String(data.sourceId)] || []
+    resolve(schemas.map((schemaName) => buildSchemaNode(data.sourceId, schemaName)))
+    nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
+    return
+  }
+
+  if (data.type === 'schema') {
+    await loadTables(data.sourceId, data.schemaName)
+    resolve(buildTableChildren(data.sourceId, data.schemaName))
+    nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
+    return
+  }
+
+  resolve([])
+}
+
+const handleCatalogNodeClick = (data) => {
+  if (!data) return
+  if (data.type === 'table') {
+    openTableTab(data.table, data.schemaName, data.sourceId)
+    return
+  }
+  nextTick(() => {
+    if (selectedTableKey.value) {
+      catalogTreeRef.value?.setCurrentKey(selectedTableKey.value, false)
+    }
+  })
+}
+
+const expandCatalogNode = (key) => {
+  return new Promise((resolve) => {
+    const tree = catalogTreeRef.value
+    if (!tree || !key) {
+      resolve(false)
+      return
+    }
+    const node = tree.getNode(key)
+    if (!node) {
+      resolve(false)
+      return
+    }
+    if (node.expanded) {
+      resolve(true)
+      return
+    }
+    node.expand(() => resolve(true), true)
+  })
+}
+
+const ensureCatalogPathExpanded = async (sourceId, schemaName) => {
+  if (!catalogTreeRef.value || !sourceId) return
+  await expandCatalogNode(getDatasourceNodeKey(sourceId))
+  await nextTick()
+  if (schemaName) {
+    await expandCatalogNode(getSchemaNodeKey(sourceId, schemaName))
+    await nextTick()
+  }
 }
 
 const getSourceName = (sourceId) => {
@@ -1427,6 +1585,9 @@ const focusTableInSidebar = async (table, key, dbFallback = '', sourceFallback =
     activeSchema[String(sourceId)] = dbName
     await loadTables(sourceId, dbName)
   }
+  await nextTick()
+  await ensureCatalogPathExpanded(sourceId, dbName)
+  catalogTreeRef.value?.setCurrentKey(key)
   await nextTick()
   const ref = tableRefs.value[key]
   if (ref?.scrollIntoView) {
@@ -2367,15 +2528,20 @@ watch(
   }
 )
 
-watch(treeStyle, (value) => {
-  localStorage.setItem('odwTreeStyle', value)
+watch(searchKeyword, (value) => {
+  catalogTreeRef.value?.filter(value)
+})
+
+watch([sortField, sortOrder], () => {
+  refreshLoadedSchemaNodesInTree()
+})
+
+watch(selectedTableKey, (value) => {
+  if (!value) return
+  catalogTreeRef.value?.setCurrentKey(value, false)
 })
 
 onMounted(() => {
-  const savedTreeStyle = localStorage.getItem('odwTreeStyle')
-  if (savedTreeStyle === 'a' || savedTreeStyle === 'b' || savedTreeStyle === 'c') {
-    treeStyle.value = savedTreeStyle
-  }
   setupTableObserver()
   loadClusters()
   fetchHistory()
@@ -2497,63 +2663,27 @@ onBeforeUnmount(() => {
   flex-wrap: nowrap;
 }
 
-.tree-style-row {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.tree-style-group {
-  display: inline-flex;
-  flex-wrap: nowrap;
-}
-
-
-
 .db-tree {
   flex: 1;
   padding: 8px 8px 12px;
   overflow: auto;
 }
 
-:deep(.el-collapse-item__header) {
-  padding: 0 6px;
-  height: 36px;
-  background: #fff;
-  border-bottom: 1px solid #eef1f6;
-  font-size: 13px;
+.catalog-tree {
+  width: 100%;
 }
 
-:deep(.el-collapse-item__arrow) {
-  display: none;
+:deep(.catalog-tree .el-tree-node__content) {
+  height: auto;
+  padding: 2px 6px;
 }
 
-:deep(.el-collapse-item__content) {
-  padding: 0;
+:deep(.catalog-tree .el-tree-node__content:hover) {
+  background-color: transparent;
 }
 
-.db-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.source-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.db-toggle {
-  color: #94a3b8;
-  font-size: 12px;
-}
-
-.db-icon {
-  color: #3b82f6;
-}
-
-.source-icon {
-  color: #f59e0b;
+:deep(.catalog-tree .el-tree-node.is-current > .el-tree-node__content) {
+  background-color: transparent;
 }
 
 .source-type {
@@ -2561,63 +2691,111 @@ onBeforeUnmount(() => {
   border-radius: 6px;
 }
 
-.db-name {
-  font-weight: 600;
-  color: #1f2f3d;
-}
-
 .db-count {
-  margin-left: auto;
-}
-
-.schema-list {
-  padding: 4px 0 6px 8px;
-}
-
-.schema-list :deep(.el-collapse-item__header) {
-  padding-left: 12px;
-}
-
-.schema-list :deep(.el-collapse-item__content) {
-  padding-left: 10px;
+  display: inline-flex;
 }
 
 .loading-icon {
   margin-left: 6px;
 }
 
-.table-list {
-  padding: 4px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.catalog-node {
+  width: 100%;
+  border-radius: 8px;
 }
 
-.table-item {
+.catalog-node--datasource,
+.catalog-node--schema {
+  padding: 6px 8px;
+  transition: background-color 0.2s ease;
+}
+
+.catalog-node--table {
   padding: 6px 8px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.3s ease;
   background-color: #fff;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   position: relative;
   overflow: hidden;
 }
 
-.table-item:hover {
+:deep(.catalog-tree .el-tree-node__content:hover .catalog-node--datasource),
+:deep(.catalog-tree .el-tree-node__content:hover .catalog-node--schema) {
+  background-color: var(--el-fill-color-light);
+}
+
+:deep(.catalog-tree .el-tree-node__content:hover .catalog-node--table) {
   border-color: #667eea;
   background-color: #f0f4ff;
-  transform: translateX(4px);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.08);
+}
+
+:deep(.catalog-tree .el-tree-node.is-current > .el-tree-node__content .catalog-node--table) {
+  border-color: #667eea;
+  background-color: #f0f4ff;
   box-shadow: 0 2px 8px rgba(102, 126, 234, 0.12);
 }
 
-.table-item.active {
-  border-color: #667eea;
-  background-color: #f0f4ff;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+.catalog-node-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+.catalog-node--table .catalog-node-row {
+  align-items: flex-start;
+}
+
+.node-icon {
+  flex-shrink: 0;
+}
+
+.node-icon.datasource {
+  color: #f59e0b;
+}
+
+.node-icon.schema {
+  color: #3b82f6;
+}
+
+.node-icon.table {
+  color: #667eea;
+}
+
+.node-name {
+  font-weight: 600;
+  color: #111827;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.table-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.table-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .table-progress-bg {
@@ -2631,150 +2809,12 @@ onBeforeUnmount(() => {
   z-index: 0;
 }
 
-.table-item:hover .table-progress-bg {
+:deep(.catalog-tree .el-tree-node__content:hover .table-progress-bg) {
   background: linear-gradient(90deg, rgba(102, 126, 234, 0.12) 0%, rgba(102, 126, 234, 0.04) 100%);
 }
 
-.table-item.active .table-progress-bg {
+:deep(.catalog-tree .el-tree-node.is-current > .el-tree-node__content .table-progress-bg) {
   background: linear-gradient(90deg, rgba(102, 126, 234, 0.18) 0%, rgba(102, 126, 234, 0.06) 100%);
-}
-
-.data-studio.tree-style-a .schema-list {
-  padding: 4px 0 6px 10px;
-}
-
-.data-studio.tree-style-a .table-list {
-  gap: 2px;
-}
-
-.data-studio.tree-style-a .table-item {
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  box-shadow: none;
-  transform: none;
-}
-
-.data-studio.tree-style-a .table-item:hover {
-  border-color: transparent;
-  background-color: var(--el-fill-color-light);
-  transform: none;
-  box-shadow: none;
-}
-
-.data-studio.tree-style-a .table-item.active {
-  border-color: transparent;
-  background-color: rgba(64, 158, 255, 0.12);
-  box-shadow: none;
-}
-
-.data-studio.tree-style-a .table-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  background: var(--el-color-primary);
-  border-radius: 2px;
-  z-index: 1;
-}
-
-.data-studio.tree-style-a .table-progress-bg,
-.data-studio.tree-style-a .table-item:hover .table-progress-bg,
-.data-studio.tree-style-a .table-item.active .table-progress-bg {
-  background: transparent;
-}
-
-.data-studio.tree-style-a .table-content {
-  z-index: 2;
-}
-
-.data-studio.tree-style-c .schema-list {
-  position: relative;
-  padding: 4px 0 6px 18px;
-}
-
-.data-studio.tree-style-c .schema-list::before {
-  content: '';
-  position: absolute;
-  left: 8px;
-  top: 6px;
-  bottom: 6px;
-  width: 1px;
-  background: var(--el-border-color-lighter);
-}
-
-.data-studio.tree-style-c .table-item {
-  border: 0;
-  background: transparent;
-  border-radius: 6px;
-  padding-left: 18px;
-  box-shadow: none;
-  transform: none;
-}
-
-.data-studio.tree-style-c .table-item::before {
-  content: '';
-  position: absolute;
-  left: 8px;
-  top: 50%;
-  width: 10px;
-  height: 1px;
-  background: var(--el-border-color-lighter);
-  transform: translateY(-50%);
-  z-index: 1;
-  pointer-events: none;
-}
-
-.data-studio.tree-style-c .table-item:hover {
-  border-color: transparent;
-  background-color: var(--el-fill-color-light);
-  transform: none;
-  box-shadow: none;
-}
-
-.data-studio.tree-style-c .table-item.active {
-  border-color: transparent;
-  background-color: rgba(64, 158, 255, 0.12);
-  box-shadow: none;
-}
-
-.data-studio.tree-style-c .table-item.active::before {
-  background: var(--el-color-primary);
-}
-
-.data-studio.tree-style-c .table-progress-bg,
-.data-studio.tree-style-c .table-item:hover .table-progress-bg,
-.data-studio.tree-style-c .table-item.active .table-progress-bg {
-  background: transparent;
-}
-
-.data-studio.tree-style-c .table-content {
-  z-index: 2;
-}
-
-.table-content {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  position: relative;
-  z-index: 1;
-}
-
-.table-icon {
-  color: #667eea;
-  flex-shrink: 0;
-}
-
-.table-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-  min-width: 0;
-  max-width: 240px;
 }
 
 .table-name {
@@ -2784,8 +2824,9 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex-shrink: 0;
-  max-width: 140px;
+  flex: 1;
+  min-width: 0;
+  max-width: 200px;
 }
 
 .table-comment {
@@ -2815,6 +2856,17 @@ onBeforeUnmount(() => {
   background-color: rgba(102, 126, 234, 0.1);
   border-radius: 4px;
   min-width: 35px;
+  text-align: center;
+}
+
+.storage-size {
+  font-size: 11px;
+  color: #475569;
+  font-weight: 500;
+  padding: 2px 6px;
+  background-color: rgba(14, 165, 233, 0.1);
+  border-radius: 4px;
+  min-width: 56px;
   text-align: center;
 }
 
