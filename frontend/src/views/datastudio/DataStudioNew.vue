@@ -62,7 +62,15 @@
                 ></div>
 
                 <div class="catalog-node-row">
-                  <el-icon v-if="data.type === 'datasource'" class="node-icon datasource"><Document /></el-icon>
+                  <template v-if="data.type === 'datasource'">
+                    <img
+                      v-if="getDatasourceIconUrl(data.sourceType)"
+                      class="node-icon datasource-logo"
+                      :src="getDatasourceIconUrl(data.sourceType)"
+                      :alt="data.sourceType || 'datasource'"
+                    />
+                    <el-icon v-else class="node-icon datasource"><Document /></el-icon>
+                  </template>
                   <el-icon v-else-if="data.type === 'schema'" class="node-icon schema"><Coin /></el-icon>
                   <el-icon v-else class="node-icon table"><Grid /></el-icon>
 
@@ -1134,6 +1142,13 @@ const buildSchemaNode = (sourceId, schemaName) => ({
   schemaName,
   leaf: false
 })
+
+const getDatasourceIconUrl = (sourceType) => {
+  const type = String(sourceType || '').toUpperCase()
+  if (type === 'MYSQL') return '/datasource-icons/mysql.svg'
+  if (type === 'DORIS') return '/datasource-icons/doris.svg'
+  return ''
+}
 
 const buildTableNode = (table, sourceId, schemaName) => {
   const key = getTableKey(table, schemaName, sourceId)
@@ -2752,6 +2767,12 @@ onBeforeUnmount(() => {
 
 .node-icon {
   flex-shrink: 0;
+}
+
+.datasource-logo {
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 
 .node-icon.datasource {
