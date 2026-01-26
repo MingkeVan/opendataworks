@@ -62,7 +62,17 @@
                 ></div>
 
                 <div class="catalog-node-row">
-                  <el-icon v-if="data.type === 'datasource'" class="node-icon datasource"><Document /></el-icon>
+                  <template v-if="data.type === 'datasource'">
+                    <img
+                      v-if="getDatasourceIconUrl(data.sourceType)"
+                      :class="['node-icon', 'datasource-logo', { 'is-inactive': isDatasourceIconInactive(data) }]"
+                      :src="getDatasourceIconUrl(data.sourceType)"
+                      :alt="data.sourceType || 'datasource'"
+                    />
+                    <el-icon v-else :class="['node-icon', 'datasource', { 'is-inactive': isDatasourceIconInactive(data) }]">
+                      <Document />
+                    </el-icon>
+                  </template>
                   <el-icon v-else-if="data.type === 'schema'" class="node-icon schema"><Coin /></el-icon>
                   <el-icon v-else class="node-icon table"><Grid /></el-icon>
 
@@ -100,18 +110,16 @@
                       {{ formatStorageSize(getTableStorageSize(data.table)) }}
                     </span>
                     <span
-                      v-if="data.table?.id && getUpstreamCount(data.table.id) > 0"
-                      class="lineage-count upstream"
-                      :title="`上游表: ${getUpstreamCount(data.table.id)} 个`"
+                      :class="['lineage-count', 'upstream', { 'is-zero': getUpstreamCount(data.table?.id) === 0 }]"
+                      :title="`上游表: ${getUpstreamCount(data.table?.id)} 个`"
                     >
-                      ↑{{ getUpstreamCount(data.table.id) }}
+                      ↑{{ getUpstreamCount(data.table?.id) }}
                     </span>
                     <span
-                      v-if="data.table?.id && getDownstreamCount(data.table.id) > 0"
-                      class="lineage-count downstream"
-                      :title="`下游表: ${getDownstreamCount(data.table.id)} 个`"
+                      :class="['lineage-count', 'downstream', { 'is-zero': getDownstreamCount(data.table?.id) === 0 }]"
+                      :title="`下游表: ${getDownstreamCount(data.table?.id)} 个`"
                     >
-                      ↓{{ getDownstreamCount(data.table.id) }}
+                      ↓{{ getDownstreamCount(data.table?.id) }}
                     </span>
                   </div>
                 </div>
@@ -912,6 +920,8 @@ const activeSchema = reactive({})
 const tableLoading = reactive({})
 const tableStore = reactive({})
 const lineageCache = reactive({})
+const activatedSources = reactive({})
+const datasourceActivationTasks = new Map()
 
 const catalogTreeRef = ref(null)
 const catalogTreeProps = {
@@ -931,6 +941,7 @@ const catalogRoots = computed(() => {
     name: source.clusterName || source.name || `DataSource ${source.id}`,
     sourceId: String(source.id),
     sourceType: source.sourceType,
+    status: source.status,
     leaf: false
   }))
 })
@@ -975,9 +986,11 @@ const loadClusters = async () => {
         dataSources.value.find((item) => item.isDefault === 1) || dataSources.value[0]
       activeSource.value = defaultSource?.id ? String(defaultSource.id) : ''
       if (activeSource.value) {
-        await loadSchemas(activeSource.value)
-        await nextTick()
-        await ensureCatalogPathExpanded(activeSource.value, activeSchema[String(activeSource.value)])
+        const ok = await loadSchemas(activeSource.value)
+        if (ok) {
+          await nextTick()
+          await ensureCatalogPathExpanded(activeSource.value, activeSchema[String(activeSource.value)])
+        }
       }
     }
   } catch (error) {
@@ -987,34 +1000,81 @@ const loadClusters = async () => {
   }
 }
 
-const loadSchemas = async (sourceId, force = false) => {
-  if (!sourceId) return
+const getDatasourceById = (sourceId) => {
+  const id = String(sourceId || '')
+  const list = Array.isArray(dataSources.value) ? dataSources.value : []
+  return list.find((item) => String(item.id) === id) || null
+}
+
+const activateDatasource = async (sourceId) => {
+  if (!sourceId) return false
   const key = String(sourceId)
-  if (schemaStore[key] && !force) return
+  const source = getDatasourceById(key)
+  if (source?.status && source.status !== 'active') {
+    ElMessage.warning('数据源已停用')
+    return false
+  }
+  if (activatedSources[key]) return true
+  if (datasourceActivationTasks.has(key)) {
+    return datasourceActivationTasks.get(key)
+  }
+
+  const task = (async () => {
+    try {
+      await dorisClusterApi.testConnection(sourceId)
+      activatedSources[key] = true
+      return true
+    } catch (error) {
+      activatedSources[key] = false
+      ElMessage.error('数据源连接失败')
+      return false
+    } finally {
+      datasourceActivationTasks.delete(key)
+    }
+  })()
+
+  datasourceActivationTasks.set(key, task)
+  return task
+}
+
+const loadSchemas = async (sourceId, force = false) => {
+  if (!sourceId) return false
+  const key = String(sourceId)
+  if (schemaStore[key] && !force) {
+    activatedSources[key] = true
+    return true
+  }
   schemaLoading[key] = true
   try {
+    const activated = await activateDatasource(sourceId)
+    if (!activated) return false
     const schemas = await dorisClusterApi.getDatabases(sourceId)
     schemaStore[key] = Array.isArray(schemas) ? schemas : []
+    activatedSources[key] = true
     refreshDatasourceChildrenInTree(sourceId)
     if (!activeSchema[key] && schemaStore[key].length) {
       activeSchema[key] = schemaStore[key][0]
       await loadTables(sourceId, activeSchema[key])
     }
+    return true
   } catch (error) {
     ElMessage.error('加载数据库列表失败')
+    return false
   } finally {
     schemaLoading[key] = false
   }
 }
 
 const loadTables = async (sourceId, database, force = false) => {
-  if (!sourceId || !database) return
+  if (!sourceId || !database) return false
   const sourceKey = String(sourceId)
   tableStore[sourceKey] = tableStore[sourceKey] || {}
-  if (tableStore[sourceKey][database] && !force) return
+  if (tableStore[sourceKey][database] && !force) return true
   const loadingKey = `${sourceKey}::${database}`
   tableLoading[loadingKey] = true
   try {
+    const activated = await activateDatasource(sourceId)
+    if (!activated) return false
     const [tables, metaTables] = await Promise.all([
       dorisClusterApi.getTables(sourceId, database),
       tableApi.listByDatabase(database, sortField.value, sortOrder.value, sourceId).catch(() => [])
@@ -1043,8 +1103,10 @@ const loadTables = async (sourceId, database, force = false) => {
     })
     tableStore[sourceKey][database] = list
     refreshSchemaChildrenInTree(sourceId, database)
+    return true
   } catch (error) {
     ElMessage.error('加载表列表失败')
+    return false
   } finally {
     tableLoading[loadingKey] = false
   }
@@ -1134,6 +1196,19 @@ const buildSchemaNode = (sourceId, schemaName) => ({
   schemaName,
   leaf: false
 })
+
+const isDatasourceIconInactive = (nodeData) => {
+  if (!nodeData || nodeData.type !== 'datasource') return false
+  if (nodeData.status && nodeData.status !== 'active') return true
+  return !activatedSources[String(nodeData.sourceId)]
+}
+
+const getDatasourceIconUrl = (sourceType) => {
+  const type = String(sourceType || '').toUpperCase()
+  if (type === 'MYSQL') return '/datasource-icons/mysql.svg'
+  if (type === 'DORIS') return '/datasource-icons/doris.svg'
+  return ''
+}
 
 const buildTableNode = (table, sourceId, schemaName) => {
   const key = getTableKey(table, schemaName, sourceId)
@@ -1225,7 +1300,7 @@ const filterCatalogNode = (value, data) => {
   return String(data?.name || '').toLowerCase().includes(keyword)
 }
 
-const loadCatalogNode = async (node, resolve) => {
+const loadCatalogNode = async (node, resolve, reject) => {
   const data = node?.data
   if (!data?.type) {
     resolve([])
@@ -1233,7 +1308,11 @@ const loadCatalogNode = async (node, resolve) => {
   }
 
   if (data.type === 'datasource') {
-    await loadSchemas(data.sourceId)
+    const ok = await loadSchemas(data.sourceId)
+    if (!ok) {
+      reject?.()
+      return
+    }
     const schemas = schemaStore[String(data.sourceId)] || []
     resolve(schemas.map((schemaName) => buildSchemaNode(data.sourceId, schemaName)))
     nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
@@ -1241,7 +1320,11 @@ const loadCatalogNode = async (node, resolve) => {
   }
 
   if (data.type === 'schema') {
-    await loadTables(data.sourceId, data.schemaName)
+    const ok = await loadTables(data.sourceId, data.schemaName)
+    if (!ok) {
+      reject?.()
+      return
+    }
     resolve(buildTableChildren(data.sourceId, data.schemaName))
     nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
     return
@@ -2754,6 +2837,20 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+.datasource-logo {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.datasource-logo.is-inactive {
+  filter: grayscale(1) saturate(0) opacity(0.55);
+}
+
+.node-icon.datasource.is-inactive {
+  color: #94a3b8;
+}
+
 .node-icon.datasource {
   color: #f59e0b;
 }
@@ -2887,6 +2984,11 @@ onBeforeUnmount(() => {
 .lineage-count.downstream {
   color: #f59e0b;
   background-color: rgba(245, 158, 11, 0.1);
+}
+
+.lineage-count.is-zero {
+  color: #94a3b8;
+  background-color: rgba(148, 163, 184, 0.16);
 }
 
 .layer-tag {
