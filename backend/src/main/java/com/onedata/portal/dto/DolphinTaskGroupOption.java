@@ -9,10 +9,10 @@ import lombok.Data;
 public class DolphinTaskGroupOption {
 
     private Integer id;
+    private Long projectCode;
     private String name;
     private String description;
     private Integer groupSize;
     private Integer useSize;
-    private Integer status;
+    private String status;
 }
-
