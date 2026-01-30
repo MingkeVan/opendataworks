@@ -58,6 +58,74 @@
         <el-descriptions-item label="上游节点数">{{ currentNode?.inDegree || 0 }}</el-descriptions-item>
         <el-descriptions-item label="下游节点数">{{ currentNode?.outDegree || 0 }}</el-descriptions-item>
       </el-descriptions>
+
+      <div class="task-section" v-loading="tasksLoading">
+        <div class="task-entry">
+          <div class="task-entry-header">
+            <span>写入任务 ({{ relatedTasks.writeTasks.length }})</span>
+            <el-button
+              type="primary"
+              size="small"
+              plain
+              :disabled="!currentNode?.tableId"
+              @click="goCreateRelatedTask('write')"
+            >
+              <el-icon><Plus /></el-icon>
+              新增写入任务
+            </el-button>
+          </div>
+          <div v-if="relatedTasks.writeTasks.length" class="task-entry-list">
+            <div v-for="task in relatedTasks.writeTasks" :key="task.id" class="task-entry-item">
+              <div class="task-entry-title">
+                <el-link type="primary" @click="goTaskDetail(task.id)">
+                  {{ task.taskName || '-' }}
+                </el-link>
+                <el-tag v-if="task.status" size="small" :type="taskStatusTag(task.status)">
+                  {{ task.status }}
+                </el-tag>
+              </div>
+              <div class="task-entry-meta">
+                <span>引擎: {{ task.engine || '-' }}</span>
+                <span v-if="task.taskCode">编码: {{ task.taskCode }}</span>
+              </div>
+            </div>
+          </div>
+          <el-empty v-else description="暂无写入任务" :image-size="50" />
+        </div>
+
+        <div class="task-entry">
+          <div class="task-entry-header">
+            <span>读取任务 ({{ relatedTasks.readTasks.length }})</span>
+            <el-button
+              type="primary"
+              size="small"
+              plain
+              :disabled="!currentNode?.tableId"
+              @click="goCreateRelatedTask('read')"
+            >
+              <el-icon><Plus /></el-icon>
+              新增读取任务
+            </el-button>
+          </div>
+          <div v-if="relatedTasks.readTasks.length" class="task-entry-list">
+            <div v-for="task in relatedTasks.readTasks" :key="task.id" class="task-entry-item">
+              <div class="task-entry-title">
+                <el-link type="primary" @click="goTaskDetail(task.id)">
+                  {{ task.taskName || '-' }}
+                </el-link>
+                <el-tag v-if="task.status" size="small" :type="taskStatusTag(task.status)">
+                  {{ task.status }}
+                </el-tag>
+              </div>
+              <div class="task-entry-meta">
+                <span>引擎: {{ task.engine || '-' }}</span>
+                <span v-if="task.taskCode">编码: {{ task.taskCode }}</span>
+              </div>
+            </div>
+          </div>
+          <el-empty v-else description="暂无读取任务" :image-size="50" />
+        </div>
+      </div>
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="dialogVisible = false">关闭</el-button>
@@ -67,17 +135,21 @@
         </span>
       </template>
     </el-dialog>
+
+    <TaskEditDrawer ref="taskDrawerRef" @success="handleTaskSuccess" />
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Search } from '@element-plus/icons-vue'
+import { Search, Plus } from '@element-plus/icons-vue'
 import { lineageApi } from '@/api/lineage'
 import { businessDomainApi, dataDomainApi } from '@/api/domain'
+import { tableApi } from '@/api/table'
 import { LineageGraph } from './LineageGraph'
 import { ElNotification } from 'element-plus'
+import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
 
 const chartRef = ref(null)
 const loading = ref(false)
@@ -89,6 +161,9 @@ const router = useRouter()
 const currentLayout = ref('dagre')
 const dialogVisible = ref(false)
 const currentNode = ref(null)
+const relatedTasks = ref({ writeTasks: [], readTasks: [] })
+const tasksLoading = ref(false)
+const taskDrawerRef = ref(null)
 
 const filters = reactive({
   layer: '',
@@ -107,6 +182,26 @@ const layerOptions = [
 
 let lineageGraph = null
 const focusTable = ref(route.query.focus || '')
+
+const loadRelatedTasks = async () => {
+  relatedTasks.value = { writeTasks: [], readTasks: [] }
+
+  const tableId = currentNode.value?.tableId
+  if (!tableId) return
+
+  tasksLoading.value = true
+  try {
+    const data = await tableApi.getTasks(tableId)
+    relatedTasks.value = {
+      writeTasks: Array.isArray(data?.writeTasks) ? data.writeTasks : [],
+      readTasks: Array.isArray(data?.readTasks) ? data.readTasks : []
+    }
+  } catch (error) {
+    console.error('加载关联任务失败:', error)
+  } finally {
+    tasksLoading.value = false
+  }
+}
 
 const buildParams = () => {
   const params = {}
@@ -237,6 +332,7 @@ const renderChart = () => {
     lineageGraph.onNodeClick = (nodeModel) => {
         currentNode.value = nodeModel
         dialogVisible.value = true
+        loadRelatedTasks()
     }
   }
 
@@ -256,6 +352,30 @@ const goToTableDetail = () => {
     })
     dialogVisible.value = false
   }
+}
+
+const goCreateRelatedTask = (relation) => {
+  const tableId = currentNode.value?.tableId
+  if (!tableId) return
+  taskDrawerRef.value?.open(null, { relation, tableId })
+}
+
+const goTaskDetail = (taskId) => {
+  if (!taskId) return
+  taskDrawerRef.value?.open(taskId)
+}
+
+const handleTaskSuccess = async () => {
+  await loadRelatedTasks()
+  await loadData()
+}
+
+const taskStatusTag = (status) => {
+  const normalized = String(status || '').toLowerCase()
+  if (normalized === 'published') return 'success'
+  if (normalized === 'running') return 'warning'
+  if (normalized === 'draft') return 'info'
+  return ''
 }
 
 const handleResize = () => {
@@ -331,5 +451,51 @@ onBeforeUnmount(() => {
   justify-content: center;
   align-items: center;
   height: 320px;
+}
+
+.task-section {
+  margin-top: 16px;
+}
+
+.task-entry + .task-entry {
+  margin-top: 14px;
+}
+
+.task-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+.task-entry-list {
+  max-height: 240px;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+.task-entry-item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fafafa;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  margin-bottom: 10px;
+}
+
+.task-entry-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-entry-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #909399;
+  font-size: 12px;
+  margin-top: 6px;
 }
 </style>

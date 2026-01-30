@@ -123,6 +123,7 @@ public class LineageService {
     private LineageNode buildLineageNode(DataTable table) {
         LineageNode node = new LineageNode();
         node.setId(table.getTableName());
+        node.setTableId(table.getId());
         node.setName(table.getTableName());
         node.setLayer(table.getLayer());
         node.setComment(table.getTableComment());
@@ -139,6 +140,7 @@ public class LineageService {
 
     @Data
     public static class LineageNode {
+        private Long tableId;
         private String id;
         private String name;
         private String layer;

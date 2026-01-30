@@ -256,7 +256,7 @@ import { workflowApi } from '@/api/workflow'
 
 import { tableApi } from '@/api/table'
 
-const emit = defineEmits(['saved', 'close'])
+const emit = defineEmits(['saved', 'success', 'close'])
 
 const visible = ref(false)
 const isEdit = ref(false)
@@ -607,6 +607,7 @@ const handleSave = async () => {
     }
     visible.value = false
     emit('saved')
+    emit('success')
   } catch (error) {
     console.error(error)
     ElMessage.error(isEdit.value ? '更新失败' : '创建失败')
