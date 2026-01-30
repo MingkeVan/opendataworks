@@ -158,27 +158,29 @@
       <!-- Right: Workspace -->
       <section class="studio-workspace">
         <div class="workspace-body">
-          <el-tabs
+          <PersistentTabs
             v-if="openTabs.length"
             v-model="activeTab"
+            :tabs="openTabs"
             type="card"
             closable
+            addable
             class="workspace-tabs"
             @tab-remove="handleTabRemove"
+            @tab-add="handleTabAdd"
+            @close-left="handleCloseLeft"
+            @close-right="handleCloseRight"
+            @close-all="handleCloseAll"
           >
-            <el-tab-pane
-              v-for="tab in openTabs"
-              :key="tab.id"
-              :name="String(tab.id)"
-            >
-              <template #label>
-                <div class="tab-label">
-                  <span class="tab-title">{{ tab.tableName }}</span>
-                  <span class="tab-sub">{{ getTabSubtitle(tab) }}</span>
-                </div>
-              </template>
+            <template #label="{ tab }">
+              <div class="tab-label">
+                <span class="tab-title">{{ tab.tableName }}</span>
+                <span class="tab-sub">{{ getTabSubtitle(tab) }}</span>
+              </div>
+            </template>
 
-              <div class="tab-grid">
+            <template #default="{ tab }">
+              <div class="tab-grid" :class="{ 'is-single': tab.kind === 'query' }">
                 <!-- Left 60% -->
                 <div
                   class="tab-left"
@@ -424,7 +426,7 @@
                 </div>
 
                 <!-- Right 40% -->
-                <div class="tab-right">
+                <div v-if="tab.kind !== 'query'" class="tab-right">
                   <div class="meta-panel">
                     <el-tabs v-model="tabStates[tab.id].metaTab" class="meta-tabs">
                       <el-tab-pane name="basic" label="基本信息">
@@ -899,14 +901,19 @@
                   </div>
                 </div>
               </div>
-            </el-tab-pane>
-          </el-tabs>
+            </template>
+          </PersistentTabs>
 
-          <div v-else class="empty-state">
-            <el-empty description="从左侧选择表以打开工作区" :image-size="120" />
-          </div>
-        </div>
-      </section>
+	          <div v-else class="empty-state">
+	            <el-empty description="从左侧选择表以打开工作区" :image-size="120">
+	              <el-button type="primary" @click="handleTabAdd">
+	                <el-icon><Plus /></el-icon>
+	                新建查询
+	              </el-button>
+	            </el-empty>
+	          </div>
+	        </div>
+	      </section>
     </div>
 
     <CreateTableDrawer v-model="createDrawerVisible" @created="handleCreateSuccess" />
@@ -939,6 +946,7 @@ import {
 import { tableApi } from '@/api/table'
 import { dorisClusterApi } from '@/api/doris'
 import { dataQueryApi } from '@/api/query'
+import PersistentTabs from '@/components/PersistentTabs.vue'
 import CreateTableDrawer from '@/views/datastudio/CreateTableDrawer.vue'
 import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
 
@@ -1004,6 +1012,141 @@ const openTabs = ref([])
 const activeTab = ref('')
 const tabStates = reactive({})
 const queryTimerHandles = new Map()
+const queryTabCounter = ref(1)
+
+const TAB_PERSIST_KEY = 'odw:datastudio:workspace-tabs:v1'
+const isRestoringTabs = ref(false)
+let persistTabsTimer = null
+
+const tabsPersistSnapshot = computed(() => {
+  const tabs = (Array.isArray(openTabs.value) ? openTabs.value : []).map((tab) => {
+    const id = String(tab?.id ?? '')
+    const state = id ? tabStates[id] : null
+    return {
+      id,
+      kind: tab?.kind === 'query' ? 'query' : 'table',
+      tableName: tab?.tableName || '',
+      dbName: tab?.dbName || state?.table?.dbName || '',
+      sourceId: tab?.sourceId || state?.table?.sourceId || '',
+      tableId: state?.table?.id || null,
+      sql: state?.query?.sql ?? '',
+      limit: Number(state?.query?.limit ?? 200)
+    }
+  })
+  return {
+    version: 1,
+    activeTab: String(activeTab.value || ''),
+    tabs
+  }
+})
+
+const persistTabsNow = (snapshot) => {
+  try {
+    const tabs = snapshot?.tabs || []
+    if (!Array.isArray(tabs) || tabs.length === 0) {
+      localStorage.removeItem(TAB_PERSIST_KEY)
+      return
+    }
+    localStorage.setItem(TAB_PERSIST_KEY, JSON.stringify(snapshot))
+  } catch (error) {
+    console.warn('保存工作区 Tab 状态失败', error)
+  }
+}
+
+const schedulePersistTabs = (snapshot) => {
+  if (persistTabsTimer) {
+    clearTimeout(persistTabsTimer)
+  }
+  persistTabsTimer = setTimeout(() => {
+    persistTabsTimer = null
+    persistTabsNow(snapshot)
+  }, 250)
+}
+
+const flushPersistTabs = () => {
+  if (persistTabsTimer) {
+    clearTimeout(persistTabsTimer)
+    persistTabsTimer = null
+  }
+  persistTabsNow(tabsPersistSnapshot.value)
+}
+
+const restoreTabsFromStorage = () => {
+  let parsed = null
+  try {
+    const raw = localStorage.getItem(TAB_PERSIST_KEY)
+    if (!raw) return false
+    parsed = JSON.parse(raw)
+  } catch (error) {
+    console.warn('读取工作区 Tab 状态失败', error)
+    return false
+  }
+
+  if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.tabs)) return false
+
+  isRestoringTabs.value = true
+  try {
+    const nextTabs = []
+    const existingKeys = Object.keys(tabStates)
+    existingKeys.forEach((key) => delete tabStates[key])
+
+    parsed.tabs.forEach((item) => {
+      const id = String(item?.id ?? '')
+      if (!id) return
+      const kind = item?.kind === 'query' ? 'query' : 'table'
+      const tabItem = {
+        id,
+        kind,
+        tableName: String(item?.tableName ?? ''),
+        dbName: String(item?.dbName ?? ''),
+        sourceId: String(item?.sourceId ?? '')
+      }
+
+      const tablePayload =
+        kind === 'query'
+          ? { tableName: '', dbName: tabItem.dbName, sourceId: tabItem.sourceId }
+          : { id: item?.tableId || undefined, tableName: tabItem.tableName, dbName: tabItem.dbName, sourceId: tabItem.sourceId }
+
+      tabStates[id] = createTabState(tablePayload)
+      if (typeof item?.sql === 'string') {
+        tabStates[id].query.sql = item.sql
+      }
+      if (Number.isFinite(Number(item?.limit))) {
+        tabStates[id].query.limit = Number(item.limit)
+      }
+
+      nextTabs.push(tabItem)
+    })
+
+    openTabs.value = nextTabs
+
+    const active = String(parsed?.activeTab ?? '')
+    const activeExists = active && nextTabs.some((tab) => String(tab.id) === active)
+    activeTab.value = activeExists ? active : (nextTabs[0] ? String(nextTabs[0].id) : '')
+
+    const maxQueryIndex = nextTabs
+      .filter((tab) => tab.kind === 'query')
+      .map((tab) => {
+        const match = String(tab.tableName || '').match(/(\d+)$/)
+        return match ? Number(match[1]) : 0
+      })
+      .reduce((max, val) => (Number.isFinite(val) ? Math.max(max, val) : max), 0)
+    queryTabCounter.value = maxQueryIndex ? maxQueryIndex + 1 : 1
+
+    return true
+  } finally {
+    isRestoringTabs.value = false
+  }
+}
+
+watch(
+  tabsPersistSnapshot,
+  (snapshot) => {
+    if (isRestoringTabs.value) return
+    schedulePersistTabs(snapshot)
+  },
+  { deep: true }
+)
 
 const tableRefs = ref({})
 const chartRefs = ref({})
@@ -1720,6 +1863,7 @@ const openTableTab = async (table, dbFallback = '', sourceFallback = '') => {
   const resolvedDb = table.dbName || table.databaseName || table.database || dbFallback || ''
   const tabItem = {
     id: key,
+    kind: 'table',
     tableName: table.tableName,
     dbName: resolvedDb,
     sourceId
@@ -1811,20 +1955,37 @@ const focusTableInSidebar = async (table, key, dbFallback = '', sourceFallback =
   }
 }
 
-const updateRouteQuery = (payload) => {
+const syncRouteWithTab = (tab, tabId) => {
   if (suppressRouteSync.value) return
-  const { dbName, tableId, tableName, sourceId } = payload || {}
-  if (!dbName || !sourceId || (!tableId && !tableName)) return
-  router.replace({
-    path: route.path,
-    query: {
-      ...route.query,
-      clusterId: sourceId,
-      database: dbName,
-      tableId: tableId ?? route.query.tableId,
-      tableName: tableName ?? route.query.tableName
-    }
-  })
+  if (!tab) return
+  const kind = tab.kind === 'query' ? 'query' : 'table'
+  const id = String(tabId ?? tab.id ?? '')
+
+  const nextQuery = { ...route.query }
+  if (id) nextQuery.tab = id
+  if (tab.sourceId) nextQuery.clusterId = String(tab.sourceId)
+  if (tab.dbName) nextQuery.database = String(tab.dbName)
+
+  if (kind === 'table') {
+    const tableId = tabStates[id]?.table?.id
+    if (tableId) nextQuery.tableId = String(tableId)
+    else delete nextQuery.tableId
+    if (tab.tableName) nextQuery.tableName = String(tab.tableName)
+  } else {
+    delete nextQuery.tableId
+    delete nextQuery.tableName
+  }
+
+  router.replace({ path: route.path, query: nextQuery })
+}
+
+const clearRouteTabQuery = () => {
+  if (suppressRouteSync.value) return
+  const nextQuery = { ...route.query }
+  delete nextQuery.tab
+  delete nextQuery.tableId
+  delete nextQuery.tableName
+  router.replace({ path: route.path, query: nextQuery })
 }
 
 const clearCreateQuery = () => {
@@ -1961,20 +2122,103 @@ const loadTabData = async (tabId) => {
   }
 }
 
+const disposeTabResources = (tabId) => {
+  const id = String(tabId || '')
+  if (!id) return
+  clearQueryTimer(id)
+  disposeChart(id)
+  if (leftPaneRefs.value?.[id]) {
+    delete leftPaneRefs.value[id]
+  }
+  if (chartRefs.value?.[id]) {
+    delete chartRefs.value[id]
+  }
+  if (leftPaneHeights[id] !== undefined) {
+    delete leftPaneHeights[id]
+  }
+  delete tabStates[id]
+}
+
 const handleTabRemove = (name) => {
   const idx = openTabs.value.findIndex((tab) => String(tab.id) === String(name))
   if (idx === -1) return
   const removed = openTabs.value.splice(idx, 1)[0]
   if (removed) {
-    clearQueryTimer(String(removed.id))
-    disposeChart(String(removed.id))
-    delete tabStates[String(removed.id)]
+    disposeTabResources(removed.id)
   }
   if (openTabs.value.length) {
     activeTab.value = String(openTabs.value[Math.max(idx - 1, 0)].id)
   } else {
     activeTab.value = ''
   }
+}
+
+const handleCloseLeft = (tabKey) => {
+  const idx = openTabs.value.findIndex((tab) => String(tab.id) === String(tabKey))
+  if (idx <= 0) return
+  const removed = openTabs.value.splice(0, idx)
+  removed.forEach((tab) => disposeTabResources(tab.id))
+  const stillActive = openTabs.value.some((tab) => String(tab.id) === String(activeTab.value))
+  if (!stillActive) {
+    activeTab.value = String(tabKey)
+  }
+}
+
+const handleCloseRight = (tabKey) => {
+  const idx = openTabs.value.findIndex((tab) => String(tab.id) === String(tabKey))
+  if (idx === -1 || idx >= openTabs.value.length - 1) return
+  const removed = openTabs.value.splice(idx + 1)
+  removed.forEach((tab) => disposeTabResources(tab.id))
+  const stillActive = openTabs.value.some((tab) => String(tab.id) === String(activeTab.value))
+  if (!stillActive) {
+    activeTab.value = String(tabKey)
+  }
+}
+
+const handleCloseAll = () => {
+  const removed = openTabs.value.splice(0)
+  removed.forEach((tab) => disposeTabResources(tab.id))
+  activeTab.value = ''
+}
+
+const resolveDefaultSourceId = () => {
+  if (clusterId.value) return String(clusterId.value)
+  if (activeSource.value) return String(activeSource.value)
+  const fallback = Array.isArray(dataSources.value) ? dataSources.value[0] : null
+  return fallback?.id ? String(fallback.id) : ''
+}
+
+const resolveDefaultDatabase = (sourceId) => {
+  const sid = String(sourceId || '')
+  if (!sid) return ''
+  return activeSchema[sid] || schemaStore[sid]?.[0] || ''
+}
+
+const handleTabAdd = async () => {
+  const sourceId = resolveDefaultSourceId()
+  if (!sourceId) {
+    ElMessage.warning('请先选择数据源')
+    return
+  }
+  await loadSchemas(sourceId)
+  const dbName = resolveDefaultDatabase(sourceId)
+  if (!dbName) {
+    ElMessage.warning('请先选择数据库')
+    return
+  }
+
+  const queryId = `query:${Date.now()}`
+  const tabItem = {
+    id: queryId,
+    kind: 'query',
+    tableName: `查询${queryTabCounter.value++}`,
+    dbName,
+    sourceId
+  }
+  tabStates[queryId] = createTabState({ tableName: '', dbName, sourceId })
+  tabStates[queryId].query.sql = ''
+  openTabs.value.push(tabItem)
+  activeTab.value = queryId
 }
 
 const buildDefaultSql = (table) => {
@@ -2723,19 +2967,23 @@ watch(
 watch(
   () => activeTab.value,
   (value) => {
-    if (!value) return
+    if (!value) {
+      if (!openTabs.value.length) {
+        clearRouteTabQuery()
+      }
+      return
+    }
     const tab = openTabs.value.find((item) => String(item.id) === String(value))
     if (!tab) return
     if (tab.sourceId) {
       clusterId.value = tab.sourceId
     }
-    selectedTableKey.value = String(tab.id)
-    updateRouteQuery({
-      dbName: tab.dbName,
-      sourceId: tab.sourceId || tabStates[value]?.table?.sourceId || clusterId.value,
-      tableId: tabStates[value]?.table?.id,
-      tableName: tab.tableName
-    })
+    if (tab.kind === 'table') {
+      selectedTableKey.value = String(tab.id)
+    } else {
+      selectedTableKey.value = ''
+    }
+    syncRouteWithTab(tab, value)
   }
 )
 
@@ -2771,6 +3019,7 @@ watch(selectedTableKey, (value) => {
 
 onMounted(() => {
   setupTableObserver()
+  restoreTabsFromStorage()
   loadClusters()
   fetchHistory()
   syncFromRoute()
@@ -2782,6 +3031,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  flushPersistTabs()
   window.removeEventListener('resize', handleResize)
   chartInstances.forEach((instance) => instance.dispose())
   chartInstances.clear()
@@ -3215,6 +3465,10 @@ onBeforeUnmount(() => {
   gap: 10px;
   padding: 10px;
   box-sizing: border-box;
+}
+
+.tab-grid.is-single {
+  grid-template-columns: 1fr;
 }
 
 .tab-left,
