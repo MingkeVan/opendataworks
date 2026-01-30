@@ -20,4 +20,20 @@
         ORDER BY statistics_time ASC
     </select>
 
+    <!-- 获取多个表的最新一条统计记录 -->
+    <select id="selectLatestByTableIds" resultType="com.onedata.portal.entity.TableStatisticsHistory">
+        SELECT t.*
+        FROM table_statistics_history t
+        INNER JOIN (
+            SELECT table_id, MAX(statistics_time) AS max_time
+            FROM table_statistics_history
+            WHERE table_id IN
+            <foreach collection="tableIds" item="id" open="(" close=")" separator=",">
+                #{id}
+            </foreach>
+            GROUP BY table_id
+        ) latest
+        ON t.table_id = latest.table_id AND t.statistics_time = latest.max_time
+    </select>
+
 </mapper>

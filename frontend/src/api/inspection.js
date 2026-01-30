@@ -63,3 +63,25 @@ export function getInspectionOverview() {
     method: 'get'
   })
 }
+
+/**
+ * 获取巡检规则列表
+ */
+export function getInspectionRules(params) {
+  return request({
+    url: '/v1/inspections/rules',
+    method: 'get',
+    params
+  })
+}
+
+/**
+ * 更新巡检规则启用状态
+ */
+export function updateRuleEnabled(ruleId, data) {
+  return request({
+    url: `/v1/inspections/rules/${ruleId}/enabled`,
+    method: 'put',
+    data
+  })
+}

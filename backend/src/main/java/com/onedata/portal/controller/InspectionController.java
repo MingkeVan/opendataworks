@@ -3,6 +3,7 @@ package com.onedata.portal.controller;
 import com.onedata.portal.dto.Result;
 import com.onedata.portal.entity.InspectionIssue;
 import com.onedata.portal.entity.InspectionRecord;
+import com.onedata.portal.entity.InspectionRule;
 import com.onedata.portal.service.InspectionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -167,6 +168,30 @@ public class InspectionController {
     }
 
     /**
+     * 获取巡检规则列表
+     */
+    @GetMapping("/rules")
+    public Result<List<InspectionRule>> getInspectionRules(@RequestParam(required = false) Boolean enabled) {
+        List<InspectionRule> rules = inspectionService.getInspectionRules(enabled);
+        return Result.success(rules);
+    }
+
+    /**
+     * 更新巡检规则启用状态
+     */
+    @PutMapping("/rules/{ruleId}/enabled")
+    public Result<Map<String, Object>> updateRuleEnabled(
+            @PathVariable Long ruleId,
+            @RequestBody UpdateRuleEnabledRequest request) {
+        inspectionService.updateRuleEnabled(ruleId, request.getEnabled());
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("message", "规则状态更新成功");
+        return Result.success(result);
+    }
+
+    /**
      * 手动触发巡检请求
      */
     @lombok.Data
@@ -182,5 +207,13 @@ public class InspectionController {
         private String status; // open, acknowledged, resolved, ignored
         private String resolvedBy;
         private String resolutionNote;
+    }
+
+    /**
+     * 更新规则启用状态请求
+     */
+    @lombok.Data
+    public static class UpdateRuleEnabledRequest {
+        private Boolean enabled;
     }
 }

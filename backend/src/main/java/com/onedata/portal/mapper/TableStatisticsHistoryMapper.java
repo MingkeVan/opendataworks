@@ -30,4 +30,9 @@ public interface TableStatisticsHistoryMapper extends BaseMapper<TableStatistics
             @Param("startTime") LocalDateTime startTime,
             @Param("endTime") LocalDateTime endTime
     );
+
+    /**
+     * 获取多个表的最新一条统计记录
+     */
+    List<TableStatisticsHistory> selectLatestByTableIds(@Param("tableIds") List<Long> tableIds);
 }
