@@ -21,7 +21,7 @@ public class DorisJdbcProperties {
      * 完整的 JDBC URL 模板，按顺序替换 FE 主机、端口、数据库。
      */
     private String urlTemplate =
-            "jdbc:mysql://%s:%d/%s?useUnicode=true&characterEncoding=UTF-8&useTimezone=true&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=5000&socketTimeout=60000";
+            "jdbc:mysql://%s:%d/%s?useUnicode=true&characterEncoding=UTF-8&useTimezone=true&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=5000&socketTimeout=300000";
 
     /**
      * 会话字符集设置。

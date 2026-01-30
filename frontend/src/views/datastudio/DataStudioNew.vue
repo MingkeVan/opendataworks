@@ -236,12 +236,29 @@
                         </template>
 
                         <div class="table-toolbar">
-                          <div class="meta-info" v-if="tabStates[tab.id].queryResult.executedAt">
-                            <span class="meta-item"><el-icon><Timer /></el-icon> {{ formatDuration(tabStates[tab.id].queryResult.durationMs) }}</span>
-                            <span class="meta-item"><el-icon><Files /></el-icon> {{ tabStates[tab.id].queryResult.rows.length }} 行</span>
-                            <span v-if="tabStates[tab.id].queryResult.hasMore" class="meta-item truncate">
-                              <el-icon><Warning /></el-icon> 结果已截断
+                          <div
+                            class="meta-info"
+                            v-if="tabStates[tab.id].queryLoading || tabStates[tab.id].queryResult.executedAt"
+                          >
+                            <span class="meta-item">
+                              <el-icon><Timer /></el-icon>
+                              {{
+                                formatDuration(
+                                  tabStates[tab.id].queryLoading
+                                    ? tabStates[tab.id].queryTiming.elapsedMs
+                                    : tabStates[tab.id].queryResult.durationMs
+                                )
+                              }}
                             </span>
+                            <span v-if="tabStates[tab.id].queryLoading" class="meta-item">
+                              <el-icon><Loading /></el-icon> 查询中
+                            </span>
+                            <template v-else>
+                              <span class="meta-item"><el-icon><Files /></el-icon> {{ tabStates[tab.id].queryResult.rows.length }} 行</span>
+                              <span v-if="tabStates[tab.id].queryResult.hasMore" class="meta-item truncate">
+                                <el-icon><Warning /></el-icon> 结果已截断
+                              </span>
+                            </template>
                           </div>
                           <div class="export-actions">
                             <el-button
@@ -374,6 +391,11 @@
                             <el-table-column label="执行时间" width="160">
                               <template #default="{ row }">
                                 {{ formatDateTime(row.executedAt || row.createdAt) }}
+                              </template>
+                            </el-table-column>
+                            <el-table-column label="耗时" width="100">
+                              <template #default="{ row }">
+                                {{ formatDuration(row.durationMs) }}
                               </template>
                             </el-table-column>
                             <el-table-column label="操作" width="90">
@@ -981,6 +1003,7 @@ const suppressRouteSync = ref(false)
 const openTabs = ref([])
 const activeTab = ref('')
 const tabStates = reactive({})
+const queryTimerHandles = new Map()
 
 const tableRefs = ref({})
 const chartRefs = ref({})
@@ -995,6 +1018,30 @@ const layerOptions = [
   { label: 'DWS - 汇总数据层', value: 'DWS' },
   { label: 'ADS - 应用数据层', value: 'ADS' }
 ]
+
+const clearQueryTimer = (tabId) => {
+  const handle = queryTimerHandles.get(tabId)
+  if (!handle) return
+  clearInterval(handle)
+  queryTimerHandles.delete(tabId)
+}
+
+const startQueryTimer = (tabId) => {
+  clearQueryTimer(tabId)
+  const state = tabStates[tabId]
+  if (!state) return
+  state.queryTiming.startedAt = Date.now()
+  state.queryTiming.elapsedMs = 0
+  const handle = setInterval(() => {
+    const current = tabStates[tabId]
+    if (!current?.queryLoading) {
+      clearQueryTimer(tabId)
+      return
+    }
+    current.queryTiming.elapsedMs = Date.now() - current.queryTiming.startedAt
+  }, 200)
+  queryTimerHandles.set(tabId, handle)
+}
 
 const loadClusters = async () => {
   dbLoading.value = true
@@ -1607,6 +1654,10 @@ const createTabState = (table) => {
       limit: 200
     },
     queryLoading: false,
+    queryTiming: {
+      startedAt: 0,
+      elapsedMs: 0
+    },
     queryResult: {
       columns: [],
       rows: [],
@@ -1915,6 +1966,7 @@ const handleTabRemove = (name) => {
   if (idx === -1) return
   const removed = openTabs.value.splice(idx, 1)[0]
   if (removed) {
+    clearQueryTimer(String(removed.id))
     disposeChart(String(removed.id))
     delete tabStates[String(removed.id)]
   }
@@ -1962,6 +2014,7 @@ const executeQuery = async (tabId) => {
     return
   }
   state.queryLoading = true
+  startQueryTimer(tabId)
   try {
     const res = await dataQueryApi.execute({
       clusterId: clusterId.value || undefined,
@@ -1987,6 +2040,7 @@ const executeQuery = async (tabId) => {
     ElMessage.error(error.response?.data?.message || error.message || '查询失败')
   } finally {
     state.queryLoading = false
+    clearQueryTimer(tabId)
   }
 }
 
@@ -2731,6 +2785,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
   chartInstances.forEach((instance) => instance.dispose())
   chartInstances.clear()
+  queryTimerHandles.forEach((handle) => clearInterval(handle))
+  queryTimerHandles.clear()
   if (tableObserver.value) {
     tableObserver.value.disconnect()
   }

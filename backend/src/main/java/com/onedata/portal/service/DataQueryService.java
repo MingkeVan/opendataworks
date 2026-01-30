@@ -68,6 +68,11 @@ public class DataQueryService {
         try (Connection connection = dorisConnectionService.getConnection(request.getClusterId(), request.getDatabase());
              Statement statement = connection.createStatement()) {
 
+            try {
+                statement.setQueryTimeout(300);
+            } catch (SQLException e) {
+                log.debug("JDBC driver does not support query timeout, fallback to socketTimeout only", e);
+            }
             statement.setMaxRows(limit + 1);
             String sql = request.getSql().trim();
             log.info("Executing SQL query: {}", abbreviate(sql));
