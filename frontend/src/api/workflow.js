@@ -33,6 +33,18 @@ export const workflowApi = {
     return request.post(`/v1/workflows/${id}/backfill`, payload)
   },
 
+  updateSchedule(id, payload) {
+    return request.put(`/v1/workflows/${id}/schedule`, payload)
+  },
+
+  onlineSchedule(id) {
+    return request.post(`/v1/workflows/${id}/schedule/online`)
+  },
+
+  offlineSchedule(id) {
+    return request.post(`/v1/workflows/${id}/schedule/offline`)
+  },
+
   delete(id) {
     return request.delete(`/v1/workflows/${id}`)
   }

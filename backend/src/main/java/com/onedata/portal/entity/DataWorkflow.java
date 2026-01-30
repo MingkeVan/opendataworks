@@ -55,6 +55,32 @@ public class DataWorkflow {
      */
     private String taskGroupName;
 
+    /**
+     * DolphinScheduler 定时调度配置
+     */
+    private Long dolphinScheduleId;
+
+    private String scheduleState;
+
+    private String scheduleCron;
+
+    private String scheduleTimezone;
+
+    private LocalDateTime scheduleStartTime;
+
+    private LocalDateTime scheduleEndTime;
+
+    private String scheduleFailureStrategy;
+
+    private String scheduleWarningType;
+
+    private Long scheduleWarningGroupId;
+
+    /**
+     * 工作流上线后是否自动上线调度
+     */
+    private Boolean scheduleAutoOnline;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

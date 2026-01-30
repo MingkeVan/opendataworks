@@ -542,6 +542,14 @@ public class WorkflowService {
             // Step 1: 删除DolphinScheduler中的工作流定义
             if (workflow.getWorkflowCode() != null) {
                 try {
+                    if (workflow.getDolphinScheduleId() != null && workflow.getDolphinScheduleId() > 0) {
+                        try {
+                            dolphinSchedulerService.offlineWorkflowSchedule(workflow.getDolphinScheduleId());
+                        } catch (Exception ex) {
+                            log.warn("Failed to offline schedule {} before workflow delete: {}",
+                                    workflow.getDolphinScheduleId(), ex.getMessage());
+                        }
+                    }
                     dolphinSchedulerService.setWorkflowReleaseState(workflow.getWorkflowCode(), "OFFLINE");
                     dolphinSchedulerService.deleteWorkflow(workflow.getWorkflowCode());
                     log.info("已删除DolphinScheduler中的工作流定义: {}", workflow.getWorkflowCode());
