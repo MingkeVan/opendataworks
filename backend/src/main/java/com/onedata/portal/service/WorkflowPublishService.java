@@ -106,6 +106,7 @@ public class WorkflowPublishService {
             case "offline":
                 workflow.setStatus("offline");
                 workflow.setPublishStatus("published");
+                workflow.setScheduleState("OFFLINE");
                 break;
             default:
                 log.warn("Unknown workflow publish operation {}", record.getOperation());
@@ -119,8 +120,29 @@ public class WorkflowPublishService {
         try {
             if ("online".equals(record.getOperation())) {
                 dolphinSchedulerService.setWorkflowReleaseState(workflow.getWorkflowCode(), "ONLINE");
+                if (Boolean.TRUE.equals(workflow.getScheduleAutoOnline())
+                        && workflow.getDolphinScheduleId() != null
+                        && workflow.getDolphinScheduleId() > 0
+                        && !"ONLINE".equalsIgnoreCase(workflow.getScheduleState())) {
+                    try {
+                        dolphinSchedulerService.onlineWorkflowSchedule(workflow.getDolphinScheduleId());
+                        workflow.setScheduleState("ONLINE");
+                    } catch (Exception ex) {
+                        log.warn("Failed to online schedule {} for workflow {}: {}",
+                                workflow.getDolphinScheduleId(), workflow.getWorkflowCode(), ex.getMessage());
+                    }
+                }
             } else if ("offline".equals(record.getOperation())) {
                 dolphinSchedulerService.setWorkflowReleaseState(workflow.getWorkflowCode(), "OFFLINE");
+                if (workflow.getDolphinScheduleId() != null && workflow.getDolphinScheduleId() > 0) {
+                    try {
+                        dolphinSchedulerService.offlineWorkflowSchedule(workflow.getDolphinScheduleId());
+                        workflow.setScheduleState("OFFLINE");
+                    } catch (Exception ex) {
+                        log.warn("Failed to offline schedule {} for workflow {}: {}",
+                                workflow.getDolphinScheduleId(), workflow.getWorkflowCode(), ex.getMessage());
+                    }
+                }
             } else {
                 log.debug("No Dolphin action for operation {}", record.getOperation());
             }

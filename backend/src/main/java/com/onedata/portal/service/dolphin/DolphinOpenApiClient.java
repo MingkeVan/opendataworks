@@ -447,6 +447,110 @@ public class DolphinOpenApiClient {
         }
     }
 
+    /**
+     * Create a schedule for a workflow definition.
+     *
+     * <p>
+     * Endpoint: POST /projects/{projectCode}/schedules
+     * Params: workflowDefinitionCode, schedule(JSON string), warningType, failureStrategy, warningGroupId(optional)
+     * </p>
+     *
+     * @return schedule id if available
+     */
+    public Long createSchedule(long projectCode,
+            long workflowDefinitionCode,
+            String scheduleJson,
+            String warningType,
+            String failureStrategy,
+            Long warningGroupId) {
+        try {
+            String path = String.format("/projects/%d/schedules", projectCode);
+            MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+            formData.add("workflowDefinitionCode", String.valueOf(workflowDefinitionCode));
+            formData.add("schedule", scheduleJson != null ? scheduleJson : "{}");
+            formData.add("warningType", StringUtils.hasText(warningType) ? warningType : "NONE");
+            formData.add("failureStrategy", StringUtils.hasText(failureStrategy) ? failureStrategy : "CONTINUE");
+            if (warningGroupId != null) {
+                formData.add("warningGroupId", String.valueOf(warningGroupId));
+            }
+
+            JsonNode data = postForm(path, formData);
+            if (data == null) {
+                return null;
+            }
+            if (data.isIntegralNumber()) {
+                return data.asLong();
+            }
+            if (data.hasNonNull("id")) {
+                return data.path("id").asLong();
+            }
+            if (data.hasNonNull("scheduleId")) {
+                return data.path("scheduleId").asLong();
+            }
+            return null;
+        } catch (Exception e) {
+            log.error("Failed to create schedule for workflow {}", workflowDefinitionCode, e);
+            throw new RuntimeException("Failed to create schedule: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Update an existing schedule.
+     *
+     * <p>
+     * Endpoint: PUT /projects/{projectCode}/schedules/{id}
+     * </p>
+     */
+    public void updateSchedule(long projectCode,
+            long scheduleId,
+            long workflowDefinitionCode,
+            String scheduleJson,
+            String warningType,
+            String failureStrategy,
+            Long warningGroupId) {
+        try {
+            String path = String.format("/projects/%d/schedules/%d", projectCode, scheduleId);
+            MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+            formData.add("workflowDefinitionCode", String.valueOf(workflowDefinitionCode));
+            formData.add("schedule", scheduleJson != null ? scheduleJson : "{}");
+            formData.add("warningType", StringUtils.hasText(warningType) ? warningType : "NONE");
+            formData.add("failureStrategy", StringUtils.hasText(failureStrategy) ? failureStrategy : "CONTINUE");
+            if (warningGroupId != null) {
+                formData.add("warningGroupId", String.valueOf(warningGroupId));
+            }
+            putForm(path, formData);
+        } catch (Exception e) {
+            log.error("Failed to update schedule {} for workflow {}", scheduleId, workflowDefinitionCode, e);
+            throw new RuntimeException("Failed to update schedule: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Online a schedule.
+     */
+    public void onlineSchedule(long projectCode, long scheduleId) {
+        try {
+            String path = String.format("/projects/%d/schedules/%d/online", projectCode, scheduleId);
+            post(path);
+        } catch (Exception e) {
+            log.error("Failed to online schedule {}", scheduleId, e);
+            throw new RuntimeException("Failed to online schedule: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Offline a schedule.
+     */
+    public void offlineSchedule(long projectCode, long scheduleId) {
+        try {
+            String path = String.format("/projects/%d/schedules/%d/offline", projectCode, scheduleId);
+            post(path);
+        } catch (Exception e) {
+            log.error("Failed to offline schedule {}", scheduleId, e);
+            throw new RuntimeException("Failed to offline schedule: " + e.getMessage());
+        }
+    }
+
     // --- Private Helpers ---
 
     private JsonNode getWithParams(String path, MultiValueMap<String, String> queryParams) {
@@ -472,6 +576,10 @@ public class DolphinOpenApiClient {
                 .uri(path)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .body(BodyInserters.fromFormData(formData)));
+    }
+
+    private JsonNode post(String path) {
+        return executeRequest(getWebClient(), getWebClient().post().uri(path));
     }
 
     private JsonNode putForm(String path, MultiValueMap<String, String> formData) {

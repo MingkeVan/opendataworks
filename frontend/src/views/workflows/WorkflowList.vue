@@ -93,6 +93,23 @@
           </template>
         </el-table-column>
 
+        <el-table-column label="定时调度" width="220">
+          <template #default="{ row }">
+            <div v-if="row.dolphinScheduleId" class="latest-instance">
+              <el-tag
+                size="small"
+                :type="(row.scheduleState || '').toUpperCase() === 'ONLINE' ? 'success' : 'warning'"
+              >
+                {{ row.scheduleState || 'OFFLINE' }}
+              </el-tag>
+              <div class="instance-time">
+                {{ row.scheduleCron || '-' }}
+              </div>
+            </div>
+            <span v-else class="text-gray">-</span>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="currentVersionId" label="当前版本" width="120">
           <template #default="{ row }">
             {{ row.currentVersionId || '-' }}

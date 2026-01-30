@@ -189,6 +189,118 @@
             />
           </div>
         </el-tab-pane>
+          <el-tab-pane label="定时调度" name="schedule">
+            <div class="tab-content">
+              <el-alert
+                title="Quartz CRON（7段）"
+                description="DolphinScheduler 使用 Quartz CRON：秒 分 时 日 月 周 年，例如：0 0 * * * ? *。先保存配置创建调度，再上线调度生效。"
+                type="info"
+                show-icon
+                :closable="false"
+                class="tips"
+              />
+
+              <div v-if="workflow?.workflow" class="schedule-status">
+                <el-space wrap>
+                  <el-tag size="small" type="info">
+                    ScheduleId: {{ workflow.workflow.dolphinScheduleId || '-' }}
+                  </el-tag>
+                  <el-tag
+                    size="small"
+                    :type="(workflow.workflow.scheduleState || '').toUpperCase() === 'ONLINE' ? 'success' : 'warning'"
+                  >
+                    {{ workflow.workflow.scheduleState || 'OFFLINE' }}
+                  </el-tag>
+                  <el-switch
+                    v-model="scheduleEnabled"
+                    :disabled="!workflow.workflow.dolphinScheduleId"
+                    :loading="scheduleSwitchLoading"
+                    active-text="上线"
+                    inactive-text="下线"
+                    @change="handleToggleSchedule"
+                  />
+                </el-space>
+                <div v-if="workflow.workflow.status !== 'online'" class="text-gray schedule-hint">
+                  工作流未上线，无法上线调度（可先保存配置，待工作流上线后再开启）。
+                </div>
+              </div>
+
+              <el-form
+                ref="scheduleFormRef"
+                :model="scheduleForm"
+                :rules="scheduleRules"
+                label-width="110px"
+                class="schedule-form"
+              >
+                <el-form-item label="Cron 表达式" prop="scheduleCron">
+                  <el-input
+                    v-model="scheduleForm.scheduleCron"
+                    placeholder="0 0 * * * ? *"
+                    clearable
+                  />
+                </el-form-item>
+                <el-form-item label="时区" prop="scheduleTimezone">
+                  <el-input
+                    v-model="scheduleForm.scheduleTimezone"
+                    placeholder="Asia/Shanghai"
+                    clearable
+                  />
+                </el-form-item>
+                <el-form-item label="开始时间" prop="scheduleStartTime">
+                  <el-date-picker
+                    v-model="scheduleForm.scheduleStartTime"
+                    type="datetime"
+                    value-format="YYYY-MM-DD HH:mm:ss"
+                    placeholder="选择开始时间"
+                    style="width: 100%;"
+                  />
+                </el-form-item>
+                <el-form-item label="结束时间" prop="scheduleEndTime">
+                  <el-date-picker
+                    v-model="scheduleForm.scheduleEndTime"
+                    type="datetime"
+                    value-format="YYYY-MM-DD HH:mm:ss"
+                    placeholder="选择结束时间"
+                    style="width: 100%;"
+                  />
+                </el-form-item>
+                <el-form-item label="失败策略">
+                  <el-select v-model="scheduleForm.scheduleFailureStrategy" placeholder="CONTINUE" style="width: 100%;">
+                    <el-option label="CONTINUE（继续）" value="CONTINUE" />
+                    <el-option label="END（结束）" value="END" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="告警类型">
+                  <el-select v-model="scheduleForm.scheduleWarningType" placeholder="NONE" style="width: 100%;">
+                    <el-option label="NONE" value="NONE" />
+                    <el-option label="SUCCESS" value="SUCCESS" />
+                    <el-option label="FAILURE" value="FAILURE" />
+                    <el-option label="SUCCESS_FAILURE" value="SUCCESS_FAILURE" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="告警组ID">
+                  <el-input-number
+                    v-model="scheduleForm.scheduleWarningGroupId"
+                    :min="0"
+                    :controls="false"
+                    style="width: 100%;"
+                  />
+                </el-form-item>
+                <el-form-item label="自动上线">
+                  <el-switch
+                    v-model="scheduleForm.scheduleAutoOnline"
+                    active-text="工作流上线后自动上线调度"
+                    inactive-text="不自动"
+                  />
+                </el-form-item>
+                <el-form-item>
+                  <el-button type="success" :loading="savingSchedule" @click="saveScheduleConfig">
+                    保存配置
+                  </el-button>
+                </el-form-item>
+              </el-form>
+            </div>
+          </el-tab-pane>
           <el-tab-pane label="执行历史" name="executions">
             <el-table
               v-if="workflow?.recentInstances?.length"
@@ -337,7 +449,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, Link, Delete, Edit, Plus } from '@element-plus/icons-vue'
@@ -358,6 +470,29 @@ const pendingApprovalFlags = reactive({})
 const actionLoading = reactive({})
 const backfillDialogVisible = ref(false)
 const backfillTarget = ref(null)
+
+// Schedule states
+const scheduleFormRef = ref(null)
+const savingSchedule = ref(false)
+const scheduleSwitchLoading = ref(false)
+const scheduleEnabled = ref(false)
+const scheduleSwitchMuted = ref(false)
+const scheduleForm = reactive({
+  scheduleCron: '',
+  scheduleTimezone: 'Asia/Shanghai',
+  scheduleStartTime: '',
+  scheduleEndTime: '',
+  scheduleFailureStrategy: 'CONTINUE',
+  scheduleWarningType: 'NONE',
+  scheduleWarningGroupId: 0,
+  scheduleAutoOnline: false
+})
+const scheduleRules = {
+  scheduleCron: [{ required: true, message: '请输入 Cron 表达式', trigger: 'blur' }],
+  scheduleTimezone: [{ required: true, message: '请输入时区', trigger: 'blur' }],
+  scheduleStartTime: [{ required: true, message: '请选择开始时间', trigger: 'change' }],
+  scheduleEndTime: [{ required: true, message: '请选择结束时间', trigger: 'change' }]
+}
 
 // Inline editing states
 const isEditingName = ref(false)
@@ -571,6 +706,7 @@ const loadWorkflowDetail = async () => {
         globalParamsList.value = []
     }
 
+    syncScheduleForm()
     syncPendingFlag(workflow.value?.workflow?.id, workflow.value?.publishRecords || [])
   } catch (error) {
     console.error('加载工作流详情失败', error)
@@ -686,6 +822,34 @@ const getPublishRecordStatusText = (status) => {
 
 const formatDateTime = (value) => {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'
+}
+
+const syncScheduleForm = () => {
+  const wf = workflow.value?.workflow
+  if (!wf) return
+
+  scheduleForm.scheduleCron = wf.scheduleCron || ''
+  scheduleForm.scheduleTimezone = wf.scheduleTimezone || 'Asia/Shanghai'
+  scheduleForm.scheduleStartTime = wf.scheduleStartTime
+    ? dayjs(wf.scheduleStartTime).format('YYYY-MM-DD HH:mm:ss')
+    : ''
+  scheduleForm.scheduleEndTime = wf.scheduleEndTime
+    ? dayjs(wf.scheduleEndTime).format('YYYY-MM-DD HH:mm:ss')
+    : ''
+  scheduleForm.scheduleFailureStrategy = wf.scheduleFailureStrategy || 'CONTINUE'
+  scheduleForm.scheduleWarningType = wf.scheduleWarningType || 'NONE'
+  scheduleForm.scheduleWarningGroupId =
+    wf.scheduleWarningGroupId === null || wf.scheduleWarningGroupId === undefined
+      ? 0
+      : wf.scheduleWarningGroupId
+  scheduleForm.scheduleAutoOnline = Boolean(wf.scheduleAutoOnline)
+
+  scheduleSwitchMuted.value = true
+  scheduleEnabled.value = (wf.scheduleState || '').toUpperCase() === 'ONLINE'
+  nextTick(() => {
+    scheduleSwitchMuted.value = false
+  })
+  scheduleFormRef.value?.clearValidate()
 }
 
 const formatDuration = (durationMs, startTime, endTime) => {
@@ -959,6 +1123,74 @@ const handleDelete = async (row) => {
     }
   } catch {
     // 用户取消删除
+  }
+}
+
+const saveScheduleConfig = async () => {
+  const wf = workflow.value?.workflow
+  if (!wf?.id) return
+
+  try {
+    await scheduleFormRef.value?.validate()
+  } catch {
+    return
+  }
+
+  savingSchedule.value = true
+  try {
+    await workflowApi.updateSchedule(wf.id, {
+      scheduleCron: scheduleForm.scheduleCron,
+      scheduleTimezone: scheduleForm.scheduleTimezone,
+      scheduleStartTime: scheduleForm.scheduleStartTime,
+      scheduleEndTime: scheduleForm.scheduleEndTime,
+      scheduleFailureStrategy: scheduleForm.scheduleFailureStrategy,
+      scheduleWarningType: scheduleForm.scheduleWarningType,
+      scheduleWarningGroupId: scheduleForm.scheduleWarningGroupId,
+      scheduleAutoOnline: scheduleForm.scheduleAutoOnline
+    })
+    ElMessage.success('调度配置已保存')
+    loadWorkflowDetail()
+  } catch (error) {
+    console.error('保存调度配置失败', error)
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    savingSchedule.value = false
+  }
+}
+
+const handleToggleSchedule = async (val) => {
+  if (scheduleSwitchMuted.value) {
+    return
+  }
+  const wf = workflow.value?.workflow
+  if (!wf?.id) return
+  if (!wf.dolphinScheduleId) {
+    ElMessage.warning('请先保存调度配置')
+    scheduleEnabled.value = false
+    return
+  }
+  if (val === true && wf.status !== 'online') {
+    ElMessage.warning('工作流未上线，无法上线调度')
+    scheduleEnabled.value = false
+    return
+  }
+
+  scheduleSwitchLoading.value = true
+  try {
+    if (val) {
+      await workflowApi.onlineSchedule(wf.id)
+      ElMessage.success('调度已上线')
+    } else {
+      await workflowApi.offlineSchedule(wf.id)
+      ElMessage.success('调度已下线')
+    }
+    loadWorkflowDetail()
+  } catch (error) {
+    console.error('切换调度状态失败', error)
+    ElMessage.error(getErrorMessage(error))
+    scheduleEnabled.value = !val
+  } finally {
+    scheduleSwitchLoading.value = false
   }
 }
 

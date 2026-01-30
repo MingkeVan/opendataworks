@@ -180,6 +180,77 @@ public class DolphinSchedulerService {
     }
 
     /**
+     * Create a DolphinScheduler schedule for the given workflow definition.
+     */
+    public Long createWorkflowSchedule(long workflowCode,
+            String scheduleJson,
+            String warningType,
+            String failureStrategy,
+            Long warningGroupId) {
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            throw new IllegalStateException("Cannot create schedule: Project not found");
+        }
+        Long scheduleId = openApiClient.createSchedule(
+                projectCode,
+                workflowCode,
+                scheduleJson,
+                warningType,
+                failureStrategy,
+                warningGroupId);
+        log.info("Created Dolphin schedule for workflow {} -> {}", workflowCode, scheduleId);
+        return scheduleId;
+    }
+
+    /**
+     * Update an existing DolphinScheduler schedule.
+     */
+    public void updateWorkflowSchedule(long scheduleId,
+            long workflowCode,
+            String scheduleJson,
+            String warningType,
+            String failureStrategy,
+            Long warningGroupId) {
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            throw new IllegalStateException("Cannot update schedule: Project not found");
+        }
+        openApiClient.updateSchedule(
+                projectCode,
+                scheduleId,
+                workflowCode,
+                scheduleJson,
+                warningType,
+                failureStrategy,
+                warningGroupId);
+        log.info("Updated Dolphin schedule {} for workflow {}", scheduleId, workflowCode);
+    }
+
+    /**
+     * Online a DolphinScheduler schedule.
+     */
+    public void onlineWorkflowSchedule(long scheduleId) {
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            throw new IllegalStateException("Cannot online schedule: Project not found");
+        }
+        openApiClient.onlineSchedule(projectCode, scheduleId);
+        log.info("Onlined Dolphin schedule {}", scheduleId);
+    }
+
+    /**
+     * Offline a DolphinScheduler schedule.
+     */
+    public void offlineWorkflowSchedule(long scheduleId) {
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            throw new IllegalStateException("Cannot offline schedule: Project not found");
+        }
+        openApiClient.offlineSchedule(projectCode, scheduleId);
+        log.info("Offlined Dolphin schedule {}", scheduleId);
+    }
+
+    /**
      * Check if workflow definition exists in DolphinScheduler.
      */
     public boolean checkWorkflowExists(long workflowCode) {
