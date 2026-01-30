@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * 巡检服务 - 检查数据表和任务的合规性
@@ -30,6 +31,7 @@ public class InspectionService {
     private final DataTaskMapper dataTaskMapper;
     private final TaskExecutionLogMapper executionLogMapper;
     private final DataLineageMapper dataLineageMapper;
+    private final TableStatisticsHistoryMapper tableStatisticsHistoryMapper;
     private final ObjectMapper objectMapper;
     private final HealthCheckService healthCheckService;
 
@@ -96,6 +98,8 @@ public class InspectionService {
                 return checkReplicaCount(recordId, rule);
             case "tablet_count":
                 return checkTabletCount(recordId, rule);
+            case "tablet_size":
+                return checkTabletSize(recordId, rule);
             case "table_owner":
                 return checkTableOwner(recordId, rule);
             case "table_comment":
@@ -161,7 +165,10 @@ public class InspectionService {
         List<InspectionIssue> issues = new ArrayList<>();
         Map<String, Object> config = parseRuleConfig(rule.getRuleConfig());
         int minReplicas = ((Number) config.getOrDefault("minReplicas", 1)).intValue();
-        int maxReplicas = ((Number) config.getOrDefault("maxReplicas", 3)).intValue();
+        Integer maxReplicas = null;
+        if (config.containsKey("maxReplicas") && config.get("maxReplicas") != null) {
+            maxReplicas = ((Number) config.get("maxReplicas")).intValue();
+        }
         int recommendedReplicas = ((Number) config.getOrDefault("recommendedReplicas", 3)).intValue();
 
         List<DataTable> tables = dataTableMapper.selectList(
@@ -172,11 +179,16 @@ public class InspectionService {
 
         for (DataTable table : tables) {
             Integer replicaNum = table.getReplicaNum();
-            if (replicaNum < minReplicas || replicaNum > maxReplicas) {
+            boolean outOfRange = replicaNum < minReplicas || (maxReplicas != null && replicaNum > maxReplicas);
+            if (outOfRange) {
                 InspectionIssue issue = createIssue(recordId, rule, table);
                 issue.setIssueDescription("副本数不在合理范围内");
                 issue.setCurrentValue(String.valueOf(replicaNum));
-                issue.setExpectedValue(String.format("%d-%d (推荐: %d)", minReplicas, maxReplicas, recommendedReplicas));
+                if (maxReplicas == null) {
+                    issue.setExpectedValue(String.format(">= %d (推荐: %d)", minReplicas, recommendedReplicas));
+                } else {
+                    issue.setExpectedValue(String.format("%d-%d (推荐: %d)", minReplicas, maxReplicas, recommendedReplicas));
+                }
                 issue.setSuggestion(String.format("建议设置副本数为 %d 以保证数据可靠性", recommendedReplicas));
                 inspectionIssueMapper.insert(issue);
                 issues.add(issue);
@@ -236,6 +248,158 @@ public class InspectionService {
         }
 
         return issues;
+    }
+
+    /**
+     * 检查 Tablet 大小（估算）
+     * 平均Tablet大小 ≈ dataSize / (partitionCount * bucketNum)
+     *
+     * 说明：
+     * - partitionCount 优先使用 table_statistics_history 的最新记录
+     * - 若无历史记录，默认按 1 个分区估算
+     */
+    private List<InspectionIssue> checkTabletSize(Long recordId, InspectionRule rule) {
+        List<InspectionIssue> issues = new ArrayList<>();
+        Map<String, Object> config = parseRuleConfig(rule.getRuleConfig());
+
+        int minTabletSizeMb = ((Number) config.getOrDefault("minTabletSizeMb", 1024)).intValue(); // 1 GB
+        int maxTabletSizeMb = ((Number) config.getOrDefault("maxTabletSizeMb", 10240)).intValue(); // 10 GB
+        int targetTabletSizeMb = ((Number) config.getOrDefault("targetTabletSizeMb", 4096)).intValue(); // 4 GB
+        int minTableSizeGbForSmallCheck = ((Number) config.getOrDefault("minTableSizeGbForSmallCheck", 20)).intValue();
+
+        long minTabletBytes = minTabletSizeMb * 1024L * 1024;
+        long maxTabletBytes = maxTabletSizeMb * 1024L * 1024;
+        long targetTabletBytes = targetTabletSizeMb * 1024L * 1024;
+        long minTableBytesForSmallCheck = minTableSizeGbForSmallCheck * 1024L * 1024 * 1024;
+
+        List<DataTable> tables = dataTableMapper.selectList(
+            new LambdaQueryWrapper<DataTable>()
+                .eq(DataTable::getStatus, "active")
+                .isNotNull(DataTable::getBucketNum)
+                .gt(DataTable::getBucketNum, 0)
+                .isNotNull(DataTable::getStorageSize)
+                .gt(DataTable::getStorageSize, 0)
+        );
+
+        Map<Long, TableStatisticsHistory> latestHistoryByTableId = getLatestStatisticsHistoryByTableId(tables);
+
+        for (DataTable table : tables) {
+            if (table.getId() == null) {
+                continue;
+            }
+
+            TableStatisticsHistory history = latestHistoryByTableId.get(table.getId());
+
+            long dataSize = table.getStorageSize() != null ? table.getStorageSize() : 0L;
+            int bucketNum = table.getBucketNum() != null ? table.getBucketNum() : 0;
+            int partitionCount = 1;
+
+            if (history != null) {
+                if (history.getDataSize() != null && history.getDataSize() > 0) {
+                    dataSize = history.getDataSize();
+                }
+                if (history.getBucketNum() != null && history.getBucketNum() > 0) {
+                    bucketNum = history.getBucketNum();
+                }
+                if (history.getPartitionCount() != null && history.getPartitionCount() > 0) {
+                    partitionCount = history.getPartitionCount();
+                }
+            }
+
+            if (dataSize <= 0 || bucketNum <= 0 || partitionCount <= 0) {
+                continue;
+            }
+
+            long tabletDenominator = (long) bucketNum * partitionCount;
+            if (tabletDenominator <= 0) {
+                continue;
+            }
+            long avgTabletBytes = dataSize / tabletDenominator;
+
+            boolean tooLarge = avgTabletBytes > maxTabletBytes;
+            boolean tooSmall = avgTabletBytes < minTabletBytes && dataSize >= minTableBytesForSmallCheck;
+            if (!tooLarge && !tooSmall) {
+                continue;
+            }
+
+            InspectionIssue issue = createIssue(recordId, rule, table);
+            if (tooLarge) {
+                issue.setSeverity("high");
+                issue.setIssueDescription("平均Tablet大小过大,可能影响 compaction/导入性能");
+            } else {
+                issue.setSeverity("medium");
+                issue.setIssueDescription("平均Tablet大小偏小,可能导致Tablet数量过多");
+            }
+
+            issue.setCurrentValue(String.format("%s (估算: bucket=%d, partition=%d)", formatBytes(avgTabletBytes),
+                bucketNum, partitionCount));
+            issue.setExpectedValue(String.format("%s ~ %s (目标: %s)", formatBytes(minTabletBytes),
+                formatBytes(maxTabletBytes), formatBytes(targetTabletBytes)));
+            issue.setSuggestion(generateTabletSizeSuggestion(dataSize, bucketNum, partitionCount,
+                minTabletBytes, maxTabletBytes, targetTabletBytes, tooLarge, tooSmall));
+
+            inspectionIssueMapper.insert(issue);
+            issues.add(issue);
+        }
+
+        return issues;
+    }
+
+    private Map<Long, TableStatisticsHistory> getLatestStatisticsHistoryByTableId(List<DataTable> tables) {
+        if (tables == null || tables.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<Long> tableIds = tables.stream()
+            .map(DataTable::getId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toList());
+        if (tableIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<TableStatisticsHistory> histories = tableStatisticsHistoryMapper.selectLatestByTableIds(tableIds);
+        if (histories == null || histories.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<Long, TableStatisticsHistory> result = new HashMap<>();
+        for (TableStatisticsHistory history : histories) {
+            if (history == null || history.getTableId() == null) {
+                continue;
+            }
+            // 如出现重复(同一时间点多条记录)，保留第一条即可
+            result.putIfAbsent(history.getTableId(), history);
+        }
+        return result;
+    }
+
+    private String generateTabletSizeSuggestion(long dataSize, int bucketNum, int partitionCount,
+                                                long minTabletBytes, long maxTabletBytes, long targetTabletBytes,
+                                                boolean tooLarge, boolean tooSmall) {
+        long perPartitionTarget = targetTabletBytes * Math.max(1L, partitionCount);
+        long perPartitionMax = maxTabletBytes * Math.max(1L, partitionCount);
+        long perPartitionMin = minTabletBytes * Math.max(1L, partitionCount);
+
+        long targetBuckets = (dataSize + perPartitionTarget - 1) / perPartitionTarget;
+        targetBuckets = Math.max(1L, targetBuckets);
+
+        if (tooLarge) {
+            long minBucketsToMeetMax = (dataSize + perPartitionMax - 1) / perPartitionMax;
+            minBucketsToMeetMax = Math.max(1L, minBucketsToMeetMax);
+            return String.format(
+                "建议增大分桶数(BUCKETS)到 %d 以上(目标约 %d)，并尽量与 BE 节点数量匹配；必要时优化分区策略",
+                minBucketsToMeetMax, targetBuckets);
+        }
+
+        if (tooSmall) {
+            long maxBucketsToMeetMin = dataSize / perPartitionMin;
+            maxBucketsToMeetMin = Math.max(1L, maxBucketsToMeetMin);
+            return String.format(
+                "建议适当减少分桶数(BUCKETS)到 %d 以下(目标约 %d)，以减少Tablet数量；如分区过多也可考虑合并分区",
+                maxBucketsToMeetMin, targetBuckets);
+        }
+
+        return "建议调整分桶数(BUCKETS)与分区策略，使单Tablet大小落在推荐范围内";
     }
 
     /**
@@ -1192,5 +1356,38 @@ public class InspectionService {
             issue.setResolutionNote(resolutionNote);
         }
         inspectionIssueMapper.updateById(issue);
+    }
+
+    /**
+     * 获取巡检规则列表
+     */
+    public List<InspectionRule> getInspectionRules(Boolean enabled) {
+        LambdaQueryWrapper<InspectionRule> wrapper = new LambdaQueryWrapper<>();
+        if (enabled != null) {
+            wrapper.eq(InspectionRule::getEnabled, enabled);
+        }
+        wrapper.orderByAsc(InspectionRule::getRuleType).orderByAsc(InspectionRule::getId);
+        return inspectionRuleMapper.selectList(wrapper);
+    }
+
+    /**
+     * 更新巡检规则启用状态
+     */
+    @Transactional
+    public void updateRuleEnabled(Long ruleId, Boolean enabled) {
+        if (ruleId == null) {
+            throw new IllegalArgumentException("ruleId is required");
+        }
+        if (enabled == null) {
+            throw new IllegalArgumentException("enabled is required");
+        }
+
+        InspectionRule rule = inspectionRuleMapper.selectById(ruleId);
+        if (rule == null) {
+            throw new IllegalArgumentException("Rule not found: " + ruleId);
+        }
+
+        rule.setEnabled(enabled);
+        inspectionRuleMapper.updateById(rule);
     }
 }

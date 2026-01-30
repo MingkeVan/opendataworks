@@ -62,6 +62,59 @@
       </el-row>
     </el-card>
 
+    <!-- 巡检规则列表 -->
+    <el-card class="rules-card">
+      <template #header>
+        <div class="card-header">
+          <span>巡检规则</span>
+          <div class="header-actions">
+            <el-button :icon="Refresh" @click="loadRules">刷新规则</el-button>
+          </div>
+        </div>
+      </template>
+
+      <el-alert
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px"
+        title="提示：默认规则为停用状态，启用后才会在“执行巡检”中生效。"
+      />
+
+      <el-table
+        v-loading="rulesLoading"
+        :data="rulesList"
+        stripe
+        style="width: 100%"
+      >
+        <el-table-column prop="ruleName" label="规则名称" min-width="180" />
+        <el-table-column prop="ruleType" label="规则类型" width="160">
+          <template #default="{ row }">
+            <el-tag size="small" effect="plain">
+              {{ getIssueTypeText(row.ruleType) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="severity" label="默认严重程度" width="140">
+          <template #default="{ row }">
+            <el-tag :type="getSeverityType(row.severity)" size="small">
+              {{ getSeverityText(row.severity) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" label="规则说明" min-width="260" show-overflow-tooltip />
+        <el-table-column prop="enabled" label="启用" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-switch
+              v-model="row.enabled"
+              :loading="!!ruleUpdating[row.id]"
+              :disabled="!!ruleUpdating[row.id]"
+              @change="(val) => handleRuleEnabledChange(row, val)"
+            />
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <!-- 巡检记录列表 -->
     <el-card class="records-card">
       <template #header>
@@ -301,6 +354,8 @@ import {
   getInspectionRecords,
   getInspectionDetail,
   getInspectionOverview,
+  getInspectionRules,
+  updateRuleEnabled,
   updateIssueStatus
 } from '@/api/inspection'
 
@@ -309,6 +364,9 @@ const loading = ref(false)
 const runningInspection = ref(false)
 const recordsList = ref([])
 const overview = ref({})
+const rulesLoading = ref(false)
+const rulesList = ref([])
+const ruleUpdating = reactive({})
 
 // 对话框控制
 const issuesDialogVisible = ref(false)
@@ -343,6 +401,7 @@ const filteredIssues = computed(() => {
 onMounted(() => {
   loadOverview()
   loadRecords()
+  loadRules()
 })
 
 // 加载概览
@@ -352,6 +411,19 @@ const loadOverview = async () => {
     overview.value = res
   } catch (error) {
     console.error('Failed to load overview:', error)
+  }
+}
+
+// 加载巡检规则
+const loadRules = async () => {
+  rulesLoading.value = true
+  try {
+    const res = await getInspectionRules()
+    rulesList.value = res || []
+  } catch (error) {
+    ElMessage.error('加载巡检规则失败: ' + error.message)
+  } finally {
+    rulesLoading.value = false
   }
 }
 
@@ -365,6 +437,23 @@ const loadRecords = async () => {
     ElMessage.error('加载巡检记录失败: ' + error.message)
   } finally {
     loading.value = false
+  }
+}
+
+// 启用/停用规则
+const handleRuleEnabledChange = async (rule, enabled) => {
+  if (!rule?.id) return
+  if (ruleUpdating[rule.id]) return
+
+  ruleUpdating[rule.id] = true
+  try {
+    await updateRuleEnabled(rule.id, { enabled })
+    ElMessage.success(enabled ? '规则已启用' : '规则已停用')
+  } catch (error) {
+    rule.enabled = !enabled
+    ElMessage.error('更新规则状态失败: ' + error.message)
+  } finally {
+    ruleUpdating[rule.id] = false
   }
 }
 
@@ -450,6 +539,7 @@ const handleUpdateIssueStatus = async (issue, newStatus) => {
 const refreshData = () => {
   loadOverview()
   loadRecords()
+  loadRules()
 }
 
 // 工具函数
@@ -513,6 +603,7 @@ const getIssueTypeText = (type) => {
     'table_naming': '表命名规范',
     'replica_count': '副本数检查',
     'tablet_count': 'Tablet数量',
+    'tablet_size': 'Tablet大小',
     'table_owner': '表负责人',
     'table_comment': '表注释',
     'task_failure': '任务失败',
@@ -568,6 +659,7 @@ const formatDuration = (seconds) => {
 }
 
 .header-card,
+.rules-card,
 .records-card {
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
@@ -650,6 +742,10 @@ const formatDuration = (seconds) => {
 }
 
 .records-card {
+  margin-top: 20px;
+}
+
+.rules-card {
   margin-top: 20px;
 }
 
