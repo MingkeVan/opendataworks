@@ -24,7 +24,7 @@ spring:
 
 doris:
   jdbc:
-    url-template: jdbc:mysql://%s:%d/%s?useUnicode=true&characterEncoding=UTF-8&useTimezone=true&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=5000&socketTimeout=60000
+    url-template: jdbc:mysql://%s:%d/%s?useUnicode=true&characterEncoding=UTF-8&useTimezone=true&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=5000&socketTimeout=300000
     default-database: information_schema
     session-charset-enabled: true
     session-charset: utf8mb4

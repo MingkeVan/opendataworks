@@ -2,7 +2,7 @@ import request from '@/utils/request'
 
 export const dataQueryApi = {
   execute(data) {
-    return request.post('/v1/data-query/execute', data)
+    return request.post('/v1/data-query/execute', data, { timeout: 300000 })
   },
 
   history(params) {
