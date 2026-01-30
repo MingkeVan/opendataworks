@@ -158,7 +158,12 @@ public class DataTaskService {
      * 根据ID获取任务
      */
     public DataTask getById(Long id) {
-        return dataTaskMapper.selectById(id);
+        DataTask task = dataTaskMapper.selectById(id);
+        if (task == null) {
+            return null;
+        }
+        enrichWorkflowMetadata(Collections.singletonList(task));
+        return task;
     }
 
     /**
@@ -252,6 +257,11 @@ public class DataTaskService {
             throw new BusinessException("任务不存在");
         }
 
+        WorkflowTaskRelation workflowRelation = workflowTaskRelationMapper.selectOne(
+                Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                        .eq(WorkflowTaskRelation::getTaskId, task.getId()));
+        Long previousWorkflowId = workflowRelation != null ? workflowRelation.getWorkflowId() : null;
+
         // 检查任务名称是否已被其他任务使用
         if (!StringUtils.hasText(task.getTaskName())) {
             // taskName 为空时不检查
@@ -295,10 +305,7 @@ public class DataTaskService {
 
         saveTableTaskRelations(task.getId(), inputTableIds, outputTableIds);
 
-        // 如果任务属于工作流，重新计算工作流中所有任务的上下游关系
-        if (task.getWorkflowId() != null) {
-            workflowService.refreshTaskRelations(task.getWorkflowId());
-        }
+        syncWorkflowRelation(task.getId(), task.getWorkflowId(), workflowRelation, previousWorkflowId);
 
         return task;
     }
@@ -680,6 +687,11 @@ public class DataTaskService {
      */
     @Transactional
     public void delete(Long id) {
+        WorkflowTaskRelation workflowRelation = workflowTaskRelationMapper.selectOne(
+                Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                        .eq(WorkflowTaskRelation::getTaskId, id));
+        Long workflowId = workflowRelation != null ? workflowRelation.getWorkflowId() : null;
+
         DataTask task = dataTaskMapper.selectById(id);
         if (task == null) {
             log.warn("Attempted to delete non-existent task: {}", id);
@@ -708,8 +720,8 @@ public class DataTaskService {
         log.info("Deleted task: {}", id);
 
         // 如果任务属于工作流，重新计算工作流中所有任务的上下游关系
-        if (task.getWorkflowId() != null) {
-            workflowService.refreshTaskRelations(task.getWorkflowId());
+        if (workflowId != null) {
+            workflowService.refreshTaskRelations(workflowId);
         }
 
         if (workflowCode != null) {
@@ -757,6 +769,56 @@ public class DataTaskService {
                 relation.setRelationType("write");
                 tableTaskRelationMapper.insert(relation);
             }
+        }
+    }
+
+    private void syncWorkflowRelation(Long taskId,
+            Long workflowId,
+            WorkflowTaskRelation workflowRelation,
+            Long previousWorkflowId) {
+        if (taskId == null) {
+            return;
+        }
+
+        // Remove workflow binding.
+        if (workflowId == null) {
+            if (workflowRelation != null) {
+                workflowTaskRelationMapper.delete(
+                        Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                                .eq(WorkflowTaskRelation::getTaskId, taskId));
+            }
+            if (previousWorkflowId != null) {
+                workflowService.refreshTaskRelations(previousWorkflowId);
+            }
+            return;
+        }
+
+        // Create or update workflow binding.
+        if (workflowRelation == null) {
+            WorkflowTaskRelation relation = new WorkflowTaskRelation();
+            relation.setWorkflowId(workflowId);
+            relation.setTaskId(taskId);
+            relation.setUpstreamTaskCount(tableTaskRelationMapper.countUpstreamTasks(taskId));
+            relation.setDownstreamTaskCount(tableTaskRelationMapper.countDownstreamTasks(taskId));
+            workflowTaskRelationMapper.insert(relation);
+        } else {
+            boolean workflowChanged = !Objects.equals(previousWorkflowId, workflowId);
+            workflowRelation.setWorkflowId(workflowId);
+            workflowRelation.setUpstreamTaskCount(tableTaskRelationMapper.countUpstreamTasks(taskId));
+            workflowRelation.setDownstreamTaskCount(tableTaskRelationMapper.countDownstreamTasks(taskId));
+            if (workflowChanged) {
+                workflowRelation.setNodeAttrs(null);
+                workflowRelation.setIsEntry(null);
+                workflowRelation.setIsExit(null);
+                workflowRelation.setVersionId(null);
+            }
+            workflowTaskRelationMapper.updateById(workflowRelation);
+        }
+
+        // Recompute topology/entry/exit & counts.
+        workflowService.refreshTaskRelations(workflowId);
+        if (previousWorkflowId != null && !previousWorkflowId.equals(workflowId)) {
+            workflowService.refreshTaskRelations(previousWorkflowId);
         }
     }
 
