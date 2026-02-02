@@ -294,43 +294,8 @@
 
                   <div class="result-panel">
                     <el-tabs v-model="tabStates[tab.id].resultTab" type="border-card" class="result-tabs">
-                      <el-tab-pane name="message">
-                        <template #label>
-                          <span class="result-label"><el-icon><Files /></el-icon> Message</span>
-                        </template>
-
-                        <div class="message-panel">
-                          <div class="message-toolbar">
-                            <div class="meta-info">
-                              <span class="meta-item">
-                                <el-icon><Timer /></el-icon>
-                                {{
-                                  formatDuration(
-                                    tabStates[tab.id].queryLoading
-                                      ? tabStates[tab.id].queryTiming.elapsedMs
-                                      : tabStates[tab.id].queryResult.durationMs
-                                  )
-                                }}
-                              </span>
-                              <span v-if="tabStates[tab.id].queryLoading" class="meta-item">
-                                <el-icon><Loading /></el-icon> 查询中
-                              </span>
-                              <template v-else>
-                                <el-tag v-if="tabStates[tab.id].queryResult.cancelled" size="small" type="warning">
-                                  已停止
-                                </el-tag>
-                                <span v-if="tabStates[tab.id].queryResult.executedAt" class="meta-item">
-                                  {{ formatDateTime(tabStates[tab.id].queryResult.executedAt) }}
-                                </span>
-                              </template>
-                            </div>
-                          </div>
-                          <pre class="message-body">{{ tabStates[tab.id].queryLoading ? '正在执行…' : tabStates[tab.id].queryResult.message || '暂无消息' }}</pre>
-                        </div>
-                      </el-tab-pane>
-
                       <el-tab-pane
-                        v-for="(resultSet, idx) in tabStates[tab.id].queryResult.resultSets"
+                        v-for="(resultSet, idx) in getDisplayResultSets(tab.id)"
                         :key="String(idx)"
                         :name="`result-${idx}`"
                       >
@@ -340,6 +305,31 @@
 
                         <div class="table-toolbar">
                           <div class="meta-info">
+                            <span class="meta-item">
+                              <el-icon><Timer /></el-icon>
+                              {{
+                                formatDuration(
+                                  tabStates[tab.id].queryLoading
+                                    ? tabStates[tab.id].queryTiming.elapsedMs
+                                    : tabStates[tab.id].queryResult.durationMs
+                                )
+                              }}
+                            </span>
+                            <span v-if="tabStates[tab.id].queryLoading" class="meta-item">
+                              <el-icon><Loading /></el-icon> 查询中
+                            </span>
+                            <template v-else>
+                              <el-tag v-if="tabStates[tab.id].queryResult.cancelled" size="small" type="warning">
+                                已停止
+                              </el-tag>
+                              <span v-if="tabStates[tab.id].queryResult.executedAt" class="meta-item">
+                                <el-icon><Clock /></el-icon>
+                                {{ formatDateTime(tabStates[tab.id].queryResult.executedAt) }}
+                              </span>
+                              <span v-if="tabStates[tab.id].queryResult.message" class="meta-item meta-message" :title="tabStates[tab.id].queryResult.message">
+                                {{ tabStates[tab.id].queryResult.message }}
+                              </span>
+                            </template>
                             <span class="meta-item"><el-icon><Files /></el-icon> {{ (resultSet.rows || []).length }} 行</span>
                             <span v-if="resultSet.hasMore" class="meta-item truncate">
                               <el-icon><Warning /></el-icon> 结果已截断
@@ -354,6 +344,26 @@
                               导出 CSV
                             </el-button>
                           </div>
+                        </div>
+
+                        <div v-if="tabStates[tab.id].queryResult.errorMessage" class="result-message">
+                          <el-alert
+                            type="error"
+                            :closable="false"
+                            show-icon
+                            :title="tabStates[tab.id].queryResult.errorMessage"
+                          />
+                        </div>
+                        <div
+                          v-else-if="tabStates[tab.id].queryResult.cancelled && tabStates[tab.id].queryResult.message"
+                          class="result-message"
+                        >
+                          <el-alert
+                            type="warning"
+                            :closable="false"
+                            show-icon
+                            :title="tabStates[tab.id].queryResult.message"
+                          />
                         </div>
 
                         <div class="table-wrapper">
@@ -1807,6 +1817,20 @@ const formatDateTime = (value) => {
   return String(value).replace('T', ' ').split('.')[0]
 }
 
+const EMPTY_RESULT_SET = Object.freeze({
+  index: 1,
+  columns: [],
+  rows: [],
+  hasMore: false,
+  previewRowCount: 0
+})
+
+const getDisplayResultSets = (tabId) => {
+  const state = tabStates[tabId]
+  const sets = Array.isArray(state?.queryResult?.resultSets) ? state.queryResult.resultSets : []
+  return sets.length ? sets : [EMPTY_RESULT_SET]
+}
+
 const getTableRowCount = (table) => {
   if (!table) return 0
   const value = table.rowCount ?? table.tableRows ?? table.table_rows
@@ -1917,9 +1941,10 @@ const createTabState = (table) => {
 	      durationMs: 0,
 	      executedAt: '',
 	      cancelled: false,
-	      message: ''
+	      message: '',
+	      errorMessage: ''
 	    },
-	    resultTab: 'message',
+	    resultTab: 'result-0',
     page: {
       current: 1,
       size: 20
@@ -2436,23 +2461,33 @@ const buildDefaultSql = (table) => {
 
 const executeQuery = async (tabId) => {
   const state = tabStates[tabId]
+  if (!state) return
   const selectedSql = String(state?.query?.selectionText || '')
   const sqlToRun = selectedSql.trim() ? selectedSql : String(state?.query?.sql || '')
   if (!sqlToRun.trim()) {
-    ElMessage.warning('请输入 SQL')
+    state.queryResult.errorMessage = '请输入 SQL'
+    state.queryResult.message = ''
+    state.resultTab = 'result-0'
     return
   }
   if (!state.table?.dbName) {
-    ElMessage.warning('请先选择数据库')
+    state.queryResult.errorMessage = '请先选择数据库'
+    state.queryResult.message = ''
+    state.resultTab = 'result-0'
     return
   }
   const sourceId = state.table?.sourceId || clusterId.value
   if (!sourceId) {
-    ElMessage.warning('请选择数据源')
+    state.queryResult.errorMessage = '请选择数据源'
+    state.queryResult.message = ''
+    state.resultTab = 'result-0'
     return
   }
   state.queryLoading = true
   state.queryStopping = false
+  state.queryResult.errorMessage = ''
+  state.queryResult.message = ''
+  state.queryResult.cancelled = false
   startQueryTimer(tabId)
   try {
     const res = await dataQueryApi.execute({
@@ -2481,17 +2516,30 @@ const executeQuery = async (tabId) => {
       durationMs: res.durationMs,
       executedAt: res.executedAt,
       cancelled: !!res.cancelled,
-      message: res.message || ''
+      message: res.message || '',
+      errorMessage: ''
     }
     state.page.current = 1
-    state.resultTab = normalizedSets.length ? 'result-0' : 'message'
+    state.resultTab = 'result-0'
     state.chart.xAxis = ''
     state.chart.yAxis = []
     await nextTick()
     renderChart(tabId)
     fetchHistory()
   } catch (error) {
-    ElMessage.error(error.response?.data?.message || error.message || '查询失败')
+    const message = error?.response?.data?.message || error?.message || '查询失败'
+    state.queryResult = {
+      resultSets: [],
+      columns: [],
+      rows: [],
+      hasMore: false,
+      durationMs: 0,
+      executedAt: '',
+      cancelled: false,
+      message: '',
+      errorMessage: message
+    }
+    state.resultTab = 'result-0'
   } finally {
     state.queryLoading = false
     state.queryStopping = false
@@ -2507,7 +2555,10 @@ const stopQuery = async (tabId) => {
     await dataQueryApi.stop({ clientQueryId: String(tabId) })
   } catch (error) {
     state.queryStopping = false
-    ElMessage.error(error.response?.data?.message || error.message || '停止失败')
+    const message = error?.response?.data?.message || error?.message || '停止失败'
+    state.queryResult.errorMessage = message
+    state.queryResult.message = ''
+    state.resultTab = 'result-0'
   }
 }
 
@@ -3997,29 +4048,18 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
-.message-panel {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: #fff;
-}
-
-.message-toolbar {
+.result-message {
   padding: 8px 12px;
+  background-color: #fff;
   border-bottom: 1px solid #ebeef5;
 }
 
-.message-body {
-  flex: 1;
-  min-height: 0;
-  margin: 0;
-  padding: 10px 12px;
-  overflow: auto;
-  font-size: 12px;
-  color: #334155;
-  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
-  white-space: pre-wrap;
+.meta-message {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #606266;
 }
 
 .meta-info {
