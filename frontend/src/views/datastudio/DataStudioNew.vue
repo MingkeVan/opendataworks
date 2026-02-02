@@ -492,7 +492,7 @@
                   <div class="meta-panel">
                     <el-tabs v-model="tabStates[tab.id].metaTab" class="meta-tabs">
                       <el-tab-pane name="basic" label="基本信息">
-                        <div class="meta-section">
+                        <div class="meta-section meta-section-fill">
                           <div class="section-header">
                             <span>表信息</span>
                             <div class="section-actions">
@@ -545,96 +545,98 @@
                             </div>
                           </div>
 
-                          <el-descriptions :column="1" border size="small" class="meta-descriptions">
-                            <el-descriptions-item label="表名">
-                              <el-input
-                                v-if="tabStates[tab.id].metaEditing"
-                                v-model="tabStates[tab.id].metaForm.tableName"
-                                size="small"
-                                class="meta-input"
-                              />
-                              <span v-else>{{ tabStates[tab.id].table.tableName || '-' }}</span>
-                            </el-descriptions-item>
-                            <el-descriptions-item label="表注释">
-                              <el-input
-                                v-if="tabStates[tab.id].metaEditing"
-                                v-model="tabStates[tab.id].metaForm.tableComment"
-                                size="small"
-                                class="meta-input"
-                              />
-                              <span v-else>{{ tabStates[tab.id].table.tableComment || '-' }}</span>
-                            </el-descriptions-item>
-                            <el-descriptions-item label="分层">
-                              <el-select
-                                v-if="tabStates[tab.id].metaEditing"
-                                v-model="tabStates[tab.id].metaForm.layer"
-                                size="small"
-                                placeholder="选择分层"
-                                class="meta-input"
-                              >
-                                <el-option v-for="item in layerOptions" :key="item.value" :label="item.label" :value="item.value" />
-                              </el-select>
-                              <span v-else>{{ tabStates[tab.id].table.layer || '-' }}</span>
-                            </el-descriptions-item>
-                            <el-descriptions-item label="负责人">
-                              <el-input
-                                v-if="tabStates[tab.id].metaEditing"
-                                v-model="tabStates[tab.id].metaForm.owner"
-                                size="small"
-                                class="meta-input"
-                              />
-                              <span v-else>{{ tabStates[tab.id].table.owner || '-' }}</span>
-                            </el-descriptions-item>
-                            <el-descriptions-item label="数据库">
-                              <span>{{ tabStates[tab.id].table.dbName || '-' }}</span>
-                            </el-descriptions-item>
-                          </el-descriptions>
-
-                          <template v-if="isDorisTable(tabStates[tab.id].table)">
-                            <div class="section-divider"></div>
-
-                            <div class="section-header small">
-                              <span>Doris 配置</span>
-                            </div>
+                          <div class="meta-scroll">
                             <el-descriptions :column="1" border size="small" class="meta-descriptions">
-                              <el-descriptions-item label="表模型">{{ tabStates[tab.id].table.tableModel || '-' }}</el-descriptions-item>
-                              <el-descriptions-item label="主键列">{{ tabStates[tab.id].table.keyColumns || '-' }}</el-descriptions-item>
-                              <el-descriptions-item label="分区字段">{{ tabStates[tab.id].table.partitionColumn || '-' }}</el-descriptions-item>
-                              <el-descriptions-item label="分桶字段">{{ tabStates[tab.id].table.distributionColumn || '-' }}</el-descriptions-item>
-                              <el-descriptions-item label="分桶数">
-                                <el-input-number
+                              <el-descriptions-item label="表名">
+                                <el-input
                                   v-if="tabStates[tab.id].metaEditing"
-                                  v-model="tabStates[tab.id].metaForm.bucketNum"
-                                  :min="1"
+                                  v-model="tabStates[tab.id].metaForm.tableName"
                                   size="small"
-                                  controls-position="right"
                                   class="meta-input"
                                 />
-                                <span v-else>{{ tabStates[tab.id].table.bucketNum || '-' }}</span>
+                                <span v-else>{{ tabStates[tab.id].table.tableName || '-' }}</span>
                               </el-descriptions-item>
-                              <el-descriptions-item label="副本数">
-                                <template v-if="tabStates[tab.id].metaEditing">
-                                  <div class="replica-edit">
-                                    <el-input-number
-                                      v-model="tabStates[tab.id].metaForm.replicaNum"
-                                      :min="1"
-                                      size="small"
-                                      controls-position="right"
-                                      class="meta-input"
-                                    />
-                                    <span v-if="isReplicaWarning(tabStates[tab.id].metaForm.replicaNum)" class="replica-warning">
-                                      <el-icon><Warning /></el-icon>
-                                      建议≥3
-                                    </span>
-                                  </div>
-                                </template>
-                                <span v-else :class="['replica-value', { 'replica-danger': isReplicaWarning(tabStates[tab.id].table.replicaNum) }]">
-                                  <el-icon v-if="isReplicaWarning(tabStates[tab.id].table.replicaNum)" class="warning-icon"><Warning /></el-icon>
-                                  {{ tabStates[tab.id].table.replicaNum || '-' }}
-                                </span>
+                              <el-descriptions-item label="表注释">
+                                <el-input
+                                  v-if="tabStates[tab.id].metaEditing"
+                                  v-model="tabStates[tab.id].metaForm.tableComment"
+                                  size="small"
+                                  class="meta-input"
+                                />
+                                <span v-else>{{ tabStates[tab.id].table.tableComment || '-' }}</span>
+                              </el-descriptions-item>
+                              <el-descriptions-item label="分层">
+                                <el-select
+                                  v-if="tabStates[tab.id].metaEditing"
+                                  v-model="tabStates[tab.id].metaForm.layer"
+                                  size="small"
+                                  placeholder="选择分层"
+                                  class="meta-input"
+                                >
+                                  <el-option v-for="item in layerOptions" :key="item.value" :label="item.label" :value="item.value" />
+                                </el-select>
+                                <span v-else>{{ tabStates[tab.id].table.layer || '-' }}</span>
+                              </el-descriptions-item>
+                              <el-descriptions-item label="负责人">
+                                <el-input
+                                  v-if="tabStates[tab.id].metaEditing"
+                                  v-model="tabStates[tab.id].metaForm.owner"
+                                  size="small"
+                                  class="meta-input"
+                                />
+                                <span v-else>{{ tabStates[tab.id].table.owner || '-' }}</span>
+                              </el-descriptions-item>
+                              <el-descriptions-item label="数据库">
+                                <span>{{ tabStates[tab.id].table.dbName || '-' }}</span>
                               </el-descriptions-item>
                             </el-descriptions>
-                          </template>
+
+                            <template v-if="isDorisTable(tabStates[tab.id].table)">
+                              <div class="section-divider"></div>
+
+                              <div class="section-header small">
+                                <span>Doris 配置</span>
+                              </div>
+                              <el-descriptions :column="1" border size="small" class="meta-descriptions">
+                                <el-descriptions-item label="表模型">{{ tabStates[tab.id].table.tableModel || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="主键列">{{ tabStates[tab.id].table.keyColumns || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="分区字段">{{ tabStates[tab.id].table.partitionColumn || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="分桶字段">{{ tabStates[tab.id].table.distributionColumn || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="分桶数">
+                                  <el-input-number
+                                    v-if="tabStates[tab.id].metaEditing"
+                                    v-model="tabStates[tab.id].metaForm.bucketNum"
+                                    :min="1"
+                                    size="small"
+                                    controls-position="right"
+                                    class="meta-input"
+                                  />
+                                  <span v-else>{{ tabStates[tab.id].table.bucketNum || '-' }}</span>
+                                </el-descriptions-item>
+                                <el-descriptions-item label="副本数">
+                                  <template v-if="tabStates[tab.id].metaEditing">
+                                    <div class="replica-edit">
+                                      <el-input-number
+                                        v-model="tabStates[tab.id].metaForm.replicaNum"
+                                        :min="1"
+                                        size="small"
+                                        controls-position="right"
+                                        class="meta-input"
+                                      />
+                                      <span v-if="isReplicaWarning(tabStates[tab.id].metaForm.replicaNum)" class="replica-warning">
+                                        <el-icon><Warning /></el-icon>
+                                        建议≥3
+                                      </span>
+                                    </div>
+                                  </template>
+                                  <span v-else :class="['replica-value', { 'replica-danger': isReplicaWarning(tabStates[tab.id].table.replicaNum) }]">
+                                    <el-icon v-if="isReplicaWarning(tabStates[tab.id].table.replicaNum)" class="warning-icon"><Warning /></el-icon>
+                                    {{ tabStates[tab.id].table.replicaNum || '-' }}
+                                  </span>
+                                </el-descriptions-item>
+                              </el-descriptions>
+                            </template>
+                          </div>
                         </div>
                       </el-tab-pane>
 
@@ -4018,6 +4020,13 @@ onBeforeUnmount(() => {
 .meta-section-fill {
   flex: 1;
   min-height: 0;
+}
+
+.meta-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .meta-table {
