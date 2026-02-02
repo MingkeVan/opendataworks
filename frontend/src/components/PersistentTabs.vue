@@ -168,8 +168,13 @@ const emitAndClose = (action) => {
 }
 
 const handleEdit = (targetName, action) => {
-  if (action === 'add') emit('tab-add')
-  if (action === 'remove') emit('tab-remove', targetName)
+  if (action === 'add') {
+    if (!props.addable) emit('tab-add')
+    return
+  }
+  if (action === 'remove') {
+    if (!props.closable) emit('tab-remove', targetName)
+  }
 }
 
 onBeforeUnmount(() => closeMenu())
