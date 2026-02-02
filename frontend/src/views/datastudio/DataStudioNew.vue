@@ -180,8 +180,7 @@
             </template>
 
             <template #default="{ tab }">
-              <div class="tab-grid" :class="{ 'is-single': tab.kind === 'query' }">
-                <!-- Left 60% -->
+              <div class="tab-grid">
                 <div
                   class="tab-left"
                   :ref="(el) => setLeftPaneRef(tab.id, el)"
@@ -190,8 +189,48 @@
                   <div class="query-panel">
                     <div class="query-header">
                       <div class="query-context">
-                        <el-tag size="small" type="info">{{ tab.dbName || '-' }}</el-tag>
-                        <el-tag size="small" type="success">{{ tab.tableName || '-' }}</el-tag>
+                        <template v-if="tab.kind === 'query'">
+                          <el-select
+                            v-model="tabStates[tab.id].table.sourceId"
+                            size="small"
+                            filterable
+                            clearable
+                            class="query-select query-select--source"
+                            placeholder="选择数据源"
+                            @change="(value) => handleQuerySourceSelect(tab.id, value)"
+                          >
+                            <el-option
+                              v-for="source in dataSources"
+                              :key="String(source.id)"
+                              :label="source.clusterName || source.name || `DataSource ${source.id}`"
+                              :value="String(source.id)"
+                            />
+                          </el-select>
+
+                          <el-select
+                            v-model="tabStates[tab.id].table.dbName"
+                            size="small"
+                            filterable
+                            clearable
+                            class="query-select query-select--db"
+                            placeholder="选择数据库"
+                            :disabled="!tabStates[tab.id].table.sourceId"
+                            @change="(value) => handleQueryDatabaseSelect(tab.id, value)"
+                          >
+                            <el-option
+                              v-for="db in getSchemaOptions(tabStates[tab.id].table.sourceId)"
+                              :key="db"
+                              :label="db"
+                              :value="db"
+                            />
+                          </el-select>
+
+                        </template>
+
+                        <template v-else>
+                          <el-tag size="small" type="info">{{ tabStates[tab.id].table.dbName || '-' }}</el-tag>
+                          <el-tag size="small" type="success">{{ tabStates[tab.id].table.tableName || '-' }}</el-tag>
+                        </template>
                       </div>
                       <div class="query-actions">
                         <span class="limit-label">Limit</span>
@@ -425,12 +464,13 @@
                   </div>
                 </div>
 
-                <!-- Right 40% -->
-                <div v-if="tab.kind !== 'query'" class="tab-right">
-                  <div class="meta-panel">
+                <!-- moved to DataStudioRightPanel.vue
+                <Teleport to="#datastudio-right-panel">
+                  <div v-if="tab.kind !== 'query' && String(activeTab) === String(tab.id)" class="tab-right">
+                    <div class="meta-panel">
                     <el-tabs v-model="tabStates[tab.id].metaTab" class="meta-tabs">
                       <el-tab-pane name="basic" label="基本信息">
-                        <div class="meta-section">
+                        <div class="meta-section meta-section-fill">
                           <div class="section-header">
                             <span>表信息</span>
                             <div class="section-actions">
@@ -483,96 +523,98 @@
                             </div>
                           </div>
 
-                          <el-descriptions :column="1" border size="small" class="meta-descriptions">
-                            <el-descriptions-item label="表名">
-                              <el-input
-                                v-if="tabStates[tab.id].metaEditing"
-                                v-model="tabStates[tab.id].metaForm.tableName"
-                                size="small"
-                                class="meta-input"
-                              />
-                              <span v-else>{{ tabStates[tab.id].table.tableName || '-' }}</span>
-                            </el-descriptions-item>
-                            <el-descriptions-item label="表注释">
-                              <el-input
-                                v-if="tabStates[tab.id].metaEditing"
-                                v-model="tabStates[tab.id].metaForm.tableComment"
-                                size="small"
-                                class="meta-input"
-                              />
-                              <span v-else>{{ tabStates[tab.id].table.tableComment || '-' }}</span>
-                            </el-descriptions-item>
-                            <el-descriptions-item label="分层">
-                              <el-select
-                                v-if="tabStates[tab.id].metaEditing"
-                                v-model="tabStates[tab.id].metaForm.layer"
-                                size="small"
-                                placeholder="选择分层"
-                                class="meta-input"
-                              >
-                                <el-option v-for="item in layerOptions" :key="item.value" :label="item.label" :value="item.value" />
-                              </el-select>
-                              <span v-else>{{ tabStates[tab.id].table.layer || '-' }}</span>
-                            </el-descriptions-item>
-                            <el-descriptions-item label="负责人">
-                              <el-input
-                                v-if="tabStates[tab.id].metaEditing"
-                                v-model="tabStates[tab.id].metaForm.owner"
-                                size="small"
-                                class="meta-input"
-                              />
-                              <span v-else>{{ tabStates[tab.id].table.owner || '-' }}</span>
-                            </el-descriptions-item>
-                            <el-descriptions-item label="数据库">
-                              <span>{{ tabStates[tab.id].table.dbName || '-' }}</span>
-                            </el-descriptions-item>
-                          </el-descriptions>
-
-                          <template v-if="isDorisTable(tabStates[tab.id].table)">
-                            <div class="section-divider"></div>
-
-                            <div class="section-header small">
-                              <span>Doris 配置</span>
-                            </div>
+                          <div class="meta-scroll">
                             <el-descriptions :column="1" border size="small" class="meta-descriptions">
-                              <el-descriptions-item label="表模型">{{ tabStates[tab.id].table.tableModel || '-' }}</el-descriptions-item>
-                              <el-descriptions-item label="主键列">{{ tabStates[tab.id].table.keyColumns || '-' }}</el-descriptions-item>
-                              <el-descriptions-item label="分区字段">{{ tabStates[tab.id].table.partitionColumn || '-' }}</el-descriptions-item>
-                              <el-descriptions-item label="分桶字段">{{ tabStates[tab.id].table.distributionColumn || '-' }}</el-descriptions-item>
-                              <el-descriptions-item label="分桶数">
-                                <el-input-number
+                              <el-descriptions-item label="表名">
+                                <el-input
                                   v-if="tabStates[tab.id].metaEditing"
-                                  v-model="tabStates[tab.id].metaForm.bucketNum"
-                                  :min="1"
+                                  v-model="tabStates[tab.id].metaForm.tableName"
                                   size="small"
-                                  controls-position="right"
                                   class="meta-input"
                                 />
-                                <span v-else>{{ tabStates[tab.id].table.bucketNum || '-' }}</span>
+                                <span v-else>{{ tabStates[tab.id].table.tableName || '-' }}</span>
                               </el-descriptions-item>
-                              <el-descriptions-item label="副本数">
-                                <template v-if="tabStates[tab.id].metaEditing">
-                                  <div class="replica-edit">
-                                    <el-input-number
-                                      v-model="tabStates[tab.id].metaForm.replicaNum"
-                                      :min="1"
-                                      size="small"
-                                      controls-position="right"
-                                      class="meta-input"
-                                    />
-                                    <span v-if="isReplicaWarning(tabStates[tab.id].metaForm.replicaNum)" class="replica-warning">
-                                      <el-icon><Warning /></el-icon>
-                                      建议≥3
-                                    </span>
-                                  </div>
-                                </template>
-                                <span v-else :class="['replica-value', { 'replica-danger': isReplicaWarning(tabStates[tab.id].table.replicaNum) }]">
-                                  <el-icon v-if="isReplicaWarning(tabStates[tab.id].table.replicaNum)" class="warning-icon"><Warning /></el-icon>
-                                  {{ tabStates[tab.id].table.replicaNum || '-' }}
-                                </span>
+                              <el-descriptions-item label="表注释">
+                                <el-input
+                                  v-if="tabStates[tab.id].metaEditing"
+                                  v-model="tabStates[tab.id].metaForm.tableComment"
+                                  size="small"
+                                  class="meta-input"
+                                />
+                                <span v-else>{{ tabStates[tab.id].table.tableComment || '-' }}</span>
+                              </el-descriptions-item>
+                              <el-descriptions-item label="分层">
+                                <el-select
+                                  v-if="tabStates[tab.id].metaEditing"
+                                  v-model="tabStates[tab.id].metaForm.layer"
+                                  size="small"
+                                  placeholder="选择分层"
+                                  class="meta-input"
+                                >
+                                  <el-option v-for="item in layerOptions" :key="item.value" :label="item.label" :value="item.value" />
+                                </el-select>
+                                <span v-else>{{ tabStates[tab.id].table.layer || '-' }}</span>
+                              </el-descriptions-item>
+                              <el-descriptions-item label="负责人">
+                                <el-input
+                                  v-if="tabStates[tab.id].metaEditing"
+                                  v-model="tabStates[tab.id].metaForm.owner"
+                                  size="small"
+                                  class="meta-input"
+                                />
+                                <span v-else>{{ tabStates[tab.id].table.owner || '-' }}</span>
+                              </el-descriptions-item>
+                              <el-descriptions-item label="数据库">
+                                <span>{{ tabStates[tab.id].table.dbName || '-' }}</span>
                               </el-descriptions-item>
                             </el-descriptions>
-                          </template>
+
+                            <template v-if="isDorisTable(tabStates[tab.id].table)">
+                              <div class="section-divider"></div>
+
+                              <div class="section-header small">
+                                <span>Doris 配置</span>
+                              </div>
+                              <el-descriptions :column="1" border size="small" class="meta-descriptions">
+                                <el-descriptions-item label="表模型">{{ tabStates[tab.id].table.tableModel || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="主键列">{{ tabStates[tab.id].table.keyColumns || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="分区字段">{{ tabStates[tab.id].table.partitionColumn || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="分桶字段">{{ tabStates[tab.id].table.distributionColumn || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="分桶数">
+                                  <el-input-number
+                                    v-if="tabStates[tab.id].metaEditing"
+                                    v-model="tabStates[tab.id].metaForm.bucketNum"
+                                    :min="1"
+                                    size="small"
+                                    controls-position="right"
+                                    class="meta-input"
+                                  />
+                                  <span v-else>{{ tabStates[tab.id].table.bucketNum || '-' }}</span>
+                                </el-descriptions-item>
+                                <el-descriptions-item label="副本数">
+                                  <template v-if="tabStates[tab.id].metaEditing">
+                                    <div class="replica-edit">
+                                      <el-input-number
+                                        v-model="tabStates[tab.id].metaForm.replicaNum"
+                                        :min="1"
+                                        size="small"
+                                        controls-position="right"
+                                        class="meta-input"
+                                      />
+                                      <span v-if="isReplicaWarning(tabStates[tab.id].metaForm.replicaNum)" class="replica-warning">
+                                        <el-icon><Warning /></el-icon>
+                                        建议≥3
+                                      </span>
+                                    </div>
+                                  </template>
+                                  <span v-else :class="['replica-value', { 'replica-danger': isReplicaWarning(tabStates[tab.id].table.replicaNum) }]">
+                                    <el-icon v-if="isReplicaWarning(tabStates[tab.id].table.replicaNum)" class="warning-icon"><Warning /></el-icon>
+                                    {{ tabStates[tab.id].table.replicaNum || '-' }}
+                                  </span>
+                                </el-descriptions-item>
+                              </el-descriptions>
+                            </template>
+                          </div>
                         </div>
                       </el-tab-pane>
 
@@ -899,7 +941,9 @@
                       </div>
                     </div>
                   </div>
-                </div>
+                  </div>
+                </Teleport>
+                -->
               </div>
             </template>
           </PersistentTabs>
@@ -914,6 +958,13 @@
 	          </div>
 	        </div>
 	      </section>
+
+      <div class="workspace-resizer" @mousedown="startRightResize"></div>
+
+      <!-- Right: Meta/Lineage -->
+      <aside class="studio-right" :style="{ width: `${rightPanelWidth}px` }">
+        <DataStudioRightPanel />
+      </aside>
     </div>
 
     <CreateTableDrawer v-model="createDrawerVisible" @created="handleCreateSuccess" />
@@ -923,7 +974,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
@@ -948,15 +999,19 @@ import { dorisClusterApi } from '@/api/doris'
 import { dataQueryApi } from '@/api/query'
 import PersistentTabs from '@/components/PersistentTabs.vue'
 import CreateTableDrawer from '@/views/datastudio/CreateTableDrawer.vue'
+import DataStudioRightPanel from '@/views/datastudio/components/DataStudioRightPanel.vue'
 import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
 
 const clusterId = ref(null)
 const route = useRoute()
 const router = useRouter()
 const sidebarWidth = ref(540)
+const rightPanelWidth = ref(520)
 const isResizing = ref(false)
 let resizeMoveHandler = null
 let resizeUpHandler = null
+let resizeRightMoveHandler = null
+let resizeRightUpHandler = null
 const leftPaneHeights = reactive({})
 const leftPaneRefs = ref({})
 let resizeLeftMoveHandler = null
@@ -1548,8 +1603,23 @@ const loadCatalogNode = async (node, resolve, reject) => {
   resolve([])
 }
 
-const handleCatalogNodeClick = (data) => {
+const handleCatalogNodeClick = async (data) => {
   if (!data) return
+  const currentTab = activeTab.value
+    ? openTabs.value.find((item) => String(item.id) === String(activeTab.value))
+    : null
+
+  if (currentTab?.kind === 'query') {
+    if (data.type === 'datasource') {
+      await handleQuerySourceSelect(currentTab.id, data.sourceId)
+      return
+    }
+    if (data.type === 'schema') {
+      await handleQuerySourceSelect(currentTab.id, data.sourceId)
+      await handleQueryDatabaseSelect(currentTab.id, data.schemaName)
+      return
+    }
+  }
   if (data.type === 'table') {
     openTableTab(data.table, data.schemaName, data.sourceId)
     return
@@ -2181,44 +2251,124 @@ const handleCloseAll = () => {
   activeTab.value = ''
 }
 
-const resolveDefaultSourceId = () => {
-  if (clusterId.value) return String(clusterId.value)
-  if (activeSource.value) return String(activeSource.value)
-  const fallback = Array.isArray(dataSources.value) ? dataSources.value[0] : null
-  return fallback?.id ? String(fallback.id) : ''
+const resolveQuerySourceId = () => {
+  const current = openTabs.value.find((tab) => String(tab.id) === String(activeTab.value))
+  if (current?.sourceId) return String(current.sourceId)
+  return ''
 }
 
-const resolveDefaultDatabase = (sourceId) => {
+const resolveQueryDatabase = (sourceId) => {
   const sid = String(sourceId || '')
   if (!sid) return ''
-  return activeSchema[sid] || schemaStore[sid]?.[0] || ''
+  const current = openTabs.value.find((tab) => String(tab.id) === String(activeTab.value))
+  if (current?.dbName) return String(current.dbName)
+  return ''
+}
+
+const getTabInsertIndex = () => {
+  const idx = openTabs.value.findIndex((tab) => String(tab.id) === String(activeTab.value))
+  return idx === -1 ? openTabs.value.length : idx + 1
 }
 
 const handleTabAdd = async () => {
-  const sourceId = resolveDefaultSourceId()
-  if (!sourceId) {
-    ElMessage.warning('请先选择数据源')
-    return
-  }
-  await loadSchemas(sourceId)
-  const dbName = resolveDefaultDatabase(sourceId)
-  if (!dbName) {
-    ElMessage.warning('请先选择数据库')
-    return
+  const sourceId = resolveQuerySourceId()
+  let dbName = resolveQueryDatabase(sourceId)
+  if (sourceId) {
+    await loadSchemas(sourceId)
+    if (dbName && !getSchemaOptions(sourceId).includes(dbName)) {
+      dbName = ''
+    }
   }
 
   const queryId = `query:${Date.now()}`
   const tabItem = {
     id: queryId,
     kind: 'query',
-    tableName: `查询${queryTabCounter.value++}`,
+    tableName: '无标题 - 查询',
     dbName,
     sourceId
   }
   tabStates[queryId] = createTabState({ tableName: '', dbName, sourceId })
   tabStates[queryId].query.sql = ''
-  openTabs.value.push(tabItem)
+  openTabs.value.splice(getTabInsertIndex(), 0, tabItem)
   activeTab.value = queryId
+}
+
+const getSchemaOptions = (sourceId) => {
+  const sid = String(sourceId || '')
+  if (!sid) return []
+  return schemaStore[sid] || []
+}
+
+const getTabItemById = (tabId) => {
+  return openTabs.value.find((tab) => String(tab.id) === String(tabId)) || null
+}
+
+const handleQuerySourceSelect = async (tabId, value) => {
+  const state = tabStates[tabId]
+  const tab = getTabItemById(tabId)
+  if (!state || !tab || tab.kind !== 'query') return
+
+  const sourceId = value ? String(value) : ''
+  state.table.sourceId = sourceId
+  tab.sourceId = sourceId
+
+  state.table.dbName = ''
+  state.table.tableName = ''
+  state.table.id = undefined
+  tab.dbName = ''
+
+  if (String(activeTab.value) === String(tabId)) {
+    clusterId.value = sourceId || null
+    activeSource.value = sourceId
+  }
+
+  if (!sourceId) {
+    if (String(activeTab.value) === String(tabId)) {
+      syncRouteWithTab(tab, tabId)
+    }
+    return
+  }
+
+  const ok = await loadSchemas(sourceId)
+  if (!ok) return
+
+  const nextDb = activeSchema[sourceId] || schemaStore[sourceId]?.[0] || ''
+  if (nextDb) {
+    state.table.dbName = nextDb
+    tab.dbName = nextDb
+    activeSchema[sourceId] = nextDb
+    await loadTables(sourceId, nextDb)
+  }
+
+  if (String(activeTab.value) === String(tabId)) {
+    syncRouteWithTab(tab, tabId)
+  }
+}
+
+const handleQueryDatabaseSelect = async (tabId, value) => {
+  const state = tabStates[tabId]
+  const tab = getTabItemById(tabId)
+  if (!state || !tab || tab.kind !== 'query') return
+
+  const dbName = value ? String(value) : ''
+  state.table.dbName = dbName
+  tab.dbName = dbName
+
+  state.table.tableName = ''
+  state.table.id = undefined
+
+  const sourceId = String(state.table.sourceId || tab.sourceId || '')
+  if (sourceId && dbName) {
+    activeSchema[sourceId] = dbName
+    await loadTables(sourceId, dbName)
+  }
+
+  if (String(activeTab.value) === String(tabId)) {
+    clusterId.value = sourceId || null
+    activeSource.value = sourceId
+    syncRouteWithTab(tab, tabId)
+  }
 }
 
 const buildDefaultSql = (table) => {
@@ -2249,7 +2399,8 @@ const executeQuery = async (tabId) => {
     ElMessage.warning('请先选择数据库')
     return
   }
-  if (!clusterId.value) {
+  const sourceId = state.table?.sourceId || clusterId.value
+  if (!sourceId) {
     ElMessage.warning('请选择数据源')
     return
   }
@@ -2261,7 +2412,7 @@ const executeQuery = async (tabId) => {
   startQueryTimer(tabId)
   try {
     const res = await dataQueryApi.execute({
-      clusterId: clusterId.value || undefined,
+      clusterId: sourceId || undefined,
       database: state.table.dbName || undefined,
       sql: state.query.sql,
       limit: state.query.limit
@@ -2300,10 +2451,11 @@ const saveAsTask = (tabId) => {
     ElMessage.warning('请先输入 SQL')
     return
   }
+  const sourceId = state?.table?.sourceId || clusterId.value || ''
   taskDrawerRef.value?.open(null, {
     taskSql: state.query.sql,
     taskName: `新建查询任务_${Date.now()}`,
-    taskDesc: `From DataStudio\nCluster: ${clusterId.value}\nDatabase: ${state.table.dbName || ''}`
+    taskDesc: `From DataStudio\nCluster: ${sourceId}\nDatabase: ${state.table.dbName || ''}`
   })
 }
 
@@ -2342,9 +2494,18 @@ const applyHistory = (row, tabId) => {
   if (!state || !row) return
   state.query.sql = row.sqlText || ''
   if (row.clusterId) {
+    const sourceId = String(row.clusterId)
     clusterId.value = row.clusterId
-    activeSource.value = String(row.clusterId)
+    activeSource.value = sourceId
     loadSchemas(row.clusterId)
+    const tab = getTabItemById(tabId)
+    if (tab?.kind === 'query') {
+      tab.sourceId = sourceId
+      state.table.sourceId = sourceId
+      if (String(activeTab.value) === String(tabId)) {
+        syncRouteWithTab(tab, tabId)
+      }
+    }
   }
 }
 
@@ -2898,6 +3059,28 @@ const startResize = (event) => {
   window.addEventListener('mouseup', resizeUpHandler)
 }
 
+const startRightResize = (event) => {
+  event.preventDefault()
+  const startX = event.clientX
+  const startWidth = rightPanelWidth.value
+  isResizing.value = true
+
+  resizeRightMoveHandler = (moveEvent) => {
+    const delta = startX - moveEvent.clientX
+    const next = Math.max(320, Math.min(900, startWidth + delta))
+    rightPanelWidth.value = next
+  }
+  resizeRightUpHandler = () => {
+    isResizing.value = false
+    window.removeEventListener('mousemove', resizeRightMoveHandler)
+    window.removeEventListener('mouseup', resizeRightUpHandler)
+    resizeRightMoveHandler = null
+    resizeRightUpHandler = null
+  }
+  window.addEventListener('mousemove', resizeRightMoveHandler)
+  window.addEventListener('mouseup', resizeRightUpHandler)
+}
+
 const startLeftResize = (tabId, event) => {
   event.preventDefault()
   const container = leftPaneRefs.value[tabId]
@@ -3017,6 +3200,33 @@ watch(selectedTableKey, (value) => {
   catalogTreeRef.value?.setCurrentKey(value, false)
 })
 
+provide('dataStudioCtx', {
+  clusterId,
+  openTabs,
+  activeTab,
+  tabStates,
+  layerOptions,
+  isDorisTable,
+  isAggregateTable,
+  isReplicaWarning,
+  getLayerType,
+  getFieldRows,
+  getVarcharLength,
+  startMetaEdit,
+  cancelMetaEdit,
+  saveMetaEdit,
+  handleDeleteTable,
+  startFieldsEdit,
+  cancelFieldsEdit,
+  saveFieldsEdit,
+  addField,
+  removeField,
+  copyDdl,
+  goLineage,
+  openTask,
+  openTableTab
+})
+
 onMounted(() => {
   setupTableObserver()
   restoreTabsFromStorage()
@@ -3047,6 +3257,14 @@ onBeforeUnmount(() => {
   if (resizeUpHandler) {
     window.removeEventListener('mouseup', resizeUpHandler)
     resizeUpHandler = null
+  }
+  if (resizeRightMoveHandler) {
+    window.removeEventListener('mousemove', resizeRightMoveHandler)
+    resizeRightMoveHandler = null
+  }
+  if (resizeRightUpHandler) {
+    window.removeEventListener('mouseup', resizeRightUpHandler)
+    resizeRightUpHandler = null
   }
   if (resizeLeftMoveHandler) {
     window.removeEventListener('mousemove', resizeLeftMoveHandler)
@@ -3088,6 +3306,13 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
+.workspace-resizer {
+  width: 6px;
+  cursor: col-resize;
+  position: relative;
+  background: transparent;
+}
+
 .sidebar-resizer::before {
   content: '';
   position: absolute;
@@ -3098,7 +3323,21 @@ onBeforeUnmount(() => {
   background: #e2e8f0;
 }
 
+.workspace-resizer::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 50%;
+  width: 1px;
+  background: #e2e8f0;
+}
+
 .sidebar-resizer:hover::before {
+  background: #cbd5f5;
+}
+
+.workspace-resizer:hover::before {
   background: #cbd5f5;
 }
 
@@ -3418,6 +3657,16 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.studio-right {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #e6e9ef;
+  overflow: hidden;
+  min-height: 0;
+}
+
 .workspace-body {
   flex: 1;
   min-height: 0;
@@ -3430,6 +3679,41 @@ onBeforeUnmount(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+:deep(.workspace-tabs .el-tabs__header) {
+  display: flex;
+  align-items: center;
+}
+
+:deep(.workspace-tabs .el-tabs__nav-wrap) {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(100% - 72px);
+}
+
+:deep(.workspace-tabs .el-tabs__new-tab) {
+  width: auto;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+:deep(.workspace-tabs .el-tabs__new-tab:hover) {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+}
+
+:deep(.workspace-tabs .el-tabs__new-tab::after) {
+  content: '查询';
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2f3d;
+  margin-left: 2px;
 }
 
 :deep(.workspace-tabs .el-tabs__content) {
@@ -3460,15 +3744,11 @@ onBeforeUnmount(() => {
 
 .tab-grid {
   height: 100%;
-  display: grid;
-  grid-template-columns: 60% 40%;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
   padding: 10px;
   box-sizing: border-box;
-}
-
-.tab-grid.is-single {
-  grid-template-columns: 1fr;
+  min-height: 0;
 }
 
 .tab-left,
@@ -3477,6 +3757,7 @@ onBeforeUnmount(() => {
 }
 
 .tab-left {
+  flex: 1;
   display: grid;
   grid-template-rows: var(--left-top, 220px) 6px minmax(220px, 1fr);
   gap: 0;
@@ -3504,6 +3785,7 @@ onBeforeUnmount(() => {
 }
 
 .tab-right {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -3531,6 +3813,17 @@ onBeforeUnmount(() => {
 .query-context {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+
+.query-select {
+  min-width: 140px;
+}
+
+.query-select--source {
+  min-width: 170px;
 }
 
 .query-actions {
@@ -3757,6 +4050,13 @@ onBeforeUnmount(() => {
 .meta-section-fill {
   flex: 1;
   min-height: 0;
+}
+
+.meta-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .meta-table {
@@ -3990,20 +4290,21 @@ onBeforeUnmount(() => {
   }
 
   .studio-sidebar {
-    width: 100%;
+    width: 100% !important;
     max-height: 320px;
   }
 
-  .sidebar-resizer {
+  .studio-right {
+    width: 100% !important;
+  }
+
+  .sidebar-resizer,
+  .workspace-resizer {
     display: none;
   }
 
   .left-resizer {
     display: none;
-  }
-
-  .tab-grid {
-    grid-template-columns: 1fr;
   }
 
   .lineage-grid {
