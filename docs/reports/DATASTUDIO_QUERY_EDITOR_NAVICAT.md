@@ -1,7 +1,6 @@
 # DataStudio 查询编辑器（Navicat 风格）设计与实现说明
 
-更新时间：2026-02-02  
-参考截图：`.context/attachments/image.png`
+更新时间：2026-02-02
 
 ## 目标
 - 将 DataStudio 中间区域“查询部分”调整为 Navicat 风格：
@@ -29,4 +28,3 @@
   - 数据源/Schema 选择、Limit、运行（运行全部/运行已选择）、停止、重置、存为任务
 - 结果区：
   - Message + Result 1/2/…（多结果集）
-
