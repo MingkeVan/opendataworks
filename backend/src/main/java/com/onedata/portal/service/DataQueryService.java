@@ -26,6 +26,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 /**
@@ -44,11 +46,56 @@ public class DataQueryService {
     private static final int MAX_LIMIT = 10000;
     private static final int DEFAULT_LIMIT = 200;
     private static final int PREVIEW_LIMIT = 100;
+    private static final int MAX_STATEMENTS = 50;
 
     private final DorisConnectionService dorisConnectionService;
     private final DorisClusterService dorisClusterService;
     private final DataQueryHistoryMapper historyMapper;
     private final ObjectMapper objectMapper;
+
+    private final Map<String, RunningQuery> runningQueries = new ConcurrentHashMap<>();
+
+    private static class RunningQuery {
+        private final Connection connection;
+        private final Statement statement;
+        private final AtomicBoolean cancelRequested = new AtomicBoolean(false);
+
+        private RunningQuery(Connection connection, Statement statement) {
+            this.connection = connection;
+            this.statement = statement;
+        }
+
+        private boolean isCancelRequested() {
+            return cancelRequested.get();
+        }
+
+        private void cancel() {
+            cancelRequested.set(true);
+            try {
+                statement.cancel();
+            } catch (SQLException ignored) {
+                // ignored
+            }
+            try {
+                connection.close();
+            } catch (SQLException ignored) {
+                // ignored
+            }
+        }
+    }
+
+    public boolean stopQuery(String userId, String clientQueryId) {
+        if (!StringUtils.hasText(userId) || !StringUtils.hasText(clientQueryId)) {
+            return false;
+        }
+        String key = buildRunningKey(userId, clientQueryId);
+        RunningQuery running = runningQueries.get(key);
+        if (running == null) {
+            return true;
+        }
+        running.cancel();
+        return true;
+    }
 
     /**
      * 执行查询
@@ -57,16 +104,39 @@ public class DataQueryService {
         if (!StringUtils.hasText(request.getDatabase())) {
             throw new RuntimeException("数据库不能为空");
         }
-        validateSql(request.getSql());
+        List<String> statements = splitStatements(request.getSql());
+        if (statements.isEmpty()) {
+            throw new RuntimeException("SQL 不能为空");
+        }
+        if (statements.size() > MAX_STATEMENTS) {
+            throw new RuntimeException("SQL 语句过多，请分批执行");
+        }
+        statements.forEach(this::validateSql);
         int limit = resolveLimit(request.getLimit());
 
         long start = System.currentTimeMillis();
-        List<String> columns = new ArrayList<>();
-        List<Map<String, Object>> rows = new ArrayList<>();
-        boolean hasMore = false;
+        List<com.onedata.portal.dto.SqlQueryResultSet> resultSets = new ArrayList<>();
+        boolean cancelled = false;
+        String message = "";
+
+        String userId = com.onedata.portal.context.UserContextHolder.getCurrentUserId();
+        String clientQueryId = request.getClientQueryId();
+        String runningKey = StringUtils.hasText(userId) && StringUtils.hasText(clientQueryId)
+            ? buildRunningKey(userId, clientQueryId)
+            : null;
+
+        RunningQuery runningQuery = null;
 
         try (Connection connection = dorisConnectionService.getConnection(request.getClusterId(), request.getDatabase());
              Statement statement = connection.createStatement()) {
+
+            if (runningKey != null) {
+                runningQuery = new RunningQuery(connection, statement);
+                RunningQuery previous = runningQueries.put(runningKey, runningQuery);
+                if (previous != null) {
+                    previous.cancel();
+                }
+            }
 
             try {
                 statement.setQueryTimeout(300);
@@ -74,47 +144,82 @@ public class DataQueryService {
                 log.debug("JDBC driver does not support query timeout, fallback to socketTimeout only", e);
             }
             statement.setMaxRows(limit + 1);
-            String sql = request.getSql().trim();
-            log.info("Executing SQL query: {}", abbreviate(sql));
 
-            try (ResultSet resultSet = statement.executeQuery(sql)) {
-                ResultSetMetaData metaData = resultSet.getMetaData();
-                int columnCount = metaData.getColumnCount();
-                for (int i = 1; i <= columnCount; i++) {
-                    columns.add(metaData.getColumnLabel(i));
+            int index = 1;
+            for (String sql : statements) {
+                if (runningQuery != null && runningQuery.isCancelRequested()) {
+                    cancelled = true;
+                    break;
                 }
+                String trimmedSql = sql.trim();
+                if (!StringUtils.hasText(trimmedSql)) {
+                    continue;
+                }
+                log.info("Executing SQL query: {}", abbreviate(trimmedSql));
 
-                int rowIndex = 0;
-                while (resultSet.next()) {
-                    if (rowIndex >= limit) {
-                        hasMore = true;
-                        break;
-                    }
-                    Map<String, Object> row = new LinkedHashMap<>();
-                    for (int i = 1; i <= columnCount; i++) {
-                        row.put(columns.get(i - 1), resultSet.getObject(i));
-                    }
-                    rows.add(row);
-                    rowIndex++;
-                }
+                com.onedata.portal.dto.SqlQueryResultSet resultSet = executeStatement(statement, trimmedSql, limit);
+                resultSet.setIndex(index++);
+                resultSets.add(resultSet);
+            }
+
+            if (cancelled && !StringUtils.hasText(message)) {
+                message = "查询已停止";
             }
         } catch (SQLException e) {
-            log.error("Execute SQL query failed", e);
-            throw new RuntimeException("执行 SQL 失败: " + e.getMessage(), e);
+            if (runningQuery != null && runningQuery.isCancelRequested()) {
+                cancelled = true;
+                message = "查询已停止";
+            } else {
+                log.error("Execute SQL query failed", e);
+                throw new RuntimeException("执行 SQL 失败: " + e.getMessage(), e);
+            }
+        } finally {
+            if (runningKey != null) {
+                runningQueries.remove(runningKey);
+            }
         }
 
         long duration = System.currentTimeMillis() - start;
 
-        DataQueryHistory history = saveHistory(request, columns, rows, hasMore, duration);
-
         SqlQueryResponse response = new SqlQueryResponse();
-        response.setColumns(columns);
-        response.setRows(rows);
-        response.setPreviewRowCount(rows.size());
-        response.setHasMore(hasMore);
+        response.setResultSets(resultSets);
+        response.setResultSetCount(resultSets.size());
+        response.setCancelled(cancelled);
+        if (!StringUtils.hasText(message)) {
+            message = String.format("执行完成：%d 条语句，%d 个结果集", statements.size(), resultSets.size());
+        }
+        response.setMessage(message);
         response.setDurationMs(duration);
-        response.setHistoryId(history.getId());
-        response.setExecutedAt(history.getExecutedAt());
+
+        if (!cancelled) {
+            com.onedata.portal.dto.SqlQueryResultSet first = resultSets.isEmpty() ? null : resultSets.get(0);
+            List<String> columns = first != null ? first.getColumns() : new ArrayList<>();
+            List<Map<String, Object>> rows = first != null ? first.getRows() : new ArrayList<>();
+            boolean hasMore = first != null && first.isHasMore();
+
+            DataQueryHistory history = saveHistory(request, columns, rows, hasMore, duration);
+            response.setHistoryId(history.getId());
+            response.setExecutedAt(history.getExecutedAt());
+
+            // backward compatible fields (first result set)
+            response.setColumns(columns);
+            response.setRows(rows);
+            response.setPreviewRowCount(rows.size());
+            response.setHasMore(hasMore);
+        } else {
+            // cancelled response still returns partial results
+            com.onedata.portal.dto.SqlQueryResultSet first = resultSets.isEmpty() ? null : resultSets.get(0);
+            List<String> columns = first != null ? first.getColumns() : new ArrayList<>();
+            List<Map<String, Object>> rows = first != null ? first.getRows() : new ArrayList<>();
+            boolean hasMore = first != null && first.isHasMore();
+
+            response.setColumns(columns);
+            response.setRows(rows);
+            response.setPreviewRowCount(rows.size());
+            response.setHasMore(hasMore);
+            response.setExecutedAt(LocalDateTime.now());
+        }
+
         return response;
     }
 
@@ -164,19 +269,6 @@ public class DataQueryService {
             throw new RuntimeException("SQL 不能为空");
         }
 
-        long semicolonCount = sanitized.chars().filter(ch -> ch == ';').count();
-        if (semicolonCount > 1) {
-            throw new RuntimeException("仅支持单条 SQL 执行");
-        }
-
-        int firstSemicolon = sanitizedTrimmed.indexOf(';');
-        if (firstSemicolon >= 0) {
-            String tail = sanitizedTrimmed.substring(firstSemicolon + 1).trim();
-            if (!tail.isEmpty()) {
-                throw new RuntimeException("仅支持单条 SQL 执行");
-            }
-        }
-
         String lowered = sanitizedTrimmed.toLowerCase(Locale.ROOT);
         if (DANGEROUS_KEYWORDS.matcher(lowered).find()) {
             throw new RuntimeException("检测到写入或危险 SQL 关键字，请检查后再执行");
@@ -191,6 +283,57 @@ public class DataQueryService {
             return DEFAULT_LIMIT;
         }
         return Math.min(limit, MAX_LIMIT);
+    }
+
+    private com.onedata.portal.dto.SqlQueryResultSet executeStatement(Statement statement, String sql, int limit) throws SQLException {
+        com.onedata.portal.dto.SqlQueryResultSet output = new com.onedata.portal.dto.SqlQueryResultSet();
+        List<String> columns = new ArrayList<>();
+        List<Map<String, Object>> rows = new ArrayList<>();
+        boolean hasMore = false;
+
+        boolean hasResultSet = statement.execute(sql);
+        if (!hasResultSet) {
+            output.setColumns(columns);
+            output.setRows(rows);
+            output.setPreviewRowCount(0);
+            output.setHasMore(false);
+            return output;
+        }
+
+        try (ResultSet resultSet = statement.getResultSet()) {
+            if (resultSet == null) {
+                output.setColumns(columns);
+                output.setRows(rows);
+                output.setPreviewRowCount(0);
+                output.setHasMore(false);
+                return output;
+            }
+            ResultSetMetaData metaData = resultSet.getMetaData();
+            int columnCount = metaData.getColumnCount();
+            for (int i = 1; i <= columnCount; i++) {
+                columns.add(metaData.getColumnLabel(i));
+            }
+
+            int rowIndex = 0;
+            while (resultSet.next()) {
+                if (rowIndex >= limit) {
+                    hasMore = true;
+                    break;
+                }
+                Map<String, Object> row = new LinkedHashMap<>();
+                for (int i = 1; i <= columnCount; i++) {
+                    row.put(columns.get(i - 1), resultSet.getObject(i));
+                }
+                rows.add(row);
+                rowIndex++;
+            }
+        }
+
+        output.setColumns(columns);
+        output.setRows(rows);
+        output.setPreviewRowCount(rows.size());
+        output.setHasMore(hasMore);
+        return output;
     }
 
     private DataQueryHistory saveHistory(SqlQueryRequest request, List<String> columns, List<Map<String, Object>> rows, boolean hasMore, long duration) {
@@ -242,6 +385,114 @@ public class DataQueryService {
         }
         String compressed = sql.replaceAll("\\s+", " ").trim();
         return compressed.length() > 200 ? compressed.substring(0, 200) + "..." : compressed;
+    }
+
+    private String buildRunningKey(String userId, String clientQueryId) {
+        return userId + "::" + clientQueryId;
+    }
+
+    private List<String> splitStatements(String sql) {
+        if (!StringUtils.hasText(sql)) {
+            return new ArrayList<>();
+        }
+        List<String> statements = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inSingleQuote = false;
+        boolean inDoubleQuote = false;
+        boolean inLineComment = false;
+        boolean inBlockComment = false;
+
+        for (int i = 0; i < sql.length(); i++) {
+            char ch = sql.charAt(i);
+            char next = i + 1 < sql.length() ? sql.charAt(i + 1) : '\0';
+
+            if (inLineComment) {
+                current.append(ch);
+                if (ch == '\n' || ch == '\r') {
+                    inLineComment = false;
+                }
+                continue;
+            }
+
+            if (inBlockComment) {
+                current.append(ch);
+                if (ch == '*' && next == '/') {
+                    current.append(next);
+                    inBlockComment = false;
+                    i++;
+                }
+                continue;
+            }
+
+            if (inSingleQuote) {
+                current.append(ch);
+                if (ch == '\'' && next == '\'') {
+                    current.append(next);
+                    i++;
+                    continue;
+                }
+                if (ch == '\'') {
+                    inSingleQuote = false;
+                }
+                continue;
+            }
+
+            if (inDoubleQuote) {
+                current.append(ch);
+                if (ch == '"' && next == '"') {
+                    current.append(next);
+                    i++;
+                    continue;
+                }
+                if (ch == '"') {
+                    inDoubleQuote = false;
+                }
+                continue;
+            }
+
+            if (ch == '-' && next == '-') {
+                inLineComment = true;
+                current.append(ch).append(next);
+                i++;
+                continue;
+            }
+
+            if (ch == '/' && next == '*') {
+                inBlockComment = true;
+                current.append(ch).append(next);
+                i++;
+                continue;
+            }
+
+            if (ch == '\'') {
+                inSingleQuote = true;
+                current.append(ch);
+                continue;
+            }
+
+            if (ch == '"') {
+                inDoubleQuote = true;
+                current.append(ch);
+                continue;
+            }
+
+            if (ch == ';') {
+                String stmt = current.toString().trim();
+                if (StringUtils.hasText(stmt)) {
+                    statements.add(stmt);
+                }
+                current.setLength(0);
+                continue;
+            }
+
+            current.append(ch);
+        }
+
+        String stmt = current.toString().trim();
+        if (StringUtils.hasText(stmt)) {
+            statements.add(stmt);
+        }
+        return statements;
     }
 
     private String stripLiteralsAndComments(String sql) {
