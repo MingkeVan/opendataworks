@@ -486,6 +486,7 @@
                   </div>
                 </div>
 
+                <!-- moved to DataStudioRightPanel.vue
                 <Teleport to="#datastudio-right-panel">
                   <div v-if="tab.kind !== 'query' && String(activeTab) === String(tab.id)" class="tab-right">
                     <div class="meta-panel">
@@ -964,6 +965,7 @@
                   </div>
                   </div>
                 </Teleport>
+                -->
               </div>
             </template>
           </PersistentTabs>
@@ -983,12 +985,7 @@
 
       <!-- Right: Meta/Lineage -->
       <aside class="studio-right" :style="{ width: `${rightPanelWidth}px` }">
-        <div class="right-body">
-          <div id="datastudio-right-panel" class="right-slot"></div>
-          <div v-if="!hasRightPanel" class="right-empty">
-            <el-empty description="选择表后在此查看基本信息、列信息、DDL 与数据血缘" :image-size="120" />
-          </div>
-        </div>
+        <DataStudioRightPanel />
       </aside>
     </div>
 
@@ -999,7 +996,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
@@ -1024,6 +1021,7 @@ import { dorisClusterApi } from '@/api/doris'
 import { dataQueryApi } from '@/api/query'
 import PersistentTabs from '@/components/PersistentTabs.vue'
 import CreateTableDrawer from '@/views/datastudio/CreateTableDrawer.vue'
+import DataStudioRightPanel from '@/views/datastudio/components/DataStudioRightPanel.vue'
 import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
 
 const clusterId = ref(null)
@@ -1092,14 +1090,6 @@ const activeTab = ref('')
 const tabStates = reactive({})
 const queryTimerHandles = new Map()
 const queryTabCounter = ref(1)
-
-const activeTabItem = computed(() => {
-  return openTabs.value.find((item) => String(item?.id) === String(activeTab.value)) || null
-})
-
-const hasRightPanel = computed(() => {
-  return !!activeTabItem.value && activeTabItem.value.kind !== 'query'
-})
 
 const TAB_PERSIST_KEY = 'odw:datastudio:workspace-tabs:v1'
 const isRestoringTabs = ref(false)
@@ -3264,6 +3254,33 @@ watch(selectedTableKey, (value) => {
   catalogTreeRef.value?.setCurrentKey(value, false)
 })
 
+provide('dataStudioCtx', {
+  clusterId,
+  openTabs,
+  activeTab,
+  tabStates,
+  layerOptions,
+  isDorisTable,
+  isAggregateTable,
+  isReplicaWarning,
+  getLayerType,
+  getFieldRows,
+  getVarcharLength,
+  startMetaEdit,
+  cancelMetaEdit,
+  saveMetaEdit,
+  handleDeleteTable,
+  startFieldsEdit,
+  cancelFieldsEdit,
+  saveFieldsEdit,
+  addField,
+  removeField,
+  copyDdl,
+  goLineage,
+  openTask,
+  openTableTab
+})
+
 onMounted(() => {
   setupTableObserver()
   restoreTabsFromStorage()
@@ -3702,30 +3719,6 @@ onBeforeUnmount(() => {
   border: 1px solid #e6e9ef;
   overflow: hidden;
   min-height: 0;
-}
-
-.right-body {
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  padding: 10px;
-  box-sizing: border-box;
-}
-
-.right-slot {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.right-empty {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .workspace-body {
