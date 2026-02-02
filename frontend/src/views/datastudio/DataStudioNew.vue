@@ -225,6 +225,9 @@
                             />
                           </el-select>
 
+                          <el-tag v-if="tabStates[tab.id].table.tableName" size="small" type="success">
+                            {{ tabStates[tab.id].table.tableName }}
+                          </el-tag>
                         </template>
 
                         <template v-else>
@@ -1157,9 +1160,14 @@ const restoreTabsFromStorage = () => {
         sourceId: String(item?.sourceId ?? '')
       }
 
+      const queryTableName =
+        kind === 'query' && tabItem.tableName && tabItem.tableName !== '无标题 - 查询' && tabItem.tableName.endsWith(' - 查询')
+          ? tabItem.tableName.slice(0, -' - 查询'.length)
+          : ''
+
       const tablePayload =
         kind === 'query'
-          ? { tableName: '', dbName: tabItem.dbName, sourceId: tabItem.sourceId }
+          ? { id: item?.tableId || undefined, tableName: queryTableName, dbName: tabItem.dbName, sourceId: tabItem.sourceId }
           : { id: item?.tableId || undefined, tableName: tabItem.tableName, dbName: tabItem.dbName, sourceId: tabItem.sourceId }
 
       tabStates[id] = createTabState(tablePayload)
@@ -1617,6 +1625,13 @@ const handleCatalogNodeClick = async (data) => {
     if (data.type === 'schema') {
       await handleQuerySourceSelect(currentTab.id, data.sourceId)
       await handleQueryDatabaseSelect(currentTab.id, data.schemaName)
+      return
+    }
+    if (data.type === 'table') {
+      selectedTableKey.value = String(data.nodeKey || '')
+      await handleQuerySourceSelect(currentTab.id, data.sourceId)
+      await handleQueryDatabaseSelect(currentTab.id, data.schemaName)
+      applyQueryTableContext(currentTab.id, data.table, data.schemaName, data.sourceId)
       return
     }
   }
@@ -2304,6 +2319,26 @@ const getTabItemById = (tabId) => {
   return openTabs.value.find((tab) => String(tab.id) === String(tabId)) || null
 }
 
+const applyQueryTableContext = (tabId, table, dbFallback = '', sourceFallback = '') => {
+  const state = tabStates[tabId]
+  const tab = getTabItemById(tabId)
+  if (!state || !tab || tab.kind !== 'query') return
+
+  const sourceId = String(table?.sourceId || table?.clusterId || sourceFallback || state.table?.sourceId || tab.sourceId || '')
+  const dbName = String(table?.dbName || table?.databaseName || table?.database || dbFallback || state.table?.dbName || tab.dbName || '')
+  const tableName = String(table?.tableName || '')
+  if (!tableName) return
+
+  Object.assign(state.table, table, { sourceId, dbName, tableName })
+  state.table.id = table?.id ?? state.table.id
+
+  if (!state.query.sql?.trim()) {
+    state.query.sql = buildDefaultSql(state.table)
+  }
+
+  tab.tableName = `${tableName} - 查询`
+}
+
 const handleQuerySourceSelect = async (tabId, value) => {
   const state = tabStates[tabId]
   const tab = getTabItemById(tabId)
@@ -2317,6 +2352,7 @@ const handleQuerySourceSelect = async (tabId, value) => {
   state.table.tableName = ''
   state.table.id = undefined
   tab.dbName = ''
+  tab.tableName = '无标题 - 查询'
 
   if (String(activeTab.value) === String(tabId)) {
     clusterId.value = sourceId || null
@@ -2357,6 +2393,7 @@ const handleQueryDatabaseSelect = async (tabId, value) => {
 
   state.table.tableName = ''
   state.table.id = undefined
+  tab.tableName = '无标题 - 查询'
 
   const sourceId = String(state.table.sourceId || tab.sourceId || '')
   if (sourceId && dbName) {
