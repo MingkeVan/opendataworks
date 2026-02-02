@@ -225,28 +225,6 @@
                             />
                           </el-select>
 
-                          <el-select
-                            v-model="tabStates[tab.id].table.tableName"
-                            size="small"
-                            filterable
-                            clearable
-                            class="query-select query-select--table"
-                            placeholder="选择表"
-                            :disabled="!tabStates[tab.id].table.sourceId || !tabStates[tab.id].table.dbName"
-                            @change="(value) => handleQueryTableSelect(tab.id, value)"
-                          >
-                            <el-option
-                              v-for="table in getTableOptions(tabStates[tab.id].table.sourceId, tabStates[tab.id].table.dbName)"
-                              :key="table.tableName"
-                              :label="table.tableName"
-                              :value="table.tableName"
-                            >
-                              <div class="table-option">
-                                <span class="table-option__name">{{ table.tableName }}</span>
-                                <span v-if="table.tableComment" class="table-option__comment">{{ table.tableComment }}</span>
-                              </div>
-                            </el-option>
-                          </el-select>
                         </template>
 
                         <template v-else>
@@ -1641,12 +1619,6 @@ const handleCatalogNodeClick = async (data) => {
       await handleQueryDatabaseSelect(currentTab.id, data.schemaName)
       return
     }
-    if (data.type === 'table') {
-      await handleQuerySourceSelect(currentTab.id, data.sourceId)
-      await handleQueryDatabaseSelect(currentTab.id, data.schemaName)
-      handleQueryTableSelect(currentTab.id, data.table?.tableName)
-      return
-    }
   }
   if (data.type === 'table') {
     openTableTab(data.table, data.schemaName, data.sourceId)
@@ -2282,7 +2254,7 @@ const handleCloseAll = () => {
 const resolveQuerySourceId = () => {
   const current = openTabs.value.find((tab) => String(tab.id) === String(activeTab.value))
   if (current?.sourceId) return String(current.sourceId)
-  return activeSource.value ? String(activeSource.value) : ''
+  return ''
 }
 
 const resolveQueryDatabase = (sourceId) => {
@@ -2290,7 +2262,7 @@ const resolveQueryDatabase = (sourceId) => {
   if (!sid) return ''
   const current = openTabs.value.find((tab) => String(tab.id) === String(activeTab.value))
   if (current?.dbName) return String(current.dbName)
-  return activeSchema[sid] || schemaStore[sid]?.[0] || ''
+  return ''
 }
 
 const getTabInsertIndex = () => {
@@ -2300,16 +2272,19 @@ const getTabInsertIndex = () => {
 
 const handleTabAdd = async () => {
   const sourceId = resolveQuerySourceId()
+  let dbName = resolveQueryDatabase(sourceId)
   if (sourceId) {
     await loadSchemas(sourceId)
+    if (dbName && !getSchemaOptions(sourceId).includes(dbName)) {
+      dbName = ''
+    }
   }
-  const dbName = resolveQueryDatabase(sourceId)
 
   const queryId = `query:${Date.now()}`
   const tabItem = {
     id: queryId,
     kind: 'query',
-    tableName: `查询${queryTabCounter.value++}`,
+    tableName: '无标题 - 查询',
     dbName,
     sourceId
   }
@@ -2323,12 +2298,6 @@ const getSchemaOptions = (sourceId) => {
   const sid = String(sourceId || '')
   if (!sid) return []
   return schemaStore[sid] || []
-}
-
-const getTableOptions = (sourceId, dbName) => {
-  const sid = String(sourceId || '')
-  if (!sid || !dbName) return []
-  return getSortedTablesForTree(sid, dbName)
 }
 
 const getTabItemById = (tabId) => {
@@ -2399,29 +2368,6 @@ const handleQueryDatabaseSelect = async (tabId, value) => {
     clusterId.value = sourceId || null
     activeSource.value = sourceId
     syncRouteWithTab(tab, tabId)
-  }
-}
-
-const handleQueryTableSelect = (tabId, value) => {
-  const state = tabStates[tabId]
-  const tab = getTabItemById(tabId)
-  if (!state || !tab || tab.kind !== 'query') return
-
-  const tableName = value ? String(value) : ''
-  state.table.tableName = tableName
-  state.table.id = undefined
-
-  if (tableName) {
-    const sourceKey = String(state.table.sourceId || tab.sourceId || '')
-    const dbName = String(state.table.dbName || '')
-    const list = tableStore[sourceKey]?.[dbName] || []
-    const match = list.find((item) => item.tableName === tableName)
-    if (match) {
-      state.table = { ...state.table, ...match }
-    }
-    if (!state.query.sql?.trim()) {
-      state.query.sql = buildDefaultSql(state.table)
-    }
   }
 }
 
@@ -3878,32 +3824,6 @@ onBeforeUnmount(() => {
 
 .query-select--source {
   min-width: 170px;
-}
-
-.query-select--table {
-  min-width: 200px;
-}
-
-.table-option {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  min-width: 0;
-}
-
-.table-option__name {
-  font-size: 13px;
-  color: #1f2f3d;
-}
-
-.table-option__comment {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  color: #94a3b8;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .query-actions {
