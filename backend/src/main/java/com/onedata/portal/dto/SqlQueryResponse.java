@@ -13,6 +13,27 @@ import java.util.Map;
 public class SqlQueryResponse {
 
     /**
+     * 多结果集（多语句执行）
+     * - index 从 1 开始，对齐 Navicat 的 Result 1/2/3...
+     */
+    private List<SqlQueryResultSet> resultSets;
+
+    /**
+     * 结果集数量
+     */
+    private Integer resultSetCount;
+
+    /**
+     * 是否已被 Stop 终止
+     */
+    private boolean cancelled;
+
+    /**
+     * 执行信息（可用于 Message 面板）
+     */
+    private String message;
+
+    /**
      * 列名
      */
     private List<String> columns;

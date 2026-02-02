@@ -11,6 +11,12 @@ import javax.validation.constraints.NotBlank;
 public class SqlQueryRequest {
 
     /**
+     * 客户端查询ID（用于 Stop/终止执行）
+     * 建议传入 DataStudio 的 tabId
+     */
+    private String clientQueryId;
+
+    /**
      * Doris 集群ID，可为空表示使用默认集群
      */
     private Long clusterId;

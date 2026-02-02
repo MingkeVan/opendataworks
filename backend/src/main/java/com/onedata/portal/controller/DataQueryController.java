@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.onedata.portal.annotation.RequireAuth;
 import com.onedata.portal.context.UserContextHolder;
 import com.onedata.portal.dto.Result;
+import com.onedata.portal.dto.StopQueryRequest;
 import com.onedata.portal.dto.SqlQueryRequest;
 import com.onedata.portal.dto.SqlQueryResponse;
 import com.onedata.portal.entity.DataQueryHistory;
@@ -27,6 +28,13 @@ public class DataQueryController {
     public Result<SqlQueryResponse> execute(@Validated @RequestBody SqlQueryRequest request) {
         // 用户上下文已由切面自动设置，DorisConnectionService会自动使用用户凭据
         return Result.success(dataQueryService.executeQuery(request));
+    }
+
+    @RequireAuth
+    @PostMapping("/stop")
+    public Result<Boolean> stop(@Validated @RequestBody StopQueryRequest request) {
+        String userId = UserContextHolder.getCurrentUserId();
+        return Result.success(dataQueryService.stopQuery(userId, request.getClientQueryId()));
     }
 
     @RequireAuth
