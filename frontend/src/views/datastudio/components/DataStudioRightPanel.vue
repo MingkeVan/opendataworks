@@ -405,11 +405,11 @@
       </div>
     </div>
 
-    <div v-else class="right-empty">
-      <el-empty description="选择表后在此查看基本信息、列信息、DDL 与数据血缘" :image-size="120" />
-    </div>
-  </div>
-</template>
+	    <div v-else class="right-empty">
+	      <el-empty :description="emptyDescription" :image-size="120" />
+	    </div>
+	  </div>
+	</template>
 
 <script setup>
 import { computed, inject } from 'vue'
@@ -449,15 +449,20 @@ const {
 
 const activeTabId = computed(() => String(activeTab.value || ''))
 
-const activeTabItem = computed(() => {
-  const id = activeTabId.value
-  if (!id) return null
-  return (openTabs.value || []).find((item) => String(item?.id) === id) || null
-})
+	const activeTabItem = computed(() => {
+	  const id = activeTabId.value
+	  if (!id) return null
+	  return (openTabs.value || []).find((item) => String(item?.id) === id) || null
+	})
 
-const hasTableTab = computed(() => {
-  return !!activeTabItem.value && activeTabItem.value.kind !== 'query'
-})
+	const emptyDescription = computed(() => {
+	  if (activeTabItem.value?.kind === 'query') return '没有可用的对象信息'
+	  return '选择表后在此查看基本信息、列信息、DDL 与数据血缘'
+	})
+
+	const hasTableTab = computed(() => {
+	  return !!activeTabItem.value && activeTabItem.value.kind !== 'query'
+	})
 
 const state = computed(() => {
   const id = activeTabId.value
