@@ -3735,6 +3735,17 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
+:deep(.workspace-tabs .el-tabs__header) {
+  display: flex;
+  align-items: center;
+}
+
+:deep(.workspace-tabs .el-tabs__nav-wrap) {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(100% - 72px);
+}
+
 :deep(.workspace-tabs .el-tabs__new-tab) {
   width: auto;
   padding: 0 10px;
