@@ -180,8 +180,7 @@
             </template>
 
             <template #default="{ tab }">
-              <div class="tab-grid" :class="{ 'is-single': tab.kind === 'query' }">
-                <!-- Left 60% -->
+              <div class="tab-grid">
                 <div
                   class="tab-left"
                   :ref="(el) => setLeftPaneRef(tab.id, el)"
@@ -487,9 +486,9 @@
                   </div>
                 </div>
 
-                <!-- Right 40% -->
-                <div v-if="tab.kind !== 'query'" class="tab-right">
-                  <div class="meta-panel">
+                <Teleport to="#datastudio-right-panel">
+                  <div v-if="tab.kind !== 'query' && String(activeTab) === String(tab.id)" class="tab-right">
+                    <div class="meta-panel">
                     <el-tabs v-model="tabStates[tab.id].metaTab" class="meta-tabs">
                       <el-tab-pane name="basic" label="基本信息">
                         <div class="meta-section meta-section-fill">
@@ -963,7 +962,8 @@
                       </div>
                     </div>
                   </div>
-                </div>
+                  </div>
+                </Teleport>
               </div>
             </template>
           </PersistentTabs>
@@ -978,6 +978,18 @@
 	          </div>
 	        </div>
 	      </section>
+
+      <div class="workspace-resizer" @mousedown="startRightResize"></div>
+
+      <!-- Right: Meta/Lineage -->
+      <aside class="studio-right" :style="{ width: `${rightPanelWidth}px` }">
+        <div class="right-body">
+          <div id="datastudio-right-panel" class="right-slot"></div>
+          <div v-if="!hasRightPanel" class="right-empty">
+            <el-empty description="选择表后在此查看基本信息、列信息、DDL 与数据血缘" :image-size="120" />
+          </div>
+        </div>
+      </aside>
     </div>
 
     <CreateTableDrawer v-model="createDrawerVisible" @created="handleCreateSuccess" />
@@ -1018,9 +1030,12 @@ const clusterId = ref(null)
 const route = useRoute()
 const router = useRouter()
 const sidebarWidth = ref(540)
+const rightPanelWidth = ref(520)
 const isResizing = ref(false)
 let resizeMoveHandler = null
 let resizeUpHandler = null
+let resizeRightMoveHandler = null
+let resizeRightUpHandler = null
 const leftPaneHeights = reactive({})
 const leftPaneRefs = ref({})
 let resizeLeftMoveHandler = null
@@ -1077,6 +1092,14 @@ const activeTab = ref('')
 const tabStates = reactive({})
 const queryTimerHandles = new Map()
 const queryTabCounter = ref(1)
+
+const activeTabItem = computed(() => {
+  return openTabs.value.find((item) => String(item?.id) === String(activeTab.value)) || null
+})
+
+const hasRightPanel = computed(() => {
+  return !!activeTabItem.value && activeTabItem.value.kind !== 'query'
+})
 
 const TAB_PERSIST_KEY = 'odw:datastudio:workspace-tabs:v1'
 const isRestoringTabs = ref(false)
@@ -3100,6 +3123,28 @@ const startResize = (event) => {
   window.addEventListener('mouseup', resizeUpHandler)
 }
 
+const startRightResize = (event) => {
+  event.preventDefault()
+  const startX = event.clientX
+  const startWidth = rightPanelWidth.value
+  isResizing.value = true
+
+  resizeRightMoveHandler = (moveEvent) => {
+    const delta = startX - moveEvent.clientX
+    const next = Math.max(320, Math.min(900, startWidth + delta))
+    rightPanelWidth.value = next
+  }
+  resizeRightUpHandler = () => {
+    isResizing.value = false
+    window.removeEventListener('mousemove', resizeRightMoveHandler)
+    window.removeEventListener('mouseup', resizeRightUpHandler)
+    resizeRightMoveHandler = null
+    resizeRightUpHandler = null
+  }
+  window.addEventListener('mousemove', resizeRightMoveHandler)
+  window.addEventListener('mouseup', resizeRightUpHandler)
+}
+
 const startLeftResize = (tabId, event) => {
   event.preventDefault()
   const container = leftPaneRefs.value[tabId]
@@ -3250,6 +3295,14 @@ onBeforeUnmount(() => {
     window.removeEventListener('mouseup', resizeUpHandler)
     resizeUpHandler = null
   }
+  if (resizeRightMoveHandler) {
+    window.removeEventListener('mousemove', resizeRightMoveHandler)
+    resizeRightMoveHandler = null
+  }
+  if (resizeRightUpHandler) {
+    window.removeEventListener('mouseup', resizeRightUpHandler)
+    resizeRightUpHandler = null
+  }
   if (resizeLeftMoveHandler) {
     window.removeEventListener('mousemove', resizeLeftMoveHandler)
     resizeLeftMoveHandler = null
@@ -3290,6 +3343,13 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
+.workspace-resizer {
+  width: 6px;
+  cursor: col-resize;
+  position: relative;
+  background: transparent;
+}
+
 .sidebar-resizer::before {
   content: '';
   position: absolute;
@@ -3300,7 +3360,21 @@ onBeforeUnmount(() => {
   background: #e2e8f0;
 }
 
+.workspace-resizer::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 50%;
+  width: 1px;
+  background: #e2e8f0;
+}
+
 .sidebar-resizer:hover::before {
+  background: #cbd5f5;
+}
+
+.workspace-resizer:hover::before {
   background: #cbd5f5;
 }
 
@@ -3620,6 +3694,40 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.studio-right {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #e6e9ef;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.right-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.right-slot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.right-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .workspace-body {
   flex: 1;
   min-height: 0;
@@ -3686,15 +3794,11 @@ onBeforeUnmount(() => {
 
 .tab-grid {
   height: 100%;
-  display: grid;
-  grid-template-columns: 60% 40%;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
   padding: 10px;
   box-sizing: border-box;
-}
-
-.tab-grid.is-single {
-  grid-template-columns: 1fr;
+  min-height: 0;
 }
 
 .tab-left,
@@ -3703,6 +3807,7 @@ onBeforeUnmount(() => {
 }
 
 .tab-left {
+  flex: 1;
   display: grid;
   grid-template-rows: var(--left-top, 220px) 6px minmax(220px, 1fr);
   gap: 0;
@@ -3730,6 +3835,7 @@ onBeforeUnmount(() => {
 }
 
 .tab-right {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -4260,20 +4366,21 @@ onBeforeUnmount(() => {
   }
 
   .studio-sidebar {
-    width: 100%;
+    width: 100% !important;
     max-height: 320px;
   }
 
-  .sidebar-resizer {
+  .studio-right {
+    width: 100% !important;
+  }
+
+  .sidebar-resizer,
+  .workspace-resizer {
     display: none;
   }
 
   .left-resizer {
     display: none;
-  }
-
-  .tab-grid {
-    grid-template-columns: 1fr;
   }
 
   .lineage-grid {
