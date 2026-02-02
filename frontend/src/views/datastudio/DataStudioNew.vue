@@ -187,52 +187,54 @@
                   :style="getLeftPaneStyle(tab.id)"
                 >
                   <div class="query-panel">
-                    <div class="query-header">
-                      <div class="query-context">
-                        <template v-if="tab.kind === 'query'">
-                          <el-select
-                            v-model="tabStates[tab.id].table.sourceId"
-                            size="small"
-                            filterable
-                            clearable
-                            class="query-select query-select--source"
-                            placeholder="选择数据源"
-                            @change="(value) => handleQuerySourceSelect(tab.id, value)"
-                          >
-                            <el-option
-                              v-for="source in dataSources"
-                              :key="String(source.id)"
-                              :label="source.clusterName || source.name || `DataSource ${source.id}`"
-                              :value="String(source.id)"
-                            />
-                          </el-select>
+                    <div class="query-topbar">
+                      <div class="query-topbar__left">
+                        <div class="query-context">
+                          <template v-if="tab.kind === 'query'">
+                            <el-select
+                              v-model="tabStates[tab.id].table.sourceId"
+                              size="small"
+                              filterable
+                              clearable
+                              class="query-select query-select--source"
+                              placeholder="选择数据源"
+                              @change="(value) => handleQuerySourceSelect(tab.id, value)"
+                            >
+                              <el-option
+                                v-for="source in dataSources"
+                                :key="String(source.id)"
+                                :label="source.clusterName || source.name || `DataSource ${source.id}`"
+                                :value="String(source.id)"
+                              />
+                            </el-select>
 
-                          <el-select
-                            v-model="tabStates[tab.id].table.dbName"
-                            size="small"
-                            filterable
-                            clearable
-                            class="query-select query-select--db"
-                            placeholder="选择数据库"
-                            :disabled="!tabStates[tab.id].table.sourceId"
-                            @change="(value) => handleQueryDatabaseSelect(tab.id, value)"
-                          >
-                            <el-option
-                              v-for="db in getSchemaOptions(tabStates[tab.id].table.sourceId)"
-                              :key="db"
-                              :label="db"
-                              :value="db"
-                            />
-                          </el-select>
+                            <el-select
+                              v-model="tabStates[tab.id].table.dbName"
+                              size="small"
+                              filterable
+                              clearable
+                              class="query-select query-select--db"
+                              placeholder="选择数据库"
+                              :disabled="!tabStates[tab.id].table.sourceId"
+                              @change="(value) => handleQueryDatabaseSelect(tab.id, value)"
+                            >
+                              <el-option
+                                v-for="db in getSchemaOptions(tabStates[tab.id].table.sourceId)"
+                                :key="db"
+                                :label="db"
+                                :value="db"
+                              />
+                            </el-select>
+                          </template>
 
-                        </template>
+                          <template v-else>
+                            <el-tag size="small" type="info">{{ getSourceName(tab.sourceId) || '-' }}</el-tag>
+                            <el-tag size="small" type="info">{{ tabStates[tab.id].table.dbName || '-' }}</el-tag>
+                          </template>
+                        </div>
 
-                        <template v-else>
-                          <el-tag size="small" type="info">{{ tabStates[tab.id].table.dbName || '-' }}</el-tag>
-                          <el-tag size="small" type="success">{{ tabStates[tab.id].table.tableName || '-' }}</el-tag>
-                        </template>
-                      </div>
-                      <div class="query-actions">
+                        <div class="query-divider"></div>
+
                         <span class="limit-label">Limit</span>
                         <el-input-number
                           v-model="tabStates[tab.id].query.limit"
@@ -243,27 +245,48 @@
                           controls-position="right"
                           class="limit-input"
                         />
+                      </div>
+
+                      <div class="query-topbar__actions">
                         <el-button
-                          type="primary"
+                          type="success"
                           size="small"
                           :loading="tabStates[tab.id].queryLoading"
+                          :disabled="tabStates[tab.id].queryLoading"
                           @click="executeQuery(tab.id)"
                         >
-                          执行
+                          <el-icon><CaretRight /></el-icon>
+                          {{ tabStates[tab.id].query.hasSelection ? '运行已选择' : '运行全部' }}
                         </el-button>
-                        <el-button size="small" @click="resetQuery(tab.id)">重置</el-button>
-                        <el-button size="small" type="success" plain @click="saveAsTask(tab.id)">
+                        <el-button
+                          size="small"
+                          :loading="tabStates[tab.id].queryStopping"
+                          :disabled="!tabStates[tab.id].queryLoading || tabStates[tab.id].queryStopping"
+                          @click="stopQuery(tab.id)"
+                        >
+                          <el-icon><VideoPause /></el-icon>
+                          停止
+                        </el-button>
+                        <el-button size="small" :disabled="tabStates[tab.id].queryLoading" @click="resetQuery(tab.id)">
+                          重置
+                        </el-button>
+                        <el-button
+                          size="small"
+                          type="success"
+                          plain
+                          :disabled="tabStates[tab.id].queryLoading"
+                          @click="saveAsTask(tab.id)"
+                        >
                           存为任务
                         </el-button>
                       </div>
                     </div>
-                    <el-input
+                    <SqlEditor
                       v-model="tabStates[tab.id].query.sql"
-                      type="textarea"
-                      :rows="5"
-                      resize="none"
                       class="sql-editor"
-                      placeholder="-- 输入 SQL，支持 SELECT/SHOW/DESC 等只读语句"
+                      placeholder="-- 输入 SQL，支持 SELECT/SHOW/DESC/EXPLAIN 等只读语句"
+                      :table-names="getSqlCompletionTables(tab.id)"
+                      @selection-change="(payload) => handleSqlSelectionChange(tab.id, payload)"
                     />
                   </div>
 
@@ -271,41 +294,62 @@
 
                   <div class="result-panel">
                     <el-tabs v-model="tabStates[tab.id].resultTab" type="border-card" class="result-tabs">
-                      <el-tab-pane name="table">
+                      <el-tab-pane name="message">
                         <template #label>
-                          <span class="result-label"><el-icon><List /></el-icon> 结果表格</span>
+                          <span class="result-label"><el-icon><Files /></el-icon> Message</span>
+                        </template>
+
+                        <div class="message-panel">
+                          <div class="message-toolbar">
+                            <div class="meta-info">
+                              <span class="meta-item">
+                                <el-icon><Timer /></el-icon>
+                                {{
+                                  formatDuration(
+                                    tabStates[tab.id].queryLoading
+                                      ? tabStates[tab.id].queryTiming.elapsedMs
+                                      : tabStates[tab.id].queryResult.durationMs
+                                  )
+                                }}
+                              </span>
+                              <span v-if="tabStates[tab.id].queryLoading" class="meta-item">
+                                <el-icon><Loading /></el-icon> 查询中
+                              </span>
+                              <template v-else>
+                                <el-tag v-if="tabStates[tab.id].queryResult.cancelled" size="small" type="warning">
+                                  已停止
+                                </el-tag>
+                                <span v-if="tabStates[tab.id].queryResult.executedAt" class="meta-item">
+                                  {{ formatDateTime(tabStates[tab.id].queryResult.executedAt) }}
+                                </span>
+                              </template>
+                            </div>
+                          </div>
+                          <pre class="message-body">{{ tabStates[tab.id].queryLoading ? '正在执行…' : tabStates[tab.id].queryResult.message || '暂无消息' }}</pre>
+                        </div>
+                      </el-tab-pane>
+
+                      <el-tab-pane
+                        v-for="(resultSet, idx) in tabStates[tab.id].queryResult.resultSets"
+                        :key="String(idx)"
+                        :name="`result-${idx}`"
+                      >
+                        <template #label>
+                          <span class="result-label"><el-icon><List /></el-icon> Result {{ idx + 1 }}</span>
                         </template>
 
                         <div class="table-toolbar">
-                          <div
-                            class="meta-info"
-                            v-if="tabStates[tab.id].queryLoading || tabStates[tab.id].queryResult.executedAt"
-                          >
-                            <span class="meta-item">
-                              <el-icon><Timer /></el-icon>
-                              {{
-                                formatDuration(
-                                  tabStates[tab.id].queryLoading
-                                    ? tabStates[tab.id].queryTiming.elapsedMs
-                                    : tabStates[tab.id].queryResult.durationMs
-                                )
-                              }}
+                          <div class="meta-info">
+                            <span class="meta-item"><el-icon><Files /></el-icon> {{ (resultSet.rows || []).length }} 行</span>
+                            <span v-if="resultSet.hasMore" class="meta-item truncate">
+                              <el-icon><Warning /></el-icon> 结果已截断
                             </span>
-                            <span v-if="tabStates[tab.id].queryLoading" class="meta-item">
-                              <el-icon><Loading /></el-icon> 查询中
-                            </span>
-                            <template v-else>
-                              <span class="meta-item"><el-icon><Files /></el-icon> {{ tabStates[tab.id].queryResult.rows.length }} 行</span>
-                              <span v-if="tabStates[tab.id].queryResult.hasMore" class="meta-item truncate">
-                                <el-icon><Warning /></el-icon> 结果已截断
-                              </span>
-                            </template>
                           </div>
                           <div class="export-actions">
                             <el-button
                               size="small"
-                              :disabled="!tabStates[tab.id].queryResult.rows.length"
-                              @click="exportResult(tab.id)"
+                              :disabled="!(resultSet.rows || []).length"
+                              @click="exportResult(tab.id, idx)"
                             >
                               导出 CSV
                             </el-button>
@@ -314,20 +358,20 @@
 
                         <div class="table-wrapper">
                           <el-empty
-                            v-if="!tabStates[tab.id].queryResult.rows.length && !tabStates[tab.id].queryLoading"
+                            v-if="!(resultSet.rows || []).length && !tabStates[tab.id].queryLoading"
                             description="暂无数据"
                             :image-size="80"
                           />
                           <el-table
                             v-else
-                            :data="getPaginatedRows(tab.id)"
+                            :data="resultSet.rows || []"
                             border
                             stripe
                             size="small"
                             height="100%"
                           >
                             <el-table-column
-                              v-for="col in tabStates[tab.id].queryResult.columns"
+                              v-for="col in (resultSet.columns || [])"
                               :key="col"
                               :prop="col"
                               :label="col"
@@ -335,18 +379,6 @@
                               show-overflow-tooltip
                             />
                           </el-table>
-                        </div>
-
-                        <div class="pagination-bar" v-if="tabStates[tab.id].queryResult.rows.length">
-                          <el-pagination
-                            v-model:current-page="tabStates[tab.id].page.current"
-                            v-model:page-size="tabStates[tab.id].page.size"
-                            :page-sizes="[10, 20, 50, 100, 500]"
-                            layout="total, sizes, prev, pager, next"
-                            :total="tabStates[tab.id].queryResult.rows.length"
-                            background
-                            small
-                          />
                         </div>
                       </el-tab-pane>
 
@@ -984,6 +1016,7 @@ import {
   Clock,
   Delete,
   Plus,
+  CaretRight,
   Document,
   Grid,
   Loading,
@@ -992,12 +1025,14 @@ import {
   TrendCharts,
   Timer,
   Files,
+  VideoPause,
   Warning
 } from '@element-plus/icons-vue'
 import { tableApi } from '@/api/table'
 import { dorisClusterApi } from '@/api/doris'
 import { dataQueryApi } from '@/api/query'
 import PersistentTabs from '@/components/PersistentTabs.vue'
+import SqlEditor from '@/components/SqlEditor.vue'
 import CreateTableDrawer from '@/views/datastudio/CreateTableDrawer.vue'
 import DataStudioRightPanel from '@/views/datastudio/components/DataStudioRightPanel.vue'
 import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
@@ -1862,23 +1897,29 @@ const setupTableObserver = () => {
 const createTabState = (table) => {
   return reactive({
     table: { ...table },
-    query: {
-      sql: buildDefaultSql(table),
-      limit: 200
-    },
-    queryLoading: false,
-    queryTiming: {
-      startedAt: 0,
-      elapsedMs: 0
-    },
-    queryResult: {
-      columns: [],
-      rows: [],
-      hasMore: false,
-      durationMs: 0,
-      executedAt: ''
-    },
-    resultTab: 'table',
+	    query: {
+	      sql: buildDefaultSql(table),
+	      limit: 200,
+	      hasSelection: false,
+	      selectionText: ''
+	    },
+	    queryLoading: false,
+	    queryStopping: false,
+	    queryTiming: {
+	      startedAt: 0,
+	      elapsedMs: 0
+	    },
+	    queryResult: {
+	      resultSets: [],
+	      columns: [],
+	      rows: [],
+	      hasMore: false,
+	      durationMs: 0,
+	      executedAt: '',
+	      cancelled: false,
+	      message: ''
+	    },
+	    resultTab: 'message',
     page: {
       current: 1,
       size: 20
@@ -2300,8 +2341,25 @@ const getSchemaOptions = (sourceId) => {
   return schemaStore[sid] || []
 }
 
+const getSqlCompletionTables = (tabId) => {
+  const state = tabStates[String(tabId || '')]
+  if (!state) return []
+  const sourceId = String(state.table?.sourceId || '')
+  const dbName = String(state.table?.dbName || '')
+  if (!sourceId || !dbName) return []
+  const list = tableStore[sourceId]?.[dbName] || []
+  return list.map((item) => item.tableName).filter(Boolean)
+}
+
 const getTabItemById = (tabId) => {
   return openTabs.value.find((tab) => String(tab.id) === String(tabId)) || null
+}
+
+const handleSqlSelectionChange = (tabId, payload) => {
+  const state = tabStates[String(tabId || '')]
+  if (!state) return
+  state.query.selectionText = payload?.text ?? ''
+  state.query.hasSelection = !!payload?.hasSelection
 }
 
 const handleQuerySourceSelect = async (tabId, value) => {
@@ -2376,22 +2434,11 @@ const buildDefaultSql = (table) => {
   return `SELECT *\nFROM \`${table.dbName}\`.\`${table.tableName}\`\nLIMIT 200;`
 }
 
-const isReadOnlySql = (sql) => {
-  if (!sql) return false
-  const trimmed = sql.trim().toLowerCase()
-  return (
-    trimmed.startsWith('select') ||
-    trimmed.startsWith('with') ||
-    trimmed.startsWith('show') ||
-    trimmed.startsWith('desc') ||
-    trimmed.startsWith('describe') ||
-    trimmed.startsWith('explain')
-  )
-}
-
 const executeQuery = async (tabId) => {
   const state = tabStates[tabId]
-  if (!state?.query?.sql?.trim()) {
+  const selectedSql = String(state?.query?.selectionText || '')
+  const sqlToRun = selectedSql.trim() ? selectedSql : String(state?.query?.sql || '')
+  if (!sqlToRun.trim()) {
     ElMessage.warning('请输入 SQL')
     return
   }
@@ -2404,28 +2451,40 @@ const executeQuery = async (tabId) => {
     ElMessage.warning('请选择数据源')
     return
   }
-  if (!isReadOnlySql(state.query.sql)) {
-    ElMessage.warning('仅支持只读查询')
-    return
-  }
   state.queryLoading = true
+  state.queryStopping = false
   startQueryTimer(tabId)
   try {
     const res = await dataQueryApi.execute({
+      clientQueryId: String(tabId),
       clusterId: sourceId || undefined,
       database: state.table.dbName || undefined,
-      sql: state.query.sql,
+      sql: sqlToRun,
       limit: state.query.limit
     })
+
+    const resultSets = Array.isArray(res.resultSets) ? res.resultSets : []
+    const fallbackResultSet = {
+      index: 1,
+      columns: res.columns || [],
+      rows: res.rows || [],
+      hasMore: !!res.hasMore,
+      previewRowCount: (res.rows || []).length
+    }
+    const normalizedSets = resultSets.length ? resultSets : [fallbackResultSet]
+
     state.queryResult = {
+      resultSets: normalizedSets,
       columns: res.columns || [],
       rows: res.rows || [],
       hasMore: res.hasMore,
       durationMs: res.durationMs,
-      executedAt: res.executedAt
+      executedAt: res.executedAt,
+      cancelled: !!res.cancelled,
+      message: res.message || ''
     }
     state.page.current = 1
-    state.resultTab = 'table'
+    state.resultTab = normalizedSets.length ? 'result-0' : 'message'
     state.chart.xAxis = ''
     state.chart.yAxis = []
     await nextTick()
@@ -2435,7 +2494,20 @@ const executeQuery = async (tabId) => {
     ElMessage.error(error.response?.data?.message || error.message || '查询失败')
   } finally {
     state.queryLoading = false
+    state.queryStopping = false
     clearQueryTimer(tabId)
+  }
+}
+
+const stopQuery = async (tabId) => {
+  const state = tabStates[tabId]
+  if (!state?.queryLoading || state.queryStopping) return
+  state.queryStopping = true
+  try {
+    await dataQueryApi.stop({ clientQueryId: String(tabId) })
+  } catch (error) {
+    state.queryStopping = false
+    ElMessage.error(error.response?.data?.message || error.message || '停止失败')
   }
 }
 
@@ -2443,6 +2515,8 @@ const resetQuery = (tabId) => {
   const state = tabStates[tabId]
   if (!state) return
   state.query.sql = buildDefaultSql(state.table)
+  state.query.selectionText = ''
+  state.query.hasSelection = false
 }
 
 const saveAsTask = (tabId) => {
@@ -2459,12 +2533,18 @@ const saveAsTask = (tabId) => {
   })
 }
 
-const exportResult = (tabId) => {
+const exportResult = (tabId, resultIndex = 0) => {
   const state = tabStates[tabId]
-  if (!state?.queryResult?.rows?.length) return
-  const header = state.queryResult.columns.join(',')
-  const body = state.queryResult.rows
-    .map((row) => state.queryResult.columns.map((col) => formatCsvValue(row[col])).join(','))
+  if (!state?.queryResult) return
+  const idx = Number(resultIndex)
+  const set = Array.isArray(state.queryResult.resultSets) ? state.queryResult.resultSets[idx] : null
+  const columns = set?.columns || state.queryResult.columns || []
+  const rows = set?.rows || state.queryResult.rows || []
+  if (!rows.length || !columns.length) return
+
+  const header = columns.join(',')
+  const body = rows
+    .map((row) => columns.map((col) => formatCsvValue(row?.[col])).join(','))
     .join('\n')
   const blob = new Blob([`${header}\n${body}`], { type: 'text/csv;charset=utf-8;' })
   const link = document.createElement('a')
@@ -3796,18 +3876,36 @@ onBeforeUnmount(() => {
   background: #fff;
   border: 1px solid #eef1f6;
   border-radius: 8px;
-  padding: 12px;
+  padding: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
 }
 
-.query-header {
+.query-topbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  gap: 10px;
+}
+
+.query-topbar__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.query-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .query-context {
@@ -3818,18 +3916,19 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.query-divider {
+  width: 1px;
+  height: 20px;
+  background: #e2e8f0;
+  flex-shrink: 0;
+}
+
 .query-select {
   min-width: 140px;
 }
 
 .query-select--source {
   min-width: 170px;
-}
-
-.query-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .limit-label {
@@ -3841,22 +3940,13 @@ onBeforeUnmount(() => {
   width: 110px;
 }
 
-.sql-editor :deep(.el-textarea__inner) {
-  font-family: 'Fira Code', monospace;
-  font-size: 13px;
-  height: 100%;
-  min-height: 0;
-  resize: none;
-}
-
 .sql-editor {
   flex: 1;
   min-height: 0;
 }
 
-.sql-editor :deep(.el-textarea) {
+.sql-editor :deep(.cm-editor) {
   height: 100%;
-  display: flex;
 }
 
 .result-panel {
@@ -3905,6 +3995,31 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.message-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.message-toolbar {
+  padding: 8px 12px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.message-body {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  font-size: 12px;
+  color: #334155;
+  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+  white-space: pre-wrap;
 }
 
 .meta-info {

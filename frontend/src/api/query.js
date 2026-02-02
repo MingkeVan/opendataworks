@@ -5,6 +5,10 @@ export const dataQueryApi = {
     return request.post('/v1/data-query/execute', data, { timeout: 300000 })
   },
 
+  stop(data) {
+    return request.post('/v1/data-query/stop', data, { timeout: 10000 })
+  },
+
   history(params) {
     return request.get('/v1/data-query/history', { params })
   }
