@@ -3943,6 +3943,7 @@ onBeforeUnmount(() => {
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
   gap: 10px;
+  flex-wrap: nowrap;
 }
 
 .query-topbar__left {
@@ -3950,6 +3951,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .query-topbar__actions {
@@ -3962,7 +3965,7 @@ onBeforeUnmount(() => {
 .query-context {
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   min-width: 0;
 }
@@ -3975,11 +3978,24 @@ onBeforeUnmount(() => {
 }
 
 .query-select {
-  min-width: 140px;
+  width: 160px;
+  flex: 0 0 160px;
 }
 
 .query-select--source {
-  min-width: 170px;
+  width: 180px;
+  flex: 0 0 180px;
+}
+
+.query-select--db {
+  width: 180px;
+  flex: 0 0 180px;
+}
+
+.query-select :deep(.el-select__selected-item) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .limit-label {
