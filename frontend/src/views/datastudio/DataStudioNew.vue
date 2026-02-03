@@ -366,6 +366,64 @@
                           />
                         </div>
 
+                        <div v-if="(resultSet.rows || []).length" class="result-chart">
+                          <div class="chart-grid">
+                            <div class="chart-config">
+                              <div class="config-title">图表类型</div>
+                              <div class="chart-type">
+                                <el-radio-group v-model="tabStates[tab.id].charts[idx].type" size="small">
+                                  <el-radio-button label="bar">柱状图</el-radio-button>
+                                  <el-radio-button label="line">折线图</el-radio-button>
+                                  <el-radio-button label="pie">饼图</el-radio-button>
+                                </el-radio-group>
+                              </div>
+                              <div class="config-title">
+                                {{ tabStates[tab.id].charts[idx].type === 'pie' ? '分类字段' : 'X 轴字段' }}
+                              </div>
+                              <el-select
+                                v-model="tabStates[tab.id].charts[idx].xAxis"
+                                size="small"
+                                placeholder="选择字段"
+                                class="config-select"
+                                :disabled="!(resultSet.columns || []).length"
+                              >
+                                <el-option
+                                  v-for="col in (resultSet.columns || [])"
+                                  :key="col"
+                                  :label="col"
+                                  :value="col"
+                                />
+                              </el-select>
+                              <div class="config-title">
+                                {{ tabStates[tab.id].charts[idx].type === 'pie' ? '数值字段' : 'Y 轴字段' }}
+                              </div>
+                              <el-select
+                                v-model="tabStates[tab.id].charts[idx].yAxis"
+                                size="small"
+                                multiple
+                                collapse-tags
+                                placeholder="选择数值字段"
+                                class="config-select"
+                                :disabled="!(resultSet.columns || []).length"
+                              >
+                                <el-option
+                                  v-for="col in getNumericColumns(tab.id, idx)"
+                                  :key="col"
+                                  :label="col"
+                                  :value="col"
+                                />
+                              </el-select>
+                              <div class="hint">配置变更后自动刷新</div>
+                            </div>
+                            <div class="chart-canvas">
+                              <div class="chart-inner" :ref="(el) => setChartRef(tab.id, idx, el)"></div>
+                              <div v-if="!canRenderChart(tab.id, idx)" class="chart-empty">
+                                请选择字段并执行查询
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
                         <div class="table-wrapper">
                           <el-empty
                             v-if="!(resultSet.rows || []).length && !tabStates[tab.id].queryLoading"
@@ -389,70 +447,6 @@
                               show-overflow-tooltip
                             />
                           </el-table>
-                        </div>
-                      </el-tab-pane>
-
-                      <el-tab-pane name="chart">
-                        <template #label>
-                          <span class="result-label"><el-icon><TrendCharts /></el-icon> 可视化图表</span>
-                        </template>
-                        <div class="chart-grid">
-                          <div class="chart-config">
-                            <div class="config-title">图表类型</div>
-                            <div class="chart-type">
-                              <el-radio-group v-model="tabStates[tab.id].chart.type" size="small">
-                                <el-radio-button label="bar">柱状图</el-radio-button>
-                                <el-radio-button label="line">折线图</el-radio-button>
-                                <el-radio-button label="pie">饼图</el-radio-button>
-                              </el-radio-group>
-                            </div>
-                            <div class="config-title">
-                              {{ tabStates[tab.id].chart.type === 'pie' ? '分类字段' : 'X 轴字段' }}
-                            </div>
-                            <el-select
-                              v-model="tabStates[tab.id].chart.xAxis"
-                              size="small"
-                              placeholder="选择字段"
-                              class="config-select"
-                              :disabled="!tabStates[tab.id].queryResult.columns.length"
-                            >
-                              <el-option
-                                v-for="col in tabStates[tab.id].queryResult.columns"
-                                :key="col"
-                                :label="col"
-                                :value="col"
-                              />
-                            </el-select>
-                            <div class="config-title">
-                              {{ tabStates[tab.id].chart.type === 'pie' ? '数值字段' : 'Y 轴字段' }}
-                            </div>
-                            <el-select
-                              v-model="tabStates[tab.id].chart.yAxis"
-                              size="small"
-                              multiple
-                              collapse-tags
-                              placeholder="选择数值字段"
-                              class="config-select"
-                              :disabled="!tabStates[tab.id].queryResult.columns.length"
-                            >
-                              <el-option
-                                v-for="col in getNumericColumns(tab.id)"
-                                :key="col"
-                                :label="col"
-                                :value="col"
-                              />
-                            </el-select>
-                            <div class="hint">配置变更后自动刷新</div>
-                          </div>
-                          <div class="chart-canvas">
-                            <div
-                              class="chart-inner"
-                              :ref="(el) => setChartRef(tab.id, el)"
-                            ></div>
-                            <div v-if="!canRenderChart(tab.id)" class="chart-empty">
-                              请选择字段并执行查询
-                            </div>
-                          </div>
                         </div>
                       </el-tab-pane>
 
@@ -1969,11 +1963,13 @@ const createTabState = (table) => {
       current: 1,
       size: 20
     },
-    chart: {
-      type: 'bar',
-      xAxis: '',
-      yAxis: []
-    },
+    charts: [
+      {
+        type: 'bar',
+        xAxis: '',
+        yAxis: []
+      }
+    ],
     metaTab: 'basic',
     metaEditing: false,
     metaSaving: false,
@@ -2355,9 +2351,6 @@ const disposeTabResources = (tabId) => {
   if (leftPaneRefs.value?.[id]) {
     delete leftPaneRefs.value[id]
   }
-  if (chartRefs.value?.[id]) {
-    delete chartRefs.value[id]
-  }
   if (leftPaneHeights[id] !== undefined) {
     delete leftPaneHeights[id]
   }
@@ -2600,6 +2593,7 @@ const executeQuery = async (tabId) => {
   state.queryResult.message = ''
   state.queryResult.cancelled = false
   startQueryTimer(tabId)
+  disposeChart(tabId)
   try {
     const res = await dataQueryApi.execute({
       clientQueryId: String(tabId),
@@ -2629,17 +2623,21 @@ const executeQuery = async (tabId) => {
       cancelled: !!res.cancelled,
       message: res.message || '',
       errorMessage: ''
-    }
-    state.page.current = 1
-    state.resultTab = 'result-0'
-    state.chart.xAxis = ''
-    state.chart.yAxis = []
-    await nextTick()
-    renderChart(tabId)
-    fetchHistory()
-  } catch (error) {
-    const message = error?.response?.data?.message || error?.message || '查询失败'
-    state.queryResult = {
+	    }
+	    state.page.current = 1
+	    state.resultTab = 'result-0'
+	    state.charts = normalizedSets.map(() => ({
+	      type: 'bar',
+	      xAxis: '',
+	      yAxis: []
+	    }))
+	    applyDefaultChartSelection(tabId)
+	    await nextTick()
+	    renderChart(tabId, 0)
+	    fetchHistory()
+	  } catch (error) {
+	    const message = error?.response?.data?.message || error?.message || '查询失败'
+	    state.queryResult = {
       resultSets: [],
       columns: [],
       rows: [],
@@ -2647,15 +2645,22 @@ const executeQuery = async (tabId) => {
       durationMs: 0,
       executedAt: '',
       cancelled: false,
-      message: '',
-      errorMessage: message
-    }
-    state.resultTab = 'result-0'
-  } finally {
-    state.queryLoading = false
-    state.queryStopping = false
-    clearQueryTimer(tabId)
-  }
+	      message: '',
+	      errorMessage: message
+	    }
+	    state.resultTab = 'result-0'
+	    state.charts = [
+	      {
+	        type: 'bar',
+	        xAxis: '',
+	        yAxis: []
+	      }
+	    ]
+	  } finally {
+	    state.queryLoading = false
+	    state.queryStopping = false
+	    clearQueryTimer(tabId)
+	  }
 }
 
 const stopQuery = async (tabId) => {
@@ -2834,60 +2839,149 @@ const getPaginatedRows = (tabId) => {
   return state.queryResult.rows.slice(start, end)
 }
 
-const getNumericColumns = (tabId) => {
+const parseResultTabIndex = (value) => {
+  const match = String(value || '').match(/^result-(\d+)$/)
+  return match ? Number(match[1]) : null
+}
+
+const getChartKey = (tabId, resultIndex) => `${String(tabId)}::${Number(resultIndex)}`
+
+const getResultSetByIndex = (tabId, resultIndex = 0) => {
   const state = tabStates[tabId]
-  if (!state?.queryResult?.rows?.length) return []
-  const sample = state.queryResult.rows.slice(0, 10)
-  return state.queryResult.columns.filter((col) => {
+  const sets = Array.isArray(state?.queryResult?.resultSets) ? state.queryResult.resultSets : []
+  const set = sets[resultIndex] || EMPTY_RESULT_SET
+  return {
+    columns: Array.isArray(set?.columns) ? set.columns : [],
+    rows: Array.isArray(set?.rows) ? set.rows : [],
+    hasMore: !!set?.hasMore
+  }
+}
+
+const getNumericColumns = (tabId, resultIndex = 0) => {
+  const set = getResultSetByIndex(tabId, resultIndex)
+  if (!set.rows.length || !set.columns.length) return []
+  const sample = set.rows.slice(0, 10)
+  return set.columns.filter((col) => {
     return sample.every((row) => {
-      const val = row[col]
+      const val = row?.[col]
       return val === null || val === '' || !Number.isNaN(Number(val))
     })
   })
 }
 
-const canRenderChart = (tabId) => {
+const scoreColumnName = (name, keywords) => {
+  if (!name) return 0
+  const lower = String(name).toLowerCase()
+  return keywords.reduce((score, keyword) => (lower.includes(keyword) ? score + 10 : score), 0)
+}
+
+const scoreDimensionColumn = (column) => {
+  const keywords = [
+    'dt', 'date', 'day', 'week', 'month', 'year', 'hour', 'time',
+    'category', 'type', 'name', 'region', 'province', 'city', 'status'
+  ]
+  const suffixBoost = /(_dt|_date|_day|_month|_year|_time)$/i.test(String(column)) ? 15 : 0
+  return scoreColumnName(column, keywords) + suffixBoost
+}
+
+const scoreMetricColumn = (column) => {
+  const keywords = [
+    'count', 'cnt', 'sum', 'avg', 'mean', 'max', 'min',
+    'total', 'num', 'qty', 'amount', 'amt', 'value', 'rate', 'ratio', 'pct', 'percent',
+    '数量', '金额', '总', '均', '最大', '最小', '比率', '比例'
+  ]
+  const suffixBoost = /(_cnt|_count|_sum|_avg|_max|_min|_total)$/i.test(String(column)) ? 15 : 0
+  return scoreColumnName(column, keywords) + suffixBoost
+}
+
+const applyDefaultChartSelection = (tabId) => {
+  const state = tabStates[tabId]
+  if (!state) return
+
+  const sets = Array.isArray(state?.queryResult?.resultSets) ? state.queryResult.resultSets : []
+  sets.forEach((set, idx) => {
+    const columns = Array.isArray(set?.columns) ? set.columns : []
+    const rows = Array.isArray(set?.rows) ? set.rows : []
+    if (!columns.length || rows.length === 0) return
+
+    const chart = state.charts?.[idx]
+    if (!chart) return
+    if (chart.xAxis || (Array.isArray(chart.yAxis) && chart.yAxis.length)) return
+
+    const numericColumns = getNumericColumns(tabId, idx)
+    if (!numericColumns.length || columns.length < 2) return
+
+    const dimensionCandidates = columns.filter((col) => !numericColumns.includes(col))
+    const xCandidates = dimensionCandidates.length ? dimensionCandidates : columns
+    const xAxis = xCandidates
+      .map((col, order) => ({ col, order, score: scoreDimensionColumn(col) }))
+      .sort((a, b) => (b.score - a.score) || (a.order - b.order))[0]?.col
+
+    const metricCandidates = numericColumns.filter((col) => col !== xAxis)
+    if (!xAxis || !metricCandidates.length) return
+
+    const yAxis = metricCandidates
+      .map((col, order) => ({ col, order, score: scoreMetricColumn(col) }))
+      .sort((a, b) => (b.score - a.score) || (a.order - b.order))[0]?.col
+
+    if (!yAxis) return
+
+    chart.xAxis = xAxis
+    chart.yAxis = [yAxis]
+  })
+}
+
+const canRenderChart = (tabId, resultIndex = 0) => {
   const state = tabStates[tabId]
   if (!state) return false
+  const set = getResultSetByIndex(tabId, resultIndex)
+  const chart = state.charts?.[resultIndex]
   return (
-    state.queryResult.rows.length > 0 &&
-    state.chart.xAxis &&
-    state.chart.yAxis.length > 0
+    set.rows.length > 0 &&
+    !!chart?.xAxis &&
+    Array.isArray(chart?.yAxis) &&
+    chart.yAxis.length > 0
   )
 }
 
-const setChartRef = (tabId, el) => {
-  if (!tabId || !el) return
-  chartRefs.value[tabId] = el
+const setChartRef = (tabId, resultIndex, el) => {
+  if (!tabId || el == null) return
+  const key = getChartKey(tabId, resultIndex)
+  chartRefs.value[key] = el
 }
 
-const renderChart = (tabId) => {
+const renderChart = (tabId, resultIndex = 0) => {
   const state = tabStates[tabId]
   if (!state) return
-  const container = chartRefs.value[tabId]
+  const key = getChartKey(tabId, resultIndex)
+  const container = chartRefs.value[key]
   if (!container) return
 
-  const shouldRender = canRenderChart(tabId)
-  let instance = chartInstances.get(tabId)
+  const set = getResultSetByIndex(tabId, resultIndex)
+  const chart = state.charts?.[resultIndex]
+  if (!chart) return
+
+  const shouldRender = canRenderChart(tabId, resultIndex)
+  let instance = chartInstances.get(key)
   if (!shouldRender) {
     instance?.clear()
     return
   }
   if (!instance) {
     instance = echarts.init(container)
-    chartInstances.set(tabId, instance)
+    chartInstances.set(key, instance)
   }
 
-  if (state.chart.type === 'pie') {
-    const xKey = state.chart.xAxis
-    const yKey = state.chart.yAxis[0]
+  if (chart.type === 'pie') {
+    const xKey = chart.xAxis
+    const yKey = chart.yAxis[0]
     if (!xKey || !yKey) {
       instance.clear()
       return
     }
-    const data = state.queryResult.rows.map((row) => ({
-      name: row[xKey],
-      value: Number(row[yKey] || 0)
+    const data = set.rows.map((row) => ({
+      name: row?.[xKey],
+      value: Number(row?.[yKey] || 0)
     }))
     instance.clear()
     instance.setOption({
@@ -2905,12 +2999,12 @@ const renderChart = (tabId) => {
     return
   }
 
-  const xData = state.queryResult.rows.map((row) => row[state.chart.xAxis])
-  const series = state.chart.yAxis.map((key) => ({
-    name: key,
-    type: state.chart.type,
-    data: state.queryResult.rows.map((row) => Number(row[key] || 0)),
-    smooth: state.chart.type === 'line'
+  const xData = set.rows.map((row) => row?.[chart.xAxis])
+  const series = chart.yAxis.map((keyName) => ({
+    name: keyName,
+    type: chart.type,
+    data: set.rows.map((row) => Number(row?.[keyName] || 0)),
+    smooth: chart.type === 'line'
   }))
   instance.clear()
   instance.setOption({
@@ -2924,19 +3018,44 @@ const renderChart = (tabId) => {
   instance.resize()
 }
 
-const disposeChart = (tabId) => {
-  const instance = chartInstances.get(tabId)
-  if (instance) {
-    instance.dispose()
-    chartInstances.delete(tabId)
+const disposeChart = (tabId, resultIndex = null) => {
+  const id = String(tabId || '')
+  if (!id) return
+  if (resultIndex !== null && resultIndex !== undefined) {
+    const key = getChartKey(id, resultIndex)
+    const instance = chartInstances.get(key)
+    if (instance) {
+      instance.dispose()
+      chartInstances.delete(key)
+    }
+    if (chartRefs.value?.[key]) {
+      delete chartRefs.value[key]
+    }
+    return
   }
+
+  const prefix = `${id}::`
+  Array.from(chartInstances.keys()).forEach((key) => {
+    if (!String(key).startsWith(prefix)) return
+    const instance = chartInstances.get(key)
+    if (instance) {
+      instance.dispose()
+    }
+    chartInstances.delete(key)
+  })
+  Object.keys(chartRefs.value).forEach((key) => {
+    if (String(key).startsWith(prefix)) {
+      delete chartRefs.value[key]
+    }
+  })
 }
 
 const handleResize = () => {
   const tabId = activeTab.value
   if (!tabId) return
-  if (tabStates[tabId]?.resultTab !== 'chart') return
-  chartInstances.get(tabId)?.resize()
+  const idx = parseResultTabIndex(tabStates[tabId]?.resultTab)
+  if (idx === null) return
+  chartInstances.get(getChartKey(tabId, idx))?.resize()
 }
 
 const startMetaEdit = (tabId) => {
@@ -3362,20 +3481,22 @@ watch(
 )
 
 watch(
-  () => [
-    activeTab.value,
-    tabStates[activeTab.value]?.resultTab,
-    tabStates[activeTab.value]?.chart.type,
-    tabStates[activeTab.value]?.chart.xAxis,
-    tabStates[activeTab.value]?.chart.yAxis?.join(','),
-    tabStates[activeTab.value]?.queryResult?.rows?.length
-  ],
-  async () => {
+  () => {
     const tabId = activeTab.value
-    if (!tabId) return
-    if (tabStates[tabId]?.resultTab !== 'chart') return
+    if (!tabId) return null
+    const state = tabStates[tabId]
+    const idx = parseResultTabIndex(state?.resultTab)
+    if (idx === null) return null
+    const chart = state?.charts?.[idx]
+    const set = Array.isArray(state?.queryResult?.resultSets) ? state.queryResult.resultSets[idx] : null
+    const rowsLen = Array.isArray(set?.rows) ? set.rows.length : 0
+    return [tabId, idx, chart?.type, chart?.xAxis, chart?.yAxis?.join(','), rowsLen]
+  },
+  async (payload) => {
+    if (!payload) return
+    const [tabId, idx] = payload
     await nextTick()
-    renderChart(tabId)
+    renderChart(tabId, idx)
   }
 )
 
@@ -4211,6 +4332,13 @@ onBeforeUnmount(() => {
 
 .truncate {
   color: #e6a23c;
+}
+
+.result-chart {
+  flex: 0 0 320px;
+  min-height: 220px;
+  border-bottom: 1px solid #eef1f6;
+  background: #fff;
 }
 
 .table-wrapper {
