@@ -660,6 +660,7 @@ function formatDate(s) {
 /* Result Panel */
 .result-panel {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -711,6 +712,7 @@ function formatDate(s) {
 
 .table-wrapper {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   background: #fff;
 }

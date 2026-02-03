@@ -5,11 +5,13 @@ import com.onedata.portal.dto.Result;
 import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.service.DorisClusterService;
 import com.onedata.portal.service.DorisConnectionService;
+import com.onedata.portal.util.TableNameUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Doris 集群管理 Controller
@@ -67,7 +69,20 @@ public class DorisClusterController {
 
     @RequireAuth
     @GetMapping("/{id}/databases/{database}/tables")
-    public Result<List<Map<String, Object>>> listTables(@PathVariable Long id, @PathVariable String database) {
-        return Result.success(dorisConnectionService.getTablesInDatabase(id, database));
+    public Result<List<Map<String, Object>>> listTables(
+            @PathVariable Long id,
+            @PathVariable String database,
+            @RequestParam(required = false, defaultValue = "false") boolean includeDeprecated) {
+        List<Map<String, Object>> tables = dorisConnectionService.getTablesInDatabase(id, database);
+        if (includeDeprecated) {
+            return Result.success(tables);
+        }
+        List<Map<String, Object>> filtered = tables.stream()
+                .filter(table -> {
+                    Object tableName = table.get("tableName");
+                    return tableName == null || !TableNameUtils.isDeprecatedTableName(String.valueOf(tableName));
+                })
+                .collect(Collectors.toList());
+        return Result.success(filtered);
     }
 }

@@ -8,6 +8,7 @@ import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.mapper.DataFieldMapper;
 import com.onedata.portal.mapper.DataTableMapper;
 import com.onedata.portal.mapper.DorisClusterMapper;
+import com.onedata.portal.util.TableNameUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -679,7 +680,7 @@ public class DorisMetadataSyncService {
         String tableComment = (String) dorisTable.get("tableComment");
         newTable.setTableComment(tableComment != null ? tableComment : "");
 
-        newTable.setStatus("active");
+        newTable.setStatus(TableNameUtils.isDeprecatedTableName(tableName) ? "deprecated" : "active");
         newTable.setIsSynced(isDoris ? 1 : 0);
         newTable.setSyncTime(LocalDateTime.now());
 
@@ -753,6 +754,12 @@ public class DorisMetadataSyncService {
         // 同步数据源
         if (!Objects.equals(localTable.getClusterId(), clusterId)) {
             localTable.setClusterId(clusterId);
+            updated = true;
+        }
+
+        // 自动识别 deprecated 表（历史上手工重命名/遗留表）
+        if (TableNameUtils.isDeprecatedTableName(tableName) && !"deprecated".equals(localTable.getStatus())) {
+            localTable.setStatus("deprecated");
             updated = true;
         }
 
