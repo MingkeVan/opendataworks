@@ -1503,6 +1503,26 @@ const getTableKey = (table, fallbackDb = '', fallbackSource = '') => {
   return sourceId ? `${sourceId}::${core}` : core
 }
 
+const findCachedTableById = (tableId) => {
+  const targetId = String(tableId || '')
+  if (!targetId) return null
+  for (const sourceId of Object.keys(tableStore)) {
+    const dbMap = tableStore[sourceId]
+    if (!dbMap || typeof dbMap !== 'object') continue
+    for (const dbName of Object.keys(dbMap)) {
+      const list = Array.isArray(dbMap[dbName]) ? dbMap[dbName] : []
+      const found = list.find((item) => item && String(item.id) === targetId)
+      if (!found) continue
+      return {
+        ...found,
+        sourceId: String(found.sourceId || found.clusterId || sourceId),
+        dbName: found.dbName || dbName
+      }
+    }
+  }
+  return null
+}
+
 const buildSchemaNode = (sourceId, schemaName) => ({
   nodeKey: getSchemaNodeKey(sourceId, schemaName),
   type: 'schema',
@@ -1980,35 +2000,104 @@ const createTabState = (table) => {
 
 const openTableTab = async (table, dbFallback = '', sourceFallback = '') => {
   if (!table) return
-  const sourceId = table.sourceId || table.clusterId || sourceFallback
+  let payload = table
+  const tableId = payload?.id
+  const hasSource = !!(payload?.sourceId || payload?.clusterId || sourceFallback)
+  const hasDb = !!(payload?.dbName || payload?.databaseName || payload?.database || dbFallback)
+  if (tableId && (!hasSource || !hasDb)) {
+    const cached = findCachedTableById(tableId)
+    if (cached) {
+      payload = { ...cached, ...payload, id: tableId, dbName: cached.dbName, sourceId: cached.sourceId }
+    } else {
+      try {
+        const tableInfo = await tableApi.getById(tableId)
+        if (tableInfo) {
+          const resolvedSourceId = String(
+            payload?.sourceId || payload?.clusterId || tableInfo.clusterId || sourceFallback || ''
+          )
+          const resolvedDb =
+            tableInfo.dbName ||
+            payload?.dbName ||
+            payload?.databaseName ||
+            payload?.database ||
+            dbFallback ||
+            ''
+          payload = {
+            ...tableInfo,
+            ...payload,
+            id: tableId,
+            dbName: resolvedDb,
+            sourceId: resolvedSourceId
+          }
+        }
+      } catch (error) {
+        console.error('加载血缘表信息失败', error)
+      }
+    }
+  }
+
+  const sourceId = String(payload.sourceId || payload.clusterId || sourceFallback || '')
   if (sourceId) {
     clusterId.value = sourceId
   }
-  const key = getTableKey(table, dbFallback, sourceId)
+  const resolvedDb = payload.dbName || payload.databaseName || payload.database || dbFallback || ''
+  payload = { ...payload, dbName: resolvedDb, sourceId }
+  const key = getTableKey(payload, resolvedDb, sourceId)
   if (!key) return
 
   selectedTableKey.value = key
 
-  const existing = openTabs.value.find((item) => String(item.id) === key)
+  const existing = openTabs.value.find((item) => String(item.id) === String(key))
   if (existing) {
     activeTab.value = String(existing.id)
-    await focusTableInSidebar(table, key, dbFallback, sourceId)
+    const state = tabStates[String(existing.id)]
+    if (state) {
+      state.table = { ...state.table, ...payload }
+      syncAutoSelectSqlIfSchemaMismatch(state)
+    }
+    if (existing.kind !== 'query') {
+      existing.sourceId = sourceId || existing.sourceId
+      existing.dbName = resolvedDb || existing.dbName
+      existing.tableName = payload.tableName || existing.tableName
+    }
+    await focusTableInSidebar(payload, key, resolvedDb, sourceId)
     return
   }
 
-  const resolvedDb = table.dbName || table.databaseName || table.database || dbFallback || ''
+  const existingById = tableId
+    ? openTabs.value.find((item) => {
+        if (!item || item.kind === 'query') return false
+        const state = tabStates[String(item.id)]
+        return state?.table?.id && String(state.table.id) === String(tableId)
+      })
+    : null
+  if (existingById) {
+    activeTab.value = String(existingById.id)
+    const state = tabStates[String(existingById.id)]
+    if (state) {
+      state.table = { ...state.table, ...payload }
+      syncAutoSelectSqlIfSchemaMismatch(state)
+    }
+    existingById.sourceId = sourceId || existingById.sourceId
+    existingById.dbName = resolvedDb || existingById.dbName
+    existingById.tableName = payload.tableName || existingById.tableName
+    selectedTableKey.value = key
+    await focusTableInSidebar(payload, key, resolvedDb, sourceId)
+    return
+  }
+
   const tabItem = {
     id: key,
     kind: 'table',
-    tableName: table.tableName,
+    tableName: payload.tableName,
     dbName: resolvedDb,
     sourceId
   }
-  tabStates[key] = createTabState({ ...table, dbName: resolvedDb, sourceId })
+  tabStates[key] = createTabState({ ...payload, dbName: resolvedDb, sourceId })
   openTabs.value.push(tabItem)
   activeTab.value = key
 
-  await focusTableInSidebar(table, key, dbFallback, sourceId)
+  await focusTableInSidebar(payload, key, resolvedDb, sourceId)
   await loadTabData(key)
 }
 
@@ -2457,6 +2546,28 @@ const handleQueryDatabaseSelect = async (tabId, value) => {
 const buildDefaultSql = (table) => {
   if (!table?.dbName || !table?.tableName) return ''
   return `SELECT *\nFROM \`${table.dbName}\`.\`${table.tableName}\`\nLIMIT 200;`
+}
+
+const parseAutoSelectSql = (sql) => {
+  const text = String(sql || '').trim()
+  if (!text) return null
+  const match = text.match(/^select\s+\*\s+from\s+`([^`]+)`\.`([^`]+)`\s+limit\s+(\d+)\s*;?$/i)
+  if (!match) return null
+  return { schema: match[1], table: match[2], limit: Number(match[3]) }
+}
+
+const syncAutoSelectSqlIfSchemaMismatch = (state) => {
+  if (!state?.table?.dbName || !state?.table?.tableName) return
+  const nextDefault = buildDefaultSql(state.table)
+  if (!String(state.query?.sql || '').trim()) {
+    state.query.sql = nextDefault
+    return
+  }
+  const parsed = parseAutoSelectSql(state.query.sql)
+  if (!parsed) return
+  if (parsed.table === state.table.tableName && parsed.schema !== state.table.dbName) {
+    state.query.sql = nextDefault
+  }
 }
 
 const executeQuery = async (tabId) => {
