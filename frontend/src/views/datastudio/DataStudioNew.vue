@@ -173,9 +173,8 @@
             @close-all="handleCloseAll"
           >
             <template #label="{ tab }">
-              <div class="tab-label">
+              <div class="tab-label" :title="getTabTooltip(tab)">
                 <span class="tab-title">{{ tab.tableName }}</span>
-                <span class="tab-sub">{{ getTabSubtitle(tab) }}</span>
               </div>
             </template>
 
@@ -366,87 +365,89 @@
                           />
                         </div>
 
-                        <div v-if="(resultSet.rows || []).length" class="result-chart">
-                          <div class="chart-grid">
-                            <div class="chart-config">
-                              <div class="config-title">图表类型</div>
-                              <div class="chart-type">
-                                <el-radio-group v-model="tabStates[tab.id].charts[idx].type" size="small">
-                                  <el-radio-button label="bar">柱状图</el-radio-button>
-                                  <el-radio-button label="line">折线图</el-radio-button>
-                                  <el-radio-button label="pie">饼图</el-radio-button>
-                                </el-radio-group>
+                        <div class="result-scroll-container">
+                          <div v-if="(resultSet.rows || []).length" class="result-chart">
+                            <div class="chart-grid">
+                              <div class="chart-config">
+                                <div class="config-title">图表类型</div>
+                                <div class="chart-type">
+                                  <el-radio-group v-model="tabStates[tab.id].charts[idx].type" size="small">
+                                    <el-radio-button label="bar">柱状图</el-radio-button>
+                                    <el-radio-button label="line">折线图</el-radio-button>
+                                    <el-radio-button label="pie">饼图</el-radio-button>
+                                  </el-radio-group>
+                                </div>
+                                <div class="config-title">
+                                  {{ tabStates[tab.id].charts[idx].type === 'pie' ? '分类字段' : 'X 轴字段' }}
+                                </div>
+                                <el-select
+                                  v-model="tabStates[tab.id].charts[idx].xAxis"
+                                  size="small"
+                                  placeholder="选择字段"
+                                  class="config-select"
+                                  :disabled="!(resultSet.columns || []).length"
+                                >
+                                  <el-option
+                                    v-for="col in (resultSet.columns || [])"
+                                    :key="col"
+                                    :label="col"
+                                    :value="col"
+                                  />
+                                </el-select>
+                                <div class="config-title">
+                                  {{ tabStates[tab.id].charts[idx].type === 'pie' ? '数值字段' : 'Y 轴字段' }}
+                                </div>
+                                <el-select
+                                  v-model="tabStates[tab.id].charts[idx].yAxis"
+                                  size="small"
+                                  multiple
+                                  collapse-tags
+                                  placeholder="选择数值字段"
+                                  class="config-select"
+                                  :disabled="!(resultSet.columns || []).length"
+                                >
+                                  <el-option
+                                    v-for="col in getNumericColumns(tab.id, idx)"
+                                    :key="col"
+                                    :label="col"
+                                    :value="col"
+                                  />
+                                </el-select>
+                                <div class="hint">配置变更后自动刷新</div>
                               </div>
-                              <div class="config-title">
-                                {{ tabStates[tab.id].charts[idx].type === 'pie' ? '分类字段' : 'X 轴字段' }}
-                              </div>
-                              <el-select
-                                v-model="tabStates[tab.id].charts[idx].xAxis"
-                                size="small"
-                                placeholder="选择字段"
-                                class="config-select"
-                                :disabled="!(resultSet.columns || []).length"
-                              >
-                                <el-option
-                                  v-for="col in (resultSet.columns || [])"
-                                  :key="col"
-                                  :label="col"
-                                  :value="col"
-                                />
-                              </el-select>
-                              <div class="config-title">
-                                {{ tabStates[tab.id].charts[idx].type === 'pie' ? '数值字段' : 'Y 轴字段' }}
-                              </div>
-                              <el-select
-                                v-model="tabStates[tab.id].charts[idx].yAxis"
-                                size="small"
-                                multiple
-                                collapse-tags
-                                placeholder="选择数值字段"
-                                class="config-select"
-                                :disabled="!(resultSet.columns || []).length"
-                              >
-                                <el-option
-                                  v-for="col in getNumericColumns(tab.id, idx)"
-                                  :key="col"
-                                  :label="col"
-                                  :value="col"
-                                />
-                              </el-select>
-                              <div class="hint">配置变更后自动刷新</div>
-                            </div>
-                            <div class="chart-canvas">
-                              <div class="chart-inner" :ref="(el) => setChartRef(tab.id, idx, el)"></div>
-                              <div v-if="!canRenderChart(tab.id, idx)" class="chart-empty">
-                                请选择字段并执行查询
+                              <div class="chart-canvas">
+                                <div class="chart-inner" :ref="(el) => setChartRef(tab.id, idx, el)"></div>
+                                <div v-if="!canRenderChart(tab.id, idx)" class="chart-empty">
+                                  请选择字段并执行查询
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
 
-                        <div class="table-wrapper">
-                          <el-empty
-                            v-if="!(resultSet.rows || []).length && !tabStates[tab.id].queryLoading"
-                            description="暂无数据"
-                            :image-size="80"
-                          />
-                          <el-table
-                            v-else
-                            :data="resultSet.rows || []"
-                            border
-                            stripe
-                            size="small"
-                            height="100%"
-                          >
-                            <el-table-column
-                              v-for="col in (resultSet.columns || [])"
-                              :key="col"
-                              :prop="col"
-                              :label="col"
-                              min-width="120"
-                              show-overflow-tooltip
+                          <div class="table-wrapper">
+                            <el-empty
+                              v-if="!(resultSet.rows || []).length && !tabStates[tab.id].queryLoading"
+                              description="暂无数据"
+                              :image-size="80"
                             />
-                          </el-table>
+                            <el-table
+                              v-else
+                              :data="resultSet.rows || []"
+                              border
+                              stripe
+                              size="small"
+                              :max-height="400"
+                            >
+                              <el-table-column
+                                v-for="col in (resultSet.columns || [])"
+                                :key="col"
+                                :prop="col"
+                                :label="col"
+                                min-width="120"
+                                show-overflow-tooltip
+                              />
+                            </el-table>
+                          </div>
                         </div>
                       </el-tab-pane>
 
@@ -1736,6 +1737,13 @@ const getTabSubtitle = (tab) => {
   return sourceName || dbName || ''
 }
 
+const getTabTooltip = (tab) => {
+  if (!tab) return ''
+  const title = tab.tableName || ''
+  const sub = getTabSubtitle(tab)
+  return sub ? `${title} · ${sub}` : title
+}
+
 const getLayerType = (layer) => {
   const map = {
     ODS: 'info',
@@ -2948,6 +2956,19 @@ const setChartRef = (tabId, resultIndex, el) => {
   if (!tabId || el == null) return
   const key = getChartKey(tabId, resultIndex)
   chartRefs.value[key] = el
+
+  // ECharts may capture wheel events and block scrolling the result pane.
+  // Stop propagation in capture phase so outer scroll can work naturally.
+  if (el?.dataset?.scrollGuard !== '1') {
+    el.dataset.scrollGuard = '1'
+    el.addEventListener(
+      'wheel',
+      (event) => {
+        event.stopPropagation()
+      },
+      { capture: true, passive: true }
+    )
+  }
 }
 
 const renderChart = (tabId, resultIndex = 0) => {
@@ -4044,39 +4065,70 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
+:deep(.workspace-tabs > .el-tabs) {
+  flex: 1;
+  min-height: 0;
+}
+
 :deep(.workspace-tabs .el-tabs__header) {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  margin: 0;
+  padding: 6px 8px 0;
+  background: linear-gradient(180deg, #f6f7f9 0%, #eef0f3 100%);
+  border-bottom: 1px solid #dcdfe6;
 }
 
 :deep(.workspace-tabs .el-tabs__nav-wrap) {
   flex: 0 1 auto;
   min-width: 0;
-  max-width: calc(100% - 72px);
+  max-width: calc(100% - 44px);
 }
 
-:deep(.workspace-tabs .el-tabs__new-tab) {
-  width: auto;
-  padding: 0 10px;
-  border-radius: 8px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+:deep(.workspace-tabs .el-tabs--card > .el-tabs__header .el-tabs__nav) {
+  border: 0;
 }
 
-:deep(.workspace-tabs .el-tabs__new-tab:hover) {
-  background: #eef2ff;
-  border-color: #c7d2fe;
+:deep(.workspace-tabs .el-tabs--card > .el-tabs__header .el-tabs__item) {
+  height: 34px;
+  line-height: 34px;
+  margin-top: 0;
+  border: 1px solid #dcdfe6;
+  border-bottom: 0;
+  background: #e9ecf1;
+  border-radius: 8px 8px 0 0;
+  padding: 0 12px;
+  color: #303133;
 }
 
-:deep(.workspace-tabs .el-tabs__new-tab::after) {
-  content: '查询';
-  font-size: 12px;
+:deep(.workspace-tabs .el-tabs--card > .el-tabs__header .el-tabs__item:not(.is-active):hover) {
+  background: #f5f7fa;
+  color: #303133;
+}
+
+:deep(.workspace-tabs .el-tabs--card > .el-tabs__header .el-tabs__item.is-active) {
+  background: #ffffff;
+  border-bottom-color: #ffffff;
+  color: #303133;
   font-weight: 600;
-  color: #1f2f3d;
-  margin-left: 2px;
+  position: relative;
+  z-index: 2;
+}
+
+:deep(.workspace-tabs .el-tabs--card > .el-tabs__header .el-tabs__new-tab) {
+  margin: 0 0 -1px 4px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px 8px 0 0;
+  border: 1px solid #dcdfe6;
+  border-bottom: 0;
+  background: #e9ecf1;
+  color: #606266;
+}
+
+:deep(.workspace-tabs .el-tabs--card > .el-tabs__header .el-tabs__new-tab:hover) {
+  background: #f5f7fa;
+  color: #303133;
 }
 
 :deep(.workspace-tabs .el-tabs__content) {
@@ -4090,19 +4142,18 @@ onBeforeUnmount(() => {
 
 .tab-label {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  min-width: 0;
 }
 
 .tab-title {
   font-size: 13px;
-  font-weight: 600;
-  color: #1f2f3d;
-}
-
-.tab-sub {
-  font-size: 11px;
-  color: #94a3b8;
+  font-weight: 500;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
 }
 
 .tab-grid {
@@ -4259,7 +4310,8 @@ onBeforeUnmount(() => {
 }
 
 .result-tabs {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   border: none;
@@ -4272,10 +4324,12 @@ onBeforeUnmount(() => {
   overflow: hidden;
   position: relative;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 :deep(.result-tabs .el-tab-pane) {
-  height: 100%;
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -4334,17 +4388,27 @@ onBeforeUnmount(() => {
   color: #e6a23c;
 }
 
+.result-scroll-container {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
 .result-chart {
-  flex: 0 0 320px;
-  min-height: 220px;
+  flex-shrink: 0;
+  height: 280px;
+  min-height: 280px;
   border-bottom: 1px solid #eef1f6;
   background: #fff;
 }
 
 .table-wrapper {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+  flex-shrink: 0;
+  min-height: 200px;
+  padding: 0;
   background: #fff;
 }
 
@@ -4362,6 +4426,7 @@ onBeforeUnmount(() => {
   padding: 8px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .history-panel :deep(.el-table) {
