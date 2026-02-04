@@ -80,9 +80,47 @@ public class WorkflowScheduleService {
         if (!StringUtils.hasText(warningType)) {
             warningType = "NONE";
         }
+        if ("SUCCESS_FAILURE".equalsIgnoreCase(warningType)) {
+            warningType = "ALL";
+        }
         Long warningGroupId = request.getScheduleWarningGroupId();
         if (warningGroupId == null) {
             warningGroupId = 0L;
+        }
+        if (!"NONE".equalsIgnoreCase(warningType) && warningGroupId <= 0) {
+            throw new IllegalArgumentException("告警类型非 NONE 时，必须选择告警组");
+        }
+
+        String processInstancePriority = normalizeText(request.getScheduleProcessInstancePriority());
+        if (!StringUtils.hasText(processInstancePriority)) {
+            processInstancePriority = normalizeText(workflow.getScheduleProcessInstancePriority());
+        }
+        if (!StringUtils.hasText(processInstancePriority)) {
+            processInstancePriority = "MEDIUM";
+        }
+
+        String workerGroup = normalizeText(request.getScheduleWorkerGroup());
+        if (!StringUtils.hasText(workerGroup)) {
+            workerGroup = normalizeText(workflow.getScheduleWorkerGroup());
+        }
+        if (!StringUtils.hasText(workerGroup)) {
+            workerGroup = dolphinSchedulerService.getDefaultWorkerGroup();
+        }
+
+        String tenantCode = normalizeText(request.getScheduleTenantCode());
+        if (!StringUtils.hasText(tenantCode)) {
+            tenantCode = normalizeText(workflow.getScheduleTenantCode());
+        }
+        if (!StringUtils.hasText(tenantCode)) {
+            tenantCode = dolphinSchedulerService.getDefaultTenantCode();
+        }
+
+        Long environmentCode = request.getScheduleEnvironmentCode();
+        if (environmentCode == null) {
+            environmentCode = workflow.getScheduleEnvironmentCode();
+        }
+        if (environmentCode == null) {
+            environmentCode = -1L;
         }
 
         String scheduleJson = buildScheduleJson(start, end, timezone, cron);
@@ -94,7 +132,11 @@ public class WorkflowScheduleService {
                     scheduleJson,
                     warningType,
                     failureStrategy,
-                    warningGroupId);
+                    warningGroupId,
+                    processInstancePriority,
+                    workerGroup,
+                    tenantCode,
+                    environmentCode);
             if (scheduleId == null || scheduleId <= 0) {
                 throw new IllegalStateException("创建 DolphinScheduler 调度失败，未返回调度ID");
             }
@@ -109,7 +151,11 @@ public class WorkflowScheduleService {
                     scheduleJson,
                     warningType,
                     failureStrategy,
-                    warningGroupId);
+                    warningGroupId,
+                    processInstancePriority,
+                    workerGroup,
+                    tenantCode,
+                    environmentCode);
         }
 
         workflow.setScheduleCron(cron);
@@ -119,6 +165,10 @@ public class WorkflowScheduleService {
         workflow.setScheduleFailureStrategy(failureStrategy);
         workflow.setScheduleWarningType(warningType);
         workflow.setScheduleWarningGroupId(warningGroupId);
+        workflow.setScheduleProcessInstancePriority(processInstancePriority);
+        workflow.setScheduleWorkerGroup(workerGroup);
+        workflow.setScheduleTenantCode(tenantCode);
+        workflow.setScheduleEnvironmentCode(environmentCode);
         if (request.getScheduleAutoOnline() != null) {
             workflow.setScheduleAutoOnline(Boolean.TRUE.equals(request.getScheduleAutoOnline()));
         }

@@ -3,8 +3,10 @@ package com.onedata.portal.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.onedata.portal.dto.DolphinAlertGroupOption;
 import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.dto.DolphinDatasourceOption;
+import com.onedata.portal.dto.DolphinEnvironmentOption;
 import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.dolphin.*;
 import com.onedata.portal.dto.workflow.WorkflowBackfillRequest;
@@ -186,7 +188,11 @@ public class DolphinSchedulerService {
             String scheduleJson,
             String warningType,
             String failureStrategy,
-            Long warningGroupId) {
+            Long warningGroupId,
+            String processInstancePriority,
+            String workerGroup,
+            String tenantCode,
+            Long environmentCode) {
         Long projectCode = getProjectCode();
         if (projectCode == null) {
             throw new IllegalStateException("Cannot create schedule: Project not found");
@@ -197,7 +203,11 @@ public class DolphinSchedulerService {
                 scheduleJson,
                 warningType,
                 failureStrategy,
-                warningGroupId);
+                warningGroupId,
+                processInstancePriority,
+                workerGroup,
+                tenantCode,
+                environmentCode);
         log.info("Created Dolphin schedule for workflow {} -> {}", workflowCode, scheduleId);
         return scheduleId;
     }
@@ -210,7 +220,11 @@ public class DolphinSchedulerService {
             String scheduleJson,
             String warningType,
             String failureStrategy,
-            Long warningGroupId) {
+            Long warningGroupId,
+            String processInstancePriority,
+            String workerGroup,
+            String tenantCode,
+            Long environmentCode) {
         Long projectCode = getProjectCode();
         if (projectCode == null) {
             throw new IllegalStateException("Cannot update schedule: Project not found");
@@ -222,7 +236,11 @@ public class DolphinSchedulerService {
                 scheduleJson,
                 warningType,
                 failureStrategy,
-                warningGroupId);
+                warningGroupId,
+                processInstancePriority,
+                workerGroup,
+                tenantCode,
+                environmentCode);
         log.info("Updated Dolphin schedule {} for workflow {}", scheduleId, workflowCode);
     }
 
@@ -523,6 +541,16 @@ public class DolphinSchedulerService {
         return url.replaceAll("/+$", "");
     }
 
+    public String getDefaultTenantCode() {
+        DolphinConfig config = getConfig();
+        return StringUtils.hasText(config.getTenantCode()) ? config.getTenantCode() : "default";
+    }
+
+    public String getDefaultWorkerGroup() {
+        DolphinConfig config = getConfig();
+        return StringUtils.hasText(config.getWorkerGroup()) ? config.getWorkerGroup() : "default";
+    }
+
     /**
      * Generate the next DolphinScheduler task code locally.
      */
@@ -749,6 +777,74 @@ public class DolphinSchedulerService {
             return result;
         } catch (Exception ex) {
             log.warn("Failed to load task groups from DolphinScheduler: {}", ex.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Retrieve worker group list from DolphinScheduler (project scoped).
+     */
+    public List<String> listWorkerGroups() {
+        try {
+            Long projectCode = getProjectCode();
+            if (projectCode == null) {
+                return Collections.emptyList();
+            }
+            return openApiClient.listProjectWorkerGroups(projectCode);
+        } catch (Exception ex) {
+            log.warn("Failed to load worker groups from DolphinScheduler: {}", ex.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Retrieve tenant code list from DolphinScheduler.
+     */
+    public List<String> listTenants() {
+        try {
+            return openApiClient.listTenants();
+        } catch (Exception ex) {
+            log.warn("Failed to load tenants from DolphinScheduler: {}", ex.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Retrieve alert group list from DolphinScheduler.
+     */
+    public List<DolphinAlertGroupOption> listAlertGroups() {
+        try {
+            return openApiClient.listAlertGroups();
+        } catch (Exception ex) {
+            log.warn("Failed to load alert groups from DolphinScheduler: {}", ex.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Retrieve environment list from DolphinScheduler.
+     */
+    public List<DolphinEnvironmentOption> listEnvironments() {
+        try {
+            return openApiClient.listEnvironments();
+        } catch (Exception ex) {
+            log.warn("Failed to load environments from DolphinScheduler: {}", ex.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Preview next trigger times for a schedule JSON.
+     */
+    public List<String> previewSchedule(String scheduleJson) {
+        try {
+            Long projectCode = getProjectCode();
+            if (projectCode == null) {
+                return Collections.emptyList();
+            }
+            return openApiClient.previewSchedule(projectCode, scheduleJson);
+        } catch (Exception ex) {
+            log.warn("Failed to preview schedule from DolphinScheduler: {}", ex.getMessage());
             return Collections.emptyList();
         }
     }

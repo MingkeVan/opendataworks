@@ -259,7 +259,7 @@ curl -X POST \
 ### 3.4 定时调度（Schedule）
 
 - **创建**：`POST /projects/{projectCode}/schedules`
-  - 需提供 `workflowDefinitionCode` 与 `schedule`（JSON 字符串，包含 `startTime`、`endTime`、`crontab`、`timezoneId` 等）
+  - 以表单提交为主，其中 `schedule` 为 JSON 字符串（包含 `startTime`、`endTime`、`crontab`、`timezoneId` 等）
 - **更新**：`PUT /projects/{projectCode}/schedules/{id}`
 - **上线 / 下线**：`POST /projects/{projectCode}/schedules/{id}/online` 与 `/offline`
 - **查询**：
@@ -268,17 +268,112 @@ curl -X POST \
   - `POST /projects/{projectCode}/schedules/preview` 预览未来触发时间
 - **出处**：[`SchedulerController.java`](https://github.com/apache/dolphinscheduler/blob/dev/dolphinscheduler-api/src/main/java/org/apache/dolphinscheduler/api/controller/SchedulerController.java#L106-L212) 及 [查询相关方法](https://github.com/apache/dolphinscheduler/blob/dev/dolphinscheduler-api/src/main/java/org/apache/dolphinscheduler/api/controller/SchedulerController.java#L232-L307)
 
-创建示例（注意 schedule 需转义或使用单引号包裹 JSON）：
+> **参数差异（重要）**：部分版本使用 `processDefinitionCode`，部分版本使用 `workflowDefinitionCode`。为了兼容，建议同时传两者（值相同）。
+>
+> 另外，DolphinScheduler WebUI 创建/编辑调度时通常还会传：`processInstancePriority`、`workerGroup`、`tenantCode`、`environmentCode`、`warningGroupId`。
+
+创建示例（注意 schedule 需转义或使用单引号包裹 JSON；下方同时传了两种 definition code 参数）：
 
 ```bash
 curl -X POST \
   "http://{host}:12345/dolphinscheduler/projects/123456789/schedules" \
   -H "token: ${TOKEN}" \
   -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "processDefinitionCode=987654321" \
   -d "workflowDefinitionCode=987654321" \
   -d "schedule={\"startTime\":\"2025-01-01 00:00:00\",\"endTime\":\"2025-12-31 23:59:59\",\"timezoneId\":\"Asia/Shanghai\",\"crontab\":\"0 0 * * * ? *\"}" \
+  -d "processInstancePriority=MEDIUM" \
   -d "warningType=NONE" \
-  -d "failureStrategy=CONTINUE"
+  -d "failureStrategy=CONTINUE" \
+  -d "warningGroupId=0" \
+  -d "workerGroup=default" \
+  -d "tenantCode=default" \
+  -d "environmentCode=-1"
+```
+
+成功响应示例（`data` 为 schedule 对象，含 `id`；`releaseState` 默认为 `OFFLINE`）：
+
+```json
+{
+  "code": 0,
+  "msg": "成功",
+  "data": {
+    "id": 38,
+    "processDefinitionCode": 156105016810496,
+    "startTime": "2026-02-04 00:00:00",
+    "endTime": "2126-02-04 00:00:00",
+    "timezoneId": "Asia/Shanghai",
+    "crontab": "0 0 * * * ? *",
+    "failureStrategy": "CONTINUE",
+    "warningType": "NONE",
+    "releaseState": "OFFLINE",
+    "warningGroupId": 0,
+    "processInstancePriority": "MEDIUM",
+    "workerGroup": "default",
+    "tenantCode": "default",
+    "environmentCode": -1
+  },
+  "failed": false,
+  "success": true
+}
+```
+
+查询流程定义时可同时拿到调度信息（包含 `scheduleReleaseState` 与 `schedule` 字段）：
+
+- `GET /projects/{projectCode}/process-definition?pageSize=10&pageNo=1`
+
+示例字段（节选）：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "totalList": [
+      {
+        "code": 156105016810496,
+        "name": "test",
+        "releaseState": "ONLINE",
+        "scheduleReleaseState": "OFFLINE",
+        "schedule": {
+          "id": 38,
+          "processDefinitionCode": 156105016810496,
+          "startTime": "2026-02-04 00:00:00",
+          "endTime": "2126-02-04 00:00:00",
+          "timezoneId": "Asia/Shanghai",
+          "crontab": "0 0 * * * ? *",
+          "failureStrategy": "CONTINUE",
+          "warningType": "NONE",
+          "releaseState": "OFFLINE",
+          "warningGroupId": 0,
+          "processInstancePriority": "MEDIUM",
+          "workerGroup": "default",
+          "tenantCode": "default",
+          "environmentCode": -1
+        }
+      }
+    ]
+  }
+}
+```
+
+更新示例（与创建类似；部分版本会同时在表单里带上 `id` 字段）：
+
+```bash
+curl -X PUT \
+  "http://{host}:12345/dolphinscheduler/projects/123456789/schedules/38" \
+  -H "token: ${TOKEN}" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "id=38" \
+  -d "processDefinitionCode=987654321" \
+  -d "workflowDefinitionCode=987654321" \
+  -d "schedule={\"startTime\":\"2026-02-04 00:00:00\",\"endTime\":\"2126-02-04 00:00:00\",\"timezoneId\":\"Asia/Shanghai\",\"crontab\":\"0 0 * * * ? *\"}" \
+  -d "processInstancePriority=MEDIUM" \
+  -d "warningType=NONE" \
+  -d "failureStrategy=CONTINUE" \
+  -d "warningGroupId=0" \
+  -d "workerGroup=default" \
+  -d "tenantCode=default" \
+  -d "environmentCode=-1"
 ```
 
 上线调度：
@@ -286,6 +381,14 @@ curl -X POST \
 ```bash
 curl -X POST \
   "http://{host}:12345/dolphinscheduler/projects/123456789/schedules/321/online" \
+  -H "token: ${TOKEN}"
+```
+
+下线调度：
+
+```bash
+curl -X POST \
+  "http://{host}:12345/dolphinscheduler/projects/123456789/schedules/321/offline" \
   -H "token: ${TOKEN}"
 ```
 

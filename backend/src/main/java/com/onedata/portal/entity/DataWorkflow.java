@@ -76,6 +76,14 @@ public class DataWorkflow {
 
     private Long scheduleWarningGroupId;
 
+    private String scheduleProcessInstancePriority;
+
+    private String scheduleWorkerGroup;
+
+    private String scheduleTenantCode;
+
+    private Long scheduleEnvironmentCode;
+
     /**
      * 工作流上线后是否自动上线调度
      */

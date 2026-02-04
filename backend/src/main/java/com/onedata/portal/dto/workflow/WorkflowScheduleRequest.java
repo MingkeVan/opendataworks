@@ -50,6 +50,26 @@ public class WorkflowScheduleRequest {
     private Long scheduleWarningGroupId;
 
     /**
+     * 流程实例优先级：HIGHEST / HIGH / MEDIUM / LOW / LOWEST
+     */
+    private String scheduleProcessInstancePriority;
+
+    /**
+     * Worker 分组（可选，默认使用 Dolphin 配置中的 workerGroup）
+     */
+    private String scheduleWorkerGroup;
+
+    /**
+     * 租户编码（可选，默认使用 Dolphin 配置中的 tenantCode）
+     */
+    private String scheduleTenantCode;
+
+    /**
+     * 环境编码（可选，-1 表示默认/不指定）
+     */
+    private Long scheduleEnvironmentCode;
+
+    /**
      * 工作流上线后是否自动上线调度
      */
     private Boolean scheduleAutoOnline;

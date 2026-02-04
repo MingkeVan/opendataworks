@@ -3,6 +3,8 @@ package com.onedata.portal.service.dolphin;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.onedata.portal.dto.DolphinAlertGroupOption;
+import com.onedata.portal.dto.DolphinEnvironmentOption;
 import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.service.DolphinConfigService;
 import com.onedata.portal.dto.dolphin.*;
@@ -16,6 +18,7 @@ import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -204,6 +207,128 @@ public class DolphinOpenApiClient {
         } catch (Exception e) {
             log.warn("Failed to list task groups", e);
             return new DolphinPageData<>();
+        }
+    }
+
+    /**
+     * List worker groups assigned to the given project.
+     *
+     * <p>
+     * Endpoint: GET /projects/{projectCode}/worker-group
+     * </p>
+     */
+    public List<String> listProjectWorkerGroups(long projectCode) {
+        try {
+            String path = String.format("/projects/%d/worker-group", projectCode);
+            JsonNode data = get(path, null);
+            if (data == null || !data.isArray()) {
+                return Collections.emptyList();
+            }
+            List<String> result = new ArrayList<>();
+            for (JsonNode node : data) {
+                String workerGroup = node.path("workerGroup").asText(null);
+                if (StringUtils.hasText(workerGroup)) {
+                    result.add(workerGroup);
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("Failed to list project worker groups for {}", projectCode, e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * List tenants.
+     *
+     * <p>
+     * Endpoint: GET /tenants/list
+     * </p>
+     */
+    public List<String> listTenants() {
+        try {
+            JsonNode data = get("/tenants/list", null);
+            if (data == null || !data.isArray()) {
+                return Collections.emptyList();
+            }
+            List<String> result = new ArrayList<>();
+            for (JsonNode node : data) {
+                String tenantCode = node.path("tenantCode").asText(null);
+                if (StringUtils.hasText(tenantCode)) {
+                    result.add(tenantCode);
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("Failed to list tenants", e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * List alert groups.
+     *
+     * <p>
+     * Endpoint: GET /alert-groups/list
+     * </p>
+     */
+    public List<DolphinAlertGroupOption> listAlertGroups() {
+        try {
+            JsonNode data = get("/alert-groups/list", null);
+            if (data == null || !data.isArray()) {
+                return Collections.emptyList();
+            }
+            return objectMapper.readValue(data.traverse(), new TypeReference<List<DolphinAlertGroupOption>>() {
+            });
+        } catch (Exception e) {
+            log.warn("Failed to list alert groups", e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * List environments.
+     *
+     * <p>
+     * Endpoint: GET /environment/query-environment-list
+     * </p>
+     */
+    public List<DolphinEnvironmentOption> listEnvironments() {
+        try {
+            JsonNode data = get("/environment/query-environment-list", null);
+            if (data == null || !data.isArray()) {
+                return Collections.emptyList();
+            }
+            return objectMapper.readValue(data.traverse(), new TypeReference<List<DolphinEnvironmentOption>>() {
+            });
+        } catch (Exception e) {
+            log.warn("Failed to list environments", e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Preview next trigger times for a given schedule.
+     *
+     * <p>
+     * Endpoint: POST /projects/{projectCode}/schedules/preview
+     * Body: {"schedule": "{...json...}"}
+     * </p>
+     */
+    public List<String> previewSchedule(long projectCode, String scheduleJson) {
+        try {
+            String path = String.format("/projects/%d/schedules/preview", projectCode);
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("schedule", StringUtils.hasText(scheduleJson) ? scheduleJson : "{}");
+            JsonNode data = postJson(path, payload);
+            if (data == null || !data.isArray()) {
+                return Collections.emptyList();
+            }
+            return objectMapper.readValue(data.traverse(), new TypeReference<List<String>>() {
+            });
+        } catch (Exception e) {
+            log.warn("Failed to preview schedule for project {}", projectCode, e);
+            return Collections.emptyList();
         }
     }
 
@@ -452,7 +577,13 @@ public class DolphinOpenApiClient {
      *
      * <p>
      * Endpoint: POST /projects/{projectCode}/schedules
-     * Params: workflowDefinitionCode, schedule(JSON string), warningType, failureStrategy, warningGroupId(optional)
+     * Params (version dependent):
+     * - DS 3.x commonly uses workflowDefinitionCode
+     * - DS 2.x commonly uses processDefinitionCode
+     * To be compatible across versions we send both keys with the same value.
+     *
+     * Additional commonly-required form fields in the WebUI:
+     * processInstancePriority, workerGroup, tenantCode, environmentCode, warningGroupId
      * </p>
      *
      * @return schedule id if available
@@ -462,17 +593,41 @@ public class DolphinOpenApiClient {
             String scheduleJson,
             String warningType,
             String failureStrategy,
-            Long warningGroupId) {
+            Long warningGroupId,
+            String processInstancePriority,
+            String workerGroup,
+            String tenantCode,
+            Long environmentCode) {
         try {
             String path = String.format("/projects/%d/schedules", projectCode);
             MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
-            formData.add("workflowDefinitionCode", String.valueOf(workflowDefinitionCode));
+            String definitionCode = String.valueOf(workflowDefinitionCode);
+            // DS 3.x
+            formData.add("workflowDefinitionCode", definitionCode);
+            // DS 2.x
+            formData.add("processDefinitionCode", definitionCode);
             formData.add("schedule", scheduleJson != null ? scheduleJson : "{}");
             formData.add("warningType", StringUtils.hasText(warningType) ? warningType : "NONE");
             formData.add("failureStrategy", StringUtils.hasText(failureStrategy) ? failureStrategy : "CONTINUE");
-            if (warningGroupId != null) {
-                formData.add("warningGroupId", String.valueOf(warningGroupId));
-            }
+            formData.add("warningGroupId", String.valueOf(warningGroupId != null ? warningGroupId : 0L));
+
+            DolphinConfig config = dolphinConfigService.getActiveConfig();
+            String resolvedTenantCode = StringUtils.hasText(tenantCode) ? tenantCode.trim()
+                    : (config != null && StringUtils.hasText(config.getTenantCode()) ? config.getTenantCode()
+                            : "default");
+            String resolvedWorkerGroup = StringUtils.hasText(workerGroup) ? workerGroup.trim()
+                    : (config != null && StringUtils.hasText(config.getWorkerGroup()) ? config.getWorkerGroup()
+                            : "default");
+            String resolvedPriority = StringUtils.hasText(processInstancePriority) ? processInstancePriority.trim()
+                    : "MEDIUM";
+            Long resolvedEnvironmentCode = environmentCode != null ? environmentCode : -1L;
+
+            formData.add("processInstancePriority", resolvedPriority);
+            formData.add("workflowInstancePriority", resolvedPriority);
+            formData.add("workerGroup", resolvedWorkerGroup);
+            formData.add("tenantCode", resolvedTenantCode);
+            // -1 means default/no environment in DolphinScheduler
+            formData.add("environmentCode", String.valueOf(resolvedEnvironmentCode));
 
             JsonNode data = postForm(path, formData);
             if (data == null) {
@@ -507,17 +662,42 @@ public class DolphinOpenApiClient {
             String scheduleJson,
             String warningType,
             String failureStrategy,
-            Long warningGroupId) {
+            Long warningGroupId,
+            String processInstancePriority,
+            String workerGroup,
+            String tenantCode,
+            Long environmentCode) {
         try {
             String path = String.format("/projects/%d/schedules/%d", projectCode, scheduleId);
             MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
-            formData.add("workflowDefinitionCode", String.valueOf(workflowDefinitionCode));
+            formData.add("id", String.valueOf(scheduleId));
+            String definitionCode = String.valueOf(workflowDefinitionCode);
+            // DS 3.x
+            formData.add("workflowDefinitionCode", definitionCode);
+            // DS 2.x
+            formData.add("processDefinitionCode", definitionCode);
             formData.add("schedule", scheduleJson != null ? scheduleJson : "{}");
             formData.add("warningType", StringUtils.hasText(warningType) ? warningType : "NONE");
             formData.add("failureStrategy", StringUtils.hasText(failureStrategy) ? failureStrategy : "CONTINUE");
-            if (warningGroupId != null) {
-                formData.add("warningGroupId", String.valueOf(warningGroupId));
-            }
+            formData.add("warningGroupId", String.valueOf(warningGroupId != null ? warningGroupId : 0L));
+
+            DolphinConfig config = dolphinConfigService.getActiveConfig();
+            String resolvedTenantCode = StringUtils.hasText(tenantCode) ? tenantCode.trim()
+                    : (config != null && StringUtils.hasText(config.getTenantCode()) ? config.getTenantCode()
+                            : "default");
+            String resolvedWorkerGroup = StringUtils.hasText(workerGroup) ? workerGroup.trim()
+                    : (config != null && StringUtils.hasText(config.getWorkerGroup()) ? config.getWorkerGroup()
+                            : "default");
+            String resolvedPriority = StringUtils.hasText(processInstancePriority) ? processInstancePriority.trim()
+                    : "MEDIUM";
+            Long resolvedEnvironmentCode = environmentCode != null ? environmentCode : -1L;
+
+            formData.add("processInstancePriority", resolvedPriority);
+            formData.add("workflowInstancePriority", resolvedPriority);
+            formData.add("workerGroup", resolvedWorkerGroup);
+            formData.add("tenantCode", resolvedTenantCode);
+            formData.add("environmentCode", String.valueOf(resolvedEnvironmentCode));
+
             putForm(path, formData);
         } catch (Exception e) {
             log.error("Failed to update schedule {} for workflow {}", scheduleId, workflowDefinitionCode, e);
@@ -576,6 +756,13 @@ public class DolphinOpenApiClient {
                 .uri(path)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .body(BodyInserters.fromFormData(formData)));
+    }
+
+    private JsonNode postJson(String path, Object payload) {
+        return executeRequest(getWebClient(), getWebClient().post()
+                .uri(path)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(payload));
     }
 
     private JsonNode post(String path) {
