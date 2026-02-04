@@ -269,6 +269,46 @@ public class DolphinSchedulerService {
     }
 
     /**
+     * Query workflow schedule (timing) from DolphinScheduler, if any.
+     *
+     * <p>
+     * We query the workflow definition detail and read its embedded "schedule"
+     * object, since it is the most reliable way to know whether a schedule
+     * already exists for the workflow.
+     * </p>
+     */
+    public DolphinSchedule getWorkflowSchedule(long workflowCode) {
+        if (workflowCode <= 0) {
+            return null;
+        }
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            return null;
+        }
+        try {
+            JsonNode definition = openApiClient.getProcessDefinition(projectCode, workflowCode);
+            if (definition == null) {
+                return null;
+            }
+            JsonNode scheduleNode = definition.path("schedule");
+            if (scheduleNode.isMissingNode() || scheduleNode.isNull()) {
+                return null;
+            }
+            DolphinSchedule schedule = objectMapper.treeToValue(scheduleNode, DolphinSchedule.class);
+            if (schedule != null && !StringUtils.hasText(schedule.getReleaseState())) {
+                String releaseState = definition.path("scheduleReleaseState").asText(null);
+                if (StringUtils.hasText(releaseState)) {
+                    schedule.setReleaseState(releaseState);
+                }
+            }
+            return schedule;
+        } catch (Exception e) {
+            log.debug("Failed to query workflow schedule {}: {}", workflowCode, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Check if workflow definition exists in DolphinScheduler.
      */
     public boolean checkWorkflowExists(long workflowCode) {

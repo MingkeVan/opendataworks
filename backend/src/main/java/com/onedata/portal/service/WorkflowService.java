@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import com.onedata.portal.dto.dolphin.DolphinSchedule;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowDetailResponse;
 import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
@@ -44,7 +45,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -93,6 +94,7 @@ public class WorkflowService {
         if (workflow == null) {
             throw new IllegalArgumentException("Workflow not found: " + workflowId);
         }
+        trySyncScheduleFromEngine(workflow);
         List<WorkflowTaskRelation> relations = workflowTaskRelationMapper.selectList(
                 Wrappers.<WorkflowTaskRelation>lambdaQuery()
                         .eq(WorkflowTaskRelation::getWorkflowId, workflowId)
@@ -113,6 +115,109 @@ public class WorkflowService {
                 .publishRecords(publishRecords)
                 .recentInstances(recentInstances)
                 .build();
+    }
+
+    private void trySyncScheduleFromEngine(DataWorkflow workflow) {
+        if (workflow == null) {
+            return;
+        }
+        Long workflowCode = workflow.getWorkflowCode();
+        if (workflowCode == null || workflowCode <= 0) {
+            return;
+        }
+
+        boolean needsSync = workflow.getDolphinScheduleId() == null
+                || workflow.getDolphinScheduleId() <= 0
+                || !StringUtils.hasText(workflow.getScheduleState())
+                || !StringUtils.hasText(workflow.getScheduleCron())
+                || !StringUtils.hasText(workflow.getScheduleTimezone())
+                || workflow.getScheduleStartTime() == null
+                || workflow.getScheduleEndTime() == null;
+        if (!needsSync) {
+            return;
+        }
+
+        DolphinSchedule schedule = dolphinSchedulerService.getWorkflowSchedule(workflowCode);
+        if (schedule == null || schedule.getId() == null || schedule.getId() <= 0) {
+            return;
+        }
+
+        boolean changed = false;
+
+        if (workflow.getDolphinScheduleId() == null
+                || workflow.getDolphinScheduleId() <= 0
+                || !Objects.equals(workflow.getDolphinScheduleId(), schedule.getId())) {
+            workflow.setDolphinScheduleId(schedule.getId());
+            changed = true;
+        }
+
+        if (StringUtils.hasText(schedule.getReleaseState())
+                && !schedule.getReleaseState().equalsIgnoreCase(workflow.getScheduleState())) {
+            workflow.setScheduleState(schedule.getReleaseState());
+            changed = true;
+        }
+
+        if (!StringUtils.hasText(workflow.getScheduleCron()) && StringUtils.hasText(schedule.getCrontab())) {
+            workflow.setScheduleCron(schedule.getCrontab());
+            changed = true;
+        }
+        if (!StringUtils.hasText(workflow.getScheduleTimezone()) && StringUtils.hasText(schedule.getTimezoneId())) {
+            workflow.setScheduleTimezone(schedule.getTimezoneId());
+            changed = true;
+        }
+        if (workflow.getScheduleStartTime() == null && StringUtils.hasText(schedule.getStartTime())) {
+            LocalDateTime start = parseFlexibleDateTime(schedule.getStartTime());
+            if (start != null) {
+                workflow.setScheduleStartTime(start);
+                changed = true;
+            }
+        }
+        if (workflow.getScheduleEndTime() == null && StringUtils.hasText(schedule.getEndTime())) {
+            LocalDateTime end = parseFlexibleDateTime(schedule.getEndTime());
+            if (end != null) {
+                workflow.setScheduleEndTime(end);
+                changed = true;
+            }
+        }
+
+        if (!StringUtils.hasText(workflow.getScheduleFailureStrategy())
+                && StringUtils.hasText(schedule.getFailureStrategy())) {
+            workflow.setScheduleFailureStrategy(schedule.getFailureStrategy());
+            changed = true;
+        }
+        if (!StringUtils.hasText(workflow.getScheduleWarningType()) && StringUtils.hasText(schedule.getWarningType())) {
+            String warningType = schedule.getWarningType();
+            if ("SUCCESS_FAILURE".equalsIgnoreCase(warningType)) {
+                warningType = "ALL";
+            }
+            workflow.setScheduleWarningType(warningType);
+            changed = true;
+        }
+        if (workflow.getScheduleWarningGroupId() == null) {
+            workflow.setScheduleWarningGroupId(schedule.getWarningGroupId() != null ? schedule.getWarningGroupId() : 0L);
+            changed = true;
+        }
+        if (!StringUtils.hasText(workflow.getScheduleProcessInstancePriority())
+                && StringUtils.hasText(schedule.getProcessInstancePriority())) {
+            workflow.setScheduleProcessInstancePriority(schedule.getProcessInstancePriority());
+            changed = true;
+        }
+        if (!StringUtils.hasText(workflow.getScheduleWorkerGroup()) && StringUtils.hasText(schedule.getWorkerGroup())) {
+            workflow.setScheduleWorkerGroup(schedule.getWorkerGroup());
+            changed = true;
+        }
+        if (!StringUtils.hasText(workflow.getScheduleTenantCode()) && StringUtils.hasText(schedule.getTenantCode())) {
+            workflow.setScheduleTenantCode(schedule.getTenantCode());
+            changed = true;
+        }
+        if (workflow.getScheduleEnvironmentCode() == null) {
+            workflow.setScheduleEnvironmentCode(schedule.getEnvironmentCode() != null ? schedule.getEnvironmentCode() : -1L);
+            changed = true;
+        }
+
+        if (changed) {
+            dataWorkflowMapper.updateById(workflow);
+        }
     }
 
     @Transactional
