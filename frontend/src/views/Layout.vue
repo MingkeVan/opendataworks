@@ -180,5 +180,6 @@ const activeMenu = computed(() => {
   padding: 4px;
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
 }
 </style>
