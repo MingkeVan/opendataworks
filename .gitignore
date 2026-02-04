@@ -11,6 +11,7 @@ backend/*.ear
 backend/*.class
 
 # IntelliJ IDEA
+.idea/
 backend/.idea/
 backend/*.iml
 backend/*.iws

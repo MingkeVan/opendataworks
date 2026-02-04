@@ -146,7 +146,7 @@
               <el-link 
                 v-if="canJumpToDolphin(workflow?.workflow)" 
                 type="primary" 
-                :underline="false" 
+                underline="never"
                 @click="openDolphin(workflow?.workflow)"
               >
                 {{ workflow?.workflow?.workflowCode }}
@@ -232,69 +232,207 @@
                 label-width="110px"
                 class="schedule-form"
               >
-                <el-form-item label="Cron 表达式" prop="scheduleCron">
-                  <el-input
-                    v-model="scheduleForm.scheduleCron"
-                    placeholder="0 0 * * * ? *"
-                    clearable
+                <el-form-item label="起止时间" prop="scheduleStartEndTime">
+                  <el-date-picker
+                    v-model="scheduleForm.scheduleStartEndTime"
+                    type="datetimerange"
+                    value-format="YYYY-MM-DD HH:mm:ss"
+                    start-placeholder="开始时间"
+                    end-placeholder="结束时间"
+                    style="width: 100%;"
+                    :disabled="isScheduleOnline"
                   />
+                </el-form-item>
+                <el-form-item label="Cron" prop="scheduleCron">
+                  <div class="cron-row">
+                    <div class="cron-input-wrapper">
+                      <el-popover
+                        v-model:visible="cronBuilderVisible"
+                        trigger="click"
+                        placement="bottom-start"
+                        :width="580"
+                        :disabled="isScheduleOnline"
+                      >
+                        <template #reference>
+                          <div class="cron-input-ref">
+                            <el-input
+                              v-model="scheduleForm.scheduleCron"
+                              placeholder="0 0 * * * ? *"
+                              readonly
+                              :disabled="isScheduleOnline"
+                            />
+                          </div>
+                        </template>
+                        <QuartzCronBuilder
+                          v-model="scheduleForm.scheduleCron"
+                          @applied="cronBuilderVisible = false"
+                          @cancel="cronBuilderVisible = false"
+                        />
+                      </el-popover>
+                    </div>
+                    <el-button
+                      type="primary"
+                      :loading="schedulePreviewLoading"
+                      :disabled="isScheduleOnline"
+                      @click="previewScheduleTimes"
+                    >
+                      预览
+                    </el-button>
+                  </div>
                 </el-form-item>
                 <el-form-item label="时区" prop="scheduleTimezone">
-                  <el-input
+                  <el-select
                     v-model="scheduleForm.scheduleTimezone"
+                    filterable
+                    allow-create
+                    default-first-option
                     placeholder="Asia/Shanghai"
-                    clearable
-                  />
-                </el-form-item>
-                <el-form-item label="开始时间" prop="scheduleStartTime">
-                  <el-date-picker
-                    v-model="scheduleForm.scheduleStartTime"
-                    type="datetime"
-                    value-format="YYYY-MM-DD HH:mm:ss"
-                    placeholder="选择开始时间"
                     style="width: 100%;"
-                  />
-                </el-form-item>
-                <el-form-item label="结束时间" prop="scheduleEndTime">
-                  <el-date-picker
-                    v-model="scheduleForm.scheduleEndTime"
-                    type="datetime"
-                    value-format="YYYY-MM-DD HH:mm:ss"
-                    placeholder="选择结束时间"
-                    style="width: 100%;"
-                  />
-                </el-form-item>
-                <el-form-item label="失败策略">
-                  <el-select v-model="scheduleForm.scheduleFailureStrategy" placeholder="CONTINUE" style="width: 100%;">
-                    <el-option label="CONTINUE（继续）" value="CONTINUE" />
-                    <el-option label="END（结束）" value="END" />
+                    :disabled="isScheduleOnline"
+                  >
+                    <el-option
+                      v-for="tz in timezoneOptions"
+                      :key="tz"
+                      :label="tz"
+                      :value="tz"
+                    />
                   </el-select>
                 </el-form-item>
+                <el-form-item v-if="schedulePreviewList.length" label="预览">
+                  <div class="schedule-preview">
+                    <div class="schedule-preview-title">未来 5 次执行时间</div>
+                    <div v-for="(time, idx) in schedulePreviewList" :key="idx" class="schedule-preview-item">
+                      {{ time }}
+                    </div>
+                  </div>
+                </el-form-item>
+                <el-form-item label="失败策略">
+                  <el-radio-group v-model="scheduleForm.scheduleFailureStrategy" :disabled="isScheduleOnline">
+                    <el-radio label="CONTINUE">CONTINUE（继续）</el-radio>
+                    <el-radio label="END">END（结束）</el-radio>
+                  </el-radio-group>
+                </el-form-item>
                 <el-form-item label="告警类型">
-                  <el-select v-model="scheduleForm.scheduleWarningType" placeholder="NONE" style="width: 100%;">
+                  <el-select
+                    v-model="scheduleForm.scheduleWarningType"
+                    placeholder="NONE"
+                    style="width: 100%;"
+                    :disabled="isScheduleOnline"
+                  >
                     <el-option label="NONE" value="NONE" />
                     <el-option label="SUCCESS" value="SUCCESS" />
                     <el-option label="FAILURE" value="FAILURE" />
-                    <el-option label="SUCCESS_FAILURE" value="SUCCESS_FAILURE" />
+                    <el-option label="ALL" value="ALL" />
+                    <el-option label="SUCCESS_FAILURE（兼容）" value="SUCCESS_FAILURE" />
                   </el-select>
                 </el-form-item>
-                <el-form-item label="告警组ID">
-                  <el-input-number
+                <el-form-item
+                  v-if="scheduleForm.scheduleWarningType !== 'NONE'"
+                  label="告警组"
+                  prop="scheduleWarningGroupId"
+                >
+                  <el-select
                     v-model="scheduleForm.scheduleWarningGroupId"
-                    :min="0"
-                    :controls="false"
+                    filterable
+                    clearable
+                    placeholder="请选择告警组"
                     style="width: 100%;"
-                  />
+                    :loading="scheduleOptionsLoading"
+                    :disabled="isScheduleOnline"
+                  >
+                    <el-option
+                      v-for="group in alertGroupOptions"
+                      :key="group.id"
+                      :label="group.groupName"
+                      :value="group.id"
+                    />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="优先级">
+                  <el-select
+                    v-model="scheduleForm.scheduleProcessInstancePriority"
+                    placeholder="MEDIUM"
+                    style="width: 100%;"
+                    :disabled="isScheduleOnline"
+                  >
+                    <el-option label="HIGHEST" value="HIGHEST" />
+                    <el-option label="HIGH" value="HIGH" />
+                    <el-option label="MEDIUM" value="MEDIUM" />
+                    <el-option label="LOW" value="LOW" />
+                    <el-option label="LOWEST" value="LOWEST" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="Worker 分组">
+                  <el-select
+                    v-model="scheduleForm.scheduleWorkerGroup"
+                    filterable
+                    allow-create
+                    default-first-option
+                    clearable
+                    placeholder="default"
+                    style="width: 100%;"
+                    :loading="scheduleOptionsLoading"
+                    :disabled="isScheduleOnline"
+                    @change="handleWorkerGroupChange"
+                  >
+                    <el-option
+                      v-for="group in workerGroupOptions"
+                      :key="group"
+                      :label="group"
+                      :value="group"
+                    />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="租户编码">
+                  <el-select
+                    v-model="scheduleForm.scheduleTenantCode"
+                    filterable
+                    allow-create
+                    default-first-option
+                    clearable
+                    placeholder="default"
+                    style="width: 100%;"
+                    :loading="scheduleOptionsLoading"
+                    :disabled="isScheduleOnline"
+                  >
+                    <el-option
+                      v-for="tenant in tenantOptions"
+                      :key="tenant"
+                      :label="tenant"
+                      :value="tenant"
+                    />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="环境">
+                  <el-select
+                    v-model="scheduleForm.scheduleEnvironmentCode"
+                    filterable
+                    clearable
+                    placeholder="默认(-1)"
+                    style="width: 100%;"
+                    :loading="scheduleOptionsLoading"
+                    :disabled="isScheduleOnline"
+                  >
+                    <el-option label="默认(-1)" :value="-1" />
+                    <el-option
+                      v-for="env in environmentFilteredOptions"
+                      :key="env.code"
+                      :label="env.name"
+                      :value="env.code"
+                    />
+                  </el-select>
+                  <div class="form-tip">切换 Worker 分组后需重新选择环境；-1 表示默认/不指定环境</div>
                 </el-form-item>
                 <el-form-item label="自动上线">
                   <el-switch
                     v-model="scheduleForm.scheduleAutoOnline"
                     active-text="工作流上线后自动上线调度"
                     inactive-text="不自动"
+                    :disabled="isScheduleOnline"
                   />
                 </el-form-item>
                 <el-form-item>
-                  <el-button type="success" :loading="savingSchedule" @click="saveScheduleConfig">
+                  <el-button type="success" :loading="savingSchedule" :disabled="isScheduleOnline" @click="saveScheduleConfig">
                     保存配置
                   </el-button>
                 </el-form-item>
@@ -449,7 +587,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, Link, Delete, Edit, Plus } from '@element-plus/icons-vue'
@@ -459,6 +597,7 @@ import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import WorkflowTaskManager from './WorkflowTaskManager.vue'
 import WorkflowBackfillDialog from './WorkflowBackfillDialog.vue'
+import QuartzCronBuilder from '@/components/QuartzCronBuilder.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -477,22 +616,222 @@ const savingSchedule = ref(false)
 const scheduleSwitchLoading = ref(false)
 const scheduleEnabled = ref(false)
 const scheduleSwitchMuted = ref(false)
+const scheduleOptionsLoading = ref(false)
+const scheduleOptionsLoaded = ref(false)
+const schedulePreviewLoading = ref(false)
+const schedulePreviewList = ref([])
+const cronBuilderVisible = ref(false)
+const workerGroupOptions = ref([])
+const tenantOptions = ref([])
+const alertGroupOptions = ref([])
+const environmentOptions = ref([])
+const isScheduleOnline = computed(() => {
+  return (workflow.value?.workflow?.scheduleState || '').toUpperCase() === 'ONLINE'
+})
+const timezoneOptions = computed(() => {
+  try {
+    if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
+      return Intl.supportedValuesOf('timeZone')
+    }
+  } catch {
+    // ignore
+  }
+  return [
+    'Asia/Shanghai',
+    'UTC',
+    'Asia/Hong_Kong',
+    'Asia/Singapore',
+    'Asia/Tokyo',
+    'Europe/London',
+    'America/New_York',
+    'America/Los_Angeles'
+  ]
+})
+const defaultTimezone = (() => {
+  try {
+    const tz = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone
+    return tz || 'Asia/Shanghai'
+  } catch {
+    return 'Asia/Shanghai'
+  }
+})()
+const defaultStartEndTime = (() => {
+  const start = dayjs().startOf('day')
+  return [
+    start.format('YYYY-MM-DD HH:mm:ss'),
+    start.add(100, 'year').format('YYYY-MM-DD HH:mm:ss')
+  ]
+})()
 const scheduleForm = reactive({
-  scheduleCron: '',
-  scheduleTimezone: 'Asia/Shanghai',
-  scheduleStartTime: '',
-  scheduleEndTime: '',
+  scheduleStartEndTime: defaultStartEndTime,
+  scheduleCron: '0 0 * * * ? *',
+  scheduleTimezone: defaultTimezone,
+  scheduleProcessInstancePriority: 'MEDIUM',
+  scheduleWorkerGroup: 'default',
+  scheduleTenantCode: 'default',
+  scheduleEnvironmentCode: -1,
   scheduleFailureStrategy: 'CONTINUE',
   scheduleWarningType: 'NONE',
-  scheduleWarningGroupId: 0,
+  scheduleWarningGroupId: null,
   scheduleAutoOnline: false
 })
+const environmentFilteredOptions = computed(() => {
+  const selectedWorkerGroup = scheduleForm.scheduleWorkerGroup
+  if (!selectedWorkerGroup) {
+    return []
+  }
+  return (environmentOptions.value || []).filter((env) => {
+    const groups = env?.workerGroups || []
+    return Array.isArray(groups) && groups.includes(selectedWorkerGroup)
+  })
+})
 const scheduleRules = {
-  scheduleCron: [{ required: true, message: '请输入 Cron 表达式', trigger: 'blur' }],
+  scheduleStartEndTime: [
+    { required: true, message: '请选择起止时间', trigger: 'change' },
+    {
+      validator: (_, value, callback) => {
+        const start = Array.isArray(value) ? value?.[0] : null
+        const end = Array.isArray(value) ? value?.[1] : null
+        if (!start || !end) {
+          callback(new Error('请选择起止时间'))
+          return
+        }
+        const startTs = dayjs(start).valueOf()
+        const endTs = dayjs(end).valueOf()
+        if (Number.isFinite(startTs) && Number.isFinite(endTs) && endTs < startTs) {
+          callback(new Error('结束时间需晚于开始时间'))
+          return
+        }
+        callback()
+      },
+      trigger: 'change'
+    }
+  ],
+  scheduleCron: [
+    { required: true, message: '请输入 Cron 表达式', trigger: 'blur' },
+    {
+      validator: (_, value, callback) => {
+        const parts = String(value || '')
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean)
+        if (parts.length !== 7) {
+          callback(new Error('Cron 需为 Quartz 7 段：秒 分 时 日 月 周 年'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur'
+    }
+  ],
   scheduleTimezone: [{ required: true, message: '请输入时区', trigger: 'blur' }],
-  scheduleStartTime: [{ required: true, message: '请选择开始时间', trigger: 'change' }],
-  scheduleEndTime: [{ required: true, message: '请选择结束时间', trigger: 'change' }]
+  scheduleWarningGroupId: [
+    {
+      validator: (_, value, callback) => {
+        if (scheduleForm.scheduleWarningType === 'NONE') {
+          callback()
+          return
+        }
+        if (!value || Number(value) <= 0) {
+          callback(new Error('请选择告警组'))
+          return
+        }
+        callback()
+      },
+      trigger: 'change'
+    }
+  ]
 }
+
+const loadScheduleOptions = async () => {
+  if (scheduleOptionsLoaded.value) {
+    return
+  }
+  scheduleOptionsLoading.value = true
+  try {
+    const [workerGroups, tenants, alertGroups, environments] = await Promise.all([
+      taskApi.fetchWorkerGroups().catch(() => []),
+      taskApi.fetchTenants().catch(() => []),
+      taskApi.fetchAlertGroups().catch(() => []),
+      taskApi.fetchEnvironments().catch(() => [])
+    ])
+    workerGroupOptions.value = workerGroups || []
+    tenantOptions.value = tenants || []
+    alertGroupOptions.value = alertGroups || []
+    environmentOptions.value = environments || []
+    scheduleOptionsLoaded.value = true
+  } finally {
+    scheduleOptionsLoading.value = false
+  }
+}
+
+const handleWorkerGroupChange = () => {
+  scheduleForm.scheduleEnvironmentCode = -1
+}
+
+const previewScheduleTimes = async () => {
+  if (isScheduleOnline.value) {
+    return
+  }
+  const [startTime, endTime] = Array.isArray(scheduleForm.scheduleStartEndTime)
+    ? scheduleForm.scheduleStartEndTime
+    : []
+  if (!startTime || !endTime) {
+    ElMessage.warning('请选择起止时间')
+    return
+  }
+  if (!String(scheduleForm.scheduleCron || '').trim()) {
+    ElMessage.warning('请输入 Cron 表达式')
+    return
+  }
+  if (!String(scheduleForm.scheduleTimezone || '').trim()) {
+    ElMessage.warning('请输入时区')
+    return
+  }
+
+  schedulePreviewLoading.value = true
+  try {
+    const schedule = JSON.stringify({
+      startTime,
+      endTime,
+      crontab: scheduleForm.scheduleCron,
+      timezoneId: scheduleForm.scheduleTimezone
+    })
+    const res = await taskApi.previewSchedule({ schedule })
+    schedulePreviewList.value = Array.isArray(res) ? res : []
+  } catch (error) {
+    console.error('预览调度时间失败', error)
+  } finally {
+    schedulePreviewLoading.value = false
+  }
+}
+
+watch(activeTab, async (tab) => {
+  if (tab === 'schedule') {
+    await loadScheduleOptions()
+  }
+})
+
+watch(
+  () => scheduleForm.scheduleWarningType,
+  (val, prev) => {
+    if (val === 'NONE') {
+      scheduleForm.scheduleWarningGroupId = 0
+      return
+    }
+    if (prev === 'NONE') {
+      scheduleForm.scheduleWarningGroupId = null
+    }
+  }
+)
+
+watch(
+  () => [scheduleForm.scheduleCron, scheduleForm.scheduleTimezone, scheduleForm.scheduleStartEndTime],
+  () => {
+    schedulePreviewList.value = []
+  },
+  { deep: true }
+)
 
 // Inline editing states
 const isEditingName = ref(false)
@@ -828,21 +1167,31 @@ const syncScheduleForm = () => {
   const wf = workflow.value?.workflow
   if (!wf) return
 
-  scheduleForm.scheduleCron = wf.scheduleCron || ''
-  scheduleForm.scheduleTimezone = wf.scheduleTimezone || 'Asia/Shanghai'
-  scheduleForm.scheduleStartTime = wf.scheduleStartTime
+  scheduleForm.scheduleCron = wf.scheduleCron || '0 0 * * * ? *'
+  scheduleForm.scheduleTimezone = wf.scheduleTimezone || defaultTimezone
+  const startTime = wf.scheduleStartTime
     ? dayjs(wf.scheduleStartTime).format('YYYY-MM-DD HH:mm:ss')
-    : ''
-  scheduleForm.scheduleEndTime = wf.scheduleEndTime
+    : null
+  const endTime = wf.scheduleEndTime
     ? dayjs(wf.scheduleEndTime).format('YYYY-MM-DD HH:mm:ss')
-    : ''
+    : null
+  scheduleForm.scheduleStartEndTime = startTime && endTime ? [startTime, endTime] : defaultStartEndTime
   scheduleForm.scheduleFailureStrategy = wf.scheduleFailureStrategy || 'CONTINUE'
-  scheduleForm.scheduleWarningType = wf.scheduleWarningType || 'NONE'
+  const warningType = (wf.scheduleWarningType || 'NONE').toUpperCase()
+  scheduleForm.scheduleWarningType = warningType === 'SUCCESS_FAILURE' ? 'ALL' : warningType
   scheduleForm.scheduleWarningGroupId =
     wf.scheduleWarningGroupId === null || wf.scheduleWarningGroupId === undefined
       ? 0
       : wf.scheduleWarningGroupId
+  scheduleForm.scheduleProcessInstancePriority = wf.scheduleProcessInstancePriority || 'MEDIUM'
+  scheduleForm.scheduleWorkerGroup = wf.scheduleWorkerGroup || 'default'
+  scheduleForm.scheduleTenantCode = wf.scheduleTenantCode || 'default'
+  scheduleForm.scheduleEnvironmentCode =
+    wf.scheduleEnvironmentCode === null || wf.scheduleEnvironmentCode === undefined
+      ? -1
+      : wf.scheduleEnvironmentCode
   scheduleForm.scheduleAutoOnline = Boolean(wf.scheduleAutoOnline)
+  schedulePreviewList.value = []
 
   scheduleSwitchMuted.value = true
   scheduleEnabled.value = (wf.scheduleState || '').toUpperCase() === 'ONLINE'
@@ -1138,14 +1487,25 @@ const saveScheduleConfig = async () => {
 
   savingSchedule.value = true
   try {
+    const [startTime, endTime] = Array.isArray(scheduleForm.scheduleStartEndTime)
+      ? scheduleForm.scheduleStartEndTime
+      : []
     await workflowApi.updateSchedule(wf.id, {
       scheduleCron: scheduleForm.scheduleCron,
       scheduleTimezone: scheduleForm.scheduleTimezone,
-      scheduleStartTime: scheduleForm.scheduleStartTime,
-      scheduleEndTime: scheduleForm.scheduleEndTime,
+      scheduleStartTime: startTime,
+      scheduleEndTime: endTime,
       scheduleFailureStrategy: scheduleForm.scheduleFailureStrategy,
       scheduleWarningType: scheduleForm.scheduleWarningType,
-      scheduleWarningGroupId: scheduleForm.scheduleWarningGroupId,
+      scheduleWarningGroupId:
+        scheduleForm.scheduleWarningType === 'NONE' ? 0 : scheduleForm.scheduleWarningGroupId,
+      scheduleProcessInstancePriority: scheduleForm.scheduleProcessInstancePriority,
+      scheduleWorkerGroup: scheduleForm.scheduleWorkerGroup || null,
+      scheduleTenantCode: scheduleForm.scheduleTenantCode || null,
+      scheduleEnvironmentCode:
+        scheduleForm.scheduleEnvironmentCode === null || scheduleForm.scheduleEnvironmentCode === undefined
+          ? -1
+          : scheduleForm.scheduleEnvironmentCode,
       scheduleAutoOnline: scheduleForm.scheduleAutoOnline
     })
     ElMessage.success('调度配置已保存')
@@ -1284,5 +1644,51 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 8px;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.schedule-preview {
+  background: #fafafa;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.schedule-preview-title {
+  color: #606266;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.schedule-preview-item {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.cron-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.cron-input-wrapper {
+  flex: 1;
+}
+
+.cron-input-ref {
+  width: 100%;
+}
+
+.cron-input-ref :deep(.el-input__inner) {
+  cursor: pointer;
 }
 </style>
