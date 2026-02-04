@@ -166,6 +166,7 @@
             closable
             addable
             class="workspace-tabs"
+            style="height: 100%;"
             @tab-remove="handleTabRemove"
             @tab-add="handleTabAdd"
             @close-left="handleCloseLeft"
@@ -173,8 +174,9 @@
             @close-all="handleCloseAll"
           >
             <template #label="{ tab }">
-              <div class="tab-label" :title="getTabTooltip(tab)">
+              <div class="tab-label">
                 <span class="tab-title">{{ tab.tableName }}</span>
+                <span class="tab-sub">{{ getTabSubtitle(tab) }}</span>
               </div>
             </template>
 
@@ -292,7 +294,7 @@
                   <div class="left-resizer" @mousedown="startLeftResize(tab.id, $event)"></div>
 
                   <div class="result-panel">
-                    <el-tabs v-model="tabStates[tab.id].resultTab" type="border-card" class="result-tabs">
+                    <el-tabs v-model="tabStates[tab.id].resultTab" type="border-card" class="result-tabs" style="height: 100%;">
                       <el-tab-pane
                         v-for="(resultSet, idx) in getDisplayResultSets(tab.id)"
                         :key="String(idx)"
@@ -302,8 +304,8 @@
                           <span class="result-label"><el-icon><List /></el-icon> Result {{ idx + 1 }}</span>
                         </template>
 
-                        <div class="table-toolbar">
-                          <div class="meta-info">
+	                        <div class="table-toolbar">
+	                          <div class="meta-info">
                             <span class="meta-item">
                               <el-icon><Timer /></el-icon>
                               {{
@@ -333,17 +335,25 @@
                             <span v-if="resultSet.hasMore" class="meta-item truncate">
                               <el-icon><Warning /></el-icon> 结果已截断
                             </span>
-                          </div>
-                          <div class="export-actions">
-                            <el-button
-                              size="small"
-                              :disabled="!(resultSet.rows || []).length"
-                              @click="exportResult(tab.id, idx)"
-                            >
-                              导出 CSV
-                            </el-button>
-                          </div>
-                        </div>
+	                          </div>
+	                          <div class="export-actions">
+	                            <el-radio-group v-model="tabStates[tab.id].resultViewTabs[idx]" size="small" class="result-view-switch">
+	                              <el-radio-button label="table">
+	                                <span class="view-label"><el-icon><Grid /></el-icon> 表格</span>
+	                              </el-radio-button>
+	                              <el-radio-button label="chart">
+	                                <span class="view-label"><el-icon><TrendCharts /></el-icon> 图表</span>
+	                              </el-radio-button>
+	                            </el-radio-group>
+	                            <el-button
+	                              size="small"
+	                              :disabled="!(resultSet.rows || []).length"
+	                              @click="exportResult(tab.id, idx)"
+	                            >
+	                              导出 CSV
+	                            </el-button>
+	                          </div>
+	                        </div>
 
                         <div v-if="tabStates[tab.id].queryResult.errorMessage" class="result-message">
                           <el-alert
@@ -365,90 +375,98 @@
                           />
                         </div>
 
-                        <div class="result-scroll-container">
-                          <div v-if="(resultSet.rows || []).length" class="result-chart">
-                            <div class="chart-grid">
-                              <div class="chart-config">
-                                <div class="config-title">图表类型</div>
-                                <div class="chart-type">
-                                  <el-radio-group v-model="tabStates[tab.id].charts[idx].type" size="small">
-                                    <el-radio-button label="bar">柱状图</el-radio-button>
-                                    <el-radio-button label="line">折线图</el-radio-button>
-                                    <el-radio-button label="pie">饼图</el-radio-button>
-                                  </el-radio-group>
-                                </div>
-                                <div class="config-title">
-                                  {{ tabStates[tab.id].charts[idx].type === 'pie' ? '分类字段' : 'X 轴字段' }}
-                                </div>
-                                <el-select
-                                  v-model="tabStates[tab.id].charts[idx].xAxis"
-                                  size="small"
-                                  placeholder="选择字段"
-                                  class="config-select"
-                                  :disabled="!(resultSet.columns || []).length"
-                                >
-                                  <el-option
-                                    v-for="col in (resultSet.columns || [])"
-                                    :key="col"
-                                    :label="col"
-                                    :value="col"
-                                  />
-                                </el-select>
-                                <div class="config-title">
-                                  {{ tabStates[tab.id].charts[idx].type === 'pie' ? '数值字段' : 'Y 轴字段' }}
-                                </div>
-                                <el-select
-                                  v-model="tabStates[tab.id].charts[idx].yAxis"
-                                  size="small"
-                                  multiple
-                                  collapse-tags
-                                  placeholder="选择数值字段"
-                                  class="config-select"
-                                  :disabled="!(resultSet.columns || []).length"
-                                >
-                                  <el-option
-                                    v-for="col in getNumericColumns(tab.id, idx)"
-                                    :key="col"
-                                    :label="col"
-                                    :value="col"
-                                  />
-                                </el-select>
-                                <div class="hint">配置变更后自动刷新</div>
-                              </div>
-                              <div class="chart-canvas">
-                                <div class="chart-inner" :ref="(el) => setChartRef(tab.id, idx, el)"></div>
-                                <div v-if="!canRenderChart(tab.id, idx)" class="chart-empty">
-                                  请选择字段并执行查询
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div class="table-wrapper">
-                            <el-empty
-                              v-if="!(resultSet.rows || []).length && !tabStates[tab.id].queryLoading"
-                              description="暂无数据"
-                              :image-size="80"
-                            />
-                            <el-table
-                              v-else
-                              :data="resultSet.rows || []"
-                              border
-                              stripe
-                              size="small"
-                              :max-height="400"
-                            >
-                              <el-table-column
-                                v-for="col in (resultSet.columns || [])"
-                                :key="col"
-                                :prop="col"
-                                :label="col"
-                                min-width="120"
-                                show-overflow-tooltip
-                              />
-                            </el-table>
-                          </div>
-                        </div>
+	                        <div class="result-view-container">
+	                          <div
+	                            v-show="(tabStates[tab.id].resultViewTabs?.[idx] || 'table') === 'table'"
+	                            class="table-wrapper"
+	                          >
+	                            <el-empty
+	                              v-if="!(resultSet.rows || []).length && !tabStates[tab.id].queryLoading"
+	                              description="暂无数据"
+	                              :image-size="80"
+	                            />
+	                            <el-table
+	                              v-else
+	                              :ref="(el) => setResultTableRef(tab.id, idx, el)"
+	                              :data="resultSet.rows || []"
+	                              border
+	                              stripe
+	                              size="small"
+	                              height="100%"
+	                            >
+	                              <el-table-column
+	                                v-for="col in (resultSet.columns || [])"
+	                                :key="col"
+	                                :prop="col"
+	                                :label="col"
+	                                min-width="120"
+	                                show-overflow-tooltip
+	                              />
+	                            </el-table>
+	                          </div>
+	
+	                          <div
+	                            v-show="(tabStates[tab.id].resultViewTabs?.[idx] || 'table') === 'chart'"
+	                            class="result-chart"
+	                          >
+	                            <div class="chart-grid">
+	                              <div class="chart-config">
+	                                <div class="config-title">图表类型</div>
+	                                <div class="chart-type">
+	                                  <el-radio-group v-model="tabStates[tab.id].charts[idx].type" size="small">
+	                                    <el-radio-button label="bar">柱状图</el-radio-button>
+	                                    <el-radio-button label="line">折线图</el-radio-button>
+	                                    <el-radio-button label="pie">饼图</el-radio-button>
+	                                  </el-radio-group>
+	                                </div>
+	                                <div class="config-title">
+	                                  {{ tabStates[tab.id].charts[idx].type === 'pie' ? '分类字段' : 'X 轴字段' }}
+	                                </div>
+	                                <el-select
+	                                  v-model="tabStates[tab.id].charts[idx].xAxis"
+	                                  size="small"
+	                                  placeholder="选择字段"
+	                                  class="config-select"
+	                                  :disabled="!(resultSet.columns || []).length"
+	                                >
+	                                  <el-option
+	                                    v-for="col in (resultSet.columns || [])"
+	                                    :key="col"
+	                                    :label="col"
+	                                    :value="col"
+	                                  />
+	                                </el-select>
+	                                <div class="config-title">
+	                                  {{ tabStates[tab.id].charts[idx].type === 'pie' ? '数值字段' : 'Y 轴字段' }}
+	                                </div>
+	                                <el-select
+	                                  v-model="tabStates[tab.id].charts[idx].yAxis"
+	                                  size="small"
+	                                  multiple
+	                                  collapse-tags
+	                                  placeholder="选择数值字段"
+	                                  class="config-select"
+	                                  :disabled="!(resultSet.columns || []).length"
+	                                >
+	                                  <el-option
+	                                    v-for="col in getNumericColumns(tab.id, idx)"
+	                                    :key="col"
+	                                    :label="col"
+	                                    :value="col"
+	                                  />
+	                                </el-select>
+	                                <div class="hint">配置变更后自动刷新</div>
+	                              </div>
+	                              <div class="chart-canvas">
+	                                <div class="chart-inner" :ref="(el) => setChartRef(tab.id, idx, el)"></div>
+	                                <div v-if="!(resultSet.rows || []).length" class="chart-empty">暂无数据</div>
+	                                <div v-else-if="!canRenderChart(tab.id, idx)" class="chart-empty">
+	                                  请选择字段并执行查询
+	                                </div>
+	                              </div>
+	                            </div>
+	                          </div>
+	                        </div>
                       </el-tab-pane>
 
                       <el-tab-pane name="history">
@@ -1246,6 +1264,7 @@ watch(
 const tableRefs = ref({})
 const chartRefs = ref({})
 const chartInstances = new Map()
+const resultTableInstances = new Map()
 const taskDrawerRef = ref(null)
 const tableObserver = ref(null)
 
@@ -1737,13 +1756,6 @@ const getTabSubtitle = (tab) => {
   return sourceName || dbName || ''
 }
 
-const getTabTooltip = (tab) => {
-  if (!tab) return ''
-  const title = tab.tableName || ''
-  const sub = getTabSubtitle(tab)
-  return sub ? `${title} · ${sub}` : title
-}
-
 const getLayerType = (layer) => {
   const map = {
     ODS: 'info',
@@ -1965,12 +1977,13 @@ const createTabState = (table) => {
 	      cancelled: false,
 	      message: '',
 	      errorMessage: ''
-	    },
-	    resultTab: 'result-0',
-    page: {
-      current: 1,
-      size: 20
-    },
+		    },
+				    resultTab: 'result-0',
+			    resultViewTabs: ['table'],
+			    page: {
+			      current: 1,
+			      size: 20
+			    },
     charts: [
       {
         type: 'bar',
@@ -2634,15 +2647,16 @@ const executeQuery = async (tabId) => {
 	    }
 	    state.page.current = 1
 	    state.resultTab = 'result-0'
-	    state.charts = normalizedSets.map(() => ({
-	      type: 'bar',
-	      xAxis: '',
-	      yAxis: []
-	    }))
-	    applyDefaultChartSelection(tabId)
-	    await nextTick()
-	    renderChart(tabId, 0)
-	    fetchHistory()
+		    state.charts = normalizedSets.map(() => ({
+		      type: 'bar',
+		      xAxis: '',
+		      yAxis: []
+		    }))
+			    state.resultViewTabs = normalizedSets.map((_, idx) => state.resultViewTabs?.[idx] || 'table')
+			    applyDefaultChartSelection(tabId)
+			    await nextTick()
+			    syncResultPaneLayout(tabId)
+			    fetchHistory()
 	  } catch (error) {
 	    const message = error?.response?.data?.message || error?.message || '查询失败'
 	    state.queryResult = {
@@ -2656,19 +2670,20 @@ const executeQuery = async (tabId) => {
 	      message: '',
 	      errorMessage: message
 	    }
-	    state.resultTab = 'result-0'
-	    state.charts = [
-	      {
-	        type: 'bar',
-	        xAxis: '',
-	        yAxis: []
-	      }
-	    ]
-	  } finally {
-	    state.queryLoading = false
-	    state.queryStopping = false
-	    clearQueryTimer(tabId)
-	  }
+		    state.resultTab = 'result-0'
+		    state.charts = [
+		      {
+		        type: 'bar',
+		        xAxis: '',
+		        yAxis: []
+		      }
+			    ]
+			    state.resultViewTabs = ['table']
+			  } finally {
+		    state.queryLoading = false
+		    state.queryStopping = false
+		    clearQueryTimer(tabId)
+		  }
 }
 
 const stopQuery = async (tabId) => {
@@ -2853,9 +2868,10 @@ const parseResultTabIndex = (value) => {
 }
 
 const getChartKey = (tabId, resultIndex) => `${String(tabId)}::${Number(resultIndex)}`
+const getResultTableKey = (tabId, resultIndex) => `${String(tabId)}::${Number(resultIndex)}`
 
-const getResultSetByIndex = (tabId, resultIndex = 0) => {
-  const state = tabStates[tabId]
+	const getResultSetByIndex = (tabId, resultIndex = 0) => {
+	  const state = tabStates[tabId]
   const sets = Array.isArray(state?.queryResult?.resultSets) ? state.queryResult.resultSets : []
   const set = sets[resultIndex] || EMPTY_RESULT_SET
   return {
@@ -2961,13 +2977,38 @@ const setChartRef = (tabId, resultIndex, el) => {
   // Stop propagation in capture phase so outer scroll can work naturally.
   if (el?.dataset?.scrollGuard !== '1') {
     el.dataset.scrollGuard = '1'
-    el.addEventListener(
-      'wheel',
-      (event) => {
-        event.stopPropagation()
-      },
-      { capture: true, passive: true }
-    )
+	    el.addEventListener(
+	      'wheel',
+	      (event) => {
+	        event.stopPropagation()
+	      },
+	      { capture: true, passive: true }
+	    )
+	  }
+	}
+
+const setResultTableRef = (tabId, resultIndex, instance) => {
+  const key = getResultTableKey(tabId, resultIndex)
+  if (!key) return
+  if (instance) {
+    resultTableInstances.set(key, instance)
+    return
+  }
+  resultTableInstances.delete(key)
+}
+
+const syncResultPaneLayout = (tabId) => {
+  const state = tabStates[tabId]
+  if (!state) return
+  const idx = parseResultTabIndex(state?.resultTab)
+  if (idx === null) return
+  const view = state?.resultViewTabs?.[idx] || 'table'
+  if (view === 'chart') {
+    chartInstances.get(getChartKey(tabId, idx))?.resize()
+    return
+  }
+  if (view === 'table') {
+    resultTableInstances.get(getResultTableKey(tabId, idx))?.doLayout?.()
   }
 }
 
@@ -3074,9 +3115,7 @@ const disposeChart = (tabId, resultIndex = null) => {
 const handleResize = () => {
   const tabId = activeTab.value
   if (!tabId) return
-  const idx = parseResultTabIndex(tabStates[tabId]?.resultTab)
-  if (idx === null) return
-  chartInstances.get(getChartKey(tabId, idx))?.resize()
+  syncResultPaneLayout(tabId)
 }
 
 const startMetaEdit = (tabId) => {
@@ -3475,6 +3514,7 @@ const startLeftResize = (tabId, event) => {
   const minBottom = 220
   const resizerHeight = 6
   isResizing.value = true
+  let layoutRaf = 0
 
   resizeLeftMoveHandler = (moveEvent) => {
     const delta = moveEvent.clientY - startY
@@ -3482,6 +3522,8 @@ const startLeftResize = (tabId, event) => {
     const maxTop = Math.max(minTop, containerRect.height - minBottom - resizerHeight)
     next = Math.max(minTop, Math.min(maxTop, next))
     leftPaneHeights[tabId] = next
+    if (layoutRaf) cancelAnimationFrame(layoutRaf)
+    layoutRaf = requestAnimationFrame(() => syncResultPaneLayout(tabId))
   }
   resizeLeftUpHandler = () => {
     isResizing.value = false
@@ -3489,6 +3531,8 @@ const startLeftResize = (tabId, event) => {
     window.removeEventListener('mouseup', resizeLeftUpHandler)
     resizeLeftMoveHandler = null
     resizeLeftUpHandler = null
+    if (layoutRaf) cancelAnimationFrame(layoutRaf)
+    layoutRaf = requestAnimationFrame(() => syncResultPaneLayout(tabId))
   }
   window.addEventListener('mousemove', resizeLeftMoveHandler)
   window.addEventListener('mouseup', resizeLeftUpHandler)
@@ -3503,23 +3547,30 @@ watch(
 
 watch(
   () => {
-    const tabId = activeTab.value
-    if (!tabId) return null
-    const state = tabStates[tabId]
-    const idx = parseResultTabIndex(state?.resultTab)
-    if (idx === null) return null
-    const chart = state?.charts?.[idx]
-    const set = Array.isArray(state?.queryResult?.resultSets) ? state.queryResult.resultSets[idx] : null
-    const rowsLen = Array.isArray(set?.rows) ? set.rows.length : 0
-    return [tabId, idx, chart?.type, chart?.xAxis, chart?.yAxis?.join(','), rowsLen]
-  },
-  async (payload) => {
-    if (!payload) return
-    const [tabId, idx] = payload
-    await nextTick()
-    renderChart(tabId, idx)
-  }
-)
+	    const tabId = activeTab.value
+	    if (!tabId) return null
+	    const state = tabStates[tabId]
+	    const idx = parseResultTabIndex(state?.resultTab)
+	    if (idx === null) return null
+	    const view = state?.resultViewTabs?.[idx] || 'table'
+	    const chart = state?.charts?.[idx]
+	    const set = Array.isArray(state?.queryResult?.resultSets) ? state.queryResult.resultSets[idx] : null
+	    const rowsLen = Array.isArray(set?.rows) ? set.rows.length : 0
+	    return [tabId, idx, view, chart?.type, chart?.xAxis, chart?.yAxis?.join(','), rowsLen]
+	  },
+		  async (payload) => {
+		    if (!payload) return
+		    const [tabId, idx, view] = payload
+		    await nextTick()
+		    if (view === 'chart') {
+		      renderChart(tabId, idx)
+		      return
+		    }
+		    if (view === 'table') {
+		      syncResultPaneLayout(tabId)
+		    }
+		  }
+		)
 
 watch(
   () => [activeTab.value, tabStates[activeTab.value]?.metaTab],
@@ -3627,10 +3678,11 @@ onMounted(() => {
 onBeforeUnmount(() => {
   flushPersistTabs()
   window.removeEventListener('resize', handleResize)
-  chartInstances.forEach((instance) => instance.dispose())
-  chartInstances.clear()
-  queryTimerHandles.forEach((handle) => clearInterval(handle))
-  queryTimerHandles.clear()
+			chartInstances.forEach((instance) => instance.dispose())
+			chartInstances.clear()
+			resultTableInstances.clear()
+			queryTimerHandles.forEach((handle) => clearInterval(handle))
+			queryTimerHandles.clear()
   if (tableObserver.value) {
     tableObserver.value.disconnect()
   }
@@ -3664,8 +3716,10 @@ onBeforeUnmount(() => {
 <style scoped>
 .data-studio {
   height: calc(100vh - 84px);
+  min-height: 0;
   padding: 8px;
   background: #f3f6fb;
+  overflow: hidden;
 }
 
 .studio-layout {
@@ -4052,6 +4106,7 @@ onBeforeUnmount(() => {
 }
 
 .workspace-body {
+  height: 100%;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -4059,6 +4114,7 @@ onBeforeUnmount(() => {
 }
 
 .workspace-tabs {
+  height: 100%;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -4066,94 +4122,76 @@ onBeforeUnmount(() => {
 }
 
 :deep(.workspace-tabs > .el-tabs) {
+  height: 100%;
   flex: 1;
   min-height: 0;
 }
 
 :deep(.workspace-tabs .el-tabs__header) {
   display: flex;
-  align-items: flex-end;
-  margin: 0;
-  padding: 6px 8px 0;
-  background: linear-gradient(180deg, #f6f7f9 0%, #eef0f3 100%);
-  border-bottom: 1px solid #dcdfe6;
+  align-items: center;
 }
 
 :deep(.workspace-tabs .el-tabs__nav-wrap) {
   flex: 0 1 auto;
   min-width: 0;
-  max-width: calc(100% - 44px);
+  max-width: calc(100% - 72px);
 }
 
-:deep(.workspace-tabs .el-tabs--card > .el-tabs__header .el-tabs__nav) {
-  border: 0;
-}
-
-:deep(.workspace-tabs .el-tabs--card > .el-tabs__header .el-tabs__item) {
-  height: 34px;
-  line-height: 34px;
-  margin-top: 0;
-  border: 1px solid #dcdfe6;
-  border-bottom: 0;
-  background: #e9ecf1;
-  border-radius: 8px 8px 0 0;
-  padding: 0 12px;
-  color: #303133;
-}
-
-:deep(.workspace-tabs .el-tabs--card > .el-tabs__header .el-tabs__item:not(.is-active):hover) {
-  background: #f5f7fa;
-  color: #303133;
-}
-
-:deep(.workspace-tabs .el-tabs--card > .el-tabs__header .el-tabs__item.is-active) {
+:deep(.workspace-tabs .el-tabs__new-tab) {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin: 4px 0 4px 6px;
+  border-radius: 8px;
   background: #ffffff;
-  border-bottom-color: #ffffff;
-  color: #303133;
-  font-weight: 600;
-  position: relative;
-  z-index: 2;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-:deep(.workspace-tabs .el-tabs--card > .el-tabs__header .el-tabs__new-tab) {
-  margin: 0 0 -1px 4px;
-  width: 34px;
-  height: 34px;
-  border-radius: 8px 8px 0 0;
-  border: 1px solid #dcdfe6;
-  border-bottom: 0;
-  background: #e9ecf1;
-  color: #606266;
+:deep(.workspace-tabs .el-tabs__new-tab:hover) {
+  background: #f8fafc;
+  border-color: #c7d2fe;
 }
 
-:deep(.workspace-tabs .el-tabs--card > .el-tabs__header .el-tabs__new-tab:hover) {
-  background: #f5f7fa;
-  color: #303133;
+/* remove label, keep only "+" icon */
+:deep(.workspace-tabs .el-tabs__new-tab::after) {
+  content: none;
 }
 
 :deep(.workspace-tabs .el-tabs__content) {
+  height: 100%;
   flex: 1;
   min-height: 0;
 }
 
 :deep(.workspace-tabs .el-tab-pane) {
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:deep(.workspace-tabs .el-tabs__card) {
+  height: 100%;
 }
 
 .tab-label {
   display: flex;
-  align-items: center;
-  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .tab-title {
   font-size: 13px;
-  font-weight: 500;
-  color: inherit;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 180px;
+  font-weight: 600;
+  color: #1f2f3d;
+}
+
+.tab-sub {
+  font-size: 11px;
+  color: #94a3b8;
 }
 
 .tab-grid {
@@ -4300,7 +4338,7 @@ onBeforeUnmount(() => {
 }
 
 .result-panel {
-  flex: 1;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   display: flex;
@@ -4311,6 +4349,7 @@ onBeforeUnmount(() => {
 
 .result-tabs {
   flex: 1;
+  height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -4324,12 +4363,10 @@ onBeforeUnmount(() => {
   overflow: hidden;
   position: relative;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
 }
 
 :deep(.result-tabs .el-tab-pane) {
-  flex: 1;
+  height: 100%;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -4388,28 +4425,40 @@ onBeforeUnmount(() => {
   color: #e6a23c;
 }
 
-.result-scroll-container {
+.result-view-container {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  background: #fff;
+  overflow: hidden;
+}
+
+.result-view-switch {
+  flex-shrink: 0;
+}
+
+.view-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .result-chart {
-  flex-shrink: 0;
-  height: 280px;
-  min-height: 280px;
-  border-bottom: 1px solid #eef1f6;
+  flex: 1;
+  min-height: 0;
   background: #fff;
 }
 
 .table-wrapper {
-  flex-shrink: 0;
-  min-height: 200px;
+  flex: 1;
+  min-height: 0;
   padding: 0;
   background: #fff;
+  overflow: hidden;
+}
+
+.table-wrapper :deep(.el-table) {
+  height: 100%;
 }
 
 .pagination-bar {

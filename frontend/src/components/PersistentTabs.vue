@@ -1,6 +1,7 @@
 <template>
   <div class="persistent-tabs">
     <el-tabs
+      style="height: 100%;"
       v-bind="forwardedAttrs"
       v-model="localValue"
       :type="type"
@@ -182,13 +183,22 @@ onBeforeUnmount(() => closeMenu())
 
 <style scoped lang="scss">
 .persistent-tabs {
+  height: 100%;
+  min-height: 0;
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 .persistent-tabs__label {
   height: 100%;
   display: flex;
   align-items: center;
+}
+
+.persistent-tabs :deep(.el-tabs) {
+  flex: 1;
+  min-height: 0;
 }
 
 .persistent-tabs__menu {

@@ -84,6 +84,16 @@ const routes = [
         name: 'Settings',
         component: () => import('@/views/settings/ConfigurationManagement.vue'),
         meta: { title: '管理员' }
+      },
+      {
+        path: '/playground',
+        redirect: '/playground/tabs'
+      },
+      {
+        path: '/playground/tabs',
+        name: 'TabPlayground',
+        component: () => import('@/views/playground/TabPlayground.vue'),
+        meta: { title: 'Tab Playground' }
       }
     ]
   }
