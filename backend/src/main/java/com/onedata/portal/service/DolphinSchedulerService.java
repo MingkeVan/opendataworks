@@ -272,9 +272,9 @@ public class DolphinSchedulerService {
      * Query workflow schedule (timing) from DolphinScheduler, if any.
      *
      * <p>
-     * We query the workflow definition detail and read its embedded "schedule"
-     * object, since it is the most reliable way to know whether a schedule
-     * already exists for the workflow.
+     * Some DolphinScheduler versions only return schedule (timing) info in the
+     * process-definition list API, so this method falls back to list paging if
+     * the detail API does not include "schedule".
      * </p>
      */
     public DolphinSchedule getWorkflowSchedule(long workflowCode) {
@@ -287,15 +287,33 @@ public class DolphinSchedulerService {
         }
         try {
             JsonNode definition = openApiClient.getProcessDefinition(projectCode, workflowCode);
-            if (definition == null) {
-                return null;
+            DolphinSchedule schedule = parseScheduleFromDefinitionNode(definition);
+            if (schedule != null) {
+                return schedule;
             }
-            JsonNode scheduleNode = definition.path("schedule");
-            if (scheduleNode.isMissingNode() || scheduleNode.isNull()) {
-                return null;
-            }
+
+            JsonNode definitionFromList = findProcessDefinitionFromList(projectCode, workflowCode);
+            return parseScheduleFromDefinitionNode(definitionFromList);
+        } catch (Exception e) {
+            log.debug("Failed to query workflow schedule {}: {}", workflowCode, e.getMessage());
+            return null;
+        }
+    }
+
+    private DolphinSchedule parseScheduleFromDefinitionNode(JsonNode definition) {
+        if (definition == null) {
+            return null;
+        }
+        JsonNode scheduleNode = definition.path("schedule");
+        if (scheduleNode.isMissingNode() || scheduleNode.isNull()) {
+            return null;
+        }
+        try {
             DolphinSchedule schedule = objectMapper.treeToValue(scheduleNode, DolphinSchedule.class);
-            if (schedule != null && !StringUtils.hasText(schedule.getReleaseState())) {
+            if (schedule == null || schedule.getId() == null || schedule.getId() <= 0) {
+                return null;
+            }
+            if (!StringUtils.hasText(schedule.getReleaseState())) {
                 String releaseState = definition.path("scheduleReleaseState").asText(null);
                 if (StringUtils.hasText(releaseState)) {
                     schedule.setReleaseState(releaseState);
@@ -303,9 +321,39 @@ public class DolphinSchedulerService {
             }
             return schedule;
         } catch (Exception e) {
-            log.debug("Failed to query workflow schedule {}: {}", workflowCode, e.getMessage());
             return null;
         }
+    }
+
+    private JsonNode findProcessDefinitionFromList(long projectCode, long workflowCode) {
+        int pageNo = 1;
+        int pageSize = 100;
+        int maxPages = 20;
+
+        while (pageNo <= maxPages) {
+            JsonNode page = openApiClient.listProcessDefinitions(projectCode, pageNo, pageSize);
+            if (page == null) {
+                return null;
+            }
+            JsonNode list = page.path("totalList");
+            if (list.isArray()) {
+                for (JsonNode node : list) {
+                    if (node != null && node.path("code").asLong(-1) == workflowCode) {
+                        return node;
+                    }
+                }
+            }
+
+            int totalPage = page.path("totalPage").asInt(0);
+            if (totalPage > 0 && pageNo >= totalPage) {
+                return null;
+            }
+            if (!list.isArray() || list.size() < pageSize) {
+                return null;
+            }
+            pageNo++;
+        }
+        return null;
     }
 
     /**

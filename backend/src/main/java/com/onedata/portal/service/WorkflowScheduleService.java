@@ -243,6 +243,12 @@ public class WorkflowScheduleService {
         if (workflowCode == null || workflowCode <= 0) {
             return;
         }
+        boolean needsSync = workflow.getDolphinScheduleId() == null
+                || workflow.getDolphinScheduleId() <= 0
+                || !StringUtils.hasText(workflow.getScheduleState());
+        if (!needsSync) {
+            return;
+        }
         try {
             DolphinSchedule schedule = dolphinSchedulerService.getWorkflowSchedule(workflowCode);
             if (schedule == null || schedule.getId() == null || schedule.getId() <= 0) {

@@ -414,6 +414,32 @@ public class DolphinOpenApiClient {
     }
 
     /**
+     * List process definitions (paged).
+     *
+     * <p>
+     * Endpoint: GET /projects/{projectCode}/process-definition?pageNo=1&pageSize=10
+     * </p>
+     *
+     * <p>
+     * Note: In some DolphinScheduler versions, the schedule (timing) information
+     * is only present in this list API response (e.g. fields: scheduleReleaseState,
+     * schedule{...}).
+     * </p>
+     */
+    public JsonNode listProcessDefinitions(long projectCode, int pageNo, int pageSize) {
+        try {
+            String path = String.format("/projects/%d/process-definition", projectCode);
+            MultiValueMap<String, String> query = new LinkedMultiValueMap<>();
+            query.add("pageNo", String.valueOf(pageNo > 0 ? pageNo : 1));
+            query.add("pageSize", String.valueOf(pageSize > 0 ? pageSize : 100));
+            return getWithParams(path, query);
+        } catch (Exception e) {
+            log.warn("Failed to list process definitions for project {}", projectCode, e);
+            return null;
+        }
+    }
+
+    /**
      * Start process instance.
      */
     public Long startProcessInstance(long projectCode,
