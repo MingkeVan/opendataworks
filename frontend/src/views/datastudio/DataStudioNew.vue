@@ -39,27 +39,28 @@
 	        </div>
 
         <div class="db-tree" v-loading="dbLoading">
-          <el-tree
-            ref="catalogTreeRef"
-            :data="catalogRoots"
-            node-key="nodeKey"
-            :props="catalogTreeProps"
-            lazy
-            accordion
-            highlight-current
-            :expand-on-click-node="false"
-            :current-node-key="selectedTableKey"
-            :filter-node-method="filterCatalogNode"
-            :load="loadCatalogNode"
-            class="catalog-tree"
-            @node-click="handleCatalogNodeClick"
-          >
-            <template #default="{ data }">
-              <div
-                class="catalog-node"
-                :class="`catalog-node--${data.type}`"
-                :ref="(el) => (data.type === 'table' ? setTableRef(data.nodeKey, el, data.table?.id) : null)"
-              >
+          <el-scrollbar class="db-tree-scroll">
+            <el-tree
+              ref="catalogTreeRef"
+              :data="catalogRoots"
+              node-key="nodeKey"
+              :props="catalogTreeProps"
+              lazy
+              accordion
+              highlight-current
+              :expand-on-click-node="false"
+              :current-node-key="selectedTableKey"
+              :filter-node-method="filterCatalogNode"
+              :load="loadCatalogNode"
+              class="catalog-tree"
+              @node-click="handleCatalogNodeClick"
+            >
+              <template #default="{ data }">
+                <div
+                  class="catalog-node"
+                  :class="`catalog-node--${data.type}`"
+                  :ref="(el) => (data.type === 'table' ? setTableRef(data.nodeKey, el, data.table?.id) : null)"
+                >
                 <div
                   v-if="data.type === 'table'"
                   class="table-progress-bg"
@@ -149,7 +150,8 @@
                 </div>
               </div>
             </template>
-          </el-tree>
+            </el-tree>
+          </el-scrollbar>
         </div>
       </aside>
 
@@ -3946,8 +3948,13 @@ onBeforeUnmount(() => {
 
 .db-tree {
   flex: 1;
+  min-height: 0;
   padding: 8px 8px 12px;
-  overflow: auto;
+  overflow: hidden;
+}
+
+.db-tree-scroll {
+  height: 100%;
 }
 
 .catalog-tree {

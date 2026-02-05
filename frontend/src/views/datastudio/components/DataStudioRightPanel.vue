@@ -43,7 +43,7 @@
                 </div>
               </div>
 
-              <div class="meta-scroll">
+              <el-scrollbar class="meta-scroll">
                 <el-descriptions :column="1" border size="small" class="meta-descriptions">
                   <el-descriptions-item label="表名">
                     <el-input v-if="state.metaEditing" v-model="state.metaForm.tableName" size="small" class="meta-input" />
@@ -124,7 +124,7 @@
                     </el-descriptions-item>
                   </el-descriptions>
                 </template>
-              </div>
+              </el-scrollbar>
             </div>
           </el-tab-pane>
 
@@ -181,7 +181,7 @@
 
               <div v-if="fieldRows.length" class="meta-table">
                 <el-table :data="fieldRows" border size="small" height="100%">
-                  <el-table-column label="字段名" width="170">
+                  <el-table-column label="字段名" width="260" show-overflow-tooltip>
                     <template #default="{ row }">
                       <el-input
                         v-if="state.fieldsEditing"
@@ -323,14 +323,10 @@
               <div class="ddl-header">
                 <el-button size="small" :disabled="!state.ddl" @click="copyDdl(activeTabId)">复制</el-button>
               </div>
-              <el-input
-                v-model="state.ddl"
-                type="textarea"
-                resize="none"
-                readonly
-                class="ddl-textarea"
-                placeholder="加载中或暂无 DDL"
-              />
+              <el-scrollbar class="ddl-scroll">
+                <pre v-if="state.ddl" class="ddl-content">{{ state.ddl }}</pre>
+                <div v-else class="ddl-placeholder">加载中或暂无 DDL</div>
+              </el-scrollbar>
             </div>
           </el-tab-pane>
         </el-tabs>
@@ -346,84 +342,88 @@
         <div class="lineage-grid">
           <div class="lineage-card">
             <div class="lineage-title">上游表 ({{ state.lineage.upstreamTables.length }})</div>
-            <div class="task-block">
-	              <div class="task-title-row">
-	                <div class="task-title">写入任务 ({{ state.tasks.writeTasks.length }})</div>
-	                <el-button
-	                  type="primary"
-	                  size="small"
-	                  plain
-	                  :disabled="!state.table?.id"
-	                  @click.stop="goCreateRelatedTask(activeTabId, 'write')"
-	                >
-	                  <el-icon><Plus /></el-icon>
-	                  新增写入任务
-	                </el-button>
-	              </div>
-	              <div v-if="state.tasks.writeTasks.length" class="task-list">
-	                <div v-for="task in state.tasks.writeTasks" :key="task.id" class="task-item" @click="openTask(task.id)">
-	                  <div class="task-name">{{ task.taskName || '-' }}</div>
-	                  <div class="task-meta">{{ task.engine || '-' }}</div>
+            <el-scrollbar class="lineage-scroll">
+              <div class="task-block">
+                <div class="task-title-row">
+                  <div class="task-title">写入任务 ({{ state.tasks.writeTasks.length }})</div>
+                  <el-button
+                    type="primary"
+                    size="small"
+                    plain
+                    :disabled="!state.table?.id"
+                    @click.stop="goCreateRelatedTask(activeTabId, 'write')"
+                  >
+                    <el-icon><Plus /></el-icon>
+                    新增写入任务
+                  </el-button>
+                </div>
+                <div v-if="state.tasks.writeTasks.length" class="task-list">
+                  <div v-for="task in state.tasks.writeTasks" :key="task.id" class="task-item" @click="openTask(task.id)">
+                    <div class="task-name">{{ task.taskName || '-' }}</div>
+                    <div class="task-meta">{{ task.engine || '-' }}</div>
+                  </div>
+                </div>
+                <el-empty v-else description="暂无写入任务" :image-size="40" />
+              </div>
+              <div class="lineage-list">
+                <div
+                  v-for="item in state.lineage.upstreamTables"
+                  :key="item.id"
+                  class="lineage-item"
+                  @click="openTableTab(item)"
+                >
+                  <el-icon><Document /></el-icon>
+                  <div class="lineage-info">
+                    <div class="lineage-name">{{ item.tableName }}</div>
+                    <div class="lineage-desc">{{ item.tableComment || '-' }}</div>
+                  </div>
+                  <el-tag v-if="item.layer" size="small" :type="getLayerType(item.layer)">{{ item.layer }}</el-tag>
                 </div>
               </div>
-              <el-empty v-else description="暂无写入任务" :image-size="40" />
-            </div>
-            <div class="lineage-list">
-              <div
-                v-for="item in state.lineage.upstreamTables"
-                :key="item.id"
-                class="lineage-item"
-                @click="openTableTab(item)"
-              >
-                <el-icon><Document /></el-icon>
-                <div class="lineage-info">
-                  <div class="lineage-name">{{ item.tableName }}</div>
-                  <div class="lineage-desc">{{ item.tableComment || '-' }}</div>
-                </div>
-                <el-tag v-if="item.layer" size="small" :type="getLayerType(item.layer)">{{ item.layer }}</el-tag>
-              </div>
-            </div>
+            </el-scrollbar>
           </div>
 
           <div class="lineage-card">
             <div class="lineage-title">下游表 ({{ state.lineage.downstreamTables.length }})</div>
-            <div class="task-block">
-	              <div class="task-title-row">
-	                <div class="task-title">读取任务 ({{ state.tasks.readTasks.length }})</div>
-	                <el-button
-	                  type="primary"
-	                  size="small"
-	                  plain
-	                  :disabled="!state.table?.id"
-	                  @click.stop="goCreateRelatedTask(activeTabId, 'read')"
-	                >
-	                  <el-icon><Plus /></el-icon>
-	                  新增读取任务
-	                </el-button>
-	              </div>
-	              <div v-if="state.tasks.readTasks.length" class="task-list">
-	                <div v-for="task in state.tasks.readTasks" :key="task.id" class="task-item" @click="openTask(task.id)">
-	                  <div class="task-name">{{ task.taskName || '-' }}</div>
-	                  <div class="task-meta">{{ task.engine || '-' }}</div>
-	                </div>
-              </div>
-              <el-empty v-else description="暂无读取任务" :image-size="40" />
-            </div>
-            <div class="lineage-list">
-              <div
-                v-for="item in state.lineage.downstreamTables"
-                :key="item.id"
-                class="lineage-item"
-                @click="openTableTab(item)"
-              >
-                <el-icon><Document /></el-icon>
-                <div class="lineage-info">
-                  <div class="lineage-name">{{ item.tableName }}</div>
-                  <div class="lineage-desc">{{ item.tableComment || '-' }}</div>
+            <el-scrollbar class="lineage-scroll">
+              <div class="task-block">
+                <div class="task-title-row">
+                  <div class="task-title">读取任务 ({{ state.tasks.readTasks.length }})</div>
+                  <el-button
+                    type="primary"
+                    size="small"
+                    plain
+                    :disabled="!state.table?.id"
+                    @click.stop="goCreateRelatedTask(activeTabId, 'read')"
+                  >
+                    <el-icon><Plus /></el-icon>
+                    新增读取任务
+                  </el-button>
                 </div>
-                <el-tag v-if="item.layer" size="small" :type="getLayerType(item.layer)">{{ item.layer }}</el-tag>
+                <div v-if="state.tasks.readTasks.length" class="task-list">
+                  <div v-for="task in state.tasks.readTasks" :key="task.id" class="task-item" @click="openTask(task.id)">
+                    <div class="task-name">{{ task.taskName || '-' }}</div>
+                    <div class="task-meta">{{ task.engine || '-' }}</div>
+                  </div>
+                </div>
+                <el-empty v-else description="暂无读取任务" :image-size="40" />
               </div>
-            </div>
+              <div class="lineage-list">
+                <div
+                  v-for="item in state.lineage.downstreamTables"
+                  :key="item.id"
+                  class="lineage-item"
+                  @click="openTableTab(item)"
+                >
+                  <el-icon><Document /></el-icon>
+                  <div class="lineage-info">
+                    <div class="lineage-name">{{ item.tableName }}</div>
+                    <div class="lineage-desc">{{ item.tableComment || '-' }}</div>
+                  </div>
+                  <el-tag v-if="item.layer" size="small" :type="getLayerType(item.layer)">{{ item.layer }}</el-tag>
+                </div>
+              </div>
+            </el-scrollbar>
           </div>
         </div>
       </div>
@@ -566,8 +566,11 @@ const fieldRows = computed(() => getFieldRows(activeTabId.value))
 .meta-scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+}
+
+.meta-scroll :deep(.el-scrollbar__view) {
   padding-right: 4px;
+  box-sizing: border-box;
 }
 
 .meta-table {
@@ -575,8 +578,18 @@ const fieldRows = computed(() => getFieldRows(activeTabId.value))
   min-height: 0;
 }
 
-.meta-descriptions :deep(.el-descriptions__content) {
+.meta-descriptions {
   width: 100%;
+}
+
+.meta-descriptions :deep(.el-descriptions__table) {
+  table-layout: fixed;
+}
+
+.meta-descriptions :deep(.el-descriptions__label.is-bordered-label) {
+  width: 120px;
+  min-width: 120px;
+  white-space: nowrap;
 }
 
 .meta-input {
@@ -651,15 +664,27 @@ const fieldRows = computed(() => getFieldRows(activeTabId.value))
   gap: 8px;
 }
 
-.ddl-textarea {
+.ddl-scroll {
   flex: 1;
   min-height: 0;
   font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  background: #fff;
 }
 
-.ddl-textarea :deep(.el-textarea__inner) {
-  height: 100% !important;
-  min-height: 160px;
+.ddl-content {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.ddl-placeholder {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #94a3b8;
 }
 
 .lineage-panel {
@@ -685,6 +710,7 @@ const fieldRows = computed(() => getFieldRows(activeTabId.value))
   flex: 1;
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-auto-rows: minmax(0, 1fr);
   gap: 12px;
   min-height: 0;
 }
@@ -697,6 +723,7 @@ const fieldRows = computed(() => getFieldRows(activeTabId.value))
   flex-direction: column;
   gap: 10px;
   overflow: hidden;
+  min-height: 0;
 }
 
 .lineage-title {
@@ -751,12 +778,23 @@ const fieldRows = computed(() => getFieldRows(activeTabId.value))
   color: #94a3b8;
 }
 
-.lineage-list {
+.lineage-scroll {
   flex: 1;
+  min-height: 0;
+}
+
+.lineage-scroll :deep(.el-scrollbar__view) {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+  box-sizing: border-box;
+}
+
+.lineage-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  overflow: auto;
 }
 
 .lineage-item {
