@@ -89,21 +89,63 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Create Release Body
-        id: release_body
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Create offline deployment package
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          echo "DOCKER_LINKS<<EOF" >> $GITHUB_ENV
-          echo "## 🐳 Docker Images" >> $GITHUB_ENV
-          echo "- [Frontend](https://hub.docker.com/r/${{ env.DOCKER_NAMESPACE }}/opendataworks-frontend/tags?name=${VERSION})" >> $GITHUB_ENV
-          echo "- [Backend](https://hub.docker.com/r/${{ env.DOCKER_NAMESPACE }}/opendataworks-backend/tags?name=${VERSION})" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          chmod +x scripts/create-offline-package.sh
+          scripts/create-offline-package.sh \
+            --namespace "${{ env.DOCKER_NAMESPACE }}" \
+            --tag "$VERSION" \
+            --output "opendataworks-deployment-${VERSION}.tar.gz" \
+            --platform linux/amd64
+          echo "PACKAGE_PATH=opendataworks-deployment-${VERSION}.tar.gz" >> $GITHUB_ENV
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Generate checksum
+        run: |
+          sha256sum "$PACKAGE_PATH" > "${PACKAGE_PATH}.sha256"
+          echo "PACKAGE_SHA=${PACKAGE_PATH}.sha256" >> $GITHUB_ENV
+
+      - name: Create Release Body
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          REPO="${{ github.repository }}"
+          TAG="${{ github.ref_name }}"
+          NS="${{ env.DOCKER_NAMESPACE }}"
+          {
+            echo "## OpenDataWorks v${VERSION}"
+            echo ""
+            echo "## 📦 下载 / Downloads"
+            echo ""
+            echo "### 离线部署包 (Offline Deployment Package)"
+            echo "- **[opendataworks-deployment-${VERSION}.tar.gz](https://github.com/${REPO}/releases/download/${TAG}/opendataworks-deployment-${VERSION}.tar.gz)** - 适用于无外网环境"
+            echo "- 校验和: \`opendataworks-deployment-${VERSION}.tar.gz.sha256\`"
+            echo ""
+            echo "### Docker 镜像 (Docker Images)"
+            echo "- [Frontend](https://hub.docker.com/r/${NS}/opendataworks-frontend/tags?name=${VERSION})"
+            echo "- [Backend](https://hub.docker.com/r/${NS}/opendataworks-backend/tags?name=${VERSION})"
+            echo ""
+            echo '```bash'
+            echo "docker pull ${NS}/opendataworks-frontend:${VERSION}"
+            echo "docker pull ${NS}/opendataworks-backend:${VERSION}"
+            echo '```'
+          } > release_body.md
+          echo "RELEASE_BODY_FILE=release_body.md" >> $GITHUB_ENV
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           generate_release_notes: true
-          body: ${{ env.DOCKER_LINKS }}
+          body_path: release_body.md
+          files: |
+            ${{ env.PACKAGE_PATH }}
+            ${{ env.PACKAGE_SHA }}
 
   summary:
     needs: build-and-push

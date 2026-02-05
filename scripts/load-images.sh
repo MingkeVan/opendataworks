@@ -85,8 +85,16 @@ echo ""
 echo "🔧 修复镜像 localhost 前缀问题..."
 echo ""
 
-# 定义需要修复的镜像
+# 定义需要修复的镜像（支持 latest 与版本号如 0.2.0）
+# 若 manifest.json 存在则从中读取 opendataworks 镜像的 tag
+IMAGE_TAG="latest"
+if [[ -f "$IMAGE_DIR/manifest.json" ]]; then
+    _tag=$(grep -o '"target": *"opendataworks-frontend:[^"]*"' "$IMAGE_DIR/manifest.json" 2>/dev/null | sed 's/.*opendataworks-frontend://;s/"//')
+    [[ -n "$_tag" ]] && IMAGE_TAG="$_tag"
+fi
 IMAGES=(
+    "opendataworks-frontend:${IMAGE_TAG}"
+    "opendataworks-backend:${IMAGE_TAG}"
     "opendataworks-frontend:latest"
     "opendataworks-backend:latest"
     "mysql:8.0"
@@ -118,7 +126,7 @@ echo ""
 
 # 显示已加载的镜像
 echo "📋 已加载的镜像列表："
-$CONTAINER_CMD images | grep -E "opendataworks|mysql" | grep -E "latest|8.0"
+$CONTAINER_CMD images | grep -E "opendataworks|mysql" | grep -E "latest|8.0|${IMAGE_TAG}"
 echo ""
 
 echo "📝 下一步："

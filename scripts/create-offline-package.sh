@@ -172,6 +172,21 @@ if [[ ! -f "$PACKAGED_DEPLOY_DIR/.env.example" ]]; then
     fi
 fi
 
+# 为离线部署设置镜像变量（使用短名称，与 load-images 加载后的标签一致）
+_env_file="$PACKAGED_DEPLOY_DIR/.env"
+if [[ -f "$_env_file" ]]; then
+    if grep -q '^OPENDATAWORKS_BACKEND_IMAGE=' "$_env_file" 2>/dev/null; then
+        sed "s|^OPENDATAWORKS_BACKEND_IMAGE=.*|OPENDATAWORKS_BACKEND_IMAGE=opendataworks-backend:${PARSER_TAG}|" "$_env_file" > "${_env_file}.tmp" && mv "${_env_file}.tmp" "$_env_file"
+    else
+        { echo ""; echo "# 离线部署镜像（由 create-offline-package 自动设置）"; echo "OPENDATAWORKS_BACKEND_IMAGE=opendataworks-backend:${PARSER_TAG}"; } >> "$_env_file"
+    fi
+    if grep -q '^OPENDATAWORKS_FRONTEND_IMAGE=' "$_env_file" 2>/dev/null; then
+        sed "s|^OPENDATAWORKS_FRONTEND_IMAGE=.*|OPENDATAWORKS_FRONTEND_IMAGE=opendataworks-frontend:${PARSER_TAG}|" "$_env_file" > "${_env_file}.tmp" && mv "${_env_file}.tmp" "$_env_file"
+    else
+        echo "OPENDATAWORKS_FRONTEND_IMAGE=opendataworks-frontend:${PARSER_TAG}" >> "$_env_file"
+    fi
+fi
+
 declare -a MANIFEST_RAW=()
 
 pull_image() {
