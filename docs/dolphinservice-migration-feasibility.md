@@ -19,7 +19,7 @@
 
 ## 用 Java 直连 DolphinScheduler 的可替代性
 - DolphinScheduler 提供完整 REST/OpenAPI（Swagger）可覆盖：
-  - 登录/Token：可用 `/login` 获取 sessionId 或安全中心 Token（配置 `dolphin.token`）。Java 可用 WebClient/RestTemplate 直接带 `token`/`sessionId` 头/参数。
+  - 登录/Token：可用 `/login` 获取 sessionId 或安全中心 Token（实际配置存于 `dolphin_config` 表，通过系统管理界面维护）。Java 可用 WebClient/RestTemplate 直接带 `token`/`sessionId` 头/参数。
   - 查询项目：`GET /projects` + `searchVal` 按名称过滤，或 `GET /projects/{projectCode}`。已有 `project-code` 配置可复用。
   - 创建/更新流程定义：`POST /projects/{projectCode}/process-definition`（新增）或 `PUT /projects/{projectCode}/process-definition/{code}`（更新）。入参含：
     - `taskDefinitionJson`（数组，字段与现有 payload 基本一致：`code/name/version/taskType/taskParams/taskPriority/workerGroup/environmentCode/failRetryTimes/failRetryInterval/timeout/flag` 等）。

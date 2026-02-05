@@ -44,8 +44,7 @@ mybatis-plus:
       logic-delete-value: 1
       logic-not-delete-value: 0
 
-# DolphinScheduler 配置
-
+# DolphinScheduler 配置由数据库 dolphin_config 表管理，可在系统管理界面配置
 
 # 日志配置
 logging:

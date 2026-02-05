@@ -33,10 +33,13 @@
 - 配置项：`dolphin.use-python-service`（灰度开关）。
 
 ## 配置设计（对齐 Dinky，并补充可选扩展）
-- 只使用三个配置项：
-  - `dolphin.url`：DolphinScheduler 地址（含 /dolphinscheduler），用于 WebUI。
-  - `dolphin.token`：安全中心 Token，放 header `token`；不考虑无 token 时可退回登录的情况。
-  - `dolphin.project-name`：目标项目名，默认使用opendataworks。
+
+> **实现说明**：实际采用数据库表 `dolphin_config` 存储配置，通过「系统管理 -> Dolphin 配置」界面维护，不再使用 `application.yml` 或 `.env` 中的 `dolphin.*` 变量。
+
+- 配置项（存于 `dolphin_config` 表）：
+  - `url`：DolphinScheduler 地址（含 /dolphinscheduler），用于 WebUI。
+  - `token`：安全中心 Token，放 header `token`；不考虑无 token 时可退回登录的情况。
+  - `project_name`：目标项目名，默认使用 opendataworks。
 
 
 ### Dinky 现有真实配置（源码扫描）

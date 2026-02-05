@@ -23,10 +23,9 @@
 3. 回到 DolphinScheduler → Workflow Definition 页面，确认多出 `test-task-<timestamp>`。
 4. 手动删除（OpenAPI 示例）：
    ```bash
-   ```bash
-   # 请先在 "系统管理 -> Dolphin 配置" 中获取配置信息
+   # 从 "系统管理 -> Dolphin 配置" 或 dolphin_config 表获取 URL、Token、ProjectCode
    DOLPHIN_URL="http://localhost:12345/dolphinscheduler"
-   DOLPHIN_TOKEN="<YOUR_TOKEN>"
+   DOLPHIN_TOKEN="<从系统配置获取>"
    PROJECT_CODE=<from_dolphinscheduler_ui>
    WORKFLOW_CODE=123456789
 
@@ -110,7 +109,7 @@ logging:
 ### 常见问题速查
 | 症状 | 排查步骤 |
 | --- | --- |
-| `Connection refused` | 检查服务端口、`dolphin.url` 与 Token |
+| `Connection refused` | 检查服务端口、系统管理中的 Dolphin 配置 URL 与 Token |
 | 登录失败 | 确认账号 `admin/dolphinscheduler123`，必要时重置密码 |
 | `工作流不存在` | 校验 `workflow-code`、`project-code`，确认已在 UI 创建 |
 | `权限不足` | 确认使用 admin 或具备权限的租户 |

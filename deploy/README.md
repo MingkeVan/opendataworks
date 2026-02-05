@@ -31,7 +31,7 @@ Use this method if you have internet access and are deploying directly from the 
 2. **Configure Environment**:
    ```bash
    cp .env.example .env
-   # Edit .env and configure settings (Database, DolphinScheduler, etc.)
+   # Edit .env for database credentials; DolphinScheduler config is set in System Settings after startup
    vim .env
    ```
 

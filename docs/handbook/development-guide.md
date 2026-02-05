@@ -62,7 +62,7 @@ npm run dev -- --host 0.0.0.0 --port 5173
 | 问题 | 排查方式 |
 | --- | --- |
 | “Access denied for user 'opendataworks'” | 确认数据库用户/密码已创建；`mysql -uopendataworks -popendataworks123 opendataworks -e "SHOW TABLES;"` |
-| 调度接口 500 | 检查后端日志；确认 `dolphin.url`/`token`/Project 配置正确且 OpenAPI 可访问 |
+| 调度接口 500 | 检查后端日志；确认系统管理 -> Dolphin 配置（URL/token/Project）正确且 OpenAPI 可访问 |
 | 前端跨域 | 运行前端时设置 `VITE_API_BASE=http://localhost:8080/api npm run dev`，或在 backend 开启 CORS |
 | 示例数据缺失 | 确认 Flyway 迁移已完成；如需演示数据可根据业务手工插入 |
 | Doris 集群不可用 | 在 `doris_cluster` 表中配置 FE 地址，并在 Portal 中标记 `is_default=1` |

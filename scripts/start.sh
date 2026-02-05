@@ -37,7 +37,7 @@ if [ ! -f "$ENV_FILE" ]; then
     echo ""
     echo "⚠️  请编辑 $ENV_FILE，确认关键配置："
     echo "   - SPRING_DATASOURCE_URL / USERNAME / PASSWORD 指向 mysql 服务"
-    echo "   - DOLPHIN_URL 与 DOLPHIN_TOKEN（外部 DolphinScheduler）"
+    echo "   - 启动后在系统管理界面配置 DolphinScheduler 连接"
     echo ""
     read -p "是否继续启动？(y/n) " -n 1 -r
     echo ""

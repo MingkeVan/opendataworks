@@ -218,7 +218,7 @@ http://localhost:12345/dolphinscheduler/projects/test-project/workflow/definitio
 
 ### 1. 配置 DolphinScheduler OpenAPI
 
-在 `application.yml` 中配置 `dolphin.url`、`dolphin.token`、`project-name` 等字段，确保后端能够访问 DolphinScheduler。
+在「系统管理 -> Dolphin 配置」中配置 URL、Token、项目名称等，确保后端能够访问 DolphinScheduler（配置存储在数据库 `dolphin_config` 表）。
 
 ### 2. 查看任务执行状态
 
@@ -239,7 +239,7 @@ http://localhost:12345/dolphinscheduler/projects/test-project/workflow/definitio
 
 1. **DolphinScheduler 可用性**
    - 所有 DolphinScheduler 交互直接通过 OpenAPI 完成
-   - 确保 `dolphin.url` 可访问且 `dolphin.token`/项目配置正确
+   - 确保系统管理中的 Dolphin 配置 URL 可访问且 Token/项目配置正确
 
 2. **状态更新**
    - 执行状态在页面加载时获取
@@ -284,18 +284,18 @@ http://localhost:12345/dolphinscheduler/projects/test-project/workflow/definitio
 - 数据库中没有执行记录
 
 **解决方法**:
-1. 检查 DolphinScheduler 是否运行、`dolphin.url` 是否可连通
+1. 检查 DolphinScheduler 是否运行、系统管理中配置的 Dolphin URL 是否可连通
 2. 确认任务至少执行过一次
 3. 查看后端日志错误信息
 
 ### 问题2：无法跳转到 DolphinScheduler
 
 **可能原因**:
-- `dolphin.url` 配置错误
+- Dolphin 配置（URL）错误
 - DolphinScheduler Web UI 未启动
 
 **解决方法**:
-1. 检查 `application.yml` 中的 `dolphin.url` 配置
+1. 检查系统管理 -> Dolphin 配置中的 URL
 2. 确认 DolphinScheduler Web UI 可访问
 3. 检查浏览器是否拦截弹窗
 
