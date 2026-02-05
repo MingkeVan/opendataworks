@@ -25,18 +25,18 @@
               新建表
             </el-button>
           </div>
-          <div class="sort-row">
-            <el-radio-group v-model="sortField" size="small" class="sort-group">
-              <el-radio-button label="tableName">表名</el-radio-button>
-              <el-radio-button label="createdAt">创建时间</el-radio-button>
-              <el-radio-button label="rowCount">数据量</el-radio-button>
-            </el-radio-group>
-            <el-radio-group v-model="sortOrder" size="small" class="sort-group">
-              <el-radio-button label="asc">升序</el-radio-button>
-              <el-radio-button label="desc">降序</el-radio-button>
-            </el-radio-group>
-          </div>
-        </div>
+	          <div class="sort-row">
+	            <el-radio-group v-model="sortField" size="small" class="sort-group">
+	              <el-radio-button value="tableName">表名</el-radio-button>
+	              <el-radio-button value="createdAt">创建时间</el-radio-button>
+	              <el-radio-button value="rowCount">数据量</el-radio-button>
+	            </el-radio-group>
+	            <el-radio-group v-model="sortOrder" size="small" class="sort-group">
+	              <el-radio-button value="asc">升序</el-radio-button>
+	              <el-radio-button value="desc">降序</el-radio-button>
+	            </el-radio-group>
+	          </div>
+	        </div>
 
         <div class="db-tree" v-loading="dbLoading">
           <el-tree
@@ -335,17 +335,17 @@
                               <el-icon><Warning /></el-icon> 结果已截断
                             </span>
 	                          </div>
-	                          <div class="export-actions">
-	                            <el-radio-group v-model="tabStates[tab.id].resultViewTabs[idx]" size="small" class="result-view-switch">
-	                              <el-radio-button label="table">
-	                                <span class="view-label"><el-icon><Grid /></el-icon> 表格</span>
-	                              </el-radio-button>
-	                              <el-radio-button label="chart">
-	                                <span class="view-label"><el-icon><TrendCharts /></el-icon> 图表</span>
-	                              </el-radio-button>
-	                            </el-radio-group>
-	                            <el-button
-	                              size="small"
+		                          <div class="export-actions">
+		                            <el-radio-group v-model="tabStates[tab.id].resultViewTabs[idx]" size="small" class="result-view-switch">
+		                              <el-radio-button value="table">
+		                                <span class="view-label"><el-icon><Grid /></el-icon> 表格</span>
+		                              </el-radio-button>
+		                              <el-radio-button value="chart">
+		                                <span class="view-label"><el-icon><TrendCharts /></el-icon> 图表</span>
+		                              </el-radio-button>
+		                            </el-radio-group>
+		                            <el-button
+		                              size="small"
 	                              :disabled="!(resultSet.rows || []).length"
 	                              @click="exportResult(tab.id, idx)"
 	                            >
@@ -411,13 +411,13 @@
 	                            <div class="chart-grid">
 	                              <div class="chart-config">
 	                                <div class="config-title">图表类型</div>
-	                                <div class="chart-type">
-	                                  <el-radio-group v-model="tabStates[tab.id].charts[idx].type" size="small">
-	                                    <el-radio-button label="bar">柱状图</el-radio-button>
-	                                    <el-radio-button label="line">折线图</el-radio-button>
-	                                    <el-radio-button label="pie">饼图</el-radio-button>
-	                                  </el-radio-group>
-	                                </div>
+		                                <div class="chart-type">
+		                                  <el-radio-group v-model="tabStates[tab.id].charts[idx].type" size="small">
+		                                    <el-radio-button value="bar">柱状图</el-radio-button>
+		                                    <el-radio-button value="line">折线图</el-radio-button>
+		                                    <el-radio-button value="pie">饼图</el-radio-button>
+		                                  </el-radio-group>
+		                                </div>
 	                                <div class="config-title">
 	                                  {{ tabStates[tab.id].charts[idx].type === 'pie' ? '分类字段' : 'X 轴字段' }}
 	                                </div>

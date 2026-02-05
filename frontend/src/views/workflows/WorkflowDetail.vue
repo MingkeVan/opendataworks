@@ -306,12 +306,12 @@
                     </div>
                   </div>
                 </el-form-item>
-                <el-form-item label="失败策略">
-                  <el-radio-group v-model="scheduleForm.scheduleFailureStrategy" :disabled="isScheduleOnline">
-                    <el-radio label="CONTINUE">CONTINUE（继续）</el-radio>
-                    <el-radio label="END">END（结束）</el-radio>
-                  </el-radio-group>
-                </el-form-item>
+	                <el-form-item label="失败策略">
+	                  <el-radio-group v-model="scheduleForm.scheduleFailureStrategy" :disabled="isScheduleOnline">
+	                    <el-radio value="CONTINUE">CONTINUE（继续）</el-radio>
+	                    <el-radio value="END">END（结束）</el-radio>
+	                  </el-radio-group>
+	                </el-form-item>
                 <el-form-item label="告警类型">
                   <el-select
                     v-model="scheduleForm.scheduleWarningType"

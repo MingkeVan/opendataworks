@@ -36,14 +36,24 @@
           <span>数据血缘图</span>
           <div class="graph-controls">
             <el-radio-group v-model="currentLayout" size="small" @change="handleLayoutChange">
-              <el-radio-button label="dagre">层级图 (Dagre)</el-radio-button>
-              <el-radio-button label="force">网状图 (Force)</el-radio-button>
-              <el-radio-button label="indented">树状图 (Vertical)</el-radio-button>
+              <el-radio-button value="dagre">层级图 (Dagre)</el-radio-button>
+              <el-radio-button value="force" disabled>网状图 (Force)</el-radio-button>
+              <el-radio-button value="indented">树状图 (Vertical)</el-radio-button>
             </el-radio-group>
           </div>
         </div>
       </template>
-      <div class="chart-container" ref="chartRef" v-loading="loading"></div>
+      <div class="chart-container" v-loading="loading">
+        <LineageFlow
+          v-if="graphData && graphData.nodes && graphData.nodes.length"
+          ref="lineageFlowRef"
+          :graph="graphData"
+          :layout="currentLayout"
+          :focus="focusTable"
+          @nodeClick="handleNodeClick"
+          @cycleDetected="handleCycleDetected"
+        />
+      </div>
       <div class="empty" v-if="!loading && (!graphData || graphData.nodes.length === 0)">
         <el-empty description="暂无血缘数据，请调整筛选条件" />
       </div>
@@ -141,17 +151,16 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ref, reactive, onMounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, Plus } from '@element-plus/icons-vue'
 import { lineageApi } from '@/api/lineage'
 import { businessDomainApi, dataDomainApi } from '@/api/domain'
 import { tableApi } from '@/api/table'
-import { LineageGraph } from './LineageGraph'
 import { ElMessage, ElNotification } from 'element-plus'
 import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
+import LineageFlow from './LineageFlow.vue'
 
-const chartRef = ref(null)
 const loading = ref(false)
 const graphData = ref(null)
 const businessDomains = ref([])
@@ -164,6 +173,7 @@ const currentNode = ref(null)
 const relatedTasks = ref({ writeTasks: [], readTasks: [] })
 const tasksLoading = ref(false)
 const taskDrawerRef = ref(null)
+const lineageFlowRef = ref(null)
 
 const filters = reactive({
   layer: '',
@@ -180,7 +190,6 @@ const layerOptions = [
   { label: 'ADS', value: 'ADS' }
 ]
 
-let lineageGraph = null
 const focusTable = ref(route.query.focus || '')
 
 const loadRelatedTasks = async () => {
@@ -231,8 +240,8 @@ const handleBusinessChange = async () => {
 
 const handleSearch = () => {
   // If we have data, try client-side search first for highlighting
-  if (lineageGraph && graphData.value) {
-     lineageGraph.searchNode(filters.keyword.trim());
+  if (lineageFlowRef.value && graphData.value) {
+    lineageFlowRef.value.searchNode(filters.keyword.trim())
   }
   // Also reload data to ensure filtering if backend supports it
   loadData()
@@ -250,9 +259,7 @@ const handleReset = () => {
 }
 
 const handleLayoutChange = (val) => {
-  if (lineageGraph) {
-    lineageGraph.changeLayout(val)
-  }
+  lineageFlowRef.value?.fitGraph?.()
 }
 
 const loadData = async () => {
@@ -262,30 +269,21 @@ const loadData = async () => {
     if (!res || !res.nodes || res.nodes.length === 0) {
         graphData.value = null
     } else {
-        const nodes = (res?.nodes || []).map(node => ({
-        ...node,
-        // Ensure required fields
-        id: node.id || node.name, 
-        label: node.name,
-        // Map properties for custom rendering
-        layer: node.layer,
-        inDegree: node.inDegree || 0,
-        outDegree: node.outDegree || 0,
-        style: {
-            stroke: getLayerColor(node.layer)
+        graphData.value = {
+          nodes: (res?.nodes || []).map((node) => ({
+            ...node,
+            id: node.id || node.name,
+            name: node.name || node.id
+          })),
+          edges: (res?.edges || []).map((edge) => ({
+            ...edge,
+            source: edge.source,
+            target: edge.target
+          }))
         }
-        }));
-        
-        const edges = (res?.edges || []).map(edge => ({
-        source: edge.source,
-        target: edge.target,
-        }));
-
-        graphData.value = { nodes, edges }
     }
     
     await nextTick()
-    renderChart()
   } catch (error) {
     console.error('加载血缘数据失败:', error)
   } finally {
@@ -293,55 +291,20 @@ const loadData = async () => {
   }
 }
 
-const getLayerColor = (layer) => {
-    const colors = {
-    ODS: '#409EFF',
-    DWD: '#67C23A',
-    DIM: '#E6A23C',
-    DWS: '#F56C6C',
-    ADS: '#909399'
-  }
-  return colors[layer] || '#409EFF';
+const handleCycleDetected = (cycles) => {
+  if (!Array.isArray(cycles) || !cycles.length) return
+  ElNotification({
+    title: '循环依赖提醒',
+    message: `检测到 ${cycles.length} 处循环依赖，已用红色虚线标出`,
+    type: 'warning',
+    duration: 0
+  })
 }
 
-const renderChart = () => {
-  if (!chartRef.value) return
-
-  if (!lineageGraph) {
-    lineageGraph = new LineageGraph(chartRef.value)
-    lineageGraph.init({
-        layout: {
-            type: currentLayout.value,
-             rankdir: 'LR',
-             nodesep: 30,
-             ranksep: 80,
-        }
-    })
-    // Bind cycle detection callback
-    // Bind cycle detection callback
-    lineageGraph.onCycleDetected = (cycles) => {
-        ElNotification({
-            title: '循环依赖提醒',
-            message: `检测到 ${cycles.length} 处循环依赖，已用红色虚线标出`,
-            type: 'warning',
-            duration: 0
-        })
-    }
-    
-    // Bind node click callback
-    lineageGraph.onNodeClick = (nodeModel) => {
-        currentNode.value = nodeModel
-        dialogVisible.value = true
-        loadRelatedTasks()
-    }
-  }
-
-  lineageGraph.render(graphData.value)
-  
-  // Handle initial focus
-  if (focusTable.value) {
-      lineageGraph.focusNode(focusTable.value); // Assuming ID is name or passed correctly
-  }
+const handleNodeClick = (nodeModel) => {
+  currentNode.value = nodeModel
+  dialogVisible.value = true
+  loadRelatedTasks()
 }
 
 const goToTableDetail = async () => {
@@ -389,17 +352,10 @@ const taskStatusTag = (status) => {
   return ''
 }
 
-const handleResize = () => {
-  lineageGraph?.handleResize()
-}
-
 watch(
   () => route.query.focus,
   (focus) => {
     focusTable.value = focus || ''
-    nextTick(() => {
-        if(lineageGraph) lineageGraph.focusNode(focusTable.value)
-    })
   }
 )
 
@@ -410,13 +366,6 @@ onMounted(async () => {
   // No need for window resize listener here as LineageGraph handles it if initialized,
   // but it's good practice to manage lifecycle here if we want more control.
   // LineageGraph handles it internally.
-})
-
-onBeforeUnmount(() => {
-  if (lineageGraph) {
-    lineageGraph.destroy()
-    lineageGraph = null
-  }
 })
 </script>
 
