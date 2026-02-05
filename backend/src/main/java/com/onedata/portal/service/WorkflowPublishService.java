@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.dto.workflow.WorkflowApprovalRequest;
 import com.onedata.portal.dto.workflow.WorkflowPublishRequest;
 
+import com.onedata.portal.dto.dolphin.DolphinSchedule;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.WorkflowPublishRecord;
 import com.onedata.portal.entity.WorkflowVersion;
@@ -120,34 +121,75 @@ public class WorkflowPublishService {
         try {
             if ("online".equals(record.getOperation())) {
                 dolphinSchedulerService.setWorkflowReleaseState(workflow.getWorkflowCode(), "ONLINE");
-                if (Boolean.TRUE.equals(workflow.getScheduleAutoOnline())
-                        && workflow.getDolphinScheduleId() != null
-                        && workflow.getDolphinScheduleId() > 0
-                        && !"ONLINE".equalsIgnoreCase(workflow.getScheduleState())) {
-                    try {
-                        dolphinSchedulerService.onlineWorkflowSchedule(workflow.getDolphinScheduleId());
-                        workflow.setScheduleState("ONLINE");
-                    } catch (Exception ex) {
-                        log.warn("Failed to online schedule {} for workflow {}: {}",
-                                workflow.getDolphinScheduleId(), workflow.getWorkflowCode(), ex.getMessage());
-                    }
-                }
+                tryAutoOnlineSchedule(workflow);
             } else if ("offline".equals(record.getOperation())) {
                 dolphinSchedulerService.setWorkflowReleaseState(workflow.getWorkflowCode(), "OFFLINE");
-                if (workflow.getDolphinScheduleId() != null && workflow.getDolphinScheduleId() > 0) {
-                    try {
-                        dolphinSchedulerService.offlineWorkflowSchedule(workflow.getDolphinScheduleId());
-                        workflow.setScheduleState("OFFLINE");
-                    } catch (Exception ex) {
-                        log.warn("Failed to offline schedule {} for workflow {}: {}",
-                                workflow.getDolphinScheduleId(), workflow.getWorkflowCode(), ex.getMessage());
-                    }
-                }
+                tryAutoOfflineSchedule(workflow);
             } else {
                 log.debug("No Dolphin action for operation {}", record.getOperation());
             }
         } catch (RuntimeException ex) {
             throw new IllegalStateException("调用 DolphinScheduler 失败: " + ex.getMessage(), ex);
+        }
+    }
+
+    private void tryAutoOnlineSchedule(DataWorkflow workflow) {
+        if (!Boolean.TRUE.equals(workflow.getScheduleAutoOnline())) {
+            return;
+        }
+        DolphinSchedule schedule = dolphinSchedulerService.getWorkflowSchedule(workflow.getWorkflowCode());
+        if (schedule != null && schedule.getId() != null && schedule.getId() > 0) {
+            workflow.setDolphinScheduleId(schedule.getId());
+            if (StringUtils.hasText(schedule.getReleaseState())) {
+                workflow.setScheduleState(schedule.getReleaseState());
+            }
+        }
+
+        Long scheduleId = workflow.getDolphinScheduleId();
+        if (scheduleId == null || scheduleId <= 0) {
+            return;
+        }
+
+        boolean needOnline = true;
+        if (schedule != null && StringUtils.hasText(schedule.getReleaseState())) {
+            needOnline = !"ONLINE".equalsIgnoreCase(schedule.getReleaseState());
+        } else if (StringUtils.hasText(workflow.getScheduleState())) {
+            needOnline = !"ONLINE".equalsIgnoreCase(workflow.getScheduleState());
+        }
+        if (!needOnline) {
+            return;
+        }
+
+        try {
+            dolphinSchedulerService.onlineWorkflowSchedule(scheduleId);
+            workflow.setScheduleState("ONLINE");
+        } catch (Exception ex) {
+            log.warn("Failed to online schedule {} for workflow {}: {}",
+                    scheduleId, workflow.getWorkflowCode(), ex.getMessage());
+        }
+    }
+
+    private void tryAutoOfflineSchedule(DataWorkflow workflow) {
+        DolphinSchedule schedule = dolphinSchedulerService.getWorkflowSchedule(workflow.getWorkflowCode());
+        if (schedule != null && schedule.getId() != null && schedule.getId() > 0) {
+            workflow.setDolphinScheduleId(schedule.getId());
+            if (StringUtils.hasText(schedule.getReleaseState())) {
+                workflow.setScheduleState(schedule.getReleaseState());
+            }
+        }
+
+        Long scheduleId = workflow.getDolphinScheduleId();
+        if (scheduleId == null || scheduleId <= 0) {
+            workflow.setScheduleState("OFFLINE");
+            return;
+        }
+        try {
+            dolphinSchedulerService.offlineWorkflowSchedule(scheduleId);
+        } catch (Exception ex) {
+            log.warn("Failed to offline schedule {} for workflow {}: {}",
+                    scheduleId, workflow.getWorkflowCode(), ex.getMessage());
+        } finally {
+            workflow.setScheduleState("OFFLINE");
         }
     }
 
