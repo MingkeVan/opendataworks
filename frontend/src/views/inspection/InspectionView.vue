@@ -191,31 +191,31 @@
       width="1200px"
       top="5vh"
     >
-      <div v-if="currentRecordDetail">
+      <div v-if="currentRecordId">
         <!-- 问题统计 -->
         <el-row :gutter="20" style="margin-bottom: 20px">
           <el-col :span="6">
             <div class="mini-stat">
               <span class="label">严重:</span>
-              <span class="value critical">{{ currentRecordDetail.severityCount?.critical || 0 }}</span>
+              <span class="value critical">{{ severitySummary.critical }}</span>
             </div>
           </el-col>
           <el-col :span="6">
             <div class="mini-stat">
               <span class="label">高危:</span>
-              <span class="value high">{{ currentRecordDetail.severityCount?.high || 0 }}</span>
+              <span class="value high">{{ severitySummary.high }}</span>
             </div>
           </el-col>
           <el-col :span="6">
             <div class="mini-stat">
               <span class="label">中等:</span>
-              <span class="value medium">{{ currentRecordDetail.severityCount?.medium || 0 }}</span>
+              <span class="value medium">{{ severitySummary.medium }}</span>
             </div>
           </el-col>
           <el-col :span="6">
             <div class="mini-stat">
               <span class="label">低危:</span>
-              <span class="value low">{{ currentRecordDetail.severityCount?.low || 0 }}</span>
+              <span class="value low">{{ severitySummary.low }}</span>
             </div>
           </el-col>
         </el-row>
@@ -238,6 +238,25 @@
               <el-option label="已忽略" value="ignored" />
             </el-select>
           </el-form-item>
+          <el-form-item label="数据源">
+            <el-select
+              v-model="issueFilter.clusterId"
+              placeholder="全部"
+              clearable
+              filterable
+              style="width: 160px"
+            >
+              <el-option
+                v-for="c in clustersList"
+                :key="c.id"
+                :label="c.clusterName"
+                :value="c.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Schema">
+            <el-input v-model="issueFilter.dbName" placeholder="全部" clearable style="width: 160px" />
+          </el-form-item>
           <el-form-item>
             <el-button type="primary" @click="applyIssueFilter">筛选</el-button>
           </el-form-item>
@@ -245,7 +264,8 @@
 
         <!-- 问题表格 -->
         <el-table
-          :data="filteredIssues"
+          v-loading="issuesLoading"
+          :data="issuesList"
           stripe
           max-height="500"
           style="width: 100%"
@@ -262,6 +282,12 @@
               </el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="数据源" width="160" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ getClusterName(row.clusterId) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="dbName" label="Schema" width="140" show-overflow-tooltip />
           <el-table-column prop="resourceName" label="资源名称" width="180" show-overflow-tooltip />
           <el-table-column prop="issueDescription" label="问题描述" min-width="200" show-overflow-tooltip />
           <el-table-column prop="currentValue" label="当前值" width="120" show-overflow-tooltip />
@@ -352,12 +378,13 @@ import {
 import {
   runInspection,
   getInspectionRecords,
-  getInspectionDetail,
   getInspectionOverview,
   getInspectionRules,
+  getInspectionIssues,
   updateRuleEnabled,
   updateIssueStatus
 } from '@/api/inspection'
+import { dorisClusterApi } from '@/api/doris'
 
 // 数据定义
 const loading = ref(false)
@@ -367,34 +394,33 @@ const overview = ref({})
 const rulesLoading = ref(false)
 const rulesList = ref([])
 const ruleUpdating = reactive({})
+const clustersList = ref([])
 
 // 对话框控制
 const issuesDialogVisible = ref(false)
 const suggestionDialogVisible = ref(false)
-const currentRecordDetail = ref(null)
+const currentRecordId = ref(null)
+const issuesLoading = ref(false)
+const issuesList = ref([])
 const currentIssue = ref(null)
 
 // 问题筛选
 const issueFilter = reactive({
   severity: null,
-  status: null
+  status: null,
+  clusterId: null,
+  dbName: ''
 })
 
-// 筛选后的问题列表
-const filteredIssues = computed(() => {
-  if (!currentRecordDetail.value?.issues) return []
-
-  let issues = currentRecordDetail.value.issues
-
-  if (issueFilter.severity) {
-    issues = issues.filter(i => i.severity === issueFilter.severity)
+const severitySummary = computed(() => {
+  const summary = { critical: 0, high: 0, medium: 0, low: 0 }
+  for (const issue of issuesList.value || []) {
+    if (!issue?.severity) continue
+    if (summary[issue.severity] !== undefined) {
+      summary[issue.severity] += 1
+    }
   }
-
-  if (issueFilter.status) {
-    issues = issues.filter(i => i.status === issueFilter.status)
-  }
-
-  return issues
+  return summary
 })
 
 // 页面加载
@@ -402,7 +428,18 @@ onMounted(() => {
   loadOverview()
   loadRecords()
   loadRules()
+  loadClusters()
 })
+
+const loadClusters = async () => {
+  try {
+    const res = await dorisClusterApi.list()
+    clustersList.value = res || []
+  } catch (error) {
+    console.error('Failed to load clusters:', error)
+    clustersList.value = []
+  }
+}
 
 // 加载概览
 const loadOverview = async () => {
@@ -437,6 +474,28 @@ const loadRecords = async () => {
     ElMessage.error('加载巡检记录失败: ' + error.message)
   } finally {
     loading.value = false
+  }
+}
+
+// 加载问题列表
+const loadIssues = async () => {
+  if (!currentRecordId.value) return
+  issuesLoading.value = true
+  try {
+    const params = {
+      recordId: currentRecordId.value,
+      severity: issueFilter.severity || undefined,
+      status: issueFilter.status || undefined,
+      clusterId: issueFilter.clusterId || undefined,
+      dbName: issueFilter.dbName?.trim() || undefined
+    }
+    const res = await getInspectionIssues(params)
+    issuesList.value = res || []
+  } catch (error) {
+    ElMessage.error('加载问题列表失败: ' + error.message)
+    issuesList.value = []
+  } finally {
+    issuesLoading.value = false
   }
 }
 
@@ -490,11 +549,13 @@ const handleRunInspection = async () => {
 // 查看问题详情
 const handleViewIssues = async (row) => {
   try {
-    const detail = await getInspectionDetail(row.id)
-    currentRecordDetail.value = detail
+    currentRecordId.value = row.id
     issueFilter.severity = null
     issueFilter.status = null
+    issueFilter.clusterId = null
+    issueFilter.dbName = ''
     issuesDialogVisible.value = true
+    await loadIssues()
   } catch (error) {
     ElMessage.error('加载问题详情失败: ' + error.message)
   }
@@ -502,7 +563,7 @@ const handleViewIssues = async (row) => {
 
 // 应用问题筛选
 const applyIssueFilter = () => {
-  // 筛选逻辑已通过 computed 实现
+  loadIssues()
 }
 
 // 查看问题建议
@@ -522,11 +583,8 @@ const handleUpdateIssueStatus = async (issue, newStatus) => {
 
     ElMessage.success('状态更新成功')
 
-    // 重新加载详情 - use the issue's recordId directly instead of array index
-    if (currentRecordDetail.value && issue.recordId) {
-      const detail = await getInspectionDetail(issue.recordId)
-      currentRecordDetail.value = detail
-    }
+    // 重新加载问题列表（保留当前筛选）
+    await loadIssues()
 
     // 刷新概览
     await loadOverview()
@@ -650,6 +708,12 @@ const formatDuration = (seconds) => {
   const minutes = Math.floor(seconds / 60)
   const remainingSeconds = seconds % 60
   return `${minutes}m ${remainingSeconds}s`
+}
+
+const getClusterName = (clusterId) => {
+  if (!clusterId) return '-'
+  const cluster = clustersList.value?.find(c => c.id === clusterId)
+  return cluster?.clusterName || String(clusterId)
 }
 </script>
 

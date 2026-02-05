@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -34,6 +35,7 @@ public class InspectionService {
     private final TableStatisticsHistoryMapper tableStatisticsHistoryMapper;
     private final ObjectMapper objectMapper;
     private final HealthCheckService healthCheckService;
+    private final DorisClusterService dorisClusterService;
 
     /**
      * 执行全量巡检
@@ -138,10 +140,10 @@ public class InspectionService {
         String errorMessage = (String) config.getOrDefault("errorMessage", "表名不符合命名规范");
         Pattern pattern = Pattern.compile(patternStr);
 
-        List<DataTable> tables = dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getStatus, "active")
-        );
+        LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
+            .eq(DataTable::getStatus, "active");
+        applyTableScope(tableWrapper, config);
+        List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : tables) {
             if (!pattern.matcher(table.getTableName()).matches()) {
@@ -171,11 +173,11 @@ public class InspectionService {
         }
         int recommendedReplicas = ((Number) config.getOrDefault("recommendedReplicas", 3)).intValue();
 
-        List<DataTable> tables = dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getStatus, "active")
-                .isNotNull(DataTable::getReplicaNum)
-        );
+        LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
+            .eq(DataTable::getStatus, "active")
+            .isNotNull(DataTable::getReplicaNum);
+        applyTableScope(tableWrapper, config);
+        List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : tables) {
             Integer replicaNum = table.getReplicaNum();
@@ -207,11 +209,11 @@ public class InspectionService {
         int maxTablets = ((Number) config.getOrDefault("maxTablets", 200)).intValue();
         int warningTablets = ((Number) config.getOrDefault("warningTablets", 100)).intValue();
 
-        List<DataTable> tables = dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getStatus, "active")
-                .isNotNull(DataTable::getBucketNum)
-        );
+        LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
+            .eq(DataTable::getStatus, "active")
+            .isNotNull(DataTable::getBucketNum);
+        applyTableScope(tableWrapper, config);
+        List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : tables) {
             Integer bucketNum = table.getBucketNum();
@@ -272,14 +274,14 @@ public class InspectionService {
         long targetTabletBytes = targetTabletSizeMb * 1024L * 1024;
         long minTableBytesForSmallCheck = minTableSizeGbForSmallCheck * 1024L * 1024 * 1024;
 
-        List<DataTable> tables = dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getStatus, "active")
-                .isNotNull(DataTable::getBucketNum)
-                .gt(DataTable::getBucketNum, 0)
-                .isNotNull(DataTable::getStorageSize)
-                .gt(DataTable::getStorageSize, 0)
-        );
+        LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
+            .eq(DataTable::getStatus, "active")
+            .isNotNull(DataTable::getBucketNum)
+            .gt(DataTable::getBucketNum, 0)
+            .isNotNull(DataTable::getStorageSize)
+            .gt(DataTable::getStorageSize, 0);
+        applyTableScope(tableWrapper, config);
+        List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         Map<Long, TableStatisticsHistory> latestHistoryByTableId = getLatestStatisticsHistoryByTableId(tables);
 
@@ -408,12 +410,13 @@ public class InspectionService {
     private List<InspectionIssue> checkTableOwner(Long recordId, InspectionRule rule) {
         List<InspectionIssue> issues = new ArrayList<>();
 
-        List<DataTable> tables = dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getStatus, "active")
-                .and(wrapper -> wrapper.isNull(DataTable::getOwner)
-                    .or().eq(DataTable::getOwner, ""))
-        );
+        Map<String, Object> config = parseRuleConfig(rule.getRuleConfig());
+        LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
+            .eq(DataTable::getStatus, "active")
+            .and(wrapper -> wrapper.isNull(DataTable::getOwner)
+                .or().eq(DataTable::getOwner, ""));
+        applyTableScope(tableWrapper, config);
+        List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : tables) {
             InspectionIssue issue = createIssue(recordId, rule, table);
@@ -434,12 +437,13 @@ public class InspectionService {
     private List<InspectionIssue> checkTableComment(Long recordId, InspectionRule rule) {
         List<InspectionIssue> issues = new ArrayList<>();
 
-        List<DataTable> tables = dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getStatus, "active")
-                .and(wrapper -> wrapper.isNull(DataTable::getTableComment)
-                    .or().eq(DataTable::getTableComment, ""))
-        );
+        Map<String, Object> config = parseRuleConfig(rule.getRuleConfig());
+        LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
+            .eq(DataTable::getStatus, "active")
+            .and(wrapper -> wrapper.isNull(DataTable::getTableComment)
+                .or().eq(DataTable::getTableComment, ""));
+        applyTableScope(tableWrapper, config);
+        List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : tables) {
             InspectionIssue issue = createIssue(recordId, rule, table);
@@ -569,12 +573,12 @@ public class InspectionService {
         List<String> validLayers = (List<String>) config.getOrDefault("validLayers",
             Arrays.asList("ODS", "DWD", "DIM", "DWS", "ADS"));
 
-        List<DataTable> tables = dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getStatus, "active")
-                .and(wrapper -> wrapper.isNull(DataTable::getLayer)
-                    .or().eq(DataTable::getLayer, ""))
-        );
+        LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
+            .eq(DataTable::getStatus, "active")
+            .and(wrapper -> wrapper.isNull(DataTable::getLayer)
+                .or().eq(DataTable::getLayer, ""));
+        applyTableScope(tableWrapper, config);
+        List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : tables) {
             InspectionIssue issue = createIssue(recordId, rule, table);
@@ -600,12 +604,12 @@ public class InspectionService {
         int toleranceHours = ((Number) config.getOrDefault("toleranceHours", 2)).intValue();
 
         // 查询有更新频率配置的表
-        List<DataTable> tables = dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getStatus, "active")
-                .isNotNull(DataTable::getStatisticsCycle)
-                .ne(DataTable::getStatisticsCycle, "")
-        );
+        LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
+            .eq(DataTable::getStatus, "active")
+            .isNotNull(DataTable::getStatisticsCycle)
+            .ne(DataTable::getStatisticsCycle, "");
+        applyTableScope(tableWrapper, config);
+        List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : tables) {
             String cycle = table.getStatisticsCycle();
@@ -806,12 +810,12 @@ public class InspectionService {
         LocalDateTime compareTime = LocalDateTime.now().minusDays(compareDays);
 
         // 查询有数据量记录的表
-        List<DataTable> tables = dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getStatus, "active")
-                .isNotNull(DataTable::getRowCount)
-                .gt(DataTable::getRowCount, minRowThreshold) // 只检查数据量超过阈值的表
-        );
+        LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
+            .eq(DataTable::getStatus, "active")
+            .isNotNull(DataTable::getRowCount)
+            .gt(DataTable::getRowCount, minRowThreshold); // 只检查数据量超过阈值的表
+        applyTableScope(tableWrapper, config);
+        List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : tables) {
             Long currentRowCount = table.getRowCount();
@@ -1064,6 +1068,7 @@ public class InspectionService {
             tableWrapper.in(DataTable::getStatus, "active", "inactive");
         }
 
+        applyTableScope(tableWrapper, config);
         List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : tables) {
@@ -1109,10 +1114,10 @@ public class InspectionService {
         LocalDateTime deprecatedThreshold = LocalDateTime.now().minusDays(deprecatedThresholdDays);
 
         // 查询废弃状态的表
-        List<DataTable> deprecatedTables = dataTableMapper.selectList(
-            new LambdaQueryWrapper<DataTable>()
-                .eq(DataTable::getStatus, "deprecated")
-        );
+        LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
+            .eq(DataTable::getStatus, "deprecated");
+        applyTableScope(tableWrapper, config);
+        List<DataTable> deprecatedTables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : deprecatedTables) {
             // 检查血缘关系
@@ -1285,6 +1290,8 @@ public class InspectionService {
     private InspectionIssue createIssue(Long recordId, InspectionRule rule, DataTable table) {
         InspectionIssue issue = new InspectionIssue();
         issue.setRecordId(recordId);
+        issue.setClusterId(table.getClusterId());
+        issue.setDbName(table.getDbName());
         issue.setIssueType(rule.getRuleType());
         issue.setSeverity(rule.getSeverity());
         issue.setResourceType("table");
@@ -1309,6 +1316,122 @@ public class InspectionService {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private void applyTableScope(LambdaQueryWrapper<DataTable> wrapper, Map<String, Object> ruleConfig) {
+        if (wrapper == null || ruleConfig == null || ruleConfig.isEmpty()) {
+            return;
+        }
+
+        Object scopeObj = ruleConfig.get("scope");
+        if (!(scopeObj instanceof Map)) {
+            return;
+        }
+
+        Map<String, Object> scope = (Map<String, Object>) scopeObj;
+
+        List<Long> clusterIds = new ArrayList<>();
+        clusterIds.addAll(toLongList(firstNonNull(scope, "clusterIds", "clusterId")));
+
+        if (clusterIds.isEmpty()) {
+            List<String> clusterNames = toStringList(firstNonNull(scope, "clusterNames", "clusterName", "dataSources", "dataSource"));
+            for (String name : clusterNames) {
+                if (!StringUtils.hasText(name)) {
+                    continue;
+                }
+                DorisCluster cluster = dorisClusterService.getByName(name.trim());
+                if (cluster != null && cluster.getId() != null) {
+                    clusterIds.add(cluster.getId());
+                }
+            }
+        }
+
+        List<String> dbNames = toStringList(firstNonNull(scope, "dbNames", "dbName", "schemas", "schema"));
+
+        if (!clusterIds.isEmpty()) {
+            wrapper.in(DataTable::getClusterId, clusterIds);
+        }
+        if (!dbNames.isEmpty()) {
+            wrapper.in(DataTable::getDbName, dbNames);
+        }
+    }
+
+    private Object firstNonNull(Map<String, Object> map, String... keys) {
+        if (map == null || keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (map.containsKey(key) && map.get(key) != null) {
+                return map.get(key);
+            }
+        }
+        return null;
+    }
+
+    private List<Long> toLongList(Object value) {
+        if (value == null) {
+            return Collections.emptyList();
+        }
+        List<Long> result = new ArrayList<>();
+        if (value instanceof Number) {
+            result.add(((Number) value).longValue());
+            return result;
+        }
+        if (value instanceof String) {
+            String str = ((String) value).trim();
+            if (!str.isEmpty()) {
+                try {
+                    result.add(Long.parseLong(str));
+                } catch (NumberFormatException ignore) {
+                    // ignore invalid numbers
+                }
+            }
+            return result;
+        }
+        if (value instanceof Collection) {
+            for (Object item : (Collection<?>) value) {
+                if (item instanceof Number) {
+                    result.add(((Number) item).longValue());
+                } else if (item instanceof String) {
+                    String str = ((String) item).trim();
+                    if (!str.isEmpty()) {
+                        try {
+                            result.add(Long.parseLong(str));
+                        } catch (NumberFormatException ignore) {
+                            // ignore invalid numbers
+                        }
+                    }
+                }
+            }
+            return result;
+        }
+        return result;
+    }
+
+    private List<String> toStringList(Object value) {
+        if (value == null) {
+            return Collections.emptyList();
+        }
+        if (value instanceof String) {
+            String str = ((String) value).trim();
+            return StringUtils.hasText(str) ? Collections.singletonList(str) : Collections.emptyList();
+        }
+        if (value instanceof Collection) {
+            List<String> result = new ArrayList<>();
+            for (Object item : (Collection<?>) value) {
+                if (item == null) {
+                    continue;
+                }
+                String str = String.valueOf(item).trim();
+                if (StringUtils.hasText(str)) {
+                    result.add(str);
+                }
+            }
+            return result;
+        }
+        String str = String.valueOf(value).trim();
+        return StringUtils.hasText(str) ? Collections.singletonList(str) : Collections.emptyList();
+    }
+
     /**
      * 获取巡检记录列表
      */
@@ -1325,6 +1448,13 @@ public class InspectionService {
      * 获取巡检问题列表
      */
     public List<InspectionIssue> getInspectionIssues(Long recordId, String status, String severity) {
+        return getInspectionIssues(recordId, status, severity, null, null);
+    }
+
+    /**
+     * 获取巡检问题列表(支持按数据源/Schema过滤)
+     */
+    public List<InspectionIssue> getInspectionIssues(Long recordId, String status, String severity, Long clusterId, String dbName) {
         LambdaQueryWrapper<InspectionIssue> wrapper = new LambdaQueryWrapper<>();
         if (recordId != null) {
             wrapper.eq(InspectionIssue::getRecordId, recordId);
@@ -1334,6 +1464,12 @@ public class InspectionService {
         }
         if (severity != null && !severity.isEmpty()) {
             wrapper.eq(InspectionIssue::getSeverity, severity);
+        }
+        if (clusterId != null) {
+            wrapper.eq(InspectionIssue::getClusterId, clusterId);
+        }
+        if (dbName != null && !dbName.trim().isEmpty()) {
+            wrapper.eq(InspectionIssue::getDbName, dbName.trim());
         }
         wrapper.orderByDesc(InspectionIssue::getCreatedTime);
         return inspectionIssueMapper.selectList(wrapper);

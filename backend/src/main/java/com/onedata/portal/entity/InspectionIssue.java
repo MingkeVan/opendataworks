@@ -21,6 +21,16 @@ public class InspectionIssue {
     private Long recordId;
 
     /**
+     * 数据源ID(集群)
+     */
+    private Long clusterId;
+
+    /**
+     * Schema/数据库名
+     */
+    private String dbName;
+
+    /**
      * 问题类型
      */
     private String issueType;

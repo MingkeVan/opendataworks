@@ -97,9 +97,12 @@ public class InspectionController {
     public Result<List<InspectionIssue>> getInspectionIssues(
             @RequestParam(required = false) Long recordId,
             @RequestParam(required = false) String status,
-            @RequestParam(required = false) String severity) {
-        log.info("Query inspection issues: recordId={}, status={}, severity={}", recordId, status, severity);
-        List<InspectionIssue> issues = inspectionService.getInspectionIssues(recordId, status, severity);
+            @RequestParam(required = false) String severity,
+            @RequestParam(required = false) Long clusterId,
+            @RequestParam(required = false) String dbName) {
+        log.info("Query inspection issues: recordId={}, status={}, severity={}, clusterId={}, dbName={}",
+                recordId, status, severity, clusterId, dbName);
+        List<InspectionIssue> issues = inspectionService.getInspectionIssues(recordId, status, severity, clusterId, dbName);
         return Result.success(issues);
     }
 
