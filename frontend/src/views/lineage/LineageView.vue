@@ -148,7 +148,7 @@ import { lineageApi } from '@/api/lineage'
 import { businessDomainApi, dataDomainApi } from '@/api/domain'
 import { tableApi } from '@/api/table'
 import { LineageGraph } from './LineageGraph'
-import { ElNotification } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
 
 const chartRef = ref(null)
@@ -344,13 +344,24 @@ const renderChart = () => {
   }
 }
 
-const goToTableDetail = () => {
-  if (currentNode.value) {
+const goToTableDetail = async () => {
+  const tableId = currentNode.value?.tableId
+  if (!tableId) return
+  try {
+    const info = await tableApi.getById(tableId)
+    const clusterId = info?.clusterId || info?.sourceId
+    const database = info?.dbName || info?.databaseName || info?.database
+    if (!clusterId || !database) {
+      ElMessage.warning('缺少集群或数据库信息，无法打开 DataStudio')
+      return
+    }
     router.push({
-      path: '/tables',
-      query: { tableName: currentNode.value.name }
+      path: '/datastudio',
+      query: { clusterId: String(clusterId), database: String(database), tableId: String(tableId) }
     })
     dialogVisible.value = false
+  } catch (error) {
+    ElMessage.error('加载表信息失败')
   }
 }
 

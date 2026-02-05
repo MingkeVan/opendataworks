@@ -1,12 +1,12 @@
 import request from '@/utils/request'
 
 export const dataQueryApi = {
-  execute(data) {
-    return request.post('/v1/data-query/execute', data, { timeout: 300000, skipErrorMessage: true })
+  execute(data, config = {}) {
+    return request.post('/v1/data-query/execute', data, { timeout: 300000, skipErrorMessage: true, ...config })
   },
 
-  stop(data) {
-    return request.post('/v1/data-query/stop', data, { timeout: 10000, skipErrorMessage: true })
+  stop(data, config = {}) {
+    return request.post('/v1/data-query/stop', data, { timeout: 10000, skipErrorMessage: true, ...config })
   },
 
   history(params) {

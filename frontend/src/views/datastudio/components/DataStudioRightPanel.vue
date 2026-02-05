@@ -347,11 +347,23 @@
           <div class="lineage-card">
             <div class="lineage-title">上游表 ({{ state.lineage.upstreamTables.length }})</div>
             <div class="task-block">
-              <div class="task-title">写入任务 ({{ state.tasks.writeTasks.length }})</div>
-              <div v-if="state.tasks.writeTasks.length" class="task-list">
-                <div v-for="task in state.tasks.writeTasks" :key="task.id" class="task-item" @click="openTask(task.id)">
-                  <div class="task-name">{{ task.taskName || '-' }}</div>
-                  <div class="task-meta">{{ task.engine || '-' }}</div>
+	              <div class="task-title-row">
+	                <div class="task-title">写入任务 ({{ state.tasks.writeTasks.length }})</div>
+	                <el-button
+	                  type="primary"
+	                  size="small"
+	                  plain
+	                  :disabled="!state.table?.id"
+	                  @click.stop="goCreateRelatedTask(activeTabId, 'write')"
+	                >
+	                  <el-icon><Plus /></el-icon>
+	                  新增写入任务
+	                </el-button>
+	              </div>
+	              <div v-if="state.tasks.writeTasks.length" class="task-list">
+	                <div v-for="task in state.tasks.writeTasks" :key="task.id" class="task-item" @click="openTask(task.id)">
+	                  <div class="task-name">{{ task.taskName || '-' }}</div>
+	                  <div class="task-meta">{{ task.engine || '-' }}</div>
                 </div>
               </div>
               <el-empty v-else description="暂无写入任务" :image-size="40" />
@@ -376,12 +388,24 @@
           <div class="lineage-card">
             <div class="lineage-title">下游表 ({{ state.lineage.downstreamTables.length }})</div>
             <div class="task-block">
-              <div class="task-title">读取任务 ({{ state.tasks.readTasks.length }})</div>
-              <div v-if="state.tasks.readTasks.length" class="task-list">
-                <div v-for="task in state.tasks.readTasks" :key="task.id" class="task-item" @click="openTask(task.id)">
-                  <div class="task-name">{{ task.taskName || '-' }}</div>
-                  <div class="task-meta">{{ task.engine || '-' }}</div>
-                </div>
+	              <div class="task-title-row">
+	                <div class="task-title">读取任务 ({{ state.tasks.readTasks.length }})</div>
+	                <el-button
+	                  type="primary"
+	                  size="small"
+	                  plain
+	                  :disabled="!state.table?.id"
+	                  @click.stop="goCreateRelatedTask(activeTabId, 'read')"
+	                >
+	                  <el-icon><Plus /></el-icon>
+	                  新增读取任务
+	                </el-button>
+	              </div>
+	              <div v-if="state.tasks.readTasks.length" class="task-list">
+	                <div v-for="task in state.tasks.readTasks" :key="task.id" class="task-item" @click="openTask(task.id)">
+	                  <div class="task-name">{{ task.taskName || '-' }}</div>
+	                  <div class="task-meta">{{ task.engine || '-' }}</div>
+	                </div>
               </div>
               <el-empty v-else description="暂无读取任务" :image-size="40" />
             </div>
@@ -412,8 +436,8 @@
 	</template>
 
 <script setup>
-import { computed, inject } from 'vue'
-import { Document, Warning } from '@element-plus/icons-vue'
+	import { computed, inject } from 'vue'
+	import { Document, Plus, Warning } from '@element-plus/icons-vue'
 
 const ctx = inject('dataStudioCtx', null)
 if (!ctx) {
@@ -440,12 +464,13 @@ const {
   cancelFieldsEdit,
   saveFieldsEdit,
   addField,
-  removeField,
-  copyDdl,
-  goLineage,
-  openTask,
-  openTableTab
-} = ctx
+	  removeField,
+	  copyDdl,
+	  goLineage,
+	  goCreateRelatedTask,
+	  openTask,
+	  openTableTab
+	} = ctx
 
 const activeTabId = computed(() => String(activeTab.value || ''))
 
@@ -689,6 +714,13 @@ const fieldRows = computed(() => getFieldRows(activeTabId.value))
 .task-title {
   font-size: 12px;
   color: #64748b;
+}
+
+.task-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .task-list {
