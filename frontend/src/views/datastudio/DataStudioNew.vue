@@ -259,14 +259,14 @@
                           <el-icon><CaretRight /></el-icon>
                           {{ tabStates[tab.id].query.hasSelection ? '运行已选择' : '运行全部' }}
                         </el-button>
-                        <el-button
-                          size="small"
-                          :loading="tabStates[tab.id].queryStopping"
-                          :disabled="!tabStates[tab.id].queryLoading || tabStates[tab.id].queryStopping"
-                          @click="stopQuery(tab.id)"
-                        >
-                          <el-icon><VideoPause /></el-icon>
-                          停止
+	                        <el-button
+	                          size="small"
+	                          :loading="tabStates[tab.id].queryStopping"
+	                          :disabled="!tabStates[tab.id].queryCancelable || tabStates[tab.id].queryStopping"
+	                          @click="stopQuery(tab.id)"
+	                        >
+	                          <el-icon><VideoPause /></el-icon>
+	                          停止
                         </el-button>
                         <el-button size="small" :disabled="tabStates[tab.id].queryLoading" @click="resetQuery(tab.id)">
                           重置
@@ -308,21 +308,20 @@
 	                          <div class="meta-info">
                             <span class="meta-item">
                               <el-icon><Timer /></el-icon>
-                              {{
-                                formatDuration(
-                                  tabStates[tab.id].queryLoading
-                                    ? tabStates[tab.id].queryTiming.elapsedMs
-                                    : tabStates[tab.id].queryResult.durationMs
-                                )
-                              }}
-                            </span>
-                            <span v-if="tabStates[tab.id].queryLoading" class="meta-item">
-                              <el-icon><Loading /></el-icon> 查询中
-                            </span>
-                            <template v-else>
-                              <el-tag v-if="tabStates[tab.id].queryResult.cancelled" size="small" type="warning">
-                                已停止
-                              </el-tag>
+	                              {{ formatDuration(getLiveDurationMs(tab.id)) }}
+	                            </span>
+	                            <span v-if="tabStates[tab.id].queryCancelable" class="meta-item">
+	                              <template v-if="tabStates[tab.id].queryLoading">
+	                                <el-icon><Loading /></el-icon> 查询中
+	                              </template>
+	                              <template v-else>
+	                                <el-icon><Warning /></el-icon> 仍可停止
+	                              </template>
+	                            </span>
+	                            <template v-else>
+	                              <el-tag v-if="tabStates[tab.id].queryResult.cancelled" size="small" type="warning">
+	                                已停止
+	                              </el-tag>
                               <span v-if="tabStates[tab.id].queryResult.executedAt" class="meta-item">
                                 <el-icon><Clock /></el-icon>
                                 {{ formatDateTime(tabStates[tab.id].queryResult.executedAt) }}
@@ -927,13 +926,25 @@
                       </el-button>
                     </div>
                     <div class="lineage-grid">
-                      <div class="lineage-card">
-                        <div class="lineage-title">上游表 ({{ tabStates[tab.id].lineage.upstreamTables.length }})</div>
-                        <div class="task-block">
-                          <div class="task-title">写入任务 ({{ tabStates[tab.id].tasks.writeTasks.length }})</div>
-                          <div v-if="tabStates[tab.id].tasks.writeTasks.length" class="task-list">
-                            <div
-                              v-for="task in tabStates[tab.id].tasks.writeTasks"
+	                      <div class="lineage-card">
+	                        <div class="lineage-title">上游表 ({{ tabStates[tab.id].lineage.upstreamTables.length }})</div>
+	                        <div class="task-block">
+	                          <div class="task-title-row">
+	                            <div class="task-title">写入任务 ({{ tabStates[tab.id].tasks.writeTasks.length }})</div>
+	                            <el-button
+	                              type="primary"
+	                              size="small"
+	                              plain
+	                              :disabled="!tabStates[tab.id].table?.id"
+	                              @click.stop="goCreateRelatedTask(tab.id, 'write')"
+	                            >
+	                              <el-icon><Plus /></el-icon>
+	                              新增写入任务
+	                            </el-button>
+	                          </div>
+	                          <div v-if="tabStates[tab.id].tasks.writeTasks.length" class="task-list">
+	                            <div
+	                              v-for="task in tabStates[tab.id].tasks.writeTasks"
                               :key="task.id"
                               class="task-item"
                               @click="openTask(task.id)"
@@ -961,13 +972,25 @@
                         </div>
                       </div>
 
-                      <div class="lineage-card">
-                        <div class="lineage-title">下游表 ({{ tabStates[tab.id].lineage.downstreamTables.length }})</div>
-                        <div class="task-block">
-                          <div class="task-title">读取任务 ({{ tabStates[tab.id].tasks.readTasks.length }})</div>
-                          <div v-if="tabStates[tab.id].tasks.readTasks.length" class="task-list">
-                            <div
-                              v-for="task in tabStates[tab.id].tasks.readTasks"
+	                      <div class="lineage-card">
+	                        <div class="lineage-title">下游表 ({{ tabStates[tab.id].lineage.downstreamTables.length }})</div>
+	                        <div class="task-block">
+	                          <div class="task-title-row">
+	                            <div class="task-title">读取任务 ({{ tabStates[tab.id].tasks.readTasks.length }})</div>
+	                            <el-button
+	                              type="primary"
+	                              size="small"
+	                              plain
+	                              :disabled="!tabStates[tab.id].table?.id"
+	                              @click.stop="goCreateRelatedTask(tab.id, 'read')"
+	                            >
+	                              <el-icon><Plus /></el-icon>
+	                              新增读取任务
+	                            </el-button>
+	                          </div>
+	                          <div v-if="tabStates[tab.id].tasks.readTasks.length" class="task-list">
+	                            <div
+	                              v-for="task in tabStates[tab.id].tasks.readTasks"
                               :key="task.id"
                               class="task-item"
                               @click="openTask(task.id)"
@@ -1023,7 +1046,7 @@
     </div>
 
     <CreateTableDrawer v-model="createDrawerVisible" @created="handleCreateSuccess" />
-    <TaskEditDrawer ref="taskDrawerRef" />
+    <TaskEditDrawer ref="taskDrawerRef" @success="handleTaskSuccess" />
 
   </div>
 </template>
@@ -1261,12 +1284,29 @@ watch(
   { deep: true }
 )
 
-const tableRefs = ref({})
-const chartRefs = ref({})
-const chartInstances = new Map()
-const resultTableInstances = new Map()
-const taskDrawerRef = ref(null)
-const tableObserver = ref(null)
+	const tableRefs = ref({})
+	const chartRefs = ref({})
+	const chartInstances = new Map()
+	const resultTableInstances = new Map()
+	const taskDrawerRef = ref(null)
+	const tableObserver = ref(null)
+	const nowTick = ref(Date.now())
+	let nowTickHandle = null
+
+	const startNowTicker = () => {
+	  if (nowTickHandle) return
+	  nowTickHandle = setInterval(() => {
+	    nowTick.value = Date.now()
+	  }, 200)
+	}
+
+	const stopNowTickerIfIdle = () => {
+	  if (!nowTickHandle) return
+	  const hasCancelable = Object.values(tabStates).some((state) => !!state?.queryCancelable)
+	  if (hasCancelable) return
+	  clearInterval(nowTickHandle)
+	  nowTickHandle = null
+	}
 
 const layerOptions = [
   { label: 'ODS - 原始数据层', value: 'ODS' },
@@ -1276,29 +1316,31 @@ const layerOptions = [
   { label: 'ADS - 应用数据层', value: 'ADS' }
 ]
 
-const clearQueryTimer = (tabId) => {
-  const handle = queryTimerHandles.get(tabId)
-  if (!handle) return
-  clearInterval(handle)
-  queryTimerHandles.delete(tabId)
-}
+	const clearQueryTimer = (tabId) => {
+	  const handle = queryTimerHandles.get(tabId)
+	  if (!handle) return
+	  clearInterval(handle)
+	  queryTimerHandles.delete(tabId)
+	}
 
-const startQueryTimer = (tabId) => {
-  clearQueryTimer(tabId)
-  const state = tabStates[tabId]
-  if (!state) return
-  state.queryTiming.startedAt = Date.now()
-  state.queryTiming.elapsedMs = 0
-  const handle = setInterval(() => {
-    const current = tabStates[tabId]
-    if (!current?.queryLoading) {
-      clearQueryTimer(tabId)
-      return
-    }
-    current.queryTiming.elapsedMs = Date.now() - current.queryTiming.startedAt
-  }, 200)
-  queryTimerHandles.set(tabId, handle)
-}
+	const startQueryTimer = (tabId) => {
+	  clearQueryTimer(tabId)
+	  const state = tabStates[tabId]
+	  if (!state) return
+	  state.queryTiming.startedAt = Date.now()
+	  state.queryTiming.elapsedMs = 0
+	  startNowTicker()
+	  const handle = setInterval(() => {
+	    const current = tabStates[tabId]
+	    if (!current?.queryCancelable) {
+	      clearQueryTimer(tabId)
+	      stopNowTickerIfIdle()
+	      return
+	    }
+	    current.queryTiming.elapsedMs = Date.now() - current.queryTiming.startedAt
+	  }, 200)
+	  queryTimerHandles.set(tabId, handle)
+	}
 
 const loadClusters = async () => {
   dbLoading.value = true
@@ -1952,22 +1994,25 @@ const setupTableObserver = () => {
   observeExistingTableRefs()
 }
 
-const createTabState = (table) => {
-  return reactive({
-    table: { ...table },
-	    query: {
-	      sql: buildDefaultSql(table),
-	      limit: 200,
-	      hasSelection: false,
-	      selectionText: ''
-	    },
-	    queryLoading: false,
-	    queryStopping: false,
-	    queryTiming: {
-	      startedAt: 0,
-	      elapsedMs: 0
-	    },
-	    queryResult: {
+	const createTabState = (table) => {
+	  return reactive({
+	    table: { ...table },
+		    query: {
+		      sql: buildDefaultSql(table),
+		      limit: 200,
+		      hasSelection: false,
+		      selectionText: ''
+		    },
+		    queryLoading: false,
+		    queryStopping: false,
+		    queryCancelable: false,
+		    queryAbortController: null,
+		    queryRunId: 0,
+		    queryTiming: {
+		      startedAt: 0,
+		      elapsedMs: 0
+		    },
+		    queryResult: {
 	      resultSets: [],
 	      columns: [],
 	      rows: [],
@@ -2364,19 +2409,20 @@ const loadTabData = async (tabId) => {
   }
 }
 
-const disposeTabResources = (tabId) => {
-  const id = String(tabId || '')
-  if (!id) return
-  clearQueryTimer(id)
-  disposeChart(id)
+	const disposeTabResources = (tabId) => {
+	  const id = String(tabId || '')
+	  if (!id) return
+	  clearQueryTimer(id)
+	  disposeChart(id)
   if (leftPaneRefs.value?.[id]) {
     delete leftPaneRefs.value[id]
   }
-  if (leftPaneHeights[id] !== undefined) {
-    delete leftPaneHeights[id]
-  }
-  delete tabStates[id]
-}
+	  if (leftPaneHeights[id] !== undefined) {
+	    delete leftPaneHeights[id]
+	  }
+	  delete tabStates[id]
+	  stopNowTickerIfIdle()
+	}
 
 const handleTabRemove = (name) => {
   const idx = openTabs.value.findIndex((tab) => String(tab.id) === String(name))
@@ -2584,11 +2630,13 @@ const syncAutoSelectSqlIfSchemaMismatch = (state) => {
   }
 }
 
-const executeQuery = async (tabId) => {
-  const state = tabStates[tabId]
-  if (!state) return
-  const selectedSql = String(state?.query?.selectionText || '')
-  const sqlToRun = selectedSql.trim() ? selectedSql : String(state?.query?.sql || '')
+	const executeQuery = async (tabId) => {
+	  const state = tabStates[tabId]
+	  if (!state) return
+	  const runId = Number(state.queryRunId || 0) + 1
+	  state.queryRunId = runId
+	  const selectedSql = String(state?.query?.selectionText || '')
+	  const sqlToRun = selectedSql.trim() ? selectedSql : String(state?.query?.sql || '')
   if (!sqlToRun.trim()) {
     state.queryResult.errorMessage = '请输入 SQL'
     state.queryResult.message = ''
@@ -2602,29 +2650,40 @@ const executeQuery = async (tabId) => {
     return
   }
   const sourceId = state.table?.sourceId || clusterId.value
-  if (!sourceId) {
-    state.queryResult.errorMessage = '请选择数据源'
-    state.queryResult.message = ''
-    state.resultTab = 'result-0'
-    return
-  }
-  state.queryLoading = true
-  state.queryStopping = false
-  state.queryResult.errorMessage = ''
-  state.queryResult.message = ''
-  state.queryResult.cancelled = false
-  startQueryTimer(tabId)
-  disposeChart(tabId)
-  try {
-    const res = await dataQueryApi.execute({
-      clientQueryId: String(tabId),
-      clusterId: sourceId || undefined,
-      database: state.table.dbName || undefined,
-      sql: sqlToRun,
-      limit: state.query.limit
-    })
+	  if (!sourceId) {
+	    state.queryResult.errorMessage = '请选择数据源'
+	    state.queryResult.message = ''
+	    state.resultTab = 'result-0'
+	    return
+	  }
+	  if (state.queryAbortController) {
+	    try {
+	      state.queryAbortController.abort()
+	    } catch (_) {
+	      // ignored
+	    }
+	  }
+	  state.queryAbortController = new AbortController()
+	  state.queryLoading = true
+	  state.queryStopping = false
+	  state.queryCancelable = true
+	  startNowTicker()
+	  state.queryResult.errorMessage = ''
+	  state.queryResult.message = ''
+	  state.queryResult.cancelled = false
+	  startQueryTimer(tabId)
+	  disposeChart(tabId)
+	  try {
+	    const res = await dataQueryApi.execute({
+	      clientQueryId: String(tabId),
+	      clusterId: sourceId || undefined,
+	      database: state.table.dbName || undefined,
+	      sql: sqlToRun,
+	      limit: state.query.limit
+	    }, { signal: state.queryAbortController?.signal })
+	    if (state.queryRunId !== runId) return
 
-    const resultSets = Array.isArray(res.resultSets) ? res.resultSets : []
+	    const resultSets = Array.isArray(res.resultSets) ? res.resultSets : []
     const fallbackResultSet = {
       index: 1,
       columns: res.columns || [],
@@ -2634,21 +2693,24 @@ const executeQuery = async (tabId) => {
     }
     const normalizedSets = resultSets.length ? resultSets : [fallbackResultSet]
 
-    state.queryResult = {
-      resultSets: normalizedSets,
-      columns: res.columns || [],
-      rows: res.rows || [],
+		    state.queryResult = {
+		      resultSets: normalizedSets,
+		      columns: res.columns || [],
+		      rows: res.rows || [],
       hasMore: res.hasMore,
       durationMs: res.durationMs,
       executedAt: res.executedAt,
       cancelled: !!res.cancelled,
-      message: res.message || '',
-      errorMessage: ''
-	    }
-	    state.page.current = 1
-	    state.resultTab = 'result-0'
-		    state.charts = normalizedSets.map(() => ({
-		      type: 'bar',
+		      message: res.message || '',
+		      errorMessage: ''
+		    }
+		    state.queryCancelable = false
+		    state.queryAbortController = null
+		    stopNowTickerIfIdle()
+		    state.page.current = 1
+		    state.resultTab = 'result-0'
+			    state.charts = normalizedSets.map(() => ({
+			      type: 'bar',
 		      xAxis: '',
 		      yAxis: []
 		    }))
@@ -2657,20 +2719,37 @@ const executeQuery = async (tabId) => {
 			    await nextTick()
 			    syncResultPaneLayout(tabId)
 			    fetchHistory()
-	  } catch (error) {
-	    const message = error?.response?.data?.message || error?.message || '查询失败'
-	    state.queryResult = {
-      resultSets: [],
-      columns: [],
-      rows: [],
+		  } catch (error) {
+		    if (state.queryRunId !== runId) return
+		    const isCanceled =
+		      String(error?.code || '') === 'ERR_CANCELED' ||
+		      String(error?.name || '') === 'CanceledError' ||
+		      /canceled/i.test(String(error?.message || ''))
+		    if (isCanceled) {
+		      return
+		    }
+		    const message = error?.response?.data?.message || error?.message || '查询失败'
+		    const hasResponse = !!error?.response
+		    const maybeStillRunning = !hasResponse
+		    if (!maybeStillRunning) {
+		      state.queryCancelable = false
+		    }
+		    if (!state.queryCancelable) {
+		      state.queryAbortController = null
+		      stopNowTickerIfIdle()
+		    }
+		    state.queryResult = {
+	      resultSets: [],
+	      columns: [],
+	      rows: [],
       hasMore: false,
-      durationMs: 0,
-      executedAt: '',
-      cancelled: false,
-	      message: '',
-	      errorMessage: message
-	    }
-		    state.resultTab = 'result-0'
+	      durationMs: 0,
+	      executedAt: '',
+	      cancelled: false,
+		      message: maybeStillRunning ? '查询请求超时/网络异常，可能仍在执行，可点击“停止”' : '',
+		      errorMessage: message
+		    }
+			    state.resultTab = 'result-0'
 		    state.charts = [
 		      {
 		        type: 'bar',
@@ -2679,27 +2758,54 @@ const executeQuery = async (tabId) => {
 		      }
 			    ]
 			    state.resultViewTabs = ['table']
-			  } finally {
-		    state.queryLoading = false
-		    state.queryStopping = false
-		    clearQueryTimer(tabId)
-		  }
-}
+				  } finally {
+			    if (state.queryRunId !== runId) return
+			    state.queryLoading = false
+			    if (!state.queryCancelable) {
+			      clearQueryTimer(tabId)
+			    }
+			  }
+	}
 
-const stopQuery = async (tabId) => {
-  const state = tabStates[tabId]
-  if (!state?.queryLoading || state.queryStopping) return
-  state.queryStopping = true
-  try {
-    await dataQueryApi.stop({ clientQueryId: String(tabId) })
-  } catch (error) {
-    state.queryStopping = false
-    const message = error?.response?.data?.message || error?.message || '停止失败'
-    state.queryResult.errorMessage = message
-    state.queryResult.message = ''
-    state.resultTab = 'result-0'
-  }
-}
+	const stopQuery = async (tabId) => {
+	  const state = tabStates[tabId]
+	  if (!state?.queryCancelable || state.queryStopping) return
+	  state.queryStopping = true
+	  try {
+	    state.queryAbortController?.abort()
+	  } catch (_) {
+	    // ignored
+	  }
+	  state.queryAbortController = null
+	  try {
+	    await dataQueryApi.stop({ clientQueryId: String(tabId) })
+	    state.queryCancelable = false
+	    state.queryLoading = false
+	    state.queryStopping = false
+	    clearQueryTimer(tabId)
+	    stopNowTickerIfIdle()
+	    state.queryResult.cancelled = true
+	    state.queryResult.message = '查询已停止'
+	    state.queryResult.errorMessage = ''
+	  } catch (error) {
+	    state.queryStopping = false
+	    const message = error?.response?.data?.message || error?.message || '停止失败'
+	    state.queryResult.errorMessage = message
+	    state.queryResult.message = ''
+	    state.resultTab = 'result-0'
+	  }
+	}
+
+	const getLiveDurationMs = (tabId) => {
+	  const state = tabStates[String(tabId || '')]
+	  if (!state) return 0
+	  if (state.queryCancelable) {
+	    const startedAt = Number(state.queryTiming?.startedAt || 0)
+	    if (!Number.isFinite(startedAt) || startedAt <= 0) return 0
+	    return Math.max(0, nowTick.value - startedAt)
+	  }
+	  return Number(state.queryResult?.durationMs || 0)
+	}
 
 const resetQuery = (tabId) => {
   const state = tabStates[tabId]
@@ -3452,6 +3558,23 @@ const openTask = (taskId) => {
   taskDrawerRef.value?.open(taskId)
 }
 
+const goCreateRelatedTask = (tabId, relation) => {
+  const state = tabStates[String(tabId || '')]
+  const tableId = state?.table?.id
+  if (!tableId) {
+    ElMessage.warning('请先选择表')
+    return
+  }
+  taskDrawerRef.value?.open(null, { relation, tableId })
+}
+
+const handleTaskSuccess = async () => {
+  const id = String(activeTab.value || '')
+  const tab = getTabItemById(id)
+  if (tab?.kind !== 'table') return
+  await loadTabData(id)
+}
+
 const goLineage = (tabId) => {
   const state = tabStates[tabId]
   if (!state?.table?.id) return
@@ -3635,11 +3758,11 @@ watch(selectedTableKey, (value) => {
   catalogTreeRef.value?.setCurrentKey(value, false)
 })
 
-provide('dataStudioCtx', {
-  clusterId,
-  openTabs,
-  activeTab,
-  tabStates,
+  provide('dataStudioCtx', {
+    clusterId,
+    openTabs,
+    activeTab,
+    tabStates,
   layerOptions,
   isDorisTable,
   isAggregateTable,
@@ -3656,11 +3779,12 @@ provide('dataStudioCtx', {
   saveFieldsEdit,
   addField,
   removeField,
-  copyDdl,
-  goLineage,
-  openTask,
-  openTableTab
-})
+    copyDdl,
+    goLineage,
+    goCreateRelatedTask,
+    openTask,
+    openTableTab
+  })
 
 onMounted(() => {
   setupTableObserver()
@@ -4725,10 +4849,17 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
-.task-title {
-  font-size: 12px;
-  color: #64748b;
-}
+	.task-title {
+	  font-size: 12px;
+	  color: #64748b;
+	}
+
+	.task-title-row {
+	  display: flex;
+	  align-items: center;
+	  justify-content: space-between;
+	  gap: 8px;
+	}
 
 .task-list {
   display: flex;

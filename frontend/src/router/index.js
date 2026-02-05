@@ -23,18 +23,6 @@ const routes = [
         redirect: (to) => ({ path: '/datastudio', query: to.query, hash: to.hash })
       },
       {
-        path: '/tables',
-        redirect: '/datastudio'
-      },
-      {
-        path: '/tables/create',
-        redirect: { path: '/datastudio', query: { create: '1' } }
-      },
-      {
-        path: '/query',
-        redirect: '/datastudio'
-      },
-      {
         path: '/domains',
         name: 'Domains',
         component: () => import('@/views/domains/DomainManagement.vue'),
