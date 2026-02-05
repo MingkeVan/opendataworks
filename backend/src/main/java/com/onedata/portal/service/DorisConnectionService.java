@@ -8,6 +8,7 @@ import com.onedata.portal.dto.TableStatistics;
 import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.entity.DataField;
 import com.onedata.portal.mapper.DorisClusterMapper;
+import com.onedata.portal.util.DorisCreateTableUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -624,17 +625,10 @@ public class DorisConnectionService {
             if (rs.next()) {
                 String createTableSql = rs.getString(2);
 
-                // 解析副本数
-                if (createTableSql.contains("\"replication_num\"")) {
-                    int start = createTableSql.indexOf("\"replication_num\" = \"") + 21;
-                    int end = createTableSql.indexOf("\"", start);
-                    if (start > 20 && end > start) {
-                        try {
-                            stats.setReplicationNum(Integer.parseInt(createTableSql.substring(start, end)));
-                        } catch (NumberFormatException e) {
-                            log.warn("Failed to parse replication_num", e);
-                        }
-                    }
+                // 解析副本数（支持 replication_allocation / dynamic_partition.replication_allocation）
+                Integer replicationNum = DorisCreateTableUtils.parseReplicationNum(createTableSql);
+                if (replicationNum != null) {
+                    stats.setReplicationNum(replicationNum);
                 }
 
                 // 解析分桶数
@@ -863,17 +857,10 @@ public class DorisConnectionService {
                     return info;
                 }
 
-                // 解析副本数
-                if (createTableSql.contains("\"replication_num\"")) {
-                    int start = createTableSql.indexOf("\"replication_num\" = \"") + 21;
-                    int end = createTableSql.indexOf("\"", start);
-                    if (start > 20 && end > start) {
-                        try {
-                            info.put("replicationNum", Integer.parseInt(createTableSql.substring(start, end)));
-                        } catch (NumberFormatException e) {
-                            log.warn("Failed to parse replication_num", e);
-                        }
-                    }
+                // 解析副本数（支持 replication_allocation / dynamic_partition.replication_allocation）
+                Integer replicationNum = DorisCreateTableUtils.parseReplicationNum(createTableSql);
+                if (replicationNum != null) {
+                    info.put("replicationNum", replicationNum);
                 }
 
                 // 解析分桶数
