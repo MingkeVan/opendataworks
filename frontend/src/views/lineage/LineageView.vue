@@ -51,6 +51,14 @@
             <el-option v-for="item in depthOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
+        <el-form-item label="孤立表">
+          <el-switch
+            v-model="filters.showIsolated"
+            inline-prompt
+            active-text="显示"
+            inactive-text="隐藏"
+          />
+        </el-form-item>
         <el-form-item label="数仓层">
           <el-select v-model="filters.layer" placeholder="全部" clearable style="width: 140px">
             <el-option v-for="layer in layerOptions" :key="layer.value" :label="layer.label" :value="layer.value" />
@@ -99,6 +107,7 @@
           :graph="graphData"
           :layout="currentLayout"
           :focus="focusTable"
+          :show-isolated="filters.showIsolated"
           @nodeClick="handleNodeClick"
           @cycleDetected="handleCycleDetected"
         />
@@ -238,6 +247,7 @@ const filters = reactive({
   dbName: '',
   tableId: null,
   depth: 1,
+  showIsolated: false,
   layer: '',
   businessDomain: '',
   dataDomain: '',
@@ -454,6 +464,7 @@ const handleReset = async () => {
   filters.dbName = ''
   filters.tableId = null
   filters.depth = 1
+  filters.showIsolated = false
   filters.layer = ''
   filters.businessDomain = ''
   filters.dataDomain = ''

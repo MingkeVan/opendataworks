@@ -50,7 +50,8 @@ import {
 const props = defineProps({
   graph: { type: Object, default: null },
   layout: { type: String, default: 'dagre' },
-  focus: { type: String, default: '' }
+  focus: { type: String, default: '' },
+  showIsolated: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['nodeClick', 'cycleDetected'])
@@ -94,7 +95,7 @@ const rebuildIndexes = () => {
 }
 
 const rebuildElements = async () => {
-  const result = buildLineageFlow(props.graph, props.layout)
+  const result = buildLineageFlow(props.graph, props.layout, { showIsolated: props.showIsolated })
   nodes.value = result.nodes
   edges.value = result.edges
   rebuildIndexes()
@@ -111,7 +112,7 @@ const rebuildElements = async () => {
   }
 }
 
-watch(() => [props.graph, props.layout], rebuildElements, { immediate: true })
+watch(() => [props.graph, props.layout, props.showIsolated], rebuildElements, { immediate: true })
 
 watch(
   () => props.focus,
@@ -251,6 +252,10 @@ defineExpose({ focusNode, searchNode, fitGraph })
 
 .lineage-flow :deep(.vue-flow__node) {
   border-radius: 12px;
+}
+
+.lineage-flow :deep(.vue-flow__node.is-isolated) {
+  opacity: 0.9;
 }
 
 .lineage-flow :deep(.vue-flow__node.is-inactive) {

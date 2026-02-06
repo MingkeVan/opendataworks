@@ -43,9 +43,10 @@ function dedupeEdges(rawEdges, validNodeIds) {
   return Array.from(edgeMap.values())
 }
 
-export function buildLineageFlow(graph, layoutType = 'dagre') {
+export function buildLineageFlow(graph, layoutType = 'dagre', options = {}) {
   const rawNodes = Array.isArray(graph?.nodes) ? graph.nodes : []
   const rawEdges = Array.isArray(graph?.edges) ? graph.edges : []
+  const showIsolated = options?.showIsolated === true
 
   const nodesById = new Map()
   for (const node of rawNodes) {
@@ -79,30 +80,49 @@ export function buildLineageFlow(graph, layoutType = 'dagre') {
 
   const rankdir = layoutType === 'indented' ? 'TB' : 'LR'
 
-  const baseNodes = Array.from(nodesById.entries()).map(([id, raw]) => ({
-    id,
-    type: 'lineageNode',
-    position: { x: 0, y: 0 },
-    draggable: false,
-    data: {
-      rankdir,
-      tableId: raw?.tableId,
-      clusterId: raw?.clusterId,
-      dbName: raw?.dbName,
+  const allNodes = Array.from(nodesById.entries()).map(([id, raw]) => {
+    const nodeIn = inDegree.get(id) || 0
+    const nodeOut = outDegree.get(id) || 0
+    const isIsolated = nodeIn === 0 && nodeOut === 0
+    return {
       id,
-      name: raw?.name || id,
-      layer: raw?.layer,
-      comment: raw?.comment,
-      businessDomain: raw?.businessDomain,
-      dataDomain: raw?.dataDomain,
-      inDegree: inDegree.get(id) || 0,
-      outDegree: outDegree.get(id) || 0
+      type: 'lineageNode',
+      position: { x: 0, y: 0 },
+      draggable: false,
+      class: isIsolated ? 'is-isolated' : '',
+      data: {
+        rankdir,
+        tableId: raw?.tableId,
+        clusterId: raw?.clusterId,
+        dbName: raw?.dbName,
+        id,
+        name: raw?.name || id,
+        layer: raw?.layer,
+        comment: raw?.comment,
+        businessDomain: raw?.businessDomain,
+        dataDomain: raw?.dataDomain,
+        inDegree: nodeIn,
+        outDegree: nodeOut,
+        isIsolated
+      }
     }
-  }))
+  })
 
-  applyLayeredLayout(baseNodes, baseEdges, rankdir)
+  const connectedNodes = allNodes.filter((node) => !node.data?.isIsolated)
+  const isolatedNodes = allNodes.filter((node) => !!node.data?.isIsolated)
 
-  const cycles = findCycles(baseNodes, baseEdges)
+  if (connectedNodes.length > 0) {
+    applyLayeredLayout(connectedNodes, baseEdges, rankdir)
+  }
+  if (showIsolated && isolatedNodes.length > 0) {
+    placeIsolatedNodes(connectedNodes, isolatedNodes, rankdir)
+  }
+
+  const visibleNodes = showIsolated ? [...connectedNodes, ...isolatedNodes] : connectedNodes
+  const visibleNodeIds = new Set(visibleNodes.map((node) => node.id))
+  const visibleEdges = baseEdges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target))
+
+  const cycles = findCycles(visibleNodes, visibleEdges)
   const cycleEdgeKeys = new Set()
   for (const cycle of cycles) {
     if (cycle.length < 2) continue
@@ -113,7 +133,7 @@ export function buildLineageFlow(graph, layoutType = 'dagre') {
     }
   }
 
-  for (const edge of baseEdges) {
+  for (const edge of visibleEdges) {
     if (!cycleEdgeKeys.has(`${edge.source}=>${edge.target}`)) continue
     edge.class = joinClasses(edge.class, 'is-cycle')
     edge.style = {
@@ -124,7 +144,47 @@ export function buildLineageFlow(graph, layoutType = 'dagre') {
     }
   }
 
-  return { nodes: baseNodes, edges: baseEdges, cycles, rankdir }
+  return { nodes: visibleNodes, edges: visibleEdges, cycles, rankdir }
+}
+
+function placeIsolatedNodes(anchorNodes, isolatedNodes, rankdir) {
+  if (!Array.isArray(isolatedNodes) || isolatedNodes.length === 0) {
+    return
+  }
+
+  isolatedNodes.sort((a, b) => {
+    const aName = String(a?.data?.name || a?.id || '')
+    const bName = String(b?.data?.name || b?.id || '')
+    return aName.localeCompare(bName)
+  })
+
+  const nodeSep = 18
+  const rowSep = 18
+  const laneGap = 140
+  const maxPerRow = rankdir === 'TB' ? 4 : 5
+
+  const firstRowCount = Math.min(maxPerRow, isolatedNodes.length)
+  const rowWidth = firstRowCount * LINEAGE_NODE_WIDTH + Math.max(0, firstRowCount - 1) * nodeSep
+
+  let baseX = -rowWidth / 2
+  let baseY = 0
+  if (anchorNodes.length > 0) {
+    const minX = Math.min(...anchorNodes.map((node) => node.position.x))
+    const maxX = Math.max(...anchorNodes.map((node) => node.position.x))
+    const maxY = Math.max(...anchorNodes.map((node) => node.position.y))
+    const graphWidth = maxX - minX + LINEAGE_NODE_WIDTH
+    baseX = minX + (graphWidth - rowWidth) / 2
+    baseY = maxY + LINEAGE_NODE_HEIGHT + laneGap
+  }
+
+  for (let i = 0; i < isolatedNodes.length; i++) {
+    const row = Math.floor(i / maxPerRow)
+    const col = i % maxPerRow
+    isolatedNodes[i].position = {
+      x: baseX + col * (LINEAGE_NODE_WIDTH + nodeSep),
+      y: baseY + row * (LINEAGE_NODE_HEIGHT + rowSep)
+    }
+  }
 }
 
 function applyLayeredLayout(nodes, edges, rankdir) {
