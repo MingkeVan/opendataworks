@@ -179,6 +179,16 @@ public class LineageService {
             incoming.computeIfAbsent(edge.targetTableId, key -> new LinkedHashSet<>()).add(edge.sourceTableId);
         }
 
+        Set<Long> upstreamReachable = traverseDirectional(centerTableId, incoming, maxDepth);
+        Set<Long> downstreamReachable = traverseDirectional(centerTableId, outgoing, maxDepth);
+
+        Set<Long> result = new LinkedHashSet<>();
+        result.addAll(upstreamReachable);
+        result.addAll(downstreamReachable);
+        return result;
+    }
+
+    private Set<Long> traverseDirectional(Long centerTableId, Map<Long, Set<Long>> adjacency, int maxDepth) {
         Set<Long> visited = new LinkedHashSet<>();
         visited.add(centerTableId);
         Set<Long> frontier = new LinkedHashSet<>();
@@ -188,8 +198,7 @@ public class LineageService {
         while (!frontier.isEmpty() && (maxDepth < 0 || currentDepth < maxDepth)) {
             Set<Long> nextFrontier = new LinkedHashSet<>();
             for (Long current : frontier) {
-                nextFrontier.addAll(outgoing.getOrDefault(current, Collections.emptySet()));
-                nextFrontier.addAll(incoming.getOrDefault(current, Collections.emptySet()));
+                nextFrontier.addAll(adjacency.getOrDefault(current, Collections.emptySet()));
             }
             nextFrontier.removeAll(visited);
             if (nextFrontier.isEmpty()) {

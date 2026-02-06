@@ -87,6 +87,23 @@ class LineageServiceTest {
         assertEquals(newHashSet("0", "1", "2", "3", "4", "9"), nodeIds);
     }
 
+    @Test
+    void getLineageGraphCenterDepthTwoDoesNotMixDirections() {
+        when(dataTableMapper.selectList(any())).thenReturn(buildDirectionalTables());
+        when(dataLineageMapper.selectList(any())).thenReturn(buildDirectionalLineages());
+
+        LineageService.LineageGraph graph = lineageService.getLineageGraph(
+                null, null, null, null, null, null, 10L, 2);
+
+        Set<String> nodeIds = graph.getNodes().stream()
+                .map(LineageService.LineageNode::getId)
+                .collect(Collectors.toSet());
+
+        assertEquals(newHashSet("8", "9", "10", "11", "12"), nodeIds);
+        assertTrue(!nodeIds.contains("7"), "Should not include upstream of downstream branch");
+        assertTrue(!nodeIds.contains("13"), "Should not include downstream of upstream branch");
+    }
+
     private List<DataTable> buildTables() {
         List<DataTable> tables = new ArrayList<>();
         tables.add(table(0L, "ods_user"));
@@ -127,6 +144,31 @@ class LineageServiceTest {
         table.setTableName(tableName);
         table.setStatus("active");
         return table;
+    }
+
+    private List<DataTable> buildDirectionalTables() {
+        List<DataTable> tables = new ArrayList<>();
+        tables.add(table(7L, "branch_in_of_downstream"));
+        tables.add(table(8L, "upstream_lv2"));
+        tables.add(table(9L, "upstream_lv1"));
+        tables.add(table(10L, "center"));
+        tables.add(table(11L, "downstream_lv1"));
+        tables.add(table(12L, "downstream_lv2"));
+        tables.add(table(13L, "branch_out_of_upstream"));
+        return tables;
+    }
+
+    private List<DataLineage> buildDirectionalLineages() {
+        List<DataLineage> lineages = new ArrayList<>();
+        addTaskLineage(lineages, 201L, 8L, 9L);
+        addTaskLineage(lineages, 202L, 9L, 10L);
+        addTaskLineage(lineages, 203L, 10L, 11L);
+        addTaskLineage(lineages, 204L, 11L, 12L);
+
+        // Direction-mixing branches that should be excluded for depth=2 from center(10)
+        addTaskLineage(lineages, 205L, 7L, 11L);
+        addTaskLineage(lineages, 206L, 9L, 13L);
+        return lineages;
     }
 
     private Set<String> newHashSet(String... values) {
