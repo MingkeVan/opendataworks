@@ -26,8 +26,12 @@ public class LineageController {
         @RequestParam(required = false) String layer,
         @RequestParam(required = false) String businessDomain,
         @RequestParam(required = false) String dataDomain,
-        @RequestParam(required = false) String keyword
+        @RequestParam(required = false) String keyword,
+        @RequestParam(required = false) Long clusterId,
+        @RequestParam(required = false) String dbName,
+        @RequestParam(required = false) Long tableId,
+        @RequestParam(required = false) Integer depth
     ) {
-        return Result.success(lineageService.getLineageGraph(layer, businessDomain, dataDomain, keyword));
+        return Result.success(lineageService.getLineageGraph(layer, businessDomain, dataDomain, keyword, clusterId, dbName, tableId, depth));
     }
 }
