@@ -17,6 +17,7 @@ import org.springframework.util.StringUtils;
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -31,6 +32,8 @@ public class DorisConnectionService {
     private final DorisJdbcProperties dorisJdbcProperties;
     private final UserMappingService userMappingService;
     private static final Pattern NUMERIC_PATTERN = Pattern.compile("^-?\\d+(\\.\\d+)?$");
+    private static final Pattern SIZE_WITH_UNIT_PATTERN = Pattern.compile("^([0-9]+(?:\\.[0-9]+)?)\\s*([KMGT]?B)?$",
+            Pattern.CASE_INSENSITIVE);
     private static final Set<String> SYSTEM_DATABASES = new HashSet<>(
             Arrays.asList("information_schema", "mysql", "performance_schema", "sys"));
 
@@ -209,6 +212,107 @@ public class DorisConnectionService {
         return Optional.empty();
     }
 
+    /**
+     * 获取表真实 Tablet 统计（基于 SHOW TABLETS）。
+     * 说明：SHOW TABLETS 一般返回每个 Replica 行，这里按 TabletId 去重并取最大 DataSize 作为单 Tablet 大小。
+     */
+    public Optional<TableTabletStats> getTableTabletStats(Long clusterId, String database, String tableName) {
+        if (clusterId == null || !StringUtils.hasText(database) || !StringUtils.hasText(tableName)) {
+            return Optional.empty();
+        }
+        DorisCluster cluster = resolveCluster(clusterId);
+        try (Connection connection = getConnection(cluster, null)) {
+            return queryTableTabletStats(connection, database.trim(), tableName.trim());
+        } catch (SQLException e) {
+            log.warn("Failed to fetch tablet stats for {}.{}, reason={}", database, tableName, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private Optional<TableTabletStats> queryTableTabletStats(Connection connection, String database, String tableName) {
+        String sql = String.format("SHOW TABLETS FROM `%s`.`%s`", database, tableName);
+        try (Statement stmt = connection.createStatement();
+                ResultSet rs = stmt.executeQuery(sql)) {
+            Map<Long, Long> tabletSizeMap = new HashMap<>();
+            long rowCount = 0L;
+            long syntheticTabletId = -1L;
+
+            while (rs.next()) {
+                rowCount++;
+                Map<String, Object> row = extractRow(rs);
+                Long tabletId = getLong(row, "tabletid", "tablet_id");
+                Long dataSize = parseSizeToBytes(row.get("datasize"));
+                if (dataSize == null || dataSize <= 0) {
+                    continue;
+                }
+                long key = tabletId != null ? tabletId : syntheticTabletId--;
+                tabletSizeMap.merge(key, dataSize, Math::max);
+            }
+
+            if (tabletSizeMap.isEmpty()) {
+                return Optional.empty();
+            }
+
+            long totalSize = tabletSizeMap.values().stream().mapToLong(Long::longValue).sum();
+            long tabletCount = tabletSizeMap.size();
+
+            TableTabletStats stats = new TableTabletStats();
+            stats.setTabletCount(tabletCount);
+            stats.setReplicaRowCount(rowCount);
+            stats.setTotalDataSizeBytes(totalSize);
+            stats.setAvgTabletSizeBytes(totalSize / Math.max(1L, tabletCount));
+            return Optional.of(stats);
+        } catch (SQLException e) {
+            log.warn("SHOW TABLETS failed for {}.{}, reason={}", database, tableName, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private Long parseSizeToBytes(Object rawValue) {
+        if (rawValue == null) {
+            return null;
+        }
+        if (rawValue instanceof Number) {
+            return ((Number) rawValue).longValue();
+        }
+
+        String text = String.valueOf(rawValue).trim();
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        String normalized = text.replace(",", "").toUpperCase(Locale.ROOT);
+        if (NUMERIC_PATTERN.matcher(normalized).matches()) {
+            try {
+                return (long) Double.parseDouble(normalized);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+
+        Matcher matcher = SIZE_WITH_UNIT_PATTERN.matcher(normalized);
+        if (!matcher.matches()) {
+            return null;
+        }
+        double value;
+        try {
+            value = Double.parseDouble(matcher.group(1));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        String unit = matcher.group(2);
+        long multiplier = 1L;
+        if ("KB".equalsIgnoreCase(unit)) {
+            multiplier = 1024L;
+        } else if ("MB".equalsIgnoreCase(unit)) {
+            multiplier = 1024L * 1024L;
+        } else if ("GB".equalsIgnoreCase(unit)) {
+            multiplier = 1024L * 1024L * 1024L;
+        } else if ("TB".equalsIgnoreCase(unit)) {
+            multiplier = 1024L * 1024L * 1024L * 1024L;
+        }
+        return (long) (value * multiplier);
+    }
+
     private Map<String, Object> extractRow(ResultSet rs) throws SQLException {
         Map<String, Object> row = new HashMap<>();
         ResultSetMetaData metaData = rs.getMetaData();
@@ -227,6 +331,13 @@ public class DorisConnectionService {
             Object value = row.get(key.toLowerCase(Locale.ROOT));
             if (value instanceof Number) {
                 return ((Number) value).longValue();
+            }
+            if (value instanceof String && NUMERIC_PATTERN.matcher(((String) value).trim()).matches()) {
+                try {
+                    return (long) Double.parseDouble(((String) value).trim());
+                } catch (NumberFormatException ignore) {
+                    // ignore malformed numeric
+                }
             }
         }
         return null;
@@ -279,6 +390,45 @@ public class DorisConnectionService {
 
         public void setLastUpdate(Timestamp lastUpdate) {
             this.lastUpdate = lastUpdate;
+        }
+    }
+
+    public static class TableTabletStats {
+        private long tabletCount;
+        private long replicaRowCount;
+        private long totalDataSizeBytes;
+        private long avgTabletSizeBytes;
+
+        public long getTabletCount() {
+            return tabletCount;
+        }
+
+        public void setTabletCount(long tabletCount) {
+            this.tabletCount = tabletCount;
+        }
+
+        public long getReplicaRowCount() {
+            return replicaRowCount;
+        }
+
+        public void setReplicaRowCount(long replicaRowCount) {
+            this.replicaRowCount = replicaRowCount;
+        }
+
+        public long getTotalDataSizeBytes() {
+            return totalDataSizeBytes;
+        }
+
+        public void setTotalDataSizeBytes(long totalDataSizeBytes) {
+            this.totalDataSizeBytes = totalDataSizeBytes;
+        }
+
+        public long getAvgTabletSizeBytes() {
+            return avgTabletSizeBytes;
+        }
+
+        public void setAvgTabletSizeBytes(long avgTabletSizeBytes) {
+            this.avgTabletSizeBytes = avgTabletSizeBytes;
         }
     }
 

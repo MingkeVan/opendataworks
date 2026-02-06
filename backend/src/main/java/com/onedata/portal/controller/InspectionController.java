@@ -99,10 +99,11 @@ public class InspectionController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String severity,
             @RequestParam(required = false) Long clusterId,
-            @RequestParam(required = false) String dbName) {
-        log.info("Query inspection issues: recordId={}, status={}, severity={}, clusterId={}, dbName={}",
-                recordId, status, severity, clusterId, dbName);
-        List<InspectionIssue> issues = inspectionService.getInspectionIssues(recordId, status, severity, clusterId, dbName);
+            @RequestParam(required = false) String dbName,
+            @RequestParam(required = false) String tableName) {
+        log.info("Query inspection issues: recordId={}, status={}, severity={}, clusterId={}, dbName={}, tableName={}",
+                recordId, status, severity, clusterId, dbName, tableName);
+        List<InspectionIssue> issues = inspectionService.getInspectionIssues(recordId, status, severity, clusterId, dbName, tableName);
         return Result.success(issues);
     }
 
@@ -130,6 +131,29 @@ public class InspectionController {
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
         result.put("message", "问题状态更新成功");
+        return Result.success(result);
+    }
+
+    /**
+     * 一键修复问题（按问题类型执行）
+     */
+    @PostMapping("/issues/{issueId}/fix")
+    public Result<Map<String, Object>> fixIssue(
+            @PathVariable Long issueId,
+            @RequestBody(required = false) FixIssueRequest request) {
+        String fixedBy = request != null ? request.getFixedBy() : null;
+        log.info("Fix inspection issue: issueId={}, fixedBy={}", issueId, fixedBy);
+        Map<String, Object> result = inspectionService.fixIssue(issueId, fixedBy);
+        return Result.success(result);
+    }
+
+    /**
+     * 查看问题修复方案
+     */
+    @GetMapping("/issues/{issueId}/fix-plan")
+    public Result<Map<String, Object>> getIssueFixPlan(@PathVariable Long issueId) {
+        log.info("Get issue fix plan: issueId={}", issueId);
+        Map<String, Object> result = inspectionService.getIssueFixPlan(issueId);
         return Result.success(result);
     }
 
@@ -218,5 +242,13 @@ public class InspectionController {
     @lombok.Data
     public static class UpdateRuleEnabledRequest {
         private Boolean enabled;
+    }
+
+    /**
+     * 一键修复请求
+     */
+    @lombok.Data
+    public static class FixIssueRequest {
+        private String fixedBy;
     }
 }

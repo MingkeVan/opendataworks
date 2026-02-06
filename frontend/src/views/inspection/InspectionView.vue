@@ -255,7 +255,37 @@
             </el-select>
           </el-form-item>
           <el-form-item label="Schema">
-            <el-input v-model="issueFilter.dbName" placeholder="全部" clearable style="width: 160px" />
+            <el-select
+              v-model="issueFilter.dbName"
+              placeholder="全部"
+              clearable
+              filterable
+              style="width: 180px"
+            >
+              <el-option
+                v-for="schema in schemaOptions"
+                :key="schema"
+                :label="schema"
+                :value="schema"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="表">
+            <el-select
+              v-model="issueFilter.tableName"
+              placeholder="全部"
+              clearable
+              filterable
+              :disabled="!issueFilter.dbName"
+              style="width: 200px"
+            >
+              <el-option
+                v-for="tableName in tableOptions"
+                :key="tableName"
+                :label="tableName"
+                :value="tableName"
+              />
+            </el-select>
           </el-form-item>
           <el-form-item>
             <el-button type="primary" @click="applyIssueFilter">筛选</el-button>
@@ -265,41 +295,47 @@
         <!-- 问题表格 -->
         <el-table
           v-loading="issuesLoading"
-          :data="issuesList"
+          :data="sortedIssuesList"
           stripe
           max-height="500"
           style="width: 100%"
+          @sort-change="handleIssueSortChange"
         >
-          <el-table-column prop="issueType" label="问题类型" width="140">
+          <el-table-column prop="issueType" label="问题类型" width="140" sortable="custom">
             <template #default="{ row }">
               {{ getIssueTypeText(row.issueType) }}
             </template>
           </el-table-column>
-          <el-table-column prop="severity" label="严重程度" width="100">
+          <el-table-column prop="severity" label="严重程度" width="100" sortable="custom">
             <template #default="{ row }">
               <el-tag :type="getSeverityType(row.severity)" size="small">
                 {{ getSeverityText(row.severity) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="数据源" width="160" show-overflow-tooltip>
+          <el-table-column prop="clusterId" label="数据源" width="160" show-overflow-tooltip sortable="custom">
             <template #default="{ row }">
               {{ getClusterName(row.clusterId) }}
             </template>
           </el-table-column>
-          <el-table-column prop="dbName" label="Schema" width="140" show-overflow-tooltip />
-          <el-table-column prop="resourceName" label="资源名称" width="180" show-overflow-tooltip />
+          <el-table-column prop="dbName" label="Schema" width="140" show-overflow-tooltip sortable="custom" />
+          <el-table-column prop="resourceName" label="资源名称" width="180" show-overflow-tooltip sortable="custom" />
           <el-table-column prop="issueDescription" label="问题描述" min-width="200" show-overflow-tooltip />
-          <el-table-column prop="currentValue" label="当前值" width="120" show-overflow-tooltip />
-          <el-table-column prop="expectedValue" label="期望值" width="120" show-overflow-tooltip />
-          <el-table-column prop="status" label="状态" width="100">
+          <el-table-column prop="currentValue" label="当前值" width="120" show-overflow-tooltip sortable="custom" />
+          <el-table-column prop="expectedValue" label="期望值" width="130" show-overflow-tooltip sortable="custom" />
+          <el-table-column prop="status" label="状态" width="100" sortable="custom">
             <template #default="{ row }">
               <el-tag :type="getIssueStatusType(row.status)" size="small">
                 {{ getIssueStatusText(row.status) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right">
+          <el-table-column prop="createdTime" label="发现时间" width="170" sortable="custom">
+            <template #default="{ row }">
+              {{ formatDateTime(row.createdTime) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="280" fixed="right">
             <template #default="{ row }">
               <el-button
                 link
@@ -311,12 +347,31 @@
               </el-button>
               <el-button
                 link
+                type="primary"
+                size="small"
+                v-if="canViewFixPlan(row)"
+                @click="handleViewFixPlan(row)"
+              >
+                查看修复方案
+              </el-button>
+              <el-button
+                link
                 type="success"
                 size="small"
                 v-if="row.status === 'open'"
                 @click="handleUpdateIssueStatus(row, 'resolved')"
               >
                 标记已解决
+              </el-button>
+              <el-button
+                link
+                type="warning"
+                size="small"
+                v-if="canAutoFix(row)"
+                :loading="!!fixingIssueMap[row.id]"
+                @click="handleFixIssue(row)"
+              >
+                一键修复
               </el-button>
               <el-button
                 link
@@ -361,11 +416,71 @@
         <el-button @click="suggestionDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="fixPlanDialogVisible"
+      title="修复方案"
+      width="820px"
+    >
+      <div v-loading="fixPlanLoading">
+        <div v-if="currentFixPlan">
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="策略">{{ currentFixPlan.strategy || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="可自动修复">{{ currentFixPlan.autoFixable ? '是' : '否' }}</el-descriptions-item>
+            <el-descriptions-item label="分区模式">{{ isTabletFixPlan ? (currentFixPlan.current?.partitionMode || '-') : '-' }}</el-descriptions-item>
+            <el-descriptions-item label="模式建议">{{ isTabletFixPlan ? (currentFixPlan.modeRecommendation || '-') : '-' }}</el-descriptions-item>
+          </el-descriptions>
+
+          <el-alert
+            type="info"
+            :closable="false"
+            style="margin-top: 12px"
+            title="官方建议"
+            :description="(currentFixPlan.officialRecommendations || []).join('；')"
+          />
+
+          <el-descriptions :column="2" border style="margin-top: 12px">
+            <template v-if="isReplicaFixPlan">
+              <el-descriptions-item label="当前副本数">{{ currentFixPlan.current?.replicaNum ?? '-' }}</el-descriptions-item>
+              <el-descriptions-item label="目标副本数">{{ currentFixPlan.target?.replicaNum ?? '-' }}</el-descriptions-item>
+            </template>
+            <template v-else>
+              <el-descriptions-item label="当前 Tablet 数">{{ currentFixPlan.current?.tabletCount ?? '-' }}</el-descriptions-item>
+              <el-descriptions-item label="目标 Tablet 数">{{ currentFixPlan.target?.targetTabletCount ?? '-' }}</el-descriptions-item>
+              <el-descriptions-item label="当前 Bucket">{{ currentFixPlan.current?.bucketNum ?? '-' }}</el-descriptions-item>
+              <el-descriptions-item label="目标 Bucket">{{ currentFixPlan.target?.targetBucketNum ?? '-' }}</el-descriptions-item>
+              <el-descriptions-item label="当前平均 Tablet 大小">{{ currentFixPlan.current?.avgTabletSizeReadable ?? '-' }}</el-descriptions-item>
+              <el-descriptions-item label="推荐大小区间">{{ currentFixPlan.target?.tabletSizeRange ?? '-' }}</el-descriptions-item>
+            </template>
+          </el-descriptions>
+
+          <el-alert
+            type="warning"
+            :closable="false"
+            style="margin-top: 12px"
+            title="解决方案"
+            :description="(currentFixPlan.solutions || []).join('；')"
+          />
+
+          <el-input
+            style="margin-top: 12px"
+            type="textarea"
+            :rows="Math.min(10, Math.max(3, (currentFixPlan.sqls || []).length + 1))"
+            readonly
+            :model-value="(currentFixPlan.sqls || []).join('\n')"
+          />
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="fixPlanDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Refresh,
@@ -381,10 +496,13 @@ import {
   getInspectionOverview,
   getInspectionRules,
   getInspectionIssues,
+  getIssueFixPlan,
+  fixInspectionIssue,
   updateRuleEnabled,
   updateIssueStatus
 } from '@/api/inspection'
 import { dorisClusterApi } from '@/api/doris'
+import { tableApi } from '@/api/table'
 
 // 数据定义
 const loading = ref(false)
@@ -399,17 +517,28 @@ const clustersList = ref([])
 // 对话框控制
 const issuesDialogVisible = ref(false)
 const suggestionDialogVisible = ref(false)
+const fixPlanDialogVisible = ref(false)
 const currentRecordId = ref(null)
 const issuesLoading = ref(false)
 const issuesList = ref([])
 const currentIssue = ref(null)
+const currentFixPlan = ref(null)
+const fixPlanLoading = ref(false)
+const schemaOptions = ref([])
+const tableOptions = ref([])
+const fixingIssueMap = reactive({})
+const issueSort = reactive({
+  prop: 'createdTime',
+  order: 'descending'
+})
 
 // 问题筛选
 const issueFilter = reactive({
   severity: null,
   status: null,
   clusterId: null,
-  dbName: ''
+  dbName: '',
+  tableName: ''
 })
 
 const severitySummary = computed(() => {
@@ -422,6 +551,39 @@ const severitySummary = computed(() => {
   }
   return summary
 })
+
+const severityRank = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1
+}
+
+const issueStatusRank = {
+  open: 4,
+  acknowledged: 3,
+  resolved: 2,
+  ignored: 1
+}
+
+const sortedIssuesList = computed(() => {
+  const list = [...(issuesList.value || [])]
+  const prop = issueSort.prop
+  const order = issueSort.order
+  if (!prop || !order) return list
+
+  const factor = order === 'ascending' ? 1 : -1
+  return list.sort((a, b) => {
+    const av = normalizeSortValue(getIssueSortValue(a, prop))
+    const bv = normalizeSortValue(getIssueSortValue(b, prop))
+    if (av < bv) return -1 * factor
+    if (av > bv) return 1 * factor
+    return 0
+  })
+})
+
+const isReplicaFixPlan = computed(() => currentFixPlan.value?.issueType === 'replica_count')
+const isTabletFixPlan = computed(() => ['tablet_count', 'tablet_size'].includes(currentFixPlan.value?.issueType))
 
 // 页面加载
 onMounted(() => {
@@ -440,6 +602,59 @@ const loadClusters = async () => {
     clustersList.value = []
   }
 }
+
+const loadSchemaOptions = async () => {
+  try {
+    const res = await tableApi.listDatabases(issueFilter.clusterId || null)
+    schemaOptions.value = (res || []).filter(Boolean)
+  } catch (error) {
+    console.error('Failed to load schema options:', error)
+    schemaOptions.value = []
+  }
+}
+
+const loadTableOptions = async () => {
+  if (!issueFilter.dbName) {
+    tableOptions.value = []
+    return
+  }
+  try {
+    const res = await tableApi.listByDatabase(
+      issueFilter.dbName,
+      'tableName',
+      'asc',
+      issueFilter.clusterId || null
+    )
+    tableOptions.value = Array.from(
+      new Set(
+        (res || [])
+          .map(item => item?.tableName)
+          .filter(name => !!name)
+      )
+    )
+  } catch (error) {
+    console.error('Failed to load table options:', error)
+    tableOptions.value = []
+  }
+}
+
+watch(
+  () => issueFilter.clusterId,
+  async () => {
+    issueFilter.dbName = ''
+    issueFilter.tableName = ''
+    tableOptions.value = []
+    await loadSchemaOptions()
+  }
+)
+
+watch(
+  () => issueFilter.dbName,
+  async () => {
+    issueFilter.tableName = ''
+    await loadTableOptions()
+  }
+)
 
 // 加载概览
 const loadOverview = async () => {
@@ -487,7 +702,8 @@ const loadIssues = async () => {
       severity: issueFilter.severity || undefined,
       status: issueFilter.status || undefined,
       clusterId: issueFilter.clusterId || undefined,
-      dbName: issueFilter.dbName?.trim() || undefined
+      dbName: issueFilter.dbName?.trim() || undefined,
+      tableName: issueFilter.tableName?.trim() || undefined
     }
     const res = await getInspectionIssues(params)
     issuesList.value = res || []
@@ -554,7 +770,11 @@ const handleViewIssues = async (row) => {
     issueFilter.status = null
     issueFilter.clusterId = null
     issueFilter.dbName = ''
+    issueFilter.tableName = ''
+    schemaOptions.value = []
+    tableOptions.value = []
     issuesDialogVisible.value = true
+    await loadSchemaOptions()
     await loadIssues()
   } catch (error) {
     ElMessage.error('加载问题详情失败: ' + error.message)
@@ -570,6 +790,26 @@ const applyIssueFilter = () => {
 const handleViewIssueSuggestion = (issue) => {
   currentIssue.value = issue
   suggestionDialogVisible.value = true
+}
+
+const canViewFixPlan = (issue) => {
+  const fixableTypes = ['replica_count', 'tablet_count', 'tablet_size']
+  return !!issue?.id && fixableTypes.includes(issue.issueType)
+}
+
+const handleViewFixPlan = async (issue) => {
+  if (!issue?.id) return
+  fixPlanLoading.value = true
+  currentFixPlan.value = null
+  fixPlanDialogVisible.value = true
+  try {
+    const result = await getIssueFixPlan(issue.id)
+    currentFixPlan.value = result || null
+  } catch (error) {
+    ElMessage.error('加载修复方案失败: ' + error.message)
+  } finally {
+    fixPlanLoading.value = false
+  }
 }
 
 // 更新问题状态
@@ -593,6 +833,52 @@ const handleUpdateIssueStatus = async (issue, newStatus) => {
   }
 }
 
+const canAutoFix = (issue) => {
+  return issue?.status === 'open' && issue?.issueType === 'replica_count'
+}
+
+const handleFixIssue = async (issue) => {
+  if (!issue?.id || !canAutoFix(issue)) return
+  if (fixingIssueMap[issue.id]) return
+
+  try {
+    await ElMessageBox.confirm(
+      `将对 ${issue.dbName || '-'}.${
+        issue.resourceName || '-'
+      } 执行副本数自动修复，是否继续？`,
+      '确认一键修复',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+
+  fixingIssueMap[issue.id] = true
+  try {
+    const result = await fixInspectionIssue(issue.id, { fixedBy: 'admin' })
+    if (issue.issueType === 'replica_count') {
+      ElMessage.success(`修复成功，目标副本数 ${result?.targetReplicaNum ?? '-'}`)
+    } else {
+      ElMessage.success(`修复成功，策略 ${result?.strategy || '-'}`)
+    }
+    await loadIssues()
+    await loadOverview()
+  } catch (error) {
+    ElMessage.error('一键修复失败: ' + error.message)
+  } finally {
+    fixingIssueMap[issue.id] = false
+  }
+}
+
+const handleIssueSortChange = ({ prop, order }) => {
+  issueSort.prop = prop
+  issueSort.order = order
+}
+
 // 刷新数据
 const refreshData = () => {
   loadOverview()
@@ -601,6 +887,34 @@ const refreshData = () => {
 }
 
 // 工具函数
+const getIssueSortValue = (issue, prop) => {
+  if (!issue) return ''
+  switch (prop) {
+    case 'issueType':
+      return getIssueTypeText(issue.issueType || '')
+    case 'severity':
+      return severityRank[issue.severity] || 0
+    case 'clusterId':
+      return getClusterName(issue.clusterId)
+    case 'status':
+      return issueStatusRank[issue.status] || 0
+    case 'createdTime':
+      return issue.createdTime || ''
+    default:
+      return issue[prop] ?? ''
+  }
+}
+
+const normalizeSortValue = (value) => {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'number') return value
+  const numeric = Number(value)
+  if (!Number.isNaN(numeric) && String(value).trim() !== '') {
+    return numeric
+  }
+  return String(value).toLowerCase()
+}
+
 const getInspectionTypeText = (type) => {
   const typeMap = {
     'full': '全量巡检',

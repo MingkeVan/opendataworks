@@ -55,6 +55,27 @@ export function updateIssueStatus(issueId, data) {
 }
 
 /**
+ * 一键修复问题
+ */
+export function fixInspectionIssue(issueId, data = {}) {
+  return request({
+    url: `/v1/inspections/issues/${issueId}/fix`,
+    method: 'post',
+    data
+  })
+}
+
+/**
+ * 查看问题修复方案
+ */
+export function getIssueFixPlan(issueId) {
+  return request({
+    url: `/v1/inspections/issues/${issueId}/fix-plan`,
+    method: 'get'
+  })
+}
+
+/**
  * 获取巡检概览统计
  */
 export function getInspectionOverview() {
