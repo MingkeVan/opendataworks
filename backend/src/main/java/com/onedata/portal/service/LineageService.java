@@ -144,6 +144,24 @@ public class LineageService {
         for (Map.Entry<Long, List<DataLineage>> entry : lineagesByTask.entrySet()) {
             Long taskId = entry.getKey();
             List<DataLineage> taskLineages = entry.getValue();
+            Set<String> uniquePairs = new HashSet<>();
+
+            // 兼容直接表级血缘（lineage_type=table）或已有上下游都写入同一行的数据
+            for (DataLineage lineage : taskLineages) {
+                Long upstreamId = lineage.getUpstreamTableId();
+                Long downstreamId = lineage.getDownstreamTableId();
+                if (upstreamId == null || downstreamId == null) {
+                    continue;
+                }
+                if (!validTableIds.contains(upstreamId) || !validTableIds.contains(downstreamId)) {
+                    continue;
+                }
+                String key = upstreamId + "->" + downstreamId;
+                if (!uniquePairs.add(key)) {
+                    continue;
+                }
+                edges.add(new EdgeRecord(upstreamId, downstreamId, taskId));
+            }
 
             Set<Long> inputTableIds = taskLineages.stream()
                     .filter(l -> "input".equals(l.getLineageType()) && l.getUpstreamTableId() != null)
@@ -159,6 +177,10 @@ public class LineageService {
 
             for (Long upstreamId : inputTableIds) {
                 for (Long downstreamId : outputTableIds) {
+                    String key = upstreamId + "->" + downstreamId;
+                    if (!uniquePairs.add(key)) {
+                        continue;
+                    }
                     edges.add(new EdgeRecord(upstreamId, downstreamId, taskId));
                 }
             }
@@ -179,6 +201,16 @@ public class LineageService {
             incoming.computeIfAbsent(edge.targetTableId, key -> new LinkedHashSet<>()).add(edge.sourceTableId);
         }
 
+        Set<Long> upstreamReachable = traverseDirectional(centerTableId, incoming, maxDepth);
+        Set<Long> downstreamReachable = traverseDirectional(centerTableId, outgoing, maxDepth);
+
+        Set<Long> result = new LinkedHashSet<>();
+        result.addAll(upstreamReachable);
+        result.addAll(downstreamReachable);
+        return result;
+    }
+
+    private Set<Long> traverseDirectional(Long centerTableId, Map<Long, Set<Long>> adjacency, int maxDepth) {
         Set<Long> visited = new LinkedHashSet<>();
         visited.add(centerTableId);
         Set<Long> frontier = new LinkedHashSet<>();
@@ -188,8 +220,7 @@ public class LineageService {
         while (!frontier.isEmpty() && (maxDepth < 0 || currentDepth < maxDepth)) {
             Set<Long> nextFrontier = new LinkedHashSet<>();
             for (Long current : frontier) {
-                nextFrontier.addAll(outgoing.getOrDefault(current, Collections.emptySet()));
-                nextFrontier.addAll(incoming.getOrDefault(current, Collections.emptySet()));
+                nextFrontier.addAll(adjacency.getOrDefault(current, Collections.emptySet()));
             }
             nextFrontier.removeAll(visited);
             if (nextFrontier.isEmpty()) {

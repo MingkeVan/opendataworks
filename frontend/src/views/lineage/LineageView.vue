@@ -389,16 +389,18 @@ const loadRelatedTasks = async () => {
 
 const buildParams = () => {
   const params = {}
-  if (filters.clusterId) params.clusterId = filters.clusterId
-  if (filters.dbName) params.dbName = filters.dbName
   if (filters.tableId) {
     params.tableId = filters.tableId
     params.depth = filters.depth
+    // 中心表模式下优先保证链路完整，不用其它筛选条件裁剪上下游
+    return params
   }
+  if (filters.clusterId) params.clusterId = filters.clusterId
+  if (filters.dbName) params.dbName = filters.dbName
   if (filters.layer) params.layer = filters.layer
   if (filters.businessDomain) params.businessDomain = filters.businessDomain
   if (filters.dataDomain) params.dataDomain = filters.dataDomain
-  if (filters.keyword && !filters.tableId) params.keyword = filters.keyword.trim()
+  if (filters.keyword) params.keyword = filters.keyword.trim()
   return params
 }
 
