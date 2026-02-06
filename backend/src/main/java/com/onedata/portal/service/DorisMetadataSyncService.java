@@ -46,6 +46,7 @@ public class DorisMetadataSyncService {
         private int updatedFields = 0;
         private int deletedFields = 0;
         private int deletedTables = 0;
+        private int inactivatedTables = 0;
         private List<String> errors = new ArrayList<>();
 
         public void addNewTable() {
@@ -70,6 +71,10 @@ public class DorisMetadataSyncService {
 
         public void addDeletedTable() {
             deletedTables++;
+        }
+
+        public void addInactivatedTable() {
+            inactivatedTables++;
         }
 
         public void addError(String error) {
@@ -100,6 +105,10 @@ public class DorisMetadataSyncService {
             return deletedTables;
         }
 
+        public int getInactivatedTables() {
+            return inactivatedTables;
+        }
+
         public List<String> getErrors() {
             return errors;
         }
@@ -107,8 +116,8 @@ public class DorisMetadataSyncService {
         @Override
         public String toString() {
             return String.format(
-                    "SyncResult{newTables=%d, updatedTables=%d, deletedTables=%d, newFields=%d, updatedFields=%d, deletedFields=%d, errors=%d}",
-                    newTables, updatedTables, deletedTables, newFields, updatedFields, deletedFields, errors.size());
+                    "SyncResult{newTables=%d, updatedTables=%d, deletedTables=%d, inactivatedTables=%d, newFields=%d, updatedFields=%d, deletedFields=%d, errors=%d}",
+                    newTables, updatedTables, deletedTables, inactivatedTables, newFields, updatedFields, deletedFields, errors.size());
         }
     }
 
@@ -263,6 +272,8 @@ public class DorisMetadataSyncService {
                     .filter(db -> !IGNORED_DATABASES.contains(db))
                     .collect(Collectors.toList());
             log.info("Found {} databases to audit (filtered)", databases.size());
+
+            appendInaccessibleDatabaseWarnings(clusterId, databases, result);
 
             for (String database : databases) {
                 try {
@@ -580,6 +591,9 @@ public class DorisMetadataSyncService {
                 }
             }
 
+            // 将当前账号不可见数据库中的 active 表降级为 inactive，避免巡检误报历史冗余元数据
+            inactivateTablesInHiddenDatabases(clusterId, databases, result);
+
             log.info("Metadata sync completed: {}", result);
         } catch (Exception e) {
             log.error("Failed to sync metadata", e);
@@ -587,6 +601,49 @@ public class DorisMetadataSyncService {
         }
 
         return result;
+    }
+
+    private void appendInaccessibleDatabaseWarnings(Long clusterId, List<String> visibleDatabases, AuditResult result) {
+        Set<String> visible = visibleDatabases == null ? Collections.emptySet() : new HashSet<>(visibleDatabases);
+        List<DataTable> localTables = dataTableMapper.selectList(
+                new LambdaQueryWrapper<DataTable>()
+                        .eq(DataTable::getClusterId, clusterId)
+                        .eq(DataTable::getStatus, "active"));
+
+        Set<String> hiddenDatabases = localTables.stream()
+                .map(DataTable::getDbName)
+                .filter(StringUtils::hasText)
+                .filter(db -> !visible.contains(db))
+                .collect(Collectors.toCollection(TreeSet::new));
+
+        if (!hiddenDatabases.isEmpty()) {
+            result.addError("检测到本地存在当前 Doris 账号不可见的数据库: " + String.join(", ", hiddenDatabases)
+                    + "。可能是权限收缩导致的历史元数据残留。");
+        }
+    }
+
+    private void inactivateTablesInHiddenDatabases(Long clusterId, List<String> visibleDatabases, SyncResult result) {
+        Set<String> visible = visibleDatabases == null ? Collections.emptySet() : new HashSet<>(visibleDatabases);
+        List<DataTable> localTables = dataTableMapper.selectList(
+                new LambdaQueryWrapper<DataTable>()
+                        .eq(DataTable::getClusterId, clusterId)
+                        .eq(DataTable::getStatus, "active"));
+
+        for (DataTable table : localTables) {
+            String dbName = table.getDbName();
+            if (StringUtils.hasText(dbName) && visible.contains(dbName)) {
+                continue;
+            }
+            DataTable update = new DataTable();
+            update.setId(table.getId());
+            update.setStatus("inactive");
+            update.setIsSynced(0);
+            update.setSyncTime(LocalDateTime.now());
+            dataTableMapper.updateById(update);
+            result.addInactivatedTable();
+            log.info("Inactivated hidden table metadata: {}.{} (cluster={})",
+                    table.getDbName(), table.getTableName(), clusterId);
+        }
     }
 
     /**
@@ -760,6 +817,13 @@ public class DorisMetadataSyncService {
         // 自动识别 deprecated 表（历史上手工重命名/遗留表）
         if (TableNameUtils.isDeprecatedTableName(tableName) && !"deprecated".equals(localTable.getStatus())) {
             localTable.setStatus("deprecated");
+            updated = true;
+        }
+        // 之前因账号不可见被降级为 inactive 的表，在再次可见时自动恢复
+        if ("inactive".equals(localTable.getStatus())
+                && Objects.equals(localTable.getIsSynced(), 0)
+                && !TableNameUtils.isDeprecatedTableName(tableName)) {
+            localTable.setStatus("active");
             updated = true;
         }
 
