@@ -204,7 +204,11 @@ const fitGraph = async () => {
 
 const focusNode = async (id) => {
   if (!id) return false
-  const node = flow.findNode(id)
+  const normalized = String(id)
+  const exact = flow.findNode(normalized)
+  const fallback = exact
+    || nodes.value.find((item) => String(item.id) === normalized || String(item.data?.name || '') === normalized)
+  const node = fallback ? flow.findNode(String(fallback.id)) : null
   if (!node) return false
 
   const width = node.dimensions?.width || LINEAGE_NODE_WIDTH
@@ -221,7 +225,10 @@ const searchNode = async (keyword) => {
   const normalized = String(keyword || '').trim()
   if (!normalized) return false
 
-  const match = nodes.value.find((n) => String(n.data?.name || '').includes(normalized) || n.id.includes(normalized))
+  const match = nodes.value.find((n) =>
+    String(n.data?.name || '').includes(normalized)
+    || String(n.data?.dbName || '').includes(normalized)
+    || String(n.id || '').includes(normalized))
   if (!match) return false
 
   clearHighlight()
