@@ -14,7 +14,7 @@
 
     <groupId>com.onedata</groupId>
     <artifactId>opendataworks-backend</artifactId>
-    <version>0.3.2</version>
+    <version>0.3.3</version>
     <name>OpenDataWorks Backend</name>
     <description>统一数据中台门户系统</description>
 
