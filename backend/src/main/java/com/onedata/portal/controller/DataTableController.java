@@ -788,6 +788,7 @@ public class DataTableController {
             response.put("newFields", result.getNewFields());
             response.put("updatedFields", result.getUpdatedFields());
             response.put("deletedFields", result.getDeletedFields());
+            response.put("inactivatedTables", result.getInactivatedTables());
             response.put("errors", result.getErrors());
             response.put("syncTime", LocalDateTime.now());
 
@@ -820,6 +821,7 @@ public class DataTableController {
             response.put("newFields", result.getNewFields());
             response.put("updatedFields", result.getUpdatedFields());
             response.put("deletedFields", result.getDeletedFields());
+            response.put("inactivatedTables", result.getInactivatedTables());
             response.put("errors", result.getErrors());
             response.put("syncTime", LocalDateTime.now());
 
@@ -874,6 +876,7 @@ public class DataTableController {
             response.put("newFields", result.getNewFields());
             response.put("updatedFields", result.getUpdatedFields());
             response.put("deletedFields", result.getDeletedFields());
+            response.put("inactivatedTables", result.getInactivatedTables());
             response.put("errors", result.getErrors());
             response.put("syncTime", LocalDateTime.now());
 
