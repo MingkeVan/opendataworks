@@ -144,6 +144,24 @@ public class LineageService {
         for (Map.Entry<Long, List<DataLineage>> entry : lineagesByTask.entrySet()) {
             Long taskId = entry.getKey();
             List<DataLineage> taskLineages = entry.getValue();
+            Set<String> uniquePairs = new HashSet<>();
+
+            // 兼容直接表级血缘（lineage_type=table）或已有上下游都写入同一行的数据
+            for (DataLineage lineage : taskLineages) {
+                Long upstreamId = lineage.getUpstreamTableId();
+                Long downstreamId = lineage.getDownstreamTableId();
+                if (upstreamId == null || downstreamId == null) {
+                    continue;
+                }
+                if (!validTableIds.contains(upstreamId) || !validTableIds.contains(downstreamId)) {
+                    continue;
+                }
+                String key = upstreamId + "->" + downstreamId;
+                if (!uniquePairs.add(key)) {
+                    continue;
+                }
+                edges.add(new EdgeRecord(upstreamId, downstreamId, taskId));
+            }
 
             Set<Long> inputTableIds = taskLineages.stream()
                     .filter(l -> "input".equals(l.getLineageType()) && l.getUpstreamTableId() != null)
@@ -159,6 +177,10 @@ public class LineageService {
 
             for (Long upstreamId : inputTableIds) {
                 for (Long downstreamId : outputTableIds) {
+                    String key = upstreamId + "->" + downstreamId;
+                    if (!uniquePairs.add(key)) {
+                        continue;
+                    }
                     edges.add(new EdgeRecord(upstreamId, downstreamId, taskId));
                 }
             }

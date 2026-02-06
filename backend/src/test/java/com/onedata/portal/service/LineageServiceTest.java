@@ -104,6 +104,25 @@ class LineageServiceTest {
         assertTrue(!nodeIds.contains("13"), "Should not include downstream of upstream branch");
     }
 
+    @Test
+    void getLineageGraphSupportsDirectTableLineageRows() {
+        when(dataTableMapper.selectList(any())).thenReturn(buildDirectTables());
+        when(dataLineageMapper.selectList(any())).thenReturn(buildDirectTableLineagesOnly());
+
+        LineageService.LineageGraph graph = lineageService.getLineageGraph(
+                null, null, null, null, null, null, 21L, 1);
+
+        Set<String> nodeIds = graph.getNodes().stream()
+                .map(LineageService.LineageNode::getId)
+                .collect(Collectors.toSet());
+        Set<String> edgePairs = graph.getEdges().stream()
+                .map(edge -> edge.getSource() + "->" + edge.getTarget())
+                .collect(Collectors.toSet());
+
+        assertEquals(newHashSet("20", "21"), nodeIds);
+        assertEquals(newHashSet("20->21"), edgePairs);
+    }
+
     private List<DataTable> buildTables() {
         List<DataTable> tables = new ArrayList<>();
         tables.add(table(0L, "ods_user"));
@@ -168,6 +187,24 @@ class LineageServiceTest {
         // Direction-mixing branches that should be excluded for depth=2 from center(10)
         addTaskLineage(lineages, 205L, 7L, 11L);
         addTaskLineage(lineages, 206L, 9L, 13L);
+        return lineages;
+    }
+
+    private List<DataTable> buildDirectTables() {
+        List<DataTable> tables = new ArrayList<>();
+        tables.add(table(20L, "direct_upstream"));
+        tables.add(table(21L, "direct_center"));
+        return tables;
+    }
+
+    private List<DataLineage> buildDirectTableLineagesOnly() {
+        List<DataLineage> lineages = new ArrayList<>();
+        DataLineage direct = new DataLineage();
+        direct.setTaskId(300L);
+        direct.setLineageType("table");
+        direct.setUpstreamTableId(20L);
+        direct.setDownstreamTableId(21L);
+        lineages.add(direct);
         return lineages;
     }
 
