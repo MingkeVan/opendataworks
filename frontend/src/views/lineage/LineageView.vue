@@ -2,7 +2,56 @@
   <div class="lineage-view">
     <el-card shadow="never" class="filter-card">
       <el-form :model="filters" inline label-width="80px">
-        <el-form-item label="层级">
+        <el-form-item label="数据源">
+          <el-select
+            v-model="filters.clusterId"
+            placeholder="全部"
+            clearable
+            filterable
+            style="width: 180px"
+            @change="handleClusterChange"
+          >
+            <el-option v-for="item in clusterOptions" :key="item.id" :label="item.clusterName" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Schema">
+          <el-select
+            v-model="filters.dbName"
+            placeholder="全部"
+            clearable
+            filterable
+            style="width: 180px"
+            @change="handleSchemaChange"
+          >
+            <el-option v-for="item in schemaOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="中心表">
+          <el-select
+            v-model="filters.tableId"
+            placeholder="输入关键词搜索表"
+            clearable
+            filterable
+            remote
+            reserve-keyword
+            :loading="tableSearchLoading"
+            :remote-method="handleTableSearch"
+            style="width: 260px"
+          >
+            <el-option
+              v-for="item in tableOptions"
+              :key="item.id"
+              :label="formatTableOptionLabel(item)"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="关联层级">
+          <el-select v-model="filters.depth" :disabled="!filters.tableId" style="width: 150px">
+            <el-option v-for="item in depthOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="数仓层">
           <el-select v-model="filters.layer" placeholder="全部" clearable style="width: 140px">
             <el-option v-for="layer in layerOptions" :key="layer.value" :label="layer.label" :value="layer.value" />
           </el-select>
@@ -62,6 +111,8 @@
     <el-dialog v-model="dialogVisible" title="表详情" width="500px">
       <el-descriptions :column="1" border>
         <el-descriptions-item label="表名">{{ currentNode?.name }}</el-descriptions-item>
+        <el-descriptions-item label="数据源">{{ getClusterName(currentNode?.clusterId) }}</el-descriptions-item>
+        <el-descriptions-item label="Schema">{{ currentNode?.dbName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="层级">{{ currentNode?.layer }}</el-descriptions-item>
         <el-descriptions-item label="业务域">{{ currentNode?.businessDomain || '-' }}</el-descriptions-item>
         <el-descriptions-item label="数据域">{{ currentNode?.dataDomain || '-' }}</el-descriptions-item>
@@ -151,12 +202,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick, watch } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, Plus } from '@element-plus/icons-vue'
 import { lineageApi } from '@/api/lineage'
 import { businessDomainApi, dataDomainApi } from '@/api/domain'
 import { tableApi } from '@/api/table'
+import { dorisClusterApi } from '@/api/doris'
 import { ElMessage, ElNotification } from 'element-plus'
 import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
 import LineageFlow from './LineageFlow.vue'
@@ -165,6 +217,11 @@ const loading = ref(false)
 const graphData = ref(null)
 const businessDomains = ref([])
 const dataDomains = ref([])
+const clusterOptions = ref([])
+const schemaOptions = ref([])
+const tableOptions = ref([])
+const tableSearchLoading = ref(false)
+const tableOptionCache = reactive({})
 const route = useRoute()
 const router = useRouter()
 const currentLayout = ref('dagre')
@@ -174,8 +231,13 @@ const relatedTasks = ref({ writeTasks: [], readTasks: [] })
 const tasksLoading = ref(false)
 const taskDrawerRef = ref(null)
 const lineageFlowRef = ref(null)
+let tableSearchTimer = null
 
 const filters = reactive({
+  clusterId: '',
+  dbName: '',
+  tableId: null,
+  depth: 1,
   layer: '',
   businessDomain: '',
   dataDomain: '',
@@ -190,7 +252,120 @@ const layerOptions = [
   { label: 'ADS', value: 'ADS' }
 ]
 
-const focusTable = ref(route.query.focus || '')
+const depthOptions = [
+  { label: '1 层（直接上下游）', value: 1 },
+  { label: '2 层（含间接血缘）', value: 2 },
+  { label: '3 层', value: 3 },
+  { label: '不限层级', value: -1 }
+]
+
+const resolveRouteFocus = () => {
+  if (route.query.tableId) return String(route.query.tableId)
+  if (route.query.focus) return String(route.query.focus)
+  return ''
+}
+
+const focusTable = ref(resolveRouteFocus())
+
+const toValidTableId = (value) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+const formatTableOptionLabel = (option) => {
+  if (!option) return ''
+  const pieces = [option.tableName || '-']
+  const meta = []
+  if (option.dbName) meta.push(option.dbName)
+  if (option.layer) meta.push(option.layer)
+  if (meta.length) {
+    pieces.push(`(${meta.join(' / ')})`)
+  }
+  return pieces.join(' ')
+}
+
+const rememberTableOptions = (items = []) => {
+  items.forEach((item) => {
+    if (!item?.id) return
+    tableOptionCache[item.id] = item
+  })
+}
+
+const loadClusters = async () => {
+  try {
+    const list = await dorisClusterApi.list()
+    clusterOptions.value = Array.isArray(list) ? list : []
+  } catch (error) {
+    console.error('加载数据源失败:', error)
+    clusterOptions.value = []
+  }
+}
+
+const loadSchemas = async () => {
+  try {
+    const list = await tableApi.listDatabases(filters.clusterId || null)
+    schemaOptions.value = Array.isArray(list) ? list : []
+  } catch (error) {
+    console.error('加载 Schema 失败:', error)
+    schemaOptions.value = []
+  }
+}
+
+const fetchTableOptions = async (keyword) => {
+  const trimmed = String(keyword || '').trim()
+  if (!trimmed) {
+    const current = filters.tableId && tableOptionCache[filters.tableId] ? [tableOptionCache[filters.tableId]] : []
+    tableOptions.value = current
+    return
+  }
+  tableSearchLoading.value = true
+  try {
+    const params = {
+      keyword: trimmed,
+      limit: 30,
+      clusterId: filters.clusterId || undefined,
+      dbName: filters.dbName || undefined
+    }
+    const result = await tableApi.searchOptions(params)
+    const list = Array.isArray(result) ? result : []
+    tableOptions.value = list
+    rememberTableOptions(list)
+  } catch (error) {
+    console.error('搜索中心表失败:', error)
+  } finally {
+    tableSearchLoading.value = false
+  }
+}
+
+const ensureCenterTableSelected = async (rawTableId) => {
+  const tableId = toValidTableId(rawTableId)
+  if (!tableId) return false
+
+  try {
+    const table = await tableApi.getById(tableId)
+    if (!table?.id) return false
+
+    filters.clusterId = table.clusterId || ''
+    await loadSchemas()
+    filters.dbName = table.dbName || ''
+    filters.tableId = table.id
+
+    const option = {
+      id: table.id,
+      tableName: table.tableName,
+      tableComment: table.tableComment,
+      layer: table.layer,
+      dbName: table.dbName
+    }
+    rememberTableOptions([option])
+    tableOptions.value = [option]
+    focusTable.value = String(table.id)
+    return true
+  } catch (error) {
+    console.error('初始化中心表失败:', error)
+    return false
+  }
+}
 
 const loadRelatedTasks = async () => {
   relatedTasks.value = { writeTasks: [], readTasks: [] }
@@ -214,10 +389,16 @@ const loadRelatedTasks = async () => {
 
 const buildParams = () => {
   const params = {}
+  if (filters.clusterId) params.clusterId = filters.clusterId
+  if (filters.dbName) params.dbName = filters.dbName
+  if (filters.tableId) {
+    params.tableId = filters.tableId
+    params.depth = filters.depth
+  }
   if (filters.layer) params.layer = filters.layer
   if (filters.businessDomain) params.businessDomain = filters.businessDomain
   if (filters.dataDomain) params.dataDomain = filters.dataDomain
-  if (filters.keyword) params.keyword = filters.keyword.trim()
+  if (filters.keyword && !filters.tableId) params.keyword = filters.keyword.trim()
   return params
 }
 
@@ -238,24 +419,50 @@ const handleBusinessChange = async () => {
   await loadDataDomains()
 }
 
+const handleClusterChange = async () => {
+  filters.dbName = ''
+  filters.tableId = null
+  tableOptions.value = []
+  await loadSchemas()
+}
+
+const handleSchemaChange = () => {
+  filters.tableId = null
+  tableOptions.value = []
+}
+
+const handleTableSearch = (query) => {
+  if (tableSearchTimer) {
+    clearTimeout(tableSearchTimer)
+  }
+  tableSearchTimer = setTimeout(() => {
+    fetchTableOptions(query)
+  }, 250)
+}
+
 const handleSearch = () => {
-  // If we have data, try client-side search first for highlighting
-  if (lineageFlowRef.value && graphData.value) {
+  if (lineageFlowRef.value && graphData.value && filters.keyword && !filters.tableId) {
     lineageFlowRef.value.searchNode(filters.keyword.trim())
   }
-  // Also reload data to ensure filtering if backend supports it
   loadData()
 }
 
-const handleReset = () => {
+const handleReset = async () => {
+  filters.clusterId = ''
+  filters.dbName = ''
+  filters.tableId = null
+  filters.depth = 1
   filters.layer = ''
   filters.businessDomain = ''
   filters.dataDomain = ''
   filters.keyword = ''
+  tableOptions.value = []
   focusTable.value = ''
   currentLayout.value = 'dagre'
-  router.replace({ query: {} })
-  loadData()
+  await loadDataDomains()
+  await loadSchemas()
+  await router.replace({ query: {} })
+  await loadData()
 }
 
 const handleLayoutChange = (val) => {
@@ -267,22 +474,26 @@ const loadData = async () => {
   try {
     const res = await lineageApi.getLineageGraph(buildParams())
     if (!res || !res.nodes || res.nodes.length === 0) {
-        graphData.value = null
+      graphData.value = null
     } else {
-        graphData.value = {
-          nodes: (res?.nodes || []).map((node) => ({
+      graphData.value = {
+        nodes: (res?.nodes || [])
+          .map((node) => ({
             ...node,
-            id: node.id || node.name,
-            name: node.name || node.id
-          })),
-          edges: (res?.edges || []).map((edge) => ({
-            ...edge,
-            source: edge.source,
-            target: edge.target
+            id: node?.id != null ? String(node.id) : '',
+            name: node?.name || node?.tableName || '-'
           }))
-        }
+          .filter((node) => !!node.id),
+        edges: (res?.edges || [])
+          .map((edge) => ({
+            ...edge,
+            source: edge?.source != null ? String(edge.source) : '',
+            target: edge?.target != null ? String(edge.target) : ''
+          }))
+          .filter((edge) => edge.source && edge.target)
+      }
     }
-    
+
     await nextTick()
   } catch (error) {
     console.error('加载血缘数据失败:', error)
@@ -305,6 +516,12 @@ const handleNodeClick = (nodeModel) => {
   currentNode.value = nodeModel
   dialogVisible.value = true
   loadRelatedTasks()
+}
+
+const getClusterName = (clusterId) => {
+  if (!clusterId) return '-'
+  const cluster = clusterOptions.value.find((item) => String(item.id) === String(clusterId))
+  return cluster?.clusterName || String(clusterId)
 }
 
 const goToTableDetail = async () => {
@@ -353,19 +570,45 @@ const taskStatusTag = (status) => {
 }
 
 watch(
+  () => route.query.tableId,
+  async (tableId) => {
+    if (!tableId) return
+    const changed = await ensureCenterTableSelected(tableId)
+    if (changed) {
+      await loadData()
+    }
+  }
+)
+
+watch(
+  () => filters.tableId,
+  (tableId) => {
+    focusTable.value = tableId ? String(tableId) : ''
+  }
+)
+
+watch(
   () => route.query.focus,
   (focus) => {
-    focusTable.value = focus || ''
+    if (route.query.tableId) return
+    focusTable.value = focus ? String(focus) : ''
   }
 )
 
 onMounted(async () => {
-  await loadBusinessDomains()
-  await loadDataDomains()
+  await Promise.all([loadBusinessDomains(), loadDataDomains(), loadClusters()])
+  await loadSchemas()
+  if (route.query.tableId) {
+    await ensureCenterTableSelected(route.query.tableId)
+  }
   await loadData()
-  // No need for window resize listener here as LineageGraph handles it if initialized,
-  // but it's good practice to manage lifecycle here if we want more control.
-  // LineageGraph handles it internally.
+})
+
+onBeforeUnmount(() => {
+  if (tableSearchTimer) {
+    clearTimeout(tableSearchTimer)
+    tableSearchTimer = null
+  }
 })
 </script>
 

@@ -87,6 +87,8 @@ export function buildLineageFlow(graph, layoutType = 'dagre') {
     data: {
       rankdir,
       tableId: raw?.tableId,
+      clusterId: raw?.clusterId,
+      dbName: raw?.dbName,
       id,
       name: raw?.name || id,
       layer: raw?.layer,
