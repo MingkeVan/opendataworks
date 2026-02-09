@@ -16,6 +16,7 @@ import com.onedata.portal.dto.workflow.WorkflowTaskBinding;
 import com.onedata.portal.dto.workflow.WorkflowTopologyResult;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
+import com.onedata.portal.entity.TaskExecutionLog;
 import com.onedata.portal.entity.WorkflowInstanceCache;
 import com.onedata.portal.entity.WorkflowPublishRecord;
 import com.onedata.portal.entity.WorkflowTaskRelation;
@@ -23,6 +24,7 @@ import com.onedata.portal.entity.WorkflowVersion;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
+import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.WorkflowPublishRecordMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
@@ -72,6 +74,7 @@ public class WorkflowService {
     private final DolphinSchedulerService dolphinSchedulerService;
     private final DataTaskMapper dataTaskMapper;
     private final TableTaskRelationMapper tableTaskRelationMapper;
+    private final TaskExecutionLogMapper taskExecutionLogMapper;
     private final WorkflowTopologyService workflowTopologyService;
 
     public Page<DataWorkflow> list(WorkflowQueryRequest request) {
@@ -303,10 +306,22 @@ public class WorkflowService {
         if (!"online".equalsIgnoreCase(workflow.getStatus())) {
             throw new IllegalStateException("工作流未上线，请先上线后再执行");
         }
-        return dolphinSchedulerService.startProcessInstance(
-                workflowCode,
-                null,
-                workflow.getWorkflowName());
+        TaskExecutionLog executionLog = createWorkflowExecutionLog(workflowId, "manual");
+        try {
+            String executionId = dolphinSchedulerService.startProcessInstance(
+                    workflowCode,
+                    null,
+                    workflow.getWorkflowName());
+            if (executionLog != null) {
+                executionLog.setExecutionId(executionId);
+                executionLog.setStatus("running");
+                taskExecutionLogMapper.updateById(executionLog);
+            }
+            return executionId;
+        } catch (RuntimeException ex) {
+            markExecutionFailed(executionLog, ex);
+            throw ex;
+        }
     }
 
     public String backfillWorkflow(Long workflowId, WorkflowBackfillRequest request) {
@@ -325,7 +340,57 @@ public class WorkflowService {
         if (!"online".equalsIgnoreCase(workflow.getStatus())) {
             throw new IllegalStateException("工作流未上线，请先上线后再补数");
         }
-        return dolphinSchedulerService.backfillProcessInstance(workflowCode, request);
+        TaskExecutionLog executionLog = createWorkflowExecutionLog(workflowId, "manual");
+        try {
+            String triggerId = dolphinSchedulerService.backfillProcessInstance(workflowCode, request);
+            if (executionLog != null) {
+                executionLog.setExecutionId(triggerId);
+                executionLog.setStatus("running");
+                taskExecutionLogMapper.updateById(executionLog);
+            }
+            return triggerId;
+        } catch (RuntimeException ex) {
+            markExecutionFailed(executionLog, ex);
+            throw ex;
+        }
+    }
+
+    private TaskExecutionLog createWorkflowExecutionLog(Long workflowId, String triggerType) {
+        Long taskId = resolveMonitorTaskId(workflowId);
+        if (taskId == null) {
+            log.warn("No task relation found for workflow {}, skip execution log creation", workflowId);
+            return null;
+        }
+        TaskExecutionLog logRecord = new TaskExecutionLog();
+        logRecord.setTaskId(taskId);
+        logRecord.setStatus("pending");
+        logRecord.setStartTime(LocalDateTime.now());
+        logRecord.setTriggerType(StringUtils.hasText(triggerType) ? triggerType : "manual");
+        taskExecutionLogMapper.insert(logRecord);
+        return logRecord;
+    }
+
+    private void markExecutionFailed(TaskExecutionLog executionLog, RuntimeException ex) {
+        if (executionLog == null) {
+            return;
+        }
+        executionLog.setStatus("failed");
+        executionLog.setEndTime(LocalDateTime.now());
+        executionLog.setErrorMessage(ex.getMessage());
+        taskExecutionLogMapper.updateById(executionLog);
+    }
+
+    private Long resolveMonitorTaskId(Long workflowId) {
+        if (workflowId == null) {
+            return null;
+        }
+        WorkflowTaskRelation relation = workflowTaskRelationMapper.selectOne(
+                Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                        .eq(WorkflowTaskRelation::getWorkflowId, workflowId)
+                        .orderByDesc(WorkflowTaskRelation::getIsEntry)
+                        .orderByAsc(WorkflowTaskRelation::getId)
+                        .last("LIMIT 1"));
+        return relation != null ? relation.getTaskId() : null;
     }
 
     @Transactional
