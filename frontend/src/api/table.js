@@ -80,6 +80,11 @@ export const tableApi = {
     })
   },
 
+  // 获取表访问统计（Doris 层面）
+  getAccessStats(id, params = {}) {
+    return request.get(`/v1/tables/${id}/access-stats`, { params })
+  },
+
   // 获取数据库所有表的统计信息
   getDatabaseStatistics(database, clusterId = null) {
     return request.get(`/v1/tables/statistics/database/${database}`, {

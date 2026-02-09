@@ -329,6 +329,80 @@
               </el-scrollbar>
             </div>
           </el-tab-pane>
+
+          <el-tab-pane name="access" label="访问情况">
+            <div class="meta-section meta-section-fill" v-loading="state.accessLoading">
+              <div class="ddl-header">
+                <el-button size="small" :disabled="!state.table?.id || state.accessLoading" @click="refreshAccess">
+                  刷新
+                </el-button>
+              </div>
+              <el-scrollbar class="meta-scroll">
+                <template v-if="state.accessStats">
+                  <el-alert
+                    v-if="state.accessStats.note"
+                    :title="state.accessStats.note"
+                    type="warning"
+                    show-icon
+                    :closable="false"
+                    class="access-note"
+                  />
+                  <el-descriptions :column="1" border size="small" class="meta-descriptions">
+                    <el-descriptions-item label="总访问次数">
+                      {{ state.accessStats.totalAccessCount ?? 0 }}
+                    </el-descriptions-item>
+                    <el-descriptions-item :label="`最近窗口访问(${state.accessStats.recentDays || 30}天)`">
+                      {{ state.accessStats.recentAccessCount ?? 0 }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="近7天访问">
+                      {{ state.accessStats.accessCount7d ?? 0 }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="近30天访问">
+                      {{ state.accessStats.accessCount30d ?? 0 }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="最近访问时间">
+                      {{ formatDateTime(state.accessStats.lastAccessTime) }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="访问用户数">
+                      {{ state.accessStats.distinctUserCount ?? 0 }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="平均耗时">
+                      {{ formatAccessDuration(state.accessStats.averageDurationMs) }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="审计来源">
+                      {{ state.accessStats.dorisAuditEnabled ? (state.accessStats.dorisAuditSource || '已启用') : '未启用' }}
+                    </el-descriptions-item>
+                  </el-descriptions>
+
+                  <div class="section-divider"></div>
+
+                  <div class="section-header small">
+                    <span>近{{ state.accessStats.trendDays || 14 }}天访问趋势</span>
+                  </div>
+                  <el-table :data="state.accessStats.trend || []" border size="small" class="access-table">
+                    <el-table-column prop="date" label="日期" min-width="120" />
+                    <el-table-column prop="accessCount" label="访问次数" width="120" />
+                  </el-table>
+
+                  <div class="section-divider"></div>
+
+                  <div class="section-header small">
+                    <span>活跃用户 Top{{ (state.accessStats.topUsers || []).length }}</span>
+                  </div>
+                  <el-table :data="state.accessStats.topUsers || []" border size="small" class="access-table">
+                    <el-table-column prop="userId" label="用户" min-width="140" show-overflow-tooltip />
+                    <el-table-column prop="accessCount" label="访问次数" width="100" />
+                    <el-table-column label="最近访问" min-width="160">
+                      <template #default="{ row }">
+                        {{ formatDateTime(row.lastAccessTime) }}
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </template>
+                <el-empty v-else :description="state.accessError || '暂无访问数据'" :image-size="60" />
+              </el-scrollbar>
+            </div>
+          </el-tab-pane>
         </el-tabs>
       </div>
 
@@ -466,6 +540,9 @@ const {
   addField,
 	  removeField,
 	  copyDdl,
+	  loadAccessStats,
+	  formatDuration,
+	  formatDateTime,
 	  goLineage,
 	  goCreateRelatedTask,
 	  openTask,
@@ -496,6 +573,17 @@ const state = computed(() => {
 })
 
 const fieldRows = computed(() => getFieldRows(activeTabId.value))
+
+const refreshAccess = () => {
+  const tabId = activeTabId.value
+  if (!tabId) return
+  loadAccessStats(tabId, true)
+}
+
+const formatAccessDuration = (value) => {
+  if (value === null || value === undefined || value === '') return '-'
+  return formatDuration(Number(value))
+}
 </script>
 
 <style scoped>
@@ -685,6 +773,14 @@ const fieldRows = computed(() => getFieldRows(activeTabId.value))
   padding: 10px 12px;
   font-size: 12px;
   color: #94a3b8;
+}
+
+.access-note {
+  margin-bottom: 10px;
+}
+
+.access-table {
+  width: 100%;
 }
 
 .lineage-panel {

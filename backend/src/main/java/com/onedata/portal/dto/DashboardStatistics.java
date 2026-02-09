@@ -5,6 +5,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 控制台统计数据 DTO
  */
@@ -78,4 +81,41 @@ public class DashboardStatistics {
      * 今日失败次数
      */
     private Long todayFailedExecutions;
+
+    /**
+     * 热点表窗口（天）
+     */
+    private Integer hotWindowDays;
+
+    /**
+     * 长期未用阈值（天）
+     */
+    private Integer coldWindowDays;
+
+    /**
+     * 热点表列表
+     */
+    @Builder.Default
+    private List<DashboardTableAccessItem> hotTables = new ArrayList<>();
+
+    /**
+     * 长期未用表列表
+     */
+    @Builder.Default
+    private List<DashboardTableAccessItem> longUnusedTables = new ArrayList<>();
+
+    /**
+     * 是否启用 Doris 审计源
+     */
+    private Boolean dorisAuditEnabled;
+
+    /**
+     * Doris 审计源名称
+     */
+    private String dorisAuditSource;
+
+    /**
+     * 表访问统计备注
+     */
+    private String tableAccessNote;
 }

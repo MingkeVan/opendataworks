@@ -10,10 +10,39 @@
         </div>
       </template>
 
-      <!-- 基础统计卡片 -->
-      <div class="section-title">资源统计</div>
+      <div class="section-header-row">
+        <div class="section-title">资产统计</div>
+        <div class="asset-filter">
+          <span class="filter-label">数据源</span>
+          <el-select
+            v-model="assetClusterId"
+            size="small"
+            class="asset-source-select"
+            @change="handleAssetClusterChange"
+          >
+            <el-option value="all" label="全部数据源" />
+            <el-option
+              v-for="item in clusters"
+              :key="item.id"
+              :value="String(item.id)"
+              :label="item.clusterName || item.name || `数据源 ${item.id}`"
+            />
+          </el-select>
+        </div>
+      </div>
       <el-row :gutter="20" class="stats-row">
-        <el-col :span="6">
+        <el-col :span="8">
+          <div class="stat-card">
+            <div class="stat-icon sources">
+              <el-icon><Coin /></el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-value">{{ assetSourceCount }}</div>
+              <div class="stat-label">数据源数</div>
+            </div>
+          </div>
+        </el-col>
+        <el-col :span="8">
           <div class="stat-card">
             <div class="stat-icon tables">
               <el-icon><Grid /></el-icon>
@@ -24,6 +53,83 @@
             </div>
           </div>
         </el-col>
+        <el-col :span="8">
+          <div class="stat-card">
+            <div class="stat-icon domains">
+              <el-icon><Folder /></el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-value">{{ statistics.totalDomains || 0 }}</div>
+              <div class="stat-label">数据域</div>
+            </div>
+          </div>
+        </el-col>
+      </el-row>
+
+      <div class="section-title" style="margin-top: 30px;">表访问总览</div>
+      <el-alert
+        v-if="statistics.tableAccessNote"
+        :title="statistics.tableAccessNote"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="access-alert"
+      />
+      <el-row :gutter="20" class="stats-row">
+        <el-col :span="12">
+          <el-card class="list-card" shadow="never">
+            <template #header>
+              <div class="list-card-header">
+                <span>热点表 Top{{ (statistics.hotTables || []).length }}</span>
+                <span class="list-card-sub">近 {{ statistics.hotWindowDays || 30 }} 天</span>
+              </div>
+            </template>
+            <el-table :data="statistics.hotTables || []" size="small" border height="320">
+              <el-table-column label="表名" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">
+                  {{ formatTableName(row) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="accessCount" label="访问次数" width="100" />
+              <el-table-column label="最近访问" min-width="150">
+                <template #default="{ row }">
+                  {{ formatDateTime(row.lastAccessTime) }}
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+        </el-col>
+        <el-col :span="12">
+          <el-card class="list-card" shadow="never">
+            <template #header>
+              <div class="list-card-header">
+                <span>长期未用表 Top{{ (statistics.longUnusedTables || []).length }}</span>
+                <span class="list-card-sub">超过 {{ statistics.coldWindowDays || 90 }} 天</span>
+              </div>
+            </template>
+            <el-table :data="statistics.longUnusedTables || []" size="small" border height="320">
+              <el-table-column label="表名" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">
+                  {{ formatTableName(row) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="最近访问" min-width="150">
+                <template #default="{ row }">
+                  {{ formatDateTime(row.lastAccessTime) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="距今天数" width="100">
+                <template #default="{ row }">
+                  {{ formatDays(row.daysSinceLastAccess) }}
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <div class="section-title" style="margin-top: 30px;">任务统计</div>
+      <el-row :gutter="20" class="stats-row">
         <el-col :span="6">
           <div class="stat-card">
             <div class="stat-icon tasks">
@@ -37,53 +143,12 @@
         </el-col>
         <el-col :span="6">
           <div class="stat-card">
-            <div class="stat-icon domains">
-              <el-icon><Folder /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-value">{{ statistics.totalDomains || 0 }}</div>
-              <div class="stat-label">数据域</div>
-            </div>
-          </div>
-        </el-col>
-        <el-col :span="6">
-          <div class="stat-card">
             <div class="stat-icon executions">
               <el-icon><Document /></el-icon>
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ statistics.totalExecutions || 0 }}</div>
               <div class="stat-label">总执行次数</div>
-            </div>
-          </div>
-        </el-col>
-      </el-row>
-
-      <!-- 执行统计卡片 -->
-      <div class="section-title" style="margin-top: 30px;">执行统计</div>
-      <el-row :gutter="20" class="stats-row">
-        <el-col :span="6">
-          <div class="stat-card">
-            <div class="stat-icon success">
-              <el-icon><CircleCheck /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-value">{{ statistics.successExecutions || 0 }}</div>
-              <div class="stat-label">成功次数</div>
-              <div class="stat-rate success-rate">
-                成功率 {{ statistics.executionSuccessRate || 0 }}%
-              </div>
-            </div>
-          </div>
-        </el-col>
-        <el-col :span="6">
-          <div class="stat-card">
-            <div class="stat-icon failed">
-              <el-icon><CircleClose /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-value">{{ statistics.failedExecutions || 0 }}</div>
-              <div class="stat-label">失败次数</div>
             </div>
           </div>
         </el-col>
@@ -114,9 +179,33 @@
         </el-col>
       </el-row>
 
-      <!-- 今日统计卡片 -->
-      <div class="section-title" style="margin-top: 30px;">今日执行</div>
+      <div class="section-title" style="margin-top: 30px;">任务执行结果</div>
       <el-row :gutter="20" class="stats-row">
+        <el-col :span="8">
+          <div class="stat-card">
+            <div class="stat-icon success">
+              <el-icon><CircleCheck /></el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-value">{{ statistics.successExecutions || 0 }}</div>
+              <div class="stat-label">成功次数</div>
+              <div class="stat-rate success-rate">
+                成功率 {{ statistics.executionSuccessRate || 0 }}%
+              </div>
+            </div>
+          </div>
+        </el-col>
+        <el-col :span="8">
+          <div class="stat-card">
+            <div class="stat-icon failed">
+              <el-icon><CircleClose /></el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-value">{{ statistics.failedExecutions || 0 }}</div>
+              <div class="stat-label">失败次数</div>
+            </div>
+          </div>
+        </el-col>
         <el-col :span="8">
           <div class="stat-card">
             <div class="stat-icon today-total">
@@ -128,6 +217,10 @@
             </div>
           </div>
         </el-col>
+      </el-row>
+
+      <div class="section-title" style="margin-top: 30px;">今日任务执行</div>
+      <el-row :gutter="20" class="stats-row">
         <el-col :span="8">
           <div class="stat-card">
             <div class="stat-icon today-success">
@@ -150,16 +243,20 @@
             </div>
           </div>
         </el-col>
+        <el-col :span="8">
+          <el-empty description="按数据源切换仅影响资产统计" :image-size="60" />
+        </el-col>
       </el-row>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Refresh,
+  Coin,
   Grid,
   List,
   Folder,
@@ -173,21 +270,35 @@ import {
   CloseBold
 } from '@element-plus/icons-vue'
 import { getDashboardStatistics } from '@/api/dashboard'
+import { dorisClusterApi } from '@/api/doris'
 
 // 数据定义
 const statistics = ref({})
 const loading = ref(false)
+const clusters = ref([])
+const assetClusterId = ref('all')
+
+const assetSourceCount = computed(() => {
+  if (assetClusterId.value === 'all') {
+    return (clusters.value || []).length
+  }
+  return assetClusterId.value ? 1 : 0
+})
 
 // 页面加载
-onMounted(() => {
-  loadStatistics()
+onMounted(async () => {
+  await loadClusters()
+  await loadStatistics()
 })
 
 // 加载统计信息
 const loadStatistics = async () => {
   loading.value = true
   try {
-    const res = await getDashboardStatistics()
+    const params = assetClusterId.value === 'all'
+      ? {}
+      : { clusterId: Number(assetClusterId.value) }
+    const res = await getDashboardStatistics(params)
     statistics.value = res
   } catch (error) {
     console.error('Failed to load statistics:', error)
@@ -197,9 +308,47 @@ const loadStatistics = async () => {
   }
 }
 
+// 加载数据源
+const loadClusters = async () => {
+  try {
+    const list = await dorisClusterApi.list()
+    clusters.value = Array.isArray(list) ? list : []
+    const validValues = new Set(['all', ...clusters.value.map((item) => String(item.id))])
+    if (!validValues.has(assetClusterId.value)) {
+      assetClusterId.value = 'all'
+    }
+  } catch (error) {
+    clusters.value = []
+    assetClusterId.value = 'all'
+    console.error('Failed to load clusters:', error)
+  }
+}
+
+const handleAssetClusterChange = async () => {
+  await loadStatistics()
+}
+
 // 刷新数据
-const refreshData = () => {
-  loadStatistics()
+const refreshData = async () => {
+  await loadClusters()
+  await loadStatistics()
+}
+
+const formatDateTime = (value) => {
+  if (!value) return '-'
+  return String(value).replace('T', ' ').split('.')[0]
+}
+
+const formatDays = (value) => {
+  if (value === null || value === undefined) return '-'
+  return `${value} 天`
+}
+
+const formatTableName = (row) => {
+  if (!row) return '-'
+  const db = row.dbName || ''
+  const table = row.tableName || ''
+  return db && table ? `${db}.${table}` : (table || '-')
 }
 </script>
 
@@ -233,6 +382,32 @@ const refreshData = () => {
   margin-bottom: 15px;
   padding-left: 10px;
   border-left: 4px solid #409eff;
+}
+
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-header-row .section-title {
+  margin-bottom: 0;
+}
+
+.asset-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-label {
+  font-size: 13px;
+  color: #606266;
+}
+
+.asset-source-select {
+  width: 240px;
 }
 
 .stats-row {
@@ -269,6 +444,11 @@ const refreshData = () => {
 .stat-icon.tables {
   background: #e8f4fd;
   color: #1890ff;
+}
+
+.stat-icon.sources {
+  background: #f0f9ff;
+  color: #0284c7;
 }
 
 .stat-icon.tasks {
@@ -353,5 +533,25 @@ const refreshData = () => {
 .stat-rate.critical-rate {
   color: #f5222d;
   font-weight: 500;
+}
+
+.access-alert {
+  margin-bottom: 16px;
+}
+
+.list-card {
+  border-radius: 10px;
+}
+
+.list-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.list-card-sub {
+  font-size: 12px;
+  color: #64748b;
 }
 </style>
