@@ -2057,6 +2057,9 @@ const setupTableObserver = () => {
     fields: [],
     ddl: '',
     ddlLoading: false,
+    accessLoading: false,
+    accessStats: null,
+    accessError: '',
     lineage: { upstreamTables: [], downstreamTables: [] },
     tasks: { writeTasks: [], readTasks: [] }
   })
@@ -2368,6 +2371,9 @@ const loadTabData = async (tabId) => {
       writeTasks: [],
       readTasks: []
     }
+    state.accessLoading = false
+    state.accessStats = null
+    state.accessError = ''
     if (state.query.sql === '') {
       state.query.sql = buildDefaultSql(state.table)
     }
@@ -2403,6 +2409,9 @@ const loadTabData = async (tabId) => {
       writeTasks: Array.isArray(tasksData?.writeTasks) ? tasksData.writeTasks : [],
       readTasks: Array.isArray(tasksData?.readTasks) ? tasksData.readTasks : []
     }
+    state.accessLoading = false
+    state.accessStats = null
+    state.accessError = ''
     if (state.query.sql === '') {
       state.query.sql = buildDefaultSql(state.table)
     }
@@ -3544,6 +3553,36 @@ const loadDdl = async (tabId) => {
   }
 }
 
+const loadAccessStats = async (tabId, force = false) => {
+  const state = tabStates[tabId]
+  if (!state?.table?.id) return
+  if (state.accessLoading) return
+  if (!force && state.accessStats) return
+  const sourceId = state.table.sourceId || clusterId.value || state.table.clusterId
+  if (!sourceId) {
+    state.accessError = '缺少集群信息，无法获取访问统计'
+    state.accessStats = null
+    return
+  }
+
+  state.accessLoading = true
+  state.accessError = ''
+  try {
+    const stats = await tableApi.getAccessStats(state.table.id, {
+      clusterId: sourceId,
+      recentDays: 30,
+      trendDays: 14,
+      topUsers: 5
+    })
+    state.accessStats = stats || null
+  } catch (error) {
+    state.accessStats = null
+    state.accessError = error?.message || '加载访问统计失败'
+  } finally {
+    state.accessLoading = false
+  }
+}
+
 const copyDdl = async (tabId) => {
   const state = tabStates[tabId]
   if (!state?.ddl) return
@@ -3700,10 +3739,18 @@ watch(
 watch(
   () => [activeTab.value, tabStates[activeTab.value]?.metaTab],
   ([tabId, metaTab]) => {
-    if (!tabId || metaTab !== 'ddl') return
+    if (!tabId) return
     const state = tabStates[tabId]
-    if (!state || state.ddlLoading || state.ddl) return
-    loadDdl(tabId)
+    if (!state) return
+    if (metaTab === 'ddl') {
+      if (state.ddlLoading || state.ddl) return
+      loadDdl(tabId)
+      return
+    }
+    if (metaTab === 'access') {
+      if (state.accessLoading || state.accessStats) return
+      loadAccessStats(tabId)
+    }
   }
 )
 
@@ -3782,6 +3829,9 @@ watch(selectedTableKey, (value) => {
   addField,
   removeField,
     copyDdl,
+    loadAccessStats,
+    formatDuration,
+    formatDateTime,
     goLineage,
     goCreateRelatedTask,
     openTask,

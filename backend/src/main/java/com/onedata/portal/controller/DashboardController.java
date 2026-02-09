@@ -2,6 +2,7 @@ package com.onedata.portal.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.onedata.portal.dto.DashboardStatistics;
+import com.onedata.portal.dto.DashboardTableAccessSummary;
 import com.onedata.portal.dto.Result;
 import com.onedata.portal.entity.DataDomain;
 import com.onedata.portal.entity.DataTable;
@@ -13,8 +14,10 @@ import com.onedata.portal.mapper.DataTableMapper;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.InspectionIssueMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
+import com.onedata.portal.service.DorisTableAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -35,15 +38,20 @@ public class DashboardController {
     private final DataDomainMapper dataDomainMapper;
     private final TaskExecutionLogMapper taskExecutionLogMapper;
     private final InspectionIssueMapper inspectionIssueMapper;
+    private final DorisTableAccessService dorisTableAccessService;
 
     /**
      * 获取控制台统计数据
      */
     @GetMapping("/statistics")
-    public Result<DashboardStatistics> getStatistics() {
+    public Result<DashboardStatistics> getStatistics(@RequestParam(required = false) Long clusterId) {
         try {
             // 1. 统计表数量
-            Long totalTables = dataTableMapper.selectCount(null);
+            QueryWrapper<DataTable> tableWrapper = new QueryWrapper<>();
+            if (clusterId != null) {
+                tableWrapper.eq("cluster_id", clusterId);
+            }
+            Long totalTables = dataTableMapper.selectCount(tableWrapper);
 
             // 2. 统计任务数量
             Long totalTasks = dataTaskMapper.selectCount(null);
@@ -118,6 +126,8 @@ public class DashboardController {
             }
 
             // 构建统计结果
+            DashboardTableAccessSummary accessSummary = dorisTableAccessService.getDashboardAccessSummary(
+                    clusterId, 30, 10, 90, 10);
             DashboardStatistics statistics = DashboardStatistics.builder()
                     .totalTables(totalTables)
                     .totalTasks(totalTasks)
@@ -132,6 +142,13 @@ public class DashboardController {
                     .todayExecutions(todayExecutions)
                     .todaySuccessExecutions(todaySuccessExecutions)
                     .todayFailedExecutions(todayFailedExecutions)
+                    .hotWindowDays(accessSummary.getHotWindowDays())
+                    .coldWindowDays(accessSummary.getColdWindowDays())
+                    .hotTables(accessSummary.getHotTables())
+                    .longUnusedTables(accessSummary.getLongUnusedTables())
+                    .dorisAuditEnabled(accessSummary.getDorisAuditEnabled())
+                    .dorisAuditSource(accessSummary.getDorisAuditSource())
+                    .tableAccessNote(accessSummary.getNote())
                     .build();
 
             return Result.success(statistics);

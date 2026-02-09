@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.onedata.portal.annotation.RequireAuth;
 import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
+import com.onedata.portal.dto.TableAccessStats;
 import com.onedata.portal.dto.TableOption;
 import com.onedata.portal.dto.TableRelatedLineageResponse;
 import com.onedata.portal.dto.TableRelatedTasksResponse;
@@ -17,6 +18,7 @@ import com.onedata.portal.service.TableStatisticsCacheService;
 import com.onedata.portal.service.TableStatisticsHistoryService;
 import com.onedata.portal.service.DataExportService;
 import com.onedata.portal.service.DorisMetadataSyncService;
+import com.onedata.portal.service.DorisTableAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -46,6 +48,7 @@ public class DataTableController {
     private final TableStatisticsHistoryService historyService;
     private final DataExportService dataExportService;
     private final DorisMetadataSyncService dorisMetadataSyncService;
+    private final DorisTableAccessService dorisTableAccessService;
 
     /**
      * 分页查询表列表
@@ -503,6 +506,34 @@ public class DataTableController {
             return Result.success(statistics);
         } catch (Exception e) {
             return Result.fail("获取表统计信息失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取表访问统计（Doris 层面）
+     */
+    @RequireAuth
+    @GetMapping("/{id}/access-stats")
+    public Result<TableAccessStats> getAccessStats(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long clusterId,
+            @RequestParam(required = false, defaultValue = "30") Integer recentDays,
+            @RequestParam(required = false, defaultValue = "14") Integer trendDays,
+            @RequestParam(required = false, defaultValue = "5") Integer topUsers) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return Result.fail("表不存在");
+        }
+        try {
+            TableAccessStats stats = dorisTableAccessService.getTableAccessStats(
+                    table,
+                    clusterId,
+                    recentDays == null ? 30 : recentDays,
+                    trendDays == null ? 14 : trendDays,
+                    topUsers == null ? 5 : topUsers);
+            return Result.success(stats);
+        } catch (Exception e) {
+            return Result.fail("获取表访问统计失败: " + e.getMessage());
         }
     }
 
