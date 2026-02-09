@@ -733,6 +733,7 @@ public class DorisMetadataSyncService {
         newTable.setClusterId(clusterId);
         newTable.setTableName(tableName);
         newTable.setDbName(database);
+        newTable.setLayer(resolveLayerForNewTable(tableName));
 
         String tableComment = (String) dorisTable.get("tableComment");
         newTable.setTableComment(tableComment != null ? tableComment : "");
@@ -824,6 +825,13 @@ public class DorisMetadataSyncService {
                 && Objects.equals(localTable.getIsSynced(), 0)
                 && !TableNameUtils.isDeprecatedTableName(tableName)) {
             localTable.setStatus("active");
+            updated = true;
+        }
+
+        // 按表名前缀自动修正数据分层（ods_/dwd_/dim_/dws_/ads_）
+        String inferredLayer = TableNameUtils.inferLayerFromTableName(tableName);
+        if (StringUtils.hasText(inferredLayer) && !Objects.equals(inferredLayer, localTable.getLayer())) {
+            localTable.setLayer(inferredLayer);
             updated = true;
         }
 
@@ -1155,6 +1163,15 @@ public class DorisMetadataSyncService {
             return true;
         }
         return "DORIS".equalsIgnoreCase(cluster.getSourceType());
+    }
+
+    private String resolveLayerForNewTable(String tableName) {
+        String inferredLayer = TableNameUtils.inferLayerFromTableName(tableName);
+        if (StringUtils.hasText(inferredLayer)) {
+            return inferredLayer;
+        }
+        // 保持历史行为：无法识别前缀时默认 ODS，避免写入空 layer。
+        return "ODS";
     }
 
     private String truncateComment(String comment) {
