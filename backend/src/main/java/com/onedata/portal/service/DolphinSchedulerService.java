@@ -547,20 +547,30 @@ public class DolphinSchedulerService {
             return Collections.emptyList();
         }
         Long projectCode = getProjectCode();
-        if (projectCode == null)
+        if (projectCode == null) {
             return Collections.emptyList();
+        }
 
-        int pageSize = Math.min(Math.max(limit, 1), 100);
+        int targetLimit = Math.min(Math.max(limit, 1), 100);
+        int pageSize = Math.min(Math.max(targetLimit * 3, 20), 100);
 
-        DolphinPageData<DolphinProcessInstance> page = openApiClient.listProcessInstances(
-                projectCode, 1, pageSize, workflowCode);
+        List<DolphinProcessInstance> filtered = collectWorkflowInstances(
+                projectCode, workflowCode, targetLimit, pageSize, true);
 
-        if (page == null || page.getTotalList() == null) {
+        // Fallback: if DS ignores server-side filter, scan global pages and filter locally.
+        if (filtered.isEmpty()) {
+            filtered = collectWorkflowInstances(projectCode, workflowCode, targetLimit, pageSize, false);
+        }
+
+        if (filtered.isEmpty()) {
             return Collections.emptyList();
         }
 
         List<WorkflowInstanceSummary> result = new ArrayList<>();
-        for (DolphinProcessInstance instance : page.getTotalList()) {
+        for (DolphinProcessInstance instance : filtered) {
+            if (result.size() >= targetLimit) {
+                break;
+            }
             result.add(WorkflowInstanceSummary.builder()
                     .instanceId(instance.getId())
                     .state(instance.getState())
@@ -571,6 +581,71 @@ public class DolphinSchedulerService {
                     .build());
         }
         return result;
+    }
+
+    private List<DolphinProcessInstance> collectWorkflowInstances(Long projectCode,
+            Long workflowCode,
+            int limit,
+            int pageSize,
+            boolean useServerFilter) {
+        List<DolphinProcessInstance> matched = new ArrayList<>();
+        int pageNo = 1;
+        int maxPages = 5;
+
+        while (pageNo <= maxPages && matched.size() < limit) {
+            DolphinPageData<DolphinProcessInstance> page = openApiClient.listProcessInstances(
+                    projectCode,
+                    pageNo,
+                    pageSize,
+                    useServerFilter ? workflowCode : null);
+
+            if (page == null || page.getTotalList() == null || page.getTotalList().isEmpty()) {
+                break;
+            }
+
+            for (DolphinProcessInstance instance : page.getTotalList()) {
+                if (instance == null || instance.getId() == null) {
+                    continue;
+                }
+                if (isWorkflowInstance(projectCode, workflowCode, instance)) {
+                    matched.add(instance);
+                    if (matched.size() >= limit) {
+                        break;
+                    }
+                }
+            }
+
+            if (shouldStopPaging(page, pageNo, pageSize)) {
+                break;
+            }
+            pageNo++;
+        }
+
+        return matched;
+    }
+
+    private boolean shouldStopPaging(DolphinPageData<DolphinProcessInstance> page,
+            int currentPage,
+            int pageSize) {
+        if (page.getTotalPage() > 0 && currentPage >= page.getTotalPage()) {
+            return true;
+        }
+        return page.getTotalList() == null || page.getTotalList().size() < pageSize;
+    }
+
+    private boolean isWorkflowInstance(Long projectCode, Long workflowCode, DolphinProcessInstance instance) {
+        if (Objects.equals(instance.getProcessDefinitionCode(), workflowCode)) {
+            return true;
+        }
+        if (instance.getProcessDefinitionCode() != null) {
+            return false;
+        }
+        try {
+            DolphinProcessInstance detail = openApiClient.getProcessInstance(projectCode, instance.getId());
+            return detail != null && Objects.equals(detail.getProcessDefinitionCode(), workflowCode);
+        } catch (Exception ex) {
+            return false;
+        }
     }
 
     /**

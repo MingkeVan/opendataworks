@@ -110,9 +110,9 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="currentVersionId" label="当前版本" width="120">
+        <el-table-column label="当前版本" width="120">
           <template #default="{ row }">
-            {{ row.currentVersionId || '-' }}
+            {{ row.currentVersionNo ? `v${row.currentVersionNo}` : '-' }}
           </template>
         </el-table-column>
 

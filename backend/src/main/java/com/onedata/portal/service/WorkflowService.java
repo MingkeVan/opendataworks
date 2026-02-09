@@ -23,7 +23,6 @@ import com.onedata.portal.entity.WorkflowVersion;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
-import com.onedata.portal.mapper.WorkflowInstanceCacheMapper;
 import com.onedata.portal.mapper.WorkflowPublishRecordMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
@@ -67,6 +66,7 @@ public class WorkflowService {
     private final WorkflowTaskRelationMapper workflowTaskRelationMapper;
     private final WorkflowPublishRecordMapper workflowPublishRecordMapper;
     private final WorkflowVersionService workflowVersionService;
+    private final WorkflowVersionMapper workflowVersionMapper;
     private final WorkflowInstanceCacheService workflowInstanceCacheService;
     private final ObjectMapper objectMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
@@ -86,6 +86,7 @@ public class WorkflowService {
         Page<DataWorkflow> page = new Page<>(request.getPageNum(), request.getPageSize());
         Page<DataWorkflow> result = dataWorkflowMapper.selectPage(page, wrapper);
         attachLatestInstanceInfo(result.getRecords());
+        attachCurrentVersionInfo(result.getRecords());
         return result;
     }
 
@@ -104,10 +105,12 @@ public class WorkflowService {
                 Wrappers.<WorkflowPublishRecord>lambdaQuery()
                         .eq(WorkflowPublishRecord::getWorkflowId, workflowId)
                         .orderByDesc(WorkflowPublishRecord::getCreatedAt));
-        List<WorkflowInstanceCache> recentInstances = workflowInstanceCacheService.listRecent(workflowId, 10);
-        if ((recentInstances == null || recentInstances.isEmpty()) && workflow.getWorkflowCode() != null) {
-            recentInstances = fetchRecentInstancesFromEngine(workflow, 10);
-        }
+        workflow.setCurrentVersionNo(versions.stream()
+                .filter(version -> Objects.equals(version.getId(), workflow.getCurrentVersionId()))
+                .map(WorkflowVersion::getVersionNo)
+                .findFirst()
+                .orElse(null));
+        List<WorkflowInstanceCache> recentInstances = resolveRecentInstances(workflow, 10);
         return WorkflowDetailResponse.builder()
                 .workflow(workflow)
                 .taskRelations(relations)
@@ -115,6 +118,40 @@ public class WorkflowService {
                 .publishRecords(publishRecords)
                 .recentInstances(recentInstances)
                 .build();
+    }
+
+    private List<WorkflowInstanceCache> resolveRecentInstances(DataWorkflow workflow, int limit) {
+        if (workflow == null || workflow.getId() == null) {
+            return Collections.emptyList();
+        }
+        if (workflow.getWorkflowCode() == null || workflow.getWorkflowCode() <= 0) {
+            return workflowInstanceCacheService.listRecent(workflow.getId(), limit);
+        }
+        try {
+            List<WorkflowInstanceSummary> realtimeSummaries = dolphinSchedulerService
+                    .listWorkflowInstances(workflow.getWorkflowCode(), limit);
+            workflowInstanceCacheService.replaceCache(workflow, realtimeSummaries);
+            return mapSummariesToCaches(workflow.getId(), realtimeSummaries);
+        } catch (Exception ex) {
+            log.warn("Failed to fetch realtime instances for workflow {}: {}", workflow.getWorkflowName(), ex.getMessage());
+            return workflowInstanceCacheService.listRecent(workflow.getId(), limit);
+        }
+    }
+
+    private void attachCurrentVersionInfo(List<DataWorkflow> workflows) {
+        if (CollectionUtils.isEmpty(workflows)) {
+            return;
+        }
+        Set<Long> versionIds = workflows.stream()
+                .map(DataWorkflow::getCurrentVersionId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (versionIds.isEmpty()) {
+            return;
+        }
+        Map<Long, Integer> versionNoById = workflowVersionMapper.selectBatchIds(versionIds).stream()
+                .collect(Collectors.toMap(WorkflowVersion::getId, WorkflowVersion::getVersionNo, (left, right) -> left));
+        workflows.forEach(workflow -> workflow.setCurrentVersionNo(versionNoById.get(workflow.getCurrentVersionId())));
     }
 
     private void trySyncScheduleFromEngine(DataWorkflow workflow) {
@@ -510,27 +547,31 @@ public class WorkflowService {
             if (workflow.getId() == null) {
                 continue;
             }
-            WorkflowInstanceCache latest = workflowInstanceCacheService.findLatest(workflow.getId());
+            WorkflowInstanceCache latest = null;
+            boolean realtimeLoaded = false;
+            if (workflow.getWorkflowCode() != null && workflow.getWorkflowCode() > 0) {
+                try {
+                    List<WorkflowInstanceSummary> summaries = dolphinSchedulerService
+                            .listWorkflowInstances(workflow.getWorkflowCode(), 1);
+                    realtimeLoaded = true;
+                    if (!summaries.isEmpty()) {
+                        latest = mapSummaryToCache(workflow.getId(), summaries.get(0));
+                    }
+                } catch (Exception ex) {
+                    log.warn("Failed to fetch latest realtime instance for workflow {}: {}",
+                            workflow.getWorkflowName(), ex.getMessage());
+                }
+            }
+            if (latest == null && !realtimeLoaded) {
+                latest = workflowInstanceCacheService.findLatest(workflow.getId());
+            }
             if (latest != null) {
-                applyInstance(workflow,
+                applyInstance(
+                        workflow,
                         latest.getInstanceId(),
                         latest.getState(),
                         latest.getStartTime(),
                         latest.getEndTime());
-                continue;
-            }
-            if (workflow.getWorkflowCode() != null) {
-                List<WorkflowInstanceSummary> summaries = dolphinSchedulerService
-                        .listWorkflowInstances(workflow.getWorkflowCode(), 1);
-                if (!summaries.isEmpty()) {
-                    WorkflowInstanceSummary summary = summaries.get(0);
-                    applyInstance(
-                            workflow,
-                            summary.getInstanceId(),
-                            summary.getState(),
-                            summary.getStartTime(),
-                            summary.getEndTime());
-                }
             }
         }
     }
@@ -570,17 +611,13 @@ public class WorkflowService {
         return null;
     }
 
-    private List<WorkflowInstanceCache> fetchRecentInstancesFromEngine(DataWorkflow workflow, int limit) {
-        if (workflow.getWorkflowCode() == null) {
-            return Collections.emptyList();
-        }
-        List<WorkflowInstanceSummary> summaries = dolphinSchedulerService
-                .listWorkflowInstances(workflow.getWorkflowCode(), limit);
-        if (CollectionUtils.isEmpty(summaries)) {
+    private List<WorkflowInstanceCache> mapSummariesToCaches(Long workflowId,
+            List<WorkflowInstanceSummary> summaries) {
+        if (workflowId == null || CollectionUtils.isEmpty(summaries)) {
             return Collections.emptyList();
         }
         return summaries.stream()
-                .map(summary -> mapSummaryToCache(workflow.getId(), summary))
+                .map(summary -> mapSummaryToCache(workflowId, summary))
                 .collect(Collectors.toList());
     }
 

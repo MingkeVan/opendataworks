@@ -554,8 +554,9 @@ public class DolphinOpenApiClient {
             query.add("pageNo", String.valueOf(pageNo));
             query.add("pageSize", String.valueOf(pageSize));
             if (processDefinitionCode != null) {
-                // API expects processDefinitionCode, not processDefineCode
+                // DS versions have inconsistent query key names, send both for compatibility.
                 query.add("processDefinitionCode", String.valueOf(processDefinitionCode));
+                query.add("processDefineCode", String.valueOf(processDefinitionCode));
             }
 
             JsonNode data = getWithParams(path, query);
