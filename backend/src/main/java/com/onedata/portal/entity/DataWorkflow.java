@@ -106,4 +106,7 @@ public class DataWorkflow {
 
     @TableField(exist = false)
     private LocalDateTime latestInstanceEndTime;
+
+    @TableField(exist = false)
+    private Integer currentVersionNo;
 }

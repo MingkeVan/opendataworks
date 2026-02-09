@@ -2,6 +2,7 @@ package com.onedata.portal.service;
 
 import com.onedata.portal.entity.DolphinConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
 import com.onedata.portal.service.dolphin.DolphinOpenApiClient;
 import com.onedata.portal.dto.dolphin.*;
 import org.junit.jupiter.api.BeforeEach;
@@ -241,5 +242,80 @@ class DolphinSchedulerServiceIntegrationTest {
         assertTrue(location.getY() > 0, "Y coordinate should be positive");
 
         System.out.println("\n✅ Test 5 Completed: Task location building works correctly");
+    }
+
+    @Test
+    @DisplayName("Test 6: Instance list should only include current workflow")
+    void testListWorkflowInstancesFiltersByWorkflowCode() {
+        DolphinProject project = new DolphinProject();
+        project.setCode(123456L);
+        when(openApiClient.getProject(anyString())).thenReturn(project);
+
+        DolphinPageData<DolphinProcessInstance> mixedPage = page(
+                processInstance(11L, 111L, "SUCCESS"),
+                processInstance(22L, 222L, "FAILURE"));
+        when(openApiClient.listProcessInstances(eq(123456L), anyInt(), anyInt(), eq(111L)))
+                .thenReturn(mixedPage);
+
+        List<WorkflowInstanceSummary> instances = service.listWorkflowInstances(111L, 10);
+
+        assertEquals(1, instances.size());
+        assertEquals(11L, instances.get(0).getInstanceId());
+        verify(openApiClient, atLeastOnce()).listProcessInstances(eq(123456L), anyInt(), anyInt(), eq(111L));
+    }
+
+    @Test
+    @DisplayName("Test 7: Instance list fallback when server filter is ignored")
+    void testListWorkflowInstancesFallbackToGlobalScan() {
+        DolphinProject project = new DolphinProject();
+        project.setCode(123456L);
+        when(openApiClient.getProject(anyString())).thenReturn(project);
+
+        DolphinPageData<DolphinProcessInstance> ignoredFilterPage = page(
+                processInstance(31L, 999L, "SUCCESS"));
+        DolphinPageData<DolphinProcessInstance> globalPage = page(
+                processInstance(32L, 888L, "SUCCESS"),
+                processInstance(33L, 111L, "RUNNING"));
+
+        when(openApiClient.listProcessInstances(eq(123456L), anyInt(), anyInt(), eq(111L)))
+                .thenReturn(ignoredFilterPage);
+        when(openApiClient.listProcessInstances(eq(123456L), anyInt(), anyInt(), isNull()))
+                .thenReturn(globalPage);
+
+        List<WorkflowInstanceSummary> instances = service.listWorkflowInstances(111L, 10);
+
+        assertEquals(1, instances.size());
+        assertEquals(33L, instances.get(0).getInstanceId());
+        verify(openApiClient, atLeastOnce()).listProcessInstances(eq(123456L), anyInt(), anyInt(), eq(111L));
+        verify(openApiClient, atLeastOnce()).listProcessInstances(eq(123456L), anyInt(), anyInt(), isNull());
+    }
+
+    private DolphinProcessInstance processInstance(Long id, Long processDefinitionCode, String state) {
+        DolphinProcessInstance instance = new DolphinProcessInstance();
+        instance.setId(id);
+        instance.setProcessDefinitionCode(processDefinitionCode);
+        instance.setState(state);
+        instance.setCommandType("START_PROCESS");
+        instance.setDuration("10s");
+        instance.setStartTime("2026-02-09 10:00:00");
+        instance.setEndTime("2026-02-09 10:00:10");
+        return instance;
+    }
+
+    @SafeVarargs
+    private final DolphinPageData<DolphinProcessInstance> page(DolphinProcessInstance... instances) {
+        DolphinPageData<DolphinProcessInstance> page = new DolphinPageData<>();
+        List<DolphinProcessInstance> totalList = new ArrayList<>();
+        if (instances != null) {
+            for (DolphinProcessInstance instance : instances) {
+                totalList.add(instance);
+            }
+        }
+        page.setTotalList(totalList);
+        page.setTotal(totalList.size());
+        page.setPageSize(totalList.size());
+        page.setCurrentPage(1);
+        page.setTotalPage(1);
+        return page;
     }
 }
