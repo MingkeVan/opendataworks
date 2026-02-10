@@ -28,9 +28,8 @@ import java.util.stream.Collectors;
  * Doris 表访问统计服务（面向 Doris 2.0.x）
  * <p>
  * 统计策略：
- * 1. 基础访问频次：SHOW QUERY STATS（Doris 原生命令，覆盖所有接入渠道）；
- * 2. 最近访问时间/冷热判断：优先读取审计表（__internal_schema.audit_log 或 doris_audit_db__.doris_audit_tbl__）；
- * 3. 审计不可用时降级为 QUERY STATS 结果。
+ * 1. 访问频次/最近访问/趋势：统一读取审计表（__internal_schema.audit_log 或 doris_audit_db__.doris_audit_tbl__）；
+ * 2. 审计不可用时返回不可统计说明（audit-only，不回退 SHOW QUERY STATS）。
  */
 @Slf4j
 @Service
@@ -88,13 +87,10 @@ public class DorisTableAccessService {
         stats.setAccessCount30d(0L);
         stats.setDistinctUserCount(0L);
 
-        Map<String, Long> queryStatsByTable = loadQueryStatsByDatabase(clusterId, database);
-        stats.setTotalAccessCount(queryStatsByTable.getOrDefault(tableName, 0L));
-
         Optional<AuditSource> auditSource = resolveAuditSource(clusterId);
         if (!auditSource.isPresent()) {
             stats.setDorisAuditEnabled(false);
-            stats.setNote("当前 Doris 未检测到可查询的审计表，最近访问时间与趋势不可用；访问次数来自 SHOW QUERY STATS。");
+            stats.setNote("当前 Doris 未检测到可查询的审计表，无法生成访问统计（audit-only 模式）。");
             return stats;
         }
 
@@ -166,10 +162,7 @@ public class DorisTableAccessService {
             }
         }
 
-        // 总访问次数优先采用 SHOW QUERY STATS；若 SHOW 无值则使用审计匹配结果兜底
-        if (stats.getTotalAccessCount() == null || stats.getTotalAccessCount() <= 0L) {
-            stats.setTotalAccessCount(matchedTotal);
-        }
+        stats.setTotalAccessCount(matchedTotal);
         stats.setRecentAccessCount(recentCount);
         stats.setAccessCount7d(count7d);
         stats.setAccessCount30d(count30d);
@@ -253,17 +246,6 @@ public class DorisTableAccessService {
                     .add(name);
         }
 
-        Map<String, Long> totalQueryCount = new HashMap<>();
-        for (Map.Entry<Long, Map<String, Set<String>>> clusterEntry : clusterDbTables.entrySet()) {
-            Long statClusterId = clusterEntry.getKey();
-            for (String db : clusterEntry.getValue().keySet()) {
-                Map<String, Long> stats = loadQueryStatsByDatabase(statClusterId, db);
-                for (Map.Entry<String, Long> item : stats.entrySet()) {
-                    totalQueryCount.put(buildClusterIdentifier(statClusterId, db, item.getKey()), item.getValue());
-                }
-            }
-        }
-
         boolean hasAnyAudit = false;
         String auditSourceName = null;
         Set<Long> auditEnabledClusters = new HashSet<>();
@@ -321,9 +303,9 @@ public class DorisTableAccessService {
         summary.setDorisAuditEnabled(hasAnyAudit);
         summary.setDorisAuditSource(auditSourceName);
         if (!hasAnyAudit) {
-            summary.setNote("未检测到 Doris 审计表，热点/冷表基于 SHOW QUERY STATS（无最后访问时间）。");
+            summary.setNote("未检测到 Doris 审计表，无法生成热点表/长期未用表（audit-only 模式）。");
         } else if (auditEnabledClusters.size() < clusterDbTables.size()) {
-            summary.setNote("部分集群未开启审计表，已对开启审计的集群使用审计统计，其他集群回退至 SHOW QUERY STATS。");
+            summary.setNote("部分集群未开启审计表，仅展示已开启审计集群的热点/冷表结果（audit-only 模式）。");
         }
 
         List<DashboardTableAccessItem> hotItems = new ArrayList<>();
@@ -331,13 +313,14 @@ public class DorisTableAccessService {
             String key = entry.getKey();
             DataTable table = entry.getValue();
             boolean clusterAuditEnabled = auditEnabledClusters.contains(table.getClusterId());
-            Long count = clusterAuditEnabled
-                    ? hotWindowCount.getOrDefault(key, 0L)
-                    : totalQueryCount.getOrDefault(key, 0L);
+            if (!clusterAuditEnabled) {
+                continue;
+            }
+            Long count = hotWindowCount.getOrDefault(key, 0L);
             DashboardTableAccessItem item = toDashboardItem(
                     table,
                     count,
-                    clusterAuditEnabled ? lastAccess.get(key) : null,
+                    lastAccess.get(key),
                     now);
             hotItems.add(item);
         }
@@ -352,16 +335,12 @@ public class DorisTableAccessService {
             DataTable table = entry.getValue();
             LocalDateTime last = lastAccess.get(key);
             boolean clusterAuditEnabled = auditEnabledClusters.contains(table.getClusterId());
-            Long count = clusterAuditEnabled
-                    ? hotWindowCount.getOrDefault(key, 0L)
-                    : totalQueryCount.getOrDefault(key, 0L);
-
-            boolean isCold;
-            if (clusterAuditEnabled) {
-                isCold = (last == null || last.isBefore(coldThreshold));
-            } else {
-                isCold = count == null || count <= 0L;
+            if (!clusterAuditEnabled) {
+                continue;
             }
+            Long count = hotWindowCount.getOrDefault(key, 0L);
+
+            boolean isCold = (last == null || last.isBefore(coldThreshold));
             if (!isCold) {
                 continue;
             }
@@ -410,34 +389,6 @@ public class DorisTableAccessService {
             return table.getClusterId();
         }
         throw new IllegalArgumentException("未指定 clusterId，且表未绑定 clusterId");
-    }
-
-    private Map<String, Long> loadQueryStatsByDatabase(Long clusterId, String database) {
-        Map<String, Long> result = new HashMap<>();
-        String sql = "SHOW QUERY STATS FOR " + wrapIdentifier(database);
-        try (Connection connection = dorisConnectionService.getConnection(clusterId);
-                Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery(sql)) {
-            ResultSetMetaData md = rs.getMetaData();
-            int tableIdx = findColumn(md, "TableName", "table_name", "table", "tablename");
-            int countIdx = findColumn(md, "QueryCount", "query_count", "querycount", "count");
-            if (tableIdx < 1) {
-                tableIdx = 1;
-            }
-            if (countIdx < 1) {
-                countIdx = 2;
-            }
-            while (rs.next()) {
-                String tableName = normalizeIdentifier(rs.getString(tableIdx));
-                if (!StringUtils.hasText(tableName)) {
-                    continue;
-                }
-                result.put(tableName, parseLongValue(rs.getObject(countIdx)));
-            }
-        } catch (Exception e) {
-            log.warn("SHOW QUERY STATS failed for cluster={} db={}, reason={}", clusterId, database, e.getMessage());
-        }
-        return result;
     }
 
     private Optional<AuditSource> resolveAuditSource(Long clusterId) {
@@ -571,21 +522,6 @@ public class DorisTableAccessService {
         return clusterId + "::" + normalizeIdentifier(dbAndTable);
     }
 
-    private int findColumn(ResultSetMetaData md, String... candidates) throws SQLException {
-        for (int i = 1; i <= md.getColumnCount(); i++) {
-            String label = md.getColumnLabel(i);
-            if (!StringUtils.hasText(label)) {
-                label = md.getColumnName(i);
-            }
-            for (String candidate : candidates) {
-                if (candidate.equalsIgnoreCase(label)) {
-                    return i;
-                }
-            }
-        }
-        return -1;
-    }
-
     private String firstPresent(Map<String, String> columns, String... candidates) {
         for (String candidate : candidates) {
             String found = columns.get(candidate.toLowerCase(Locale.ROOT));
@@ -631,11 +567,6 @@ public class DorisTableAccessService {
         } catch (Exception ignore) {
             return null;
         }
-    }
-
-    private long parseLongValue(Object value) {
-        Long parsed = parseNullableLong(value);
-        return parsed == null ? 0L : parsed;
     }
 
     private String normalizeIdentifier(String value) {
