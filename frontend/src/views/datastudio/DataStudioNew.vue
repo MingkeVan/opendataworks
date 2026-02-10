@@ -736,7 +736,7 @@
               size="small"
               height="100%"
             >
-              <el-table-column label="字段名" width="170">
+              <el-table-column label="字段名" width="130" show-overflow-tooltip>
                 <template #default="{ row }">
                   <el-input
                     v-if="tabStates[tab.id].fieldsEditing"
@@ -1162,6 +1162,7 @@ const tabsPersistSnapshot = computed(() => {
       tableName: tab?.tableName || '',
       dbName: tab?.dbName || state?.table?.dbName || '',
       sourceId: tab?.sourceId || state?.table?.sourceId || '',
+      sourceType: state?.table?.sourceType || '',
       tableId: state?.table?.id || null,
       sql: state?.query?.sql ?? '',
       limit: Number(state?.query?.limit ?? 200)
@@ -1233,13 +1234,14 @@ const restoreTabsFromStorage = () => {
         kind,
         tableName: String(item?.tableName ?? ''),
         dbName: String(item?.dbName ?? ''),
-        sourceId: String(item?.sourceId ?? '')
+        sourceId: String(item?.sourceId ?? ''),
+        sourceType: String(item?.sourceType ?? '')
       }
 
       const tablePayload =
         kind === 'query'
-          ? { tableName: '', dbName: tabItem.dbName, sourceId: tabItem.sourceId }
-          : { id: item?.tableId || undefined, tableName: tabItem.tableName, dbName: tabItem.dbName, sourceId: tabItem.sourceId }
+          ? { tableName: '', dbName: tabItem.dbName, sourceId: tabItem.sourceId, sourceType: tabItem.sourceType }
+          : { id: item?.tableId || undefined, tableName: tabItem.tableName, dbName: tabItem.dbName, sourceId: tabItem.sourceId, sourceType: tabItem.sourceType }
 
       tabStates[id] = createTabState(tablePayload)
       if (typeof item?.sql === 'string') {
@@ -1477,6 +1479,7 @@ const loadSchemas = async (sourceId, force = false) => {
 const loadTables = async (sourceId, database, force = false) => {
   if (!sourceId || !database) return false
   const sourceKey = String(sourceId)
+  const sourceType = String(getDatasourceById(sourceKey)?.sourceType || '').toUpperCase()
   tableStore[sourceKey] = tableStore[sourceKey] || {}
   if (tableStore[sourceKey][database] && !force) return true
   const loadingKey = `${sourceKey}::${database}`
@@ -1495,6 +1498,7 @@ const loadTables = async (sourceId, database, force = false) => {
       const base = {
         ...item,
         sourceId: sourceKey,
+        sourceType,
         dbName: database,
         tableName,
         tableComment: item.tableComment || item.TABLE_COMMENT || '',
@@ -1888,8 +1892,24 @@ const hasPositiveNumber = (value) => {
   return Number.isFinite(num) && num > 0
 }
 
+const getTableSourceType = (table) => {
+  if (!table) return ''
+  const explicitType = String(table.sourceType || table.datasourceType || table.dataSourceType || '')
+    .trim()
+    .toUpperCase()
+  if (explicitType) return explicitType
+  const sourceId = table.sourceId || table.clusterId || table.datasourceId
+  if (!sourceId) return ''
+  return String(getDatasourceById(sourceId)?.sourceType || '')
+    .trim()
+    .toUpperCase()
+}
+
 const isDorisTable = (table) => {
   if (!table) return false
+  const sourceType = getTableSourceType(table)
+  if (sourceType === 'MYSQL') return false
+  if (sourceType === 'DORIS') return true
   if (table.isSynced === 1) return true
   return (
     hasText(table.tableModel) ||
@@ -2140,8 +2160,9 @@ const openTableTab = async (table, dbFallback = '', sourceFallback = '') => {
   if (sourceId) {
     clusterId.value = sourceId
   }
+  const resolvedSourceType = String(payload.sourceType || getDatasourceById(sourceId)?.sourceType || '').toUpperCase()
   const resolvedDb = payload.dbName || payload.databaseName || payload.database || dbFallback || ''
-  payload = { ...payload, dbName: resolvedDb, sourceId }
+  payload = { ...payload, dbName: resolvedDb, sourceId, sourceType: resolvedSourceType }
   const key = getTableKey(payload, resolvedDb, sourceId)
   if (!key) return
 
@@ -2157,6 +2178,7 @@ const openTableTab = async (table, dbFallback = '', sourceFallback = '') => {
     }
     if (existing.kind !== 'query') {
       existing.sourceId = sourceId || existing.sourceId
+      existing.sourceType = resolvedSourceType || existing.sourceType
       existing.dbName = resolvedDb || existing.dbName
       existing.tableName = payload.tableName || existing.tableName
     }
@@ -2179,6 +2201,7 @@ const openTableTab = async (table, dbFallback = '', sourceFallback = '') => {
       syncAutoSelectSqlIfSchemaMismatch(state)
     }
     existingById.sourceId = sourceId || existingById.sourceId
+    existingById.sourceType = resolvedSourceType || existingById.sourceType
     existingById.dbName = resolvedDb || existingById.dbName
     existingById.tableName = payload.tableName || existingById.tableName
     selectedTableKey.value = key
@@ -2191,7 +2214,8 @@ const openTableTab = async (table, dbFallback = '', sourceFallback = '') => {
     kind: 'table',
     tableName: payload.tableName,
     dbName: resolvedDb,
-    sourceId
+    sourceId,
+    sourceType: resolvedSourceType
   }
   tabStates[key] = createTabState({ ...payload, dbName: resolvedDb, sourceId })
   openTabs.value.push(tabItem)
@@ -2463,6 +2487,15 @@ const loadTabData = async (tabId) => {
   } catch (error) {
     console.error('加载表详情失败', error)
   }
+}
+
+const hydrateRestoredTableTabs = () => {
+  const tableTabIds = openTabs.value
+    .filter((tab) => tab?.kind === 'table')
+    .map((tab) => String(tab.id || ''))
+    .filter(Boolean)
+  if (!tableTabIds.length) return
+  void Promise.allSettled(tableTabIds.map((tabId) => loadTabData(tabId)))
 }
 
 	const disposeTabResources = (tabId) => {
@@ -3902,13 +3935,16 @@ watch(selectedTableKey, (value) => {
     openTableTab
   })
 
-onMounted(() => {
+onMounted(async () => {
   setupTableObserver()
-  restoreTabsFromStorage()
+  const restored = restoreTabsFromStorage()
+  if (restored) {
+    hydrateRestoredTableTabs()
+  }
   loadBusinessDomains()
-  loadClusters()
+  await loadClusters()
   fetchHistory()
-  syncFromRoute()
+  await syncFromRoute()
   if (route.query.create) {
     createDrawerVisible.value = true
     clearCreateQuery()
