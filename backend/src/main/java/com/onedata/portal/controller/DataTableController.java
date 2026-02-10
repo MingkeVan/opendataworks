@@ -11,14 +11,18 @@ import com.onedata.portal.dto.TableRelatedTasksResponse;
 import com.onedata.portal.dto.TableStatistics;
 import com.onedata.portal.entity.DataField;
 import com.onedata.portal.entity.DataTable;
+import com.onedata.portal.entity.DorisCluster;
+import com.onedata.portal.entity.MetadataSyncHistory;
 import com.onedata.portal.entity.TableStatisticsHistory;
 import com.onedata.portal.service.DataTableService;
 import com.onedata.portal.service.DorisConnectionService;
 import com.onedata.portal.service.TableStatisticsCacheService;
 import com.onedata.portal.service.TableStatisticsHistoryService;
 import com.onedata.portal.service.DataExportService;
+import com.onedata.portal.service.DorisClusterService;
 import com.onedata.portal.service.DorisMetadataSyncService;
 import com.onedata.portal.service.DorisTableAccessService;
+import com.onedata.portal.service.MetadataSyncHistoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -28,8 +32,10 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -49,6 +55,8 @@ public class DataTableController {
     private final DataExportService dataExportService;
     private final DorisMetadataSyncService dorisMetadataSyncService;
     private final DorisTableAccessService dorisTableAccessService;
+    private final DorisClusterService dorisClusterService;
+    private final MetadataSyncHistoryService metadataSyncHistoryService;
 
     /**
      * 分页查询表列表
@@ -211,7 +219,12 @@ public class DataTableController {
      */
     @PostMapping
     public Result<DataTable> create(@RequestBody DataTable dataTable) {
-        return Result.success(dataTableService.create(dataTable));
+        try {
+            dataTable.setLayer(dataTableService.normalizeLayer(dataTable.getLayer(), true));
+            return Result.success(dataTableService.create(dataTable));
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
     }
 
     /**
@@ -223,6 +236,14 @@ public class DataTableController {
         DataTable existing = dataTableService.getById(id);
         if (existing == null) {
             return Result.fail("表不存在");
+        }
+        if (!StringUtils.hasText(dataTable.getLayer())) {
+            return Result.fail("数据分层不能为空");
+        }
+        try {
+            dataTable.setLayer(dataTableService.normalizeLayer(dataTable.getLayer(), true));
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
         }
         boolean syncDoris = isDorisTable(existing);
         if (syncDoris && clusterId == null) {
@@ -331,6 +352,27 @@ public class DataTableController {
         return tableName;
     }
 
+    private String resolveRestoreTableName(DataTable table, String currentActualTableName) {
+        if (table != null && StringUtils.hasText(table.getOriginTableName())) {
+            return table.getOriginTableName().trim();
+        }
+        if (!StringUtils.hasText(currentActualTableName)) {
+            return null;
+        }
+        return currentActualTableName.replaceFirst("_deprecated_\\d{14}$", "");
+    }
+
+    private Long calculateRemainingDays(LocalDateTime now, LocalDateTime purgeAt) {
+        if (now == null || purgeAt == null) {
+            return null;
+        }
+        long seconds = Duration.between(now, purgeAt).getSeconds();
+        if (seconds <= 0) {
+            return 0L;
+        }
+        return (seconds + 86_399) / 86_400;
+    }
+
     private static class TableRef {
         private final String database;
         private final String tableName;
@@ -411,6 +453,13 @@ public class DataTableController {
         if (table == null) {
             return Result.fail("表不存在");
         }
+        if ("deprecated".equalsIgnoreCase(table.getStatus())) {
+            return Result.fail("表已处于待删除状态");
+        }
+        Long actualClusterId = clusterId != null ? clusterId : table.getClusterId();
+        if (isDorisTable(table) && actualClusterId == null) {
+            return Result.fail("请指定数据源");
+        }
 
         String database;
         String actualTableName;
@@ -430,20 +479,135 @@ public class DataTableController {
 
         try {
             // 生成新表名
-            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+            LocalDateTime now = LocalDateTime.now();
+            String timestamp = now.format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
             String newTableName = actualTableName + "_deprecated_" + timestamp;
 
-            // 在Doris中重命名表
-            dorisConnectionService.renameTable(clusterId, database, actualTableName, newTableName);
+            if (isDorisTable(table)) {
+                // 在Doris中重命名表
+                dorisConnectionService.renameTable(actualClusterId, database, actualTableName, newTableName);
+            }
 
             // 更新本地记录
+            table.setOriginTableName(actualTableName);
             table.setTableName(newTableName);
             table.setStatus("deprecated");
+            table.setDeprecatedAt(now);
+            table.setPurgeAt(now.plusDays(30));
             dataTableService.update(table);
 
             return Result.success();
         } catch (Exception e) {
             return Result.fail("删除表失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 待删除表列表
+     */
+    @RequireAuth
+    @GetMapping("/pending-deletion")
+    public Result<List<Map<String, Object>>> listPendingDeletion(
+            @RequestParam(required = false) Long clusterId) {
+        List<DataTable> tables = dataTableService.listPendingDeletion(clusterId);
+        LocalDateTime now = LocalDateTime.now();
+        List<Map<String, Object>> result = new java.util.ArrayList<>(tables.size());
+        for (DataTable table : tables) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("id", table.getId());
+            item.put("clusterId", table.getClusterId());
+            item.put("dbName", table.getDbName());
+            item.put("tableName", table.getTableName());
+            item.put("originTableName", table.getOriginTableName());
+            item.put("tableComment", table.getTableComment());
+            item.put("status", table.getStatus());
+            item.put("isSynced", table.getIsSynced());
+            item.put("deprecatedAt", table.getDeprecatedAt());
+            item.put("purgeAt", table.getPurgeAt());
+            item.put("remainingDays", calculateRemainingDays(now, table.getPurgeAt()));
+            result.add(item);
+        }
+        return Result.success(result);
+    }
+
+    /**
+     * 恢复待删除表
+     */
+    @RequireAuth
+    @PostMapping("/{id}/restore")
+    public Result<DataTable> restoreTable(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long clusterId) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return Result.fail("表不存在");
+        }
+        if (!"deprecated".equalsIgnoreCase(table.getStatus())) {
+            return Result.fail("仅支持恢复已废弃表");
+        }
+
+        TableRef tableRef = resolveTableRef(table);
+        if (tableRef == null) {
+            return Result.fail("表未配置数据库名，请先设置 dbName 字段");
+        }
+
+        String restoreTableName = resolveRestoreTableName(table, tableRef.tableName);
+        if (!StringUtils.hasText(restoreTableName)) {
+            return Result.fail("恢复失败：缺少原始表名");
+        }
+        DataTable duplicate = dataTableService.getByDbAndTableName(table.getClusterId(), tableRef.database, restoreTableName);
+        if (duplicate != null && !Objects.equals(duplicate.getId(), table.getId())) {
+            return Result.fail("恢复失败：目标表名冲突 " + restoreTableName);
+        }
+
+        Long actualClusterId = clusterId != null ? clusterId : table.getClusterId();
+        try {
+            if (isDorisTable(table)) {
+                if (actualClusterId == null) {
+                    return Result.fail("请指定数据源");
+                }
+                dorisConnectionService.renameTable(actualClusterId, tableRef.database, tableRef.tableName, restoreTableName);
+            }
+            DataTable restored = dataTableService.restoreDeprecatedTable(table, restoreTableName);
+            return Result.success(restored);
+        } catch (Exception e) {
+            return Result.fail("恢复表失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 立即物理删除表
+     */
+    @RequireAuth
+    @PostMapping("/{id}/purge-now")
+    public Result<Void> purgeTableNow(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long clusterId) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return Result.fail("表不存在");
+        }
+        if (!"deprecated".equalsIgnoreCase(table.getStatus())) {
+            return Result.fail("仅支持清理已废弃表");
+        }
+
+        Long actualClusterId = clusterId != null ? clusterId : table.getClusterId();
+        TableRef tableRef = resolveTableRef(table);
+        if (tableRef == null) {
+            return Result.fail("表未配置数据库名，请先设置 dbName 字段");
+        }
+
+        try {
+            if (isDorisTable(table)) {
+                if (actualClusterId == null) {
+                    return Result.fail("请指定数据源");
+                }
+                dorisConnectionService.dropTable(actualClusterId, tableRef.database, tableRef.tableName);
+            }
+            dataTableService.purgeTableMetadata(id);
+            return Result.success();
+        } catch (Exception e) {
+            return Result.fail("立即清理失败: " + e.getMessage());
         }
     }
 
@@ -809,28 +973,33 @@ public class DataTableController {
     @PostMapping("/sync-metadata")
     public Result<Map<String, Object>> syncAllMetadata(
             @RequestParam(required = false) Long clusterId) {
-        try {
-            DorisMetadataSyncService.SyncResult result = dorisMetadataSyncService.syncAllMetadata(clusterId);
-
-            Map<String, Object> response = new java.util.HashMap<>();
-            response.put("success", result.getErrors().isEmpty());
-            response.put("newTables", result.getNewTables());
-            response.put("updatedTables", result.getUpdatedTables());
-            response.put("newFields", result.getNewFields());
-            response.put("updatedFields", result.getUpdatedFields());
-            response.put("deletedFields", result.getDeletedFields());
-            response.put("inactivatedTables", result.getInactivatedTables());
-            response.put("errors", result.getErrors());
-            response.put("syncTime", LocalDateTime.now());
-
-            if (result.getErrors().isEmpty()) {
-                return Result.success(response, "元数据同步成功");
-            } else {
-                return Result.success(response, "元数据同步完成，但存在部分错误");
-            }
-        } catch (Exception e) {
-            return Result.fail("元数据同步失败: " + e.getMessage());
+        if (clusterId == null) {
+            return Result.fail("请指定数据源");
         }
+        DorisCluster cluster = dorisClusterService.getById(clusterId);
+        if (cluster == null) {
+            return Result.fail("未找到指定数据源: " + clusterId);
+        }
+
+        LocalDateTime startedAt = LocalDateTime.now();
+        DorisMetadataSyncService.SyncResult result;
+        try {
+            result = dorisMetadataSyncService.syncAllMetadata(clusterId);
+        } catch (Exception e) {
+            result = new DorisMetadataSyncService.SyncResult();
+            result.addError("元数据同步失败: " + e.getMessage());
+        }
+
+        MetadataSyncHistory history = metadataSyncHistoryService.record(cluster, "manual", "all", null, startedAt, result);
+        Map<String, Object> response = buildSyncResponse(result, history);
+
+        if ("SUCCESS".equals(result.getStatus())) {
+            return Result.success(response, "元数据同步成功");
+        }
+        if ("PARTIAL".equals(result.getStatus())) {
+            return Result.success(response, "元数据同步完成，但存在部分错误");
+        }
+        return Result.success(response, "元数据同步失败");
     }
 
     /**
@@ -840,30 +1009,35 @@ public class DataTableController {
     public Result<Map<String, Object>> syncDatabaseMetadata(
             @PathVariable String database,
             @RequestParam(required = false) Long clusterId) {
-        try {
-            DorisMetadataSyncService.SyncResult result = dorisMetadataSyncService.syncDatabase(clusterId, database,
-                    null);
-
-            Map<String, Object> response = new java.util.HashMap<>();
-            response.put("success", result.getErrors().isEmpty());
-            response.put("database", database);
-            response.put("newTables", result.getNewTables());
-            response.put("updatedTables", result.getUpdatedTables());
-            response.put("newFields", result.getNewFields());
-            response.put("updatedFields", result.getUpdatedFields());
-            response.put("deletedFields", result.getDeletedFields());
-            response.put("inactivatedTables", result.getInactivatedTables());
-            response.put("errors", result.getErrors());
-            response.put("syncTime", LocalDateTime.now());
-
-            if (result.getErrors().isEmpty()) {
-                return Result.success(response, "数据库元数据同步成功");
-            } else {
-                return Result.success(response, "数据库元数据同步完成，但存在部分错误");
-            }
-        } catch (Exception e) {
-            return Result.fail("数据库元数据同步失败: " + e.getMessage());
+        if (clusterId == null) {
+            return Result.fail("请指定数据源");
         }
+        DorisCluster cluster = dorisClusterService.getById(clusterId);
+        if (cluster == null) {
+            return Result.fail("未找到指定数据源: " + clusterId);
+        }
+
+        LocalDateTime startedAt = LocalDateTime.now();
+        DorisMetadataSyncService.SyncResult result;
+        try {
+            result = dorisMetadataSyncService.syncDatabase(clusterId, database, null);
+        } catch (Exception e) {
+            result = new DorisMetadataSyncService.SyncResult();
+            result.addError("数据库元数据同步失败: " + e.getMessage());
+        }
+
+        MetadataSyncHistory history = metadataSyncHistoryService.record(cluster, "manual", "database", database, startedAt,
+                result);
+        Map<String, Object> response = buildSyncResponse(result, history);
+        response.put("database", database);
+
+        if ("SUCCESS".equals(result.getStatus())) {
+            return Result.success(response, "数据库元数据同步成功");
+        }
+        if ("PARTIAL".equals(result.getStatus())) {
+            return Result.success(response, "数据库元数据同步完成，但存在部分错误");
+        }
+        return Result.success(response, "数据库元数据同步失败");
     }
 
     /**
@@ -876,6 +1050,14 @@ public class DataTableController {
         DataTable table = dataTableService.getById(id);
         if (table == null) {
             return Result.fail("表不存在");
+        }
+        Long actualClusterId = clusterId != null ? clusterId : table.getClusterId();
+        if (actualClusterId == null) {
+            return Result.fail("请指定数据源");
+        }
+        DorisCluster cluster = dorisClusterService.getById(actualClusterId);
+        if (cluster == null) {
+            return Result.fail("未找到指定数据源: " + actualClusterId);
         }
 
         String database;
@@ -894,30 +1076,46 @@ public class DataTableController {
             return Result.fail("表未配置数据库名，请先设置 dbName 字段");
         }
 
+        LocalDateTime startedAt = LocalDateTime.now();
+        DorisMetadataSyncService.SyncResult result;
         try {
-            DorisMetadataSyncService.SyncResult result = dorisMetadataSyncService.syncTable(clusterId, database,
-                    actualTableName);
-
-            Map<String, Object> response = new java.util.HashMap<>();
-            response.put("success", result.getErrors().isEmpty());
-            response.put("database", database);
-            response.put("tableName", actualTableName);
-            response.put("newTables", result.getNewTables());
-            response.put("updatedTables", result.getUpdatedTables());
-            response.put("newFields", result.getNewFields());
-            response.put("updatedFields", result.getUpdatedFields());
-            response.put("deletedFields", result.getDeletedFields());
-            response.put("inactivatedTables", result.getInactivatedTables());
-            response.put("errors", result.getErrors());
-            response.put("syncTime", LocalDateTime.now());
-
-            if (result.getErrors().isEmpty()) {
-                return Result.success(response, "表元数据同步成功");
-            } else {
-                return Result.success(response, "表元数据同步完成，但存在部分错误");
-            }
+            result = dorisMetadataSyncService.syncTable(actualClusterId, database, actualTableName);
         } catch (Exception e) {
-            return Result.fail("表元数据同步失败: " + e.getMessage());
+            result = new DorisMetadataSyncService.SyncResult();
+            result.addError("表元数据同步失败: " + e.getMessage());
         }
+
+        String scopeTarget = database + "." + actualTableName;
+        MetadataSyncHistory history = metadataSyncHistoryService.record(cluster, "manual", "table", scopeTarget, startedAt,
+                result);
+        Map<String, Object> response = buildSyncResponse(result, history);
+        response.put("database", database);
+        response.put("tableName", actualTableName);
+
+        if ("SUCCESS".equals(result.getStatus())) {
+            return Result.success(response, "表元数据同步成功");
+        }
+        if ("PARTIAL".equals(result.getStatus())) {
+            return Result.success(response, "表元数据同步完成，但存在部分错误");
+        }
+        return Result.success(response, "表元数据同步失败");
+    }
+
+    private Map<String, Object> buildSyncResponse(DorisMetadataSyncService.SyncResult result, MetadataSyncHistory history) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", "SUCCESS".equals(result.getStatus()));
+        response.put("status", result.getStatus());
+        response.put("syncRunId", history != null ? history.getId() : null);
+        response.put("newTables", result.getNewTables());
+        response.put("updatedTables", result.getUpdatedTables());
+        response.put("deletedTables", result.getDeletedTables());
+        response.put("blockedDeletedTables", result.getBlockedDeletedTables());
+        response.put("newFields", result.getNewFields());
+        response.put("updatedFields", result.getUpdatedFields());
+        response.put("deletedFields", result.getDeletedFields());
+        response.put("inactivatedTables", result.getInactivatedTables());
+        response.put("errors", result.getErrors());
+        response.put("syncTime", LocalDateTime.now());
+        return response;
     }
 }

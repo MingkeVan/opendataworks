@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.mapper.DorisClusterMapper;
 import com.onedata.portal.service.DorisMetadataSyncService;
+import com.onedata.portal.service.MetadataSyncHistoryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -30,6 +31,7 @@ public class DataSourceMetadataAutoSyncTask {
 
     private final DorisClusterMapper dorisClusterMapper;
     private final DorisMetadataSyncService dorisMetadataSyncService;
+    private final MetadataSyncHistoryService metadataSyncHistoryService;
 
     /**
      * 每分钟扫描一次启用自动同步的数据源，根据其 cron 判断是否需要执行同步。
@@ -92,12 +94,23 @@ public class DataSourceMetadataAutoSyncTask {
                 next);
 
         updateLastSyncTime(cluster.getId(), now);
+        LocalDateTime syncStartedAt = LocalDateTime.now();
+        DorisMetadataSyncService.SyncResult syncResult = null;
         try {
-            dorisMetadataSyncService.syncAllMetadata(cluster.getId());
+            syncResult = dorisMetadataSyncService.syncAllMetadata(cluster.getId());
             log.info("Auto metadata sync finished, datasource id={}, name={}", cluster.getId(), cluster.getClusterName());
         } catch (Exception e) {
+            syncResult = new DorisMetadataSyncService.SyncResult();
+            syncResult.addError("自动同步失败: " + e.getMessage());
             log.error("Auto metadata sync failed, datasource id={}, name={}", cluster.getId(), cluster.getClusterName(),
                     e);
+        } finally {
+            try {
+                metadataSyncHistoryService.record(cluster, "auto", "all", null, syncStartedAt, syncResult);
+            } catch (Exception historyEx) {
+                log.error("Failed to record auto metadata sync history, datasource id={}, name={}",
+                        cluster.getId(), cluster.getClusterName(), historyEx);
+            }
         }
     }
 

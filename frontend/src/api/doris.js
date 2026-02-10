@@ -35,5 +35,13 @@ export const dorisClusterApi = {
 
   getTables(id, dbName) {
     return request.get(`/v1/doris-clusters/${id}/databases/${dbName}/tables`)
+  },
+
+  getSyncHistory(id, params = {}) {
+    return request.get(`/v1/doris-clusters/${id}/sync-history`, { params })
+  },
+
+  getSyncHistoryDetail(id, runId) {
+    return request.get(`/v1/doris-clusters/${id}/sync-history/${runId}`)
   }
 }

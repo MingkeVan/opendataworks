@@ -159,6 +159,27 @@ export const tableApi = {
     })
   },
 
+  // 待删除表列表
+  listPendingDeletion(clusterId = null) {
+    return request.get('/v1/tables/pending-deletion', {
+      params: clusterId === null || clusterId === undefined ? {} : { clusterId }
+    })
+  },
+
+  // 恢复废弃表
+  restore(id, clusterId = null) {
+    return request.post(`/v1/tables/${id}/restore`, null, {
+      params: clusterId === null || clusterId === undefined ? {} : { clusterId }
+    })
+  },
+
+  // 立即清理废弃表
+  purgeNow(id, clusterId = null) {
+    return request.post(`/v1/tables/${id}/purge-now`, null, {
+      params: clusterId === null || clusterId === undefined ? {} : { clusterId }
+    })
+  },
+
   // 稽核/比对 Doris 元数据（只检查差异，不同步）
   auditMetadata(clusterId = null) {
     return request.post('/v1/tables/audit-metadata', null, {

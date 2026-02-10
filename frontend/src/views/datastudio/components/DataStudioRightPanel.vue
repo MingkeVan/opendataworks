@@ -63,12 +63,48 @@
                       v-if="state.metaEditing"
                       v-model="state.metaForm.layer"
                       size="small"
-                      placeholder="选择分层"
+                      placeholder="选择分层（必填）"
                       class="meta-input"
                     >
                       <el-option v-for="item in layerOptions" :key="item.value" :label="item.label" :value="item.value" />
                     </el-select>
                     <span v-else>{{ state.table.layer || '-' }}</span>
+                  </el-descriptions-item>
+                  <el-descriptions-item label="业务域">
+                    <el-select
+                      v-if="state.metaEditing"
+                      v-model="state.metaForm.businessDomain"
+                      size="small"
+                      placeholder="选择业务域"
+                      class="meta-input"
+                      @change="handleMetaBusinessDomainChange(activeTabId)"
+                    >
+                      <el-option
+                        v-for="item in businessDomainOptions"
+                        :key="item.domainCode"
+                        :label="`${item.domainCode} - ${item.domainName}`"
+                        :value="item.domainCode"
+                      />
+                    </el-select>
+                    <span v-else>{{ state.table.businessDomain || '-' }}</span>
+                  </el-descriptions-item>
+                  <el-descriptions-item label="数据域">
+                    <el-select
+                      v-if="state.metaEditing"
+                      v-model="state.metaForm.dataDomain"
+                      size="small"
+                      placeholder="选择数据域"
+                      class="meta-input"
+                      :disabled="!state.metaForm.businessDomain"
+                    >
+                      <el-option
+                        v-for="item in dataDomainOptions"
+                        :key="item.domainCode"
+                        :label="`${item.domainCode} - ${item.domainName}`"
+                        :value="item.domainCode"
+                      />
+                    </el-select>
+                    <span v-else>{{ state.table.dataDomain || '-' }}</span>
                   </el-descriptions-item>
                   <el-descriptions-item label="负责人">
                     <el-input v-if="state.metaEditing" v-model="state.metaForm.owner" size="small" class="meta-input" />
@@ -203,11 +239,6 @@
                         :disabled="isAggregateTable(state.table)"
                       />
                       <span v-else>{{ row.fieldType }}</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="长度" width="70">
-                    <template #default="{ row }">
-                      <span>{{ getVarcharLength(row) }}</span>
                     </template>
                   </el-table-column>
                   <el-table-column label="可为空" width="90">
@@ -524,12 +555,14 @@ const {
   activeTab,
   tabStates,
   layerOptions,
+  businessDomainOptions,
+  getMetaDataDomainOptions,
+  handleMetaBusinessDomainChange,
   isDorisTable,
   isAggregateTable,
   isReplicaWarning,
   getLayerType,
   getFieldRows,
-  getVarcharLength,
   startMetaEdit,
   cancelMetaEdit,
   saveMetaEdit,
@@ -573,6 +606,7 @@ const state = computed(() => {
 })
 
 const fieldRows = computed(() => getFieldRows(activeTabId.value))
+const dataDomainOptions = computed(() => getMetaDataDomainOptions(activeTabId.value))
 
 const refreshAccess = () => {
   const tabId = activeTabId.value

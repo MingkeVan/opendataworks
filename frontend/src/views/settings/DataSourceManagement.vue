@@ -68,7 +68,7 @@
             <span>{{ formatDateTime(row.updatedAt) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" fixed="right" width="340">
+        <el-table-column label="操作" fixed="right" width="500">
           <template #default="{ row }">
             <el-button type="primary" text size="small" @click="openEdit(row.id)">编辑</el-button>
             <el-button type="success" text size="small" @click="handleTestConnection(row.id)">测试连接</el-button>
@@ -76,6 +76,8 @@
               >设为默认</el-button
             >
             <el-button type="info" text size="small" @click="openMetadata(row)">元数据</el-button>
+            <el-button type="primary" text size="small" @click="openSyncHistory(row)">同步历史</el-button>
+            <el-button type="danger" text size="small" @click="openPendingDeletion(row)">待删除表</el-button>
             <el-button type="danger" text size="small" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -243,6 +245,118 @@
         <el-button @click="closeMetadata">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="syncHistoryDialogVisible"
+      :title="`同步历史 - ${syncHistoryCluster?.clusterName || ''}`"
+      width="78%"
+      :close-on-click-modal="false"
+    >
+      <el-table v-loading="syncHistoryLoading" :data="syncHistoryList" border style="width: 100%">
+        <el-table-column prop="startedAt" label="时间" min-width="170">
+          <template #default="{ row }">{{ formatDateTime(row.startedAt) }}</template>
+        </el-table-column>
+        <el-table-column prop="triggerType" label="触发方式" min-width="100" />
+        <el-table-column prop="scopeType" label="范围" min-width="90" />
+        <el-table-column prop="scopeTarget" label="目标" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="status" label="状态" min-width="100">
+          <template #default="{ row }">
+            <el-tag :type="getSyncStatusTagType(row.status)" size="small">{{ row.status }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="耗时" min-width="90">
+          <template #default="{ row }">{{ formatDuration(row.durationMs) }}</template>
+        </el-table-column>
+        <el-table-column label="变更统计" min-width="240">
+          <template #default="{ row }">
+            +表{{ row.newTables || 0 }} / ~表{{ row.updatedTables || 0 }} / -表{{ row.deletedTables || 0 }}
+            / 阻断{{ row.blockedDeletedTables || 0 }} / +字段{{ row.newFields || 0 }} / ~字段{{ row.updatedFields || 0 }} /
+            -字段{{ row.deletedFields || 0 }}
+          </template>
+        </el-table-column>
+        <el-table-column label="错误摘要" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.errorSummary || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="viewSyncHistoryDetail(row)">详情</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div class="history-pagination">
+        <el-pagination
+          background
+          layout="total, prev, pager, next, sizes"
+          :total="syncHistoryPager.total"
+          :current-page="syncHistoryPager.pageNum"
+          :page-size="syncHistoryPager.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          @current-change="handleSyncHistoryPageChange"
+          @size-change="handleSyncHistorySizeChange"
+        />
+      </div>
+
+      <template #footer>
+        <el-button @click="syncHistoryDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="syncHistoryDetailVisible"
+      title="同步历史详情"
+      width="58%"
+      :close-on-click-modal="false"
+    >
+      <el-descriptions v-if="syncHistoryDetail" :column="1" border>
+        <el-descriptions-item label="运行ID">{{ syncHistoryDetail.id }}</el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <el-tag :type="getSyncStatusTagType(syncHistoryDetail.status)" size="small">{{ syncHistoryDetail.status }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="触发">{{ syncHistoryDetail.triggerType }}</el-descriptions-item>
+        <el-descriptions-item label="范围">{{ syncHistoryDetail.scopeType }} {{ syncHistoryDetail.scopeTarget || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="开始时间">{{ formatDateTime(syncHistoryDetail.startedAt) }}</el-descriptions-item>
+        <el-descriptions-item label="结束时间">{{ formatDateTime(syncHistoryDetail.finishedAt) }}</el-descriptions-item>
+        <el-descriptions-item label="耗时">{{ formatDuration(syncHistoryDetail.durationMs) }}</el-descriptions-item>
+        <el-descriptions-item label="错误数">{{ syncHistoryDetail.errorCount || 0 }}</el-descriptions-item>
+        <el-descriptions-item label="错误摘要">{{ syncHistoryDetail.errorSummary || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="错误明细">
+          <pre class="error-detail">{{ formatErrorDetails(syncHistoryDetail.errorDetails) }}</pre>
+        </el-descriptions-item>
+      </el-descriptions>
+      <template #footer>
+        <el-button @click="syncHistoryDetailVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="pendingDeletionDialogVisible"
+      :title="`待删除表管理 - ${pendingDeletionCluster?.clusterName || ''}`"
+      width="74%"
+      :close-on-click-modal="false"
+    >
+      <el-table v-loading="pendingDeletionLoading" :data="pendingDeletionList" border style="width: 100%">
+        <el-table-column prop="dbName" label="数据库" min-width="130" />
+        <el-table-column prop="tableName" label="当前表名" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="originTableName" label="原始表名" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="deprecatedAt" label="废弃时间" min-width="170">
+          <template #default="{ row }">{{ formatDateTime(row.deprecatedAt) }}</template>
+        </el-table-column>
+        <el-table-column prop="purgeAt" label="预计删除时间" min-width="170">
+          <template #default="{ row }">{{ formatDateTime(row.purgeAt) }}</template>
+        </el-table-column>
+        <el-table-column prop="remainingDays" label="剩余天数" min-width="90" />
+        <el-table-column label="操作" width="180" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="handleRestoreTable(row)">恢复</el-button>
+            <el-button link type="danger" @click="handlePurgeNow(row)">立即删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="pendingDeletionDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -281,6 +395,21 @@ const selectedCluster = ref(null)
 const auditLoading = ref(false)
 const syncLoading = ref(false)
 const auditResult = ref(null)
+const syncHistoryDialogVisible = ref(false)
+const syncHistoryDetailVisible = ref(false)
+const syncHistoryLoading = ref(false)
+const syncHistoryCluster = ref(null)
+const syncHistoryList = ref([])
+const syncHistoryDetail = ref(null)
+const syncHistoryPager = reactive({
+  pageNum: 1,
+  pageSize: 20,
+  total: 0
+})
+const pendingDeletionDialogVisible = ref(false)
+const pendingDeletionLoading = ref(false)
+const pendingDeletionCluster = ref(null)
+const pendingDeletionList = ref([])
 
 const rules = {
   clusterName: [{ required: true, message: '请输入数据源名称', trigger: 'blur' }],
@@ -319,6 +448,37 @@ const dialogTitle = computed(() => (isEdit.value ? '编辑数据源' : '新增�
 const formatDateTime = value => {
   if (!value) return '-'
   return dayjs(value).format('YYYY-MM-DD HH:mm:ss')
+}
+
+const formatDuration = value => {
+  const ms = Number(value || 0)
+  if (!Number.isFinite(ms) || ms < 0) return '-'
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(2)}s`
+  const seconds = Math.floor(ms / 1000)
+  const mins = Math.floor(seconds / 60)
+  const remain = seconds % 60
+  return `${mins}m ${remain}s`
+}
+
+const getSyncStatusTagType = status => {
+  const normalized = String(status || '').toUpperCase()
+  if (normalized === 'SUCCESS') return 'success'
+  if (normalized === 'PARTIAL') return 'warning'
+  return 'danger'
+}
+
+const formatErrorDetails = value => {
+  if (!value) return '-'
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value
+    if (Array.isArray(parsed)) {
+      return parsed.length ? parsed.join('\n') : '-'
+    }
+    return JSON.stringify(parsed, null, 2)
+  } catch {
+    return String(value)
+  }
 }
 
 async function loadClusters() {
@@ -467,6 +627,123 @@ function closeMetadata() {
   differenceDialogVisible.value = false
 }
 
+function openSyncHistory(row) {
+  syncHistoryCluster.value = row
+  syncHistoryPager.pageNum = 1
+  syncHistoryPager.pageSize = 20
+  syncHistoryPager.total = 0
+  syncHistoryList.value = []
+  syncHistoryDetail.value = null
+  syncHistoryDetailVisible.value = false
+  syncHistoryDialogVisible.value = true
+  loadSyncHistory()
+}
+
+async function loadSyncHistory() {
+  if (!syncHistoryCluster.value?.id) return
+  syncHistoryLoading.value = true
+  try {
+    const data = await dorisClusterApi.getSyncHistory(syncHistoryCluster.value.id, {
+      pageNum: syncHistoryPager.pageNum,
+      pageSize: syncHistoryPager.pageSize
+    })
+    syncHistoryList.value = Array.isArray(data?.records) ? data.records : []
+    syncHistoryPager.total = Number(data?.total || 0)
+  } catch (error) {
+    console.error('加载同步历史失败:', error)
+    ElMessage.error('加载同步历史失败: ' + (error.message || '未知错误'))
+  } finally {
+    syncHistoryLoading.value = false
+  }
+}
+
+function handleSyncHistoryPageChange(pageNum) {
+  syncHistoryPager.pageNum = pageNum
+  loadSyncHistory()
+}
+
+function handleSyncHistorySizeChange(pageSize) {
+  syncHistoryPager.pageSize = pageSize
+  syncHistoryPager.pageNum = 1
+  loadSyncHistory()
+}
+
+async function viewSyncHistoryDetail(row) {
+  if (!syncHistoryCluster.value?.id || !row?.id) return
+  try {
+    syncHistoryDetail.value = await dorisClusterApi.getSyncHistoryDetail(syncHistoryCluster.value.id, row.id)
+    syncHistoryDetailVisible.value = true
+  } catch (error) {
+    console.error('加载同步历史详情失败:', error)
+    ElMessage.error('加载同步历史详情失败: ' + (error.message || '未知错误'))
+  }
+}
+
+function openPendingDeletion(row) {
+  pendingDeletionCluster.value = row
+  pendingDeletionList.value = []
+  pendingDeletionDialogVisible.value = true
+  loadPendingDeletion()
+}
+
+async function loadPendingDeletion() {
+  if (!pendingDeletionCluster.value?.id) return
+  pendingDeletionLoading.value = true
+  try {
+    const data = await tableApi.listPendingDeletion(pendingDeletionCluster.value.id)
+    pendingDeletionList.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    console.error('加载待删除表失败:', error)
+    ElMessage.error('加载待删除表失败: ' + (error.message || '未知错误'))
+  } finally {
+    pendingDeletionLoading.value = false
+  }
+}
+
+const handleRestoreTable = async row => {
+  if (!row?.id || !pendingDeletionCluster.value?.id) return
+  try {
+    await ElMessageBox.confirm(`确认恢复表「${row.originTableName || row.tableName}」吗？`, '恢复确认', {
+      confirmButtonText: '确认恢复',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+
+  try {
+    await tableApi.restore(row.id, pendingDeletionCluster.value.id)
+    ElMessage.success('恢复成功')
+    await loadPendingDeletion()
+  } catch (error) {
+    console.error('恢复表失败:', error)
+    ElMessage.error('恢复表失败: ' + (error.message || '未知错误'))
+  }
+}
+
+const handlePurgeNow = async row => {
+  if (!row?.id || !pendingDeletionCluster.value?.id) return
+  try {
+    await ElMessageBox.confirm(`确认立即删除表「${row.tableName}」吗？该操作不可恢复。`, '立即删除确认', {
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+
+  try {
+    await tableApi.purgeNow(row.id, pendingDeletionCluster.value.id)
+    ElMessage.success('已立即删除')
+    await loadPendingDeletion()
+  } catch (error) {
+    console.error('立即删除失败:', error)
+    ElMessage.error('立即删除失败: ' + (error.message || '未知错误'))
+  }
+}
+
 const auditMetadata = async () => {
   if (!selectedCluster.value?.id) return
   auditLoading.value = true
@@ -524,13 +801,21 @@ const performSync = async () => {
   syncLoading.value = true
   try {
     const response = await tableApi.syncMetadata(selectedCluster.value.id)
-    if (response.success) {
-      ElMessage.success('元数据同步成功！')
+    const status = String(response?.status || '').toUpperCase()
+    const blocked = Number(response?.blockedDeletedTables || 0)
+    const runId = response?.syncRunId
+    if (status === 'SUCCESS') {
+      ElMessage.success(runId ? `元数据同步成功（Run #${runId}）` : '元数据同步成功')
+    } else if (status === 'PARTIAL') {
+      ElMessage.warning(
+        `元数据同步部分成功${blocked > 0 ? `，阻断删除 ${blocked} 张表` : ''}${runId ? `（Run #${runId}）` : ''}`
+      )
     } else {
-      ElMessage.warning('元数据同步完成，但存在部分错误')
+      ElMessage.error(runId ? `元数据同步失败（Run #${runId}）` : '元数据同步失败')
     }
     auditResult.value = null
     await loadClusters()
+    await loadSyncHistory()
   } catch (error) {
     console.error('同步元数据失败:', error)
     ElMessage.error('同步元数据失败: ' + (error.message || '未知错误'))
@@ -683,5 +968,25 @@ loadClusters()
 .field-change-item strong {
   color: #666;
   font-weight: 600;
+}
+
+.history-pagination {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.error-detail {
+  margin: 0;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

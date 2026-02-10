@@ -490,6 +490,15 @@ public class DorisConnectionService {
     }
 
     /**
+     * 删除表
+     */
+    public void dropTable(Long clusterId, String database, String tableName) {
+        String sql = String.format("DROP TABLE IF EXISTS `%s`.`%s`", database, tableName);
+        execute(clusterId, database, sql);
+        log.info("Dropped table {}.{}", database, tableName);
+    }
+
+    /**
      * 添加列
      */
     public void addColumn(Long clusterId, String database, String tableName, String columnDefinition) {
@@ -953,10 +962,7 @@ public class DorisConnectionService {
         List<Map<String, Object>> columns = new ArrayList<>();
 
         boolean isMysql = "MYSQL".equalsIgnoreCase(cluster.getSourceType());
-        String sql = isMysql
-                ? "SELECT COLUMN_NAME, COLUMN_TYPE AS DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, ORDINAL_POSITION, COLUMN_KEY "
-                + "FROM information_schema.columns WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION"
-                : "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, ORDINAL_POSITION, COLUMN_KEY "
+        String sql = "SELECT COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, ORDINAL_POSITION, COLUMN_KEY "
                 + "FROM information_schema.columns WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION";
 
         try (Connection connection = getConnection(cluster, null);
@@ -969,7 +975,7 @@ public class DorisConnectionService {
                 while (rs.next()) {
                     Map<String, Object> column = new HashMap<>();
                     column.put("columnName", rs.getString("COLUMN_NAME"));
-                    column.put("dataType", rs.getString("DATA_TYPE"));
+                    column.put("dataType", resolveColumnDataType(rs));
                     column.put("isNullable", "YES".equalsIgnoreCase(rs.getString("IS_NULLABLE")) ? 1 : 0);
                     column.put("defaultValue", rs.getString("COLUMN_DEFAULT"));
                     column.put("columnComment", rs.getString("COLUMN_COMMENT"));
@@ -979,12 +985,61 @@ public class DorisConnectionService {
                     columns.add(column);
                 }
             }
+
+            // Doris 某些版本中 information_schema.columns.COLUMN_TYPE 可能为空，回退到 SHOW FULL COLUMNS.Type。
+            if (!isMysql) {
+                Map<String, String> fallbackTypeMap = loadColumnTypesByShowFullColumns(connection, database, tableName);
+                for (Map<String, Object> column : columns) {
+                    String currentType = (String) column.get("dataType");
+                    if (StringUtils.hasText(currentType)) {
+                        continue;
+                    }
+                    String columnName = (String) column.get("columnName");
+                    String fallbackType = fallbackTypeMap.get(columnName);
+                    if (StringUtils.hasText(fallbackType)) {
+                        column.put("dataType", fallbackType);
+                    }
+                }
+            }
         } catch (SQLException e) {
             log.error("Failed to get columns from table {}.{}", database, tableName, e);
             throw new RuntimeException("获取列信息失败: " + e.getMessage(), e);
         }
 
         return columns;
+    }
+
+    private String resolveColumnDataType(ResultSet rs) throws SQLException {
+        String columnType = rs.getString("COLUMN_TYPE");
+        if (StringUtils.hasText(columnType)) {
+            return columnType;
+        }
+        return rs.getString("DATA_TYPE");
+    }
+
+    private Map<String, String> loadColumnTypesByShowFullColumns(Connection connection, String database, String tableName) {
+        Map<String, String> typeMap = new HashMap<>();
+        String sql = String.format("SHOW FULL COLUMNS FROM `%s`.`%s`", database, tableName);
+        try (Statement stmt = connection.createStatement();
+                ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                Map<String, Object> row = extractRow(rs);
+                Object field = row.get("field");
+                Object type = row.get("type");
+                if (field == null || type == null) {
+                    continue;
+                }
+                String fieldName = String.valueOf(field);
+                String fullType = String.valueOf(type);
+                if (!StringUtils.hasText(fieldName) || !StringUtils.hasText(fullType)) {
+                    continue;
+                }
+                typeMap.put(fieldName, fullType);
+            }
+        } catch (SQLException e) {
+            log.warn("SHOW FULL COLUMNS fallback failed for {}.{}, reason={}", database, tableName, e.getMessage());
+        }
+        return typeMap;
     }
 
     /**

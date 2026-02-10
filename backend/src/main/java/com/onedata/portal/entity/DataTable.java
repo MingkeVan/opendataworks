@@ -19,6 +19,8 @@ public class DataTable {
 
     private String tableName;
 
+    private String originTableName;
+
     private String tableComment;
 
     private String layer; // ODS, DWD, DIM, DWS, ADS
@@ -44,6 +46,10 @@ public class DataTable {
     private String owner;
 
     private String status; // active, inactive, deprecated
+
+    private LocalDateTime deprecatedAt;
+
+    private LocalDateTime purgeAt;
 
     private Integer lifecycleDays;
 

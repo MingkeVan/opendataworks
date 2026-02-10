@@ -760,11 +760,6 @@
                   <span v-else>{{ row.fieldType }}</span>
                 </template>
               </el-table-column>
-                              <el-table-column label="长度" width="70">
-                                <template #default="{ row }">
-                                  <span>{{ getVarcharLength(row) }}</span>
-                                </template>
-                              </el-table-column>
               <el-table-column label="可为空" width="90">
                 <template #default="{ row }">
                   <el-switch
@@ -1079,6 +1074,7 @@ import {
 import { tableApi } from '@/api/table'
 import { dorisClusterApi } from '@/api/doris'
 import { dataQueryApi } from '@/api/query'
+import { businessDomainApi, dataDomainApi } from '@/api/domain'
 import PersistentTabs from '@/components/PersistentTabs.vue'
 import SqlEditor from '@/components/SqlEditor.vue'
 import CreateTableDrawer from '@/views/datastudio/CreateTableDrawer.vue'
@@ -1317,6 +1313,7 @@ const layerOptions = [
   { label: 'DWS - 汇总数据层', value: 'DWS' },
   { label: 'ADS - 应用数据层', value: 'ADS' }
 ]
+const businessDomainOptions = ref([])
 
 	const clearQueryTimer = (tabId) => {
 	  const handle = queryTimerHandles.get(tabId)
@@ -1371,6 +1368,45 @@ const loadClusters = async () => {
   } finally {
     dbLoading.value = false
   }
+}
+
+const loadBusinessDomains = async () => {
+  try {
+    const options = await businessDomainApi.list()
+    businessDomainOptions.value = Array.isArray(options) ? options : []
+  } catch (error) {
+    businessDomainOptions.value = []
+    console.error('加载业务域失败', error)
+  }
+}
+
+const loadMetaDataDomainOptions = async (tabId, businessDomain) => {
+  const state = tabStates[tabId]
+  if (!state) return
+  if (!businessDomain) {
+    state.metaDataDomainOptions = []
+    return
+  }
+  try {
+    const options = await dataDomainApi.list({ businessDomain })
+    state.metaDataDomainOptions = Array.isArray(options) ? options : []
+  } catch (error) {
+    state.metaDataDomainOptions = []
+    console.error('加载数据域失败', error)
+  }
+}
+
+const getMetaDataDomainOptions = (tabId) => {
+  const state = tabStates[tabId]
+  if (!state?.metaDataDomainOptions) return []
+  return state.metaDataDomainOptions
+}
+
+const handleMetaBusinessDomainChange = async (tabId) => {
+  const state = tabStates[tabId]
+  if (!state) return
+  state.metaForm.dataDomain = ''
+  await loadMetaDataDomainOptions(tabId, state.metaForm.businessDomain)
 }
 
 const getDatasourceById = (sourceId) => {
@@ -1835,12 +1871,6 @@ const ensureClusterSelected = (table) => {
   return true
 }
 
-const getVarcharLength = (row) => {
-  const fieldType = row?.fieldType || ''
-  const match = String(fieldType).match(/varchar\s*\((\d+)\)/i)
-  return match ? match[1] : '-'
-}
-
 const isReplicaWarning = (value) => {
   if (value === null || value === undefined || value === '') return false
   const num = Number(value)
@@ -2045,11 +2075,14 @@ const setupTableObserver = () => {
       tableName: table.tableName || '',
       tableComment: table.tableComment || '',
       layer: table.layer || '',
+      businessDomain: table.businessDomain || '',
+      dataDomain: table.dataDomain || '',
       owner: table.owner || '',
       bucketNum: table.bucketNum ?? '',
       replicaNum: table.replicaNum ?? ''
     },
     metaOriginal: {},
+    metaDataDomainOptions: [],
     fieldSubmitting: false,
     fieldsEditing: false,
     fieldsDraft: [],
@@ -2354,11 +2387,17 @@ const loadTabData = async (tabId) => {
       tableName: state.table.tableName || '',
       tableComment: state.table.tableComment || '',
       layer: state.table.layer || '',
+      businessDomain: state.table.businessDomain || '',
+      dataDomain: state.table.dataDomain || '',
       owner: state.table.owner || '',
       bucketNum: state.table.bucketNum ?? '',
       replicaNum: state.table.replicaNum ?? ''
     }
     state.metaOriginal = { ...state.metaForm }
+    state.metaDataDomainOptions = []
+    if (state.metaForm.businessDomain) {
+      await loadMetaDataDomainOptions(tabId, state.metaForm.businessDomain)
+    }
     state.fields = []
     state.fieldsEditing = false
     state.fieldsDraft = []
@@ -2391,9 +2430,15 @@ const loadTabData = async (tabId) => {
       tableName: state.table.tableName || '',
       tableComment: state.table.tableComment || '',
       layer: state.table.layer || '',
+      businessDomain: state.table.businessDomain || '',
+      dataDomain: state.table.dataDomain || '',
       owner: state.table.owner || '',
       bucketNum: state.table.bucketNum ?? '',
       replicaNum: state.table.replicaNum ?? ''
+    }
+    state.metaDataDomainOptions = []
+    if (state.metaForm.businessDomain) {
+      await loadMetaDataDomainOptions(tabId, state.metaForm.businessDomain)
     }
     state.metaOriginal = { ...state.metaForm }
     state.fields = Array.isArray(fieldList) ? fieldList : []
@@ -3235,25 +3280,34 @@ const handleResize = () => {
   syncResultPaneLayout(tabId)
 }
 
-const startMetaEdit = (tabId) => {
+const startMetaEdit = async (tabId) => {
   const state = tabStates[tabId]
   if (!state) return
   if (!ensureClusterSelected(state.table)) return
+  if (!businessDomainOptions.value.length) {
+    await loadBusinessDomains()
+  }
+  await loadMetaDataDomainOptions(tabId, state.metaForm.businessDomain)
   state.metaEditing = true
   state.metaForm = { ...state.metaForm }
 }
 
-const cancelMetaEdit = (tabId) => {
+const cancelMetaEdit = async (tabId) => {
   const state = tabStates[tabId]
   if (!state) return
   state.metaEditing = false
   state.metaForm = { ...state.metaOriginal }
+  await loadMetaDataDomainOptions(tabId, state.metaForm.businessDomain)
 }
 
 const saveMetaEdit = async (tabId) => {
   const state = tabStates[tabId]
   if (!state?.table?.id) return
   if (!ensureClusterSelected(state.table)) return
+  if (!state.metaForm.layer) {
+    ElMessage.warning('请选择数据分层')
+    return
+  }
   try {
     await ElMessageBox.confirm('确认保存表信息与 Doris 配置的修改吗？', '提示', {
       type: 'warning',
@@ -3269,6 +3323,8 @@ const saveMetaEdit = async (tabId) => {
       tableName: state.metaForm.tableName,
       tableComment: state.metaForm.tableComment,
       layer: state.metaForm.layer,
+      businessDomain: state.metaForm.businessDomain,
+      dataDomain: state.metaForm.dataDomain,
       owner: state.metaForm.owner,
       bucketNum: state.metaForm.bucketNum,
       replicaNum: state.metaForm.replicaNum
@@ -3279,9 +3335,15 @@ const saveMetaEdit = async (tabId) => {
       tableName: state.table.tableName || '',
       tableComment: state.table.tableComment || '',
       layer: state.table.layer || '',
+      businessDomain: state.table.businessDomain || '',
+      dataDomain: state.table.dataDomain || '',
       owner: state.table.owner || '',
       bucketNum: state.table.bucketNum ?? '',
       replicaNum: state.table.replicaNum ?? ''
+    }
+    state.metaDataDomainOptions = []
+    if (state.metaForm.businessDomain) {
+      await loadMetaDataDomainOptions(tabId, state.metaForm.businessDomain)
     }
     state.metaOriginal = { ...state.metaForm }
     state.metaEditing = false
@@ -3813,12 +3875,14 @@ watch(selectedTableKey, (value) => {
     activeTab,
     tabStates,
   layerOptions,
+  businessDomainOptions,
+  getMetaDataDomainOptions,
+  handleMetaBusinessDomainChange,
   isDorisTable,
   isAggregateTable,
   isReplicaWarning,
   getLayerType,
   getFieldRows,
-  getVarcharLength,
   startMetaEdit,
   cancelMetaEdit,
   saveMetaEdit,
@@ -3841,6 +3905,7 @@ watch(selectedTableKey, (value) => {
 onMounted(() => {
   setupTableObserver()
   restoreTabsFromStorage()
+  loadBusinessDomains()
   loadClusters()
   fetchHistory()
   syncFromRoute()

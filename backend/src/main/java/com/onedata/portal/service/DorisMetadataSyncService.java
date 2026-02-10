@@ -2,12 +2,16 @@ package com.onedata.portal.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataField;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.DorisCluster;
+import com.onedata.portal.entity.TableTaskRelation;
 import com.onedata.portal.mapper.DataFieldMapper;
+import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTableMapper;
 import com.onedata.portal.mapper.DorisClusterMapper;
+import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.util.TableNameUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +36,8 @@ public class DorisMetadataSyncService {
     private final DorisClusterMapper dorisClusterMapper;
     private final DataTableMapper dataTableMapper;
     private final DataFieldMapper dataFieldMapper;
+    private final TableTaskRelationMapper tableTaskRelationMapper;
+    private final DataLineageMapper dataLineageMapper;
 
     private static final Set<String> IGNORED_DATABASES = new HashSet<>(Arrays.asList("performance_schema", "sys"));
     private static final int MAX_COMMENT_LENGTH = 5000;
@@ -46,6 +52,7 @@ public class DorisMetadataSyncService {
         private int updatedFields = 0;
         private int deletedFields = 0;
         private int deletedTables = 0;
+        private int blockedDeletedTables = 0;
         private int inactivatedTables = 0;
         private List<String> errors = new ArrayList<>();
 
@@ -71,6 +78,10 @@ public class DorisMetadataSyncService {
 
         public void addDeletedTable() {
             deletedTables++;
+        }
+
+        public void addBlockedDeletedTable() {
+            blockedDeletedTables++;
         }
 
         public void addInactivatedTable() {
@@ -109,15 +120,29 @@ public class DorisMetadataSyncService {
             return inactivatedTables;
         }
 
+        public int getBlockedDeletedTables() {
+            return blockedDeletedTables;
+        }
+
         public List<String> getErrors() {
             return errors;
+        }
+
+        public String getStatus() {
+            if (errors == null || errors.isEmpty()) {
+                return "SUCCESS";
+            }
+            int totalApplied = newTables + updatedTables + deletedTables + inactivatedTables
+                    + newFields + updatedFields + deletedFields + blockedDeletedTables;
+            return totalApplied > 0 ? "PARTIAL" : "FAILED";
         }
 
         @Override
         public String toString() {
             return String.format(
-                    "SyncResult{newTables=%d, updatedTables=%d, deletedTables=%d, inactivatedTables=%d, newFields=%d, updatedFields=%d, deletedFields=%d, errors=%d}",
-                    newTables, updatedTables, deletedTables, inactivatedTables, newFields, updatedFields, deletedFields, errors.size());
+                    "SyncResult{status=%s, newTables=%d, updatedTables=%d, deletedTables=%d, blockedDeletedTables=%d, inactivatedTables=%d, newFields=%d, updatedFields=%d, deletedFields=%d, errors=%d}",
+                    getStatus(), newTables, updatedTables, deletedTables, blockedDeletedTables, inactivatedTables,
+                    newFields, updatedFields, deletedFields, errors.size());
         }
     }
 
@@ -704,6 +729,22 @@ public class DorisMetadataSyncService {
         for (DataTable localTable : localTables) {
             if (!dorisTableNames.contains(localTable.getTableName())) {
                 try {
+                    TableReferenceStats referenceStats = countTableReferences(localTable.getId());
+                    if (referenceStats.hasReferences()) {
+                        result.addBlockedDeletedTable();
+                        String reason = String.format(
+                                "表 %s.%s 在 Doris 中不存在，但仍被引用（任务关联=%d，血缘上游=%d，血缘下游=%d），已阻断删除",
+                                database,
+                                localTable.getTableName(),
+                                referenceStats.getTaskRelationCount(),
+                                referenceStats.getUpstreamLineageCount(),
+                                referenceStats.getDownstreamLineageCount());
+                        result.addError(reason);
+                        log.warn("Blocked metadata deletion for referenced table: {}.{} (cluster={}, tableId={})",
+                                database, localTable.getTableName(), clusterId, localTable.getId());
+                        continue;
+                    }
+
                     log.info("Deleting table not in Doris: {}.{}", database, localTable.getTableName());
                     dataTableMapper.deleteById(localTable.getId());
                     result.addDeletedTable();
@@ -715,6 +756,51 @@ public class DorisMetadataSyncService {
         }
 
         return result;
+    }
+
+    private TableReferenceStats countTableReferences(Long tableId) {
+        Long taskRelationCount = tableTaskRelationMapper.selectCount(
+                new LambdaQueryWrapper<TableTaskRelation>()
+                        .eq(TableTaskRelation::getTableId, tableId));
+        Long upstreamLineageCount = dataLineageMapper.selectCount(
+                new LambdaQueryWrapper<DataLineage>()
+                        .eq(DataLineage::getUpstreamTableId, tableId));
+        Long downstreamLineageCount = dataLineageMapper.selectCount(
+                new LambdaQueryWrapper<DataLineage>()
+                        .eq(DataLineage::getDownstreamTableId, tableId));
+
+        return new TableReferenceStats(
+                taskRelationCount == null ? 0L : taskRelationCount,
+                upstreamLineageCount == null ? 0L : upstreamLineageCount,
+                downstreamLineageCount == null ? 0L : downstreamLineageCount);
+    }
+
+    private static class TableReferenceStats {
+        private final long taskRelationCount;
+        private final long upstreamLineageCount;
+        private final long downstreamLineageCount;
+
+        private TableReferenceStats(long taskRelationCount, long upstreamLineageCount, long downstreamLineageCount) {
+            this.taskRelationCount = taskRelationCount;
+            this.upstreamLineageCount = upstreamLineageCount;
+            this.downstreamLineageCount = downstreamLineageCount;
+        }
+
+        private boolean hasReferences() {
+            return taskRelationCount > 0 || upstreamLineageCount > 0 || downstreamLineageCount > 0;
+        }
+
+        private long getTaskRelationCount() {
+            return taskRelationCount;
+        }
+
+        private long getUpstreamLineageCount() {
+            return upstreamLineageCount;
+        }
+
+        private long getDownstreamLineageCount() {
+            return downstreamLineageCount;
+        }
     }
 
     /**

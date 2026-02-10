@@ -37,6 +37,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DataTableService {
 
+    private static final Set<String> VALID_LAYERS = new HashSet<>(Arrays.asList("ODS", "DWD", "DIM", "DWS", "ADS"));
+
     private final DataTableMapper dataTableMapper;
     private final DataFieldMapper dataFieldMapper;
     private final TableTaskRelationMapper tableTaskRelationMapper;
@@ -186,6 +188,8 @@ public class DataTableService {
      */
     @Transactional
     public DataTable create(DataTable dataTable) {
+        dataTable.setLayer(normalizeLayer(dataTable.getLayer(), true));
+
         // 检查表名是否已存在（在同一数据库下）
         DataTable exists = getByDbAndTableName(dataTable.getClusterId(), dataTable.getDbName(), dataTable.getTableName());
         if (exists != null) {
@@ -205,6 +209,10 @@ public class DataTableService {
         DataTable exists = dataTableMapper.selectById(dataTable.getId());
         if (exists == null) {
             throw new RuntimeException("表不存在");
+        }
+
+        if (dataTable.getLayer() != null) {
+            dataTable.setLayer(normalizeLayer(dataTable.getLayer(), true));
         }
 
         // 检查表名是否发生变化且是否重复
@@ -237,6 +245,109 @@ public class DataTableService {
     public void delete(Long id) {
         dataTableMapper.deleteById(id);
         log.info("Deleted data table: {}", id);
+    }
+
+    /**
+     * 校验并标准化数据分层
+     */
+    public String normalizeLayer(String layer, boolean required) {
+        if (!StringUtils.hasText(layer)) {
+            if (required) {
+                throw new RuntimeException("数据分层不能为空，且必须是 ODS/DWD/DIM/DWS/ADS 之一");
+            }
+            return null;
+        }
+        String normalized = layer.trim().toUpperCase(Locale.ROOT);
+        if (!VALID_LAYERS.contains(normalized)) {
+            throw new RuntimeException("数据分层非法，仅支持 ODS/DWD/DIM/DWS/ADS");
+        }
+        return normalized;
+    }
+
+    /**
+     * 查询待删除表列表（deprecated 且存在 purge_at）
+     */
+    public List<DataTable> listPendingDeletion(Long clusterId) {
+        LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<DataTable>()
+                .eq(DataTable::getStatus, "deprecated")
+                .isNotNull(DataTable::getPurgeAt)
+                .orderByAsc(DataTable::getPurgeAt)
+                .orderByAsc(DataTable::getId);
+        if (clusterId != null) {
+            wrapper.eq(DataTable::getClusterId, clusterId);
+        }
+        return dataTableMapper.selectList(wrapper);
+    }
+
+    /**
+     * 查询已到期可物理清理的表
+     */
+    public List<DataTable> listDueForPurge(LocalDateTime now, int limit) {
+        LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<DataTable>()
+                .eq(DataTable::getStatus, "deprecated")
+                .isNotNull(DataTable::getPurgeAt)
+                .le(DataTable::getPurgeAt, now)
+                .orderByAsc(DataTable::getPurgeAt)
+                .orderByAsc(DataTable::getId);
+        if (limit > 0) {
+            wrapper.last("LIMIT " + limit);
+        }
+        return dataTableMapper.selectList(wrapper);
+    }
+
+    /**
+     * 恢复废弃表元数据
+     */
+    @Transactional
+    public DataTable restoreDeprecatedTable(DataTable table, String restoredTableName) {
+        if (table == null || table.getId() == null) {
+            throw new RuntimeException("表不存在");
+        }
+        if (!StringUtils.hasText(restoredTableName)) {
+            throw new RuntimeException("恢复失败：原始表名为空");
+        }
+
+        LambdaQueryWrapper<DataTable> duplicateWrapper = new LambdaQueryWrapper<DataTable>()
+                .eq(DataTable::getDbName, table.getDbName())
+                .eq(DataTable::getTableName, restoredTableName)
+                .ne(DataTable::getId, table.getId())
+                .last("LIMIT 1");
+        if (table.getClusterId() == null) {
+            duplicateWrapper.isNull(DataTable::getClusterId);
+        } else {
+            duplicateWrapper.eq(DataTable::getClusterId, table.getClusterId());
+        }
+        DataTable duplicate = dataTableMapper.selectOne(duplicateWrapper);
+        if (duplicate != null) {
+            throw new RuntimeException("恢复失败：目标表名已存在 " + restoredTableName);
+        }
+
+        DataTable update = new DataTable();
+        update.setId(table.getId());
+        update.setTableName(restoredTableName);
+        update.setStatus("active");
+        update.setOriginTableName(null);
+        update.setDeprecatedAt(null);
+        update.setPurgeAt(null);
+        dataTableMapper.updateById(update);
+        return dataTableMapper.selectById(table.getId());
+    }
+
+    /**
+     * 立即清理平台侧表元数据（逻辑删除）
+     */
+    @Transactional
+    public void purgeTableMetadata(Long tableId) {
+        dataFieldMapper.delete(new LambdaQueryWrapper<DataField>()
+                .eq(DataField::getTableId, tableId));
+        tableTaskRelationMapper.delete(new LambdaQueryWrapper<TableTaskRelation>()
+                .eq(TableTaskRelation::getTableId, tableId));
+        dataLineageMapper.delete(new LambdaQueryWrapper<DataLineage>()
+                .eq(DataLineage::getUpstreamTableId, tableId));
+        dataLineageMapper.delete(new LambdaQueryWrapper<DataLineage>()
+                .eq(DataLineage::getDownstreamTableId, tableId));
+        dataTableMapper.deleteById(tableId);
+        log.info("Purged table metadata, tableId={}", tableId);
     }
 
     /**
