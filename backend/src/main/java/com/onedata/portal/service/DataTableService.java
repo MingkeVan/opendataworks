@@ -11,12 +11,14 @@ import com.onedata.portal.entity.DataField;
 import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.DataTask;
+import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.entity.TableTaskRelation;
 import com.onedata.portal.entity.TaskExecutionLog;
 import com.onedata.portal.mapper.DataFieldMapper;
 import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTableMapper;
 import com.onedata.portal.mapper.DataTaskMapper;
+import com.onedata.portal.mapper.DorisClusterMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +45,7 @@ public class DataTableService {
     private final DataTaskMapper dataTaskMapper;
     private final TaskExecutionLogMapper taskExecutionLogMapper;
     private final DataLineageMapper dataLineageMapper;
+    private final DorisClusterMapper dorisClusterMapper;
     private final DorisConnectionService dorisConnectionService;
 
     /**
@@ -290,18 +293,34 @@ public class DataTableService {
         Page<DataTable> page = new Page<>(1, pageSize);
         Page<DataTable> result = dataTableMapper.selectPage(page, wrapper);
 
+        Set<Long> clusterIds = result.getRecords().stream()
+                .map(DataTable::getClusterId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, DorisCluster> clusterMap = clusterIds.isEmpty()
+                ? Collections.emptyMap()
+                : dorisClusterMapper.selectBatchIds(clusterIds).stream()
+                        .collect(Collectors.toMap(DorisCluster::getId, c -> c));
+
         return result.getRecords().stream()
-                .map(this::toTableOption)
+                .map(table -> toTableOption(table, clusterMap))
                 .collect(Collectors.toList());
     }
 
-    private TableOption toTableOption(DataTable table) {
+    private TableOption toTableOption(DataTable table, Map<Long, DorisCluster> clusterMap) {
         TableOption option = new TableOption();
         option.setId(table.getId());
+        option.setClusterId(table.getClusterId());
+        DorisCluster cluster = table.getClusterId() == null ? null : clusterMap.get(table.getClusterId());
+        option.setClusterName(cluster != null ? cluster.getClusterName() : null);
+        option.setSourceType(cluster != null ? cluster.getSourceType() : null);
         option.setTableName(table.getTableName());
         option.setTableComment(table.getTableComment());
         option.setLayer(table.getLayer());
         option.setDbName(table.getDbName());
+        option.setQualifiedName(StringUtils.hasText(table.getDbName())
+                ? table.getDbName() + "." + table.getTableName()
+                : table.getTableName());
         return option;
     }
 

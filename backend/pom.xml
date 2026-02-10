@@ -73,6 +73,13 @@
             <artifactId>spring-boot-starter-webflux</artifactId>
         </dependency>
 
+        <!-- SQL AST parser -->
+        <dependency>
+            <groupId>com.github.jsqlparser</groupId>
+            <artifactId>jsqlparser</artifactId>
+            <version>4.6</version>
+        </dependency>
+
         <!-- JSON 处理 -->
         <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
