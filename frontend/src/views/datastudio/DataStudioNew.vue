@@ -80,7 +80,17 @@
                     </el-icon>
                   </template>
                   <el-icon v-else-if="data.type === 'schema'" class="node-icon schema"><Coin /></el-icon>
-                  <el-icon v-else class="node-icon table"><Grid /></el-icon>
+                  <el-icon
+                    v-else-if="data.type === 'object_group'"
+                    :class="['node-icon', data.objectType === 'view' ? 'view-folder' : 'table-folder']"
+                  >
+                    <View v-if="data.objectType === 'view'" />
+                    <Grid v-else />
+                  </el-icon>
+                  <el-icon v-else :class="['node-icon', isViewTable(data.table) ? 'view' : 'table']">
+                    <View v-if="isViewTable(data.table)" />
+                    <Grid v-else />
+                  </el-icon>
 
 	                  <div v-if="data.type === 'table'" class="table-main">
 	                    <div class="table-title">
@@ -127,7 +137,15 @@
                     </el-icon>
                   </div>
 
-                  <div v-else class="table-meta-tags">
+                  <div v-else-if="data.type === 'object_group'" class="node-right">
+                    <el-badge
+                      :value="getTableCountByType(data.sourceId, data.schemaName, data.objectType)"
+                      type="info"
+                      class="db-count"
+                    />
+                  </div>
+
+                  <div v-else-if="data.type === 'table'" class="table-meta-tags">
                     <span class="row-count" :title="`数据量: ${formatNumber(getTableRowCount(data.table))} 行`">
                       {{ formatRowCount(getTableRowCount(data.table)) }}
                     </span>
@@ -1068,6 +1086,7 @@ import {
   TrendCharts,
   Timer,
   Files,
+  View,
   VideoPause,
   Warning
 } from '@element-plus/icons-vue'
@@ -1121,6 +1140,8 @@ const catalogTreeProps = {
 
 const getDatasourceNodeKey = (sourceId) => `ds:${String(sourceId)}`
 const getSchemaNodeKey = (sourceId, schemaName) => `schema:${String(sourceId)}::${schemaName}`
+const getObjectGroupNodeKey = (sourceId, schemaName, objectType) =>
+  `group:${String(sourceId)}::${schemaName}::${objectType}`
 
 const catalogRoots = computed(() => {
   const list = Array.isArray(dataSources.value) ? dataSources.value : []
@@ -1501,6 +1522,7 @@ const loadTables = async (sourceId, database, force = false) => {
         sourceType,
         dbName: database,
         tableName,
+        tableType: item.tableType || item.TABLE_TYPE || '',
         tableComment: item.tableComment || item.TABLE_COMMENT || '',
         rowCount: item.tableRows ?? item.table_rows ?? item.rowCount,
         storageSize: item.dataLength ?? item.data_length ?? item.storageSize,
@@ -1516,6 +1538,8 @@ const loadTables = async (sourceId, database, force = false) => {
     })
     tableStore[sourceKey][database] = list
     refreshSchemaChildrenInTree(sourceId, database)
+    refreshObjectGroupChildrenInTree(sourceId, database, 'table')
+    refreshObjectGroupChildrenInTree(sourceId, database, 'view')
     return true
   } catch (error) {
     ElMessage.error('加载表列表失败')
@@ -1569,6 +1593,10 @@ const getDisplayedTables = (sourceId, database) => {
 }
 
 const getTableCount = (sourceId, database) => getFilteredTables(sourceId, database).length
+const getTableCountByType = (sourceId, database, objectType) =>
+  getFilteredTables(sourceId, database).filter((item) =>
+    objectType === 'view' ? isViewTable(item) : !isViewTable(item)
+  ).length
 
 const setTableRef = (key, el, tableId) => {
   if (!key || !el) return
@@ -1630,6 +1658,16 @@ const buildSchemaNode = (sourceId, schemaName) => ({
   leaf: false
 })
 
+const buildObjectGroupNode = (sourceId, schemaName, objectType) => ({
+  nodeKey: getObjectGroupNodeKey(sourceId, schemaName, objectType),
+  type: 'object_group',
+  objectType,
+  name: objectType === 'view' ? '视图' : '表',
+  sourceId: String(sourceId),
+  schemaName,
+  leaf: false
+})
+
 const isDatasourceIconInactive = (nodeData) => {
   if (!nodeData || nodeData.type !== 'datasource') return false
   if (nodeData.status && nodeData.status !== 'active') return true
@@ -1643,6 +1681,15 @@ const getDatasourceIconUrl = (sourceType) => {
   return ''
 }
 
+const normalizeTableType = (tableType) => {
+  const normalized = String(tableType || '').trim().toUpperCase()
+  return normalized || 'BASE TABLE'
+}
+
+const isViewTableType = (tableType) => normalizeTableType(tableType).includes('VIEW')
+
+const isViewTable = (table) => isViewTableType(table?.tableType)
+
 const buildTableNode = (table, sourceId, schemaName) => {
   const key = getTableKey(table, schemaName, sourceId)
   return {
@@ -1652,6 +1699,7 @@ const buildTableNode = (table, sourceId, schemaName) => {
     sourceId: String(sourceId),
     schemaName,
     table,
+    objectType: isViewTable(table) ? 'view' : 'table',
     leaf: true
   }
 }
@@ -1673,9 +1721,14 @@ const getTableSortValue = (table) => {
   return String(table?.tableName || '').toLowerCase()
 }
 
-const getSortedTablesForTree = (sourceId, database) => {
+const getSortedTablesForTree = (sourceId, database, objectType = 'all') => {
   const sourceKey = String(sourceId || '')
-  const list = [...(tableStore[sourceKey]?.[database] || [])]
+  let list = [...(tableStore[sourceKey]?.[database] || [])]
+  if (objectType === 'view') {
+    list = list.filter((item) => isViewTable(item))
+  } else if (objectType === 'table') {
+    list = list.filter((item) => !isViewTable(item))
+  }
   const order = sortOrder.value
   list.sort((a, b) => {
     const aVal = getTableSortValue(a)
@@ -1687,9 +1740,13 @@ const getSortedTablesForTree = (sourceId, database) => {
   return list
 }
 
-const buildTableChildren = (sourceId, database) => {
-  return getSortedTablesForTree(sourceId, database).map((table) => buildTableNode(table, sourceId, database))
-}
+const buildSchemaChildren = (sourceId, database) => ([
+  buildObjectGroupNode(sourceId, database, 'table'),
+  buildObjectGroupNode(sourceId, database, 'view')
+])
+
+const buildTableChildren = (sourceId, database, objectType = 'all') =>
+  getSortedTablesForTree(sourceId, database, objectType).map((table) => buildTableNode(table, sourceId, database))
 
 const refreshDatasourceChildrenInTree = (sourceId) => {
   const tree = catalogTreeRef.value
@@ -1708,7 +1765,17 @@ const refreshSchemaChildrenInTree = (sourceId, database) => {
   const key = getSchemaNodeKey(sourceId, database)
   const node = tree.getNode(key)
   if (!node?.loaded) return
-  tree.updateKeyChildren(key, buildTableChildren(sourceId, database))
+  tree.updateKeyChildren(key, buildSchemaChildren(sourceId, database))
+  nextTick(() => tree.filter(searchKeyword.value))
+}
+
+const refreshObjectGroupChildrenInTree = (sourceId, database, objectType) => {
+  const tree = catalogTreeRef.value
+  if (!tree || !sourceId || !database || !objectType) return
+  const key = getObjectGroupNodeKey(sourceId, database, objectType)
+  const node = tree.getNode(key)
+  if (!node?.loaded) return
+  tree.updateKeyChildren(key, buildTableChildren(sourceId, database, objectType))
   nextTick(() => tree.filter(searchKeyword.value))
 }
 
@@ -1718,6 +1785,8 @@ const refreshLoadedSchemaNodesInTree = () => {
     if (!dbMap || typeof dbMap !== 'object') return
     Object.keys(dbMap).forEach((schemaName) => {
       refreshSchemaChildrenInTree(sourceId, schemaName)
+      refreshObjectGroupChildrenInTree(sourceId, schemaName, 'table')
+      refreshObjectGroupChildrenInTree(sourceId, schemaName, 'view')
     })
   })
 }
@@ -1758,7 +1827,18 @@ const loadCatalogNode = async (node, resolve, reject) => {
       reject?.()
       return
     }
-    resolve(buildTableChildren(data.sourceId, data.schemaName))
+    resolve(buildSchemaChildren(data.sourceId, data.schemaName))
+    nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
+    return
+  }
+
+  if (data.type === 'object_group') {
+    const ok = await loadTables(data.sourceId, data.schemaName)
+    if (!ok) {
+      reject?.()
+      return
+    }
+    resolve(buildTableChildren(data.sourceId, data.schemaName, data.objectType))
     nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
     return
   }
@@ -1778,6 +1858,11 @@ const handleCatalogNodeClick = async (data) => {
       return
     }
     if (data.type === 'schema') {
+      await handleQuerySourceSelect(currentTab.id, data.sourceId)
+      await handleQueryDatabaseSelect(currentTab.id, data.schemaName)
+      return
+    }
+    if (data.type === 'object_group') {
       await handleQuerySourceSelect(currentTab.id, data.sourceId)
       await handleQueryDatabaseSelect(currentTab.id, data.schemaName)
       return
@@ -2296,6 +2381,10 @@ const focusTableInSidebar = async (table, key, dbFallback = '', sourceFallback =
   }
   await nextTick()
   await ensureCatalogPathExpanded(sourceId, dbName)
+  if (sourceId && dbName) {
+    const objectType = isViewTable(table) ? 'view' : 'table'
+    await expandCatalogNode(getObjectGroupNodeKey(sourceId, dbName, objectType))
+  }
   catalogTreeRef.value?.setCurrentKey(key)
   await nextTick()
   const ref = tableRefs.value[key]
@@ -4160,7 +4249,8 @@ onBeforeUnmount(() => {
 }
 
 .catalog-node--datasource,
-.catalog-node--schema {
+.catalog-node--schema,
+.catalog-node--object_group {
   padding: 6px 8px;
   transition: background-color 0.2s ease;
 }
@@ -4176,7 +4266,8 @@ onBeforeUnmount(() => {
 }
 
 :deep(.catalog-tree .el-tree-node__content:hover .catalog-node--datasource),
-:deep(.catalog-tree .el-tree-node__content:hover .catalog-node--schema) {
+:deep(.catalog-tree .el-tree-node__content:hover .catalog-node--schema),
+:deep(.catalog-tree .el-tree-node__content:hover .catalog-node--object_group) {
   background-color: var(--el-fill-color-light);
 }
 
@@ -4233,6 +4324,18 @@ onBeforeUnmount(() => {
 
 .node-icon.table {
   color: #667eea;
+}
+
+.node-icon.table-folder {
+  color: #667eea;
+}
+
+.node-icon.view {
+  color: #0ea5e9;
+}
+
+.node-icon.view-folder {
+  color: #0ea5e9;
 }
 
 .node-name {

@@ -478,6 +478,13 @@ public class DorisMetadataSyncService {
                     tableName);
             List<Map<String, Object>> dorisColumns = dorisConnectionService.getColumnsInTable(clusterId, database,
                     tableName);
+            String dorisTableType = normalizeTableType((String) dorisTable.get("tableType"));
+            boolean viewType = isViewType(dorisTableType);
+
+            if (!Objects.equals(dorisTableType, normalizeTableType(localTable.getTableType()))) {
+                diff.addChange(String.format("表类型不同: 平台='%s', 数据源='%s'",
+                        localTable.getTableType(), dorisTableType));
+            }
 
             // 比对表注释
             String dorisComment = (String) dorisTable.get("tableComment");
@@ -486,30 +493,32 @@ public class DorisMetadataSyncService {
                         localTable.getTableComment(), dorisComment));
             }
 
-            // 比对分桶数
-            if (tableCreateInfo.containsKey("bucketNum")) {
-                Integer dorisBucketNum = (Integer) tableCreateInfo.get("bucketNum");
-                if (!Objects.equals(dorisBucketNum, localTable.getBucketNum())) {
-                    diff.addChange(String.format("分桶数不同: 平台=%d, Doris=%d",
-                            localTable.getBucketNum(), dorisBucketNum));
+            if (!viewType) {
+                // 比对分桶数
+                if (tableCreateInfo.containsKey("bucketNum")) {
+                    Integer dorisBucketNum = (Integer) tableCreateInfo.get("bucketNum");
+                    if (!Objects.equals(dorisBucketNum, localTable.getBucketNum())) {
+                        diff.addChange(String.format("分桶数不同: 平台=%d, Doris=%d",
+                                localTable.getBucketNum(), dorisBucketNum));
+                    }
                 }
-            }
 
-            // 比对副本数
-            if (tableCreateInfo.containsKey("replicationNum")) {
-                Integer dorisReplicationNum = (Integer) tableCreateInfo.get("replicationNum");
-                if (!Objects.equals(dorisReplicationNum, localTable.getReplicaNum())) {
-                    diff.addChange(String.format("副本数不同: 平台=%d, Doris=%d",
-                            localTable.getReplicaNum(), dorisReplicationNum));
+                // 比对副本数
+                if (tableCreateInfo.containsKey("replicationNum")) {
+                    Integer dorisReplicationNum = (Integer) tableCreateInfo.get("replicationNum");
+                    if (!Objects.equals(dorisReplicationNum, localTable.getReplicaNum())) {
+                        diff.addChange(String.format("副本数不同: 平台=%d, Doris=%d",
+                                localTable.getReplicaNum(), dorisReplicationNum));
+                    }
                 }
-            }
 
-            // 比对分区字段
-            if (tableCreateInfo.containsKey("partitionField")) {
-                String dorisPartitionField = (String) tableCreateInfo.get("partitionField");
-                if (!Objects.equals(dorisPartitionField, localTable.getPartitionField())) {
-                    diff.addChange(String.format("分区字段不同: 平台='%s', Doris='%s'",
-                            localTable.getPartitionField(), dorisPartitionField));
+                // 比对分区字段
+                if (tableCreateInfo.containsKey("partitionField")) {
+                    String dorisPartitionField = (String) tableCreateInfo.get("partitionField");
+                    if (!Objects.equals(dorisPartitionField, localTable.getPartitionField())) {
+                        diff.addChange(String.format("分区字段不同: 平台='%s', Doris='%s'",
+                                localTable.getPartitionField(), dorisPartitionField));
+                    }
                 }
             }
 
@@ -813,11 +822,14 @@ public class DorisMetadataSyncService {
         // 获取表的详细信息
         Map<String, Object> tableCreateInfo = dorisConnectionService.getTableCreateInfo(clusterId, database, tableName);
         List<Map<String, Object>> columns = dorisConnectionService.getColumnsInTable(clusterId, database, tableName);
+        String tableType = normalizeTableType((String) dorisTable.get("tableType"));
+        boolean viewType = isViewType(tableType);
 
         // 创建表记录
         DataTable newTable = new DataTable();
         newTable.setClusterId(clusterId);
         newTable.setTableName(tableName);
+        newTable.setTableType(tableType);
         newTable.setDbName(database);
         newTable.setLayer(resolveLayerForNewTable(tableName));
 
@@ -828,7 +840,7 @@ public class DorisMetadataSyncService {
         newTable.setIsSynced(isDoris ? 1 : 0);
         newTable.setSyncTime(LocalDateTime.now());
 
-        if (isDoris) {
+        if (isDoris && !viewType) {
             // 从建表语句中解析的信息（仅 Doris）
             if (tableCreateInfo.containsKey("bucketNum")) {
                 newTable.setBucketNum((Integer) tableCreateInfo.get("bucketNum"));
@@ -848,9 +860,16 @@ public class DorisMetadataSyncService {
             if (tableCreateInfo.containsKey("tableModel")) {
                 newTable.setTableModel((String) tableCreateInfo.get("tableModel"));
             }
-            if (tableCreateInfo.containsKey("createTableSql")) {
-                newTable.setDorisDdl((String) tableCreateInfo.get("createTableSql"));
-            }
+        } else {
+            newTable.setBucketNum(null);
+            newTable.setReplicaNum(null);
+            newTable.setPartitionField(null);
+            newTable.setDistributionColumn(null);
+            newTable.setKeyColumns(null);
+            newTable.setTableModel(null);
+        }
+        if (tableCreateInfo.containsKey("createTableSql")) {
+            newTable.setDorisDdl((String) tableCreateInfo.get("createTableSql"));
         }
 
         // 从统计信息中获取的信息
@@ -892,12 +911,18 @@ public class DorisMetadataSyncService {
         // 获取表的详细信息
         Map<String, Object> tableCreateInfo = dorisConnectionService.getTableCreateInfo(clusterId, database, tableName);
         List<Map<String, Object>> columns = dorisConnectionService.getColumnsInTable(clusterId, database, tableName);
+        String tableType = normalizeTableType((String) dorisTable.get("tableType"));
+        boolean viewType = isViewType(tableType);
 
         boolean updated = false;
 
         // 同步数据源
         if (!Objects.equals(localTable.getClusterId(), clusterId)) {
             localTable.setClusterId(clusterId);
+            updated = true;
+        }
+        if (!Objects.equals(tableType, localTable.getTableType())) {
+            localTable.setTableType(tableType);
             updated = true;
         }
 
@@ -928,7 +953,7 @@ public class DorisMetadataSyncService {
             updated = true;
         }
 
-        if (isDoris) {
+        if (isDoris && !viewType) {
             // 更新分桶数
             if (tableCreateInfo.containsKey("bucketNum")) {
                 Integer bucketNum = (Integer) tableCreateInfo.get("bucketNum");
@@ -1016,7 +1041,13 @@ public class DorisMetadataSyncService {
                 localTable.setTableModel(null);
                 updated = true;
             }
-            if (StringUtils.hasText(localTable.getDorisDdl())) {
+            String createTableSql = (String) tableCreateInfo.get("createTableSql");
+            if (StringUtils.hasText(createTableSql)) {
+                if (!Objects.equals(createTableSql, localTable.getDorisDdl())) {
+                    localTable.setDorisDdl(createTableSql);
+                    updated = true;
+                }
+            } else if (StringUtils.hasText(localTable.getDorisDdl())) {
                 localTable.setDorisDdl(null);
                 updated = true;
             }
@@ -1249,6 +1280,17 @@ public class DorisMetadataSyncService {
             return true;
         }
         return "DORIS".equalsIgnoreCase(cluster.getSourceType());
+    }
+
+    private String normalizeTableType(String tableType) {
+        if (!StringUtils.hasText(tableType)) {
+            return "BASE TABLE";
+        }
+        return tableType.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private boolean isViewType(String tableType) {
+        return normalizeTableType(tableType).contains("VIEW");
     }
 
     private String resolveLayerForNewTable(String tableName) {

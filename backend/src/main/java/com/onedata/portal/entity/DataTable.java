@@ -19,6 +19,8 @@ public class DataTable {
 
     private String tableName;
 
+    private String tableType;
+
     private String originTableName;
 
     private String tableComment;

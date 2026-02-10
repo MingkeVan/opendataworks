@@ -41,6 +41,9 @@ public class InspectionService {
     private static final Pattern RECOMMENDED_REPLICA_PATTERN = Pattern.compile("推荐\\s*[:：]?\\s*(\\d+)");
     private static final Pattern RANGE_REPLICA_PATTERN = Pattern.compile("(\\d+)\\s*-\\s*(\\d+)");
     private static final Pattern MIN_REPLICA_PATTERN = Pattern.compile(">=\\s*(\\d+)");
+    private static final Pattern CREATE_VIEW_DDL_PATTERN = Pattern.compile(
+        "^CREATE\\s+(OR\\s+REPLACE\\s+)?VIEW\\b",
+        Pattern.CASE_INSENSITIVE);
 
     /**
      * 执行全量巡检
@@ -177,14 +180,23 @@ public class InspectionService {
             maxReplicas = ((Number) config.get("maxReplicas")).intValue();
         }
         int recommendedReplicas = ((Number) config.getOrDefault("recommendedReplicas", 3)).intValue();
+        Set<Long> dorisClusterIds = resolveDorisClusterIds();
+        if (dorisClusterIds.isEmpty()) {
+            return issues;
+        }
 
         LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
             .eq(DataTable::getStatus, "active")
+            .isNotNull(DataTable::getClusterId)
+            .in(DataTable::getClusterId, dorisClusterIds)
             .isNotNull(DataTable::getReplicaNum);
         applyTableScope(tableWrapper, config);
         List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : tables) {
+            if (isViewTable(table)) {
+                continue;
+            }
             Integer replicaNum = table.getReplicaNum();
             boolean outOfRange = replicaNum < minReplicas || (maxReplicas != null && replicaNum > maxReplicas);
             if (outOfRange) {
@@ -220,16 +232,24 @@ public class InspectionService {
         Map<String, Object> config = parseRuleConfig(rule.getRuleConfig());
         int maxTablets = ((Number) config.getOrDefault("maxTablets", 200)).intValue();
         int warningTablets = ((Number) config.getOrDefault("warningTablets", 100)).intValue();
+        Set<Long> dorisClusterIds = resolveDorisClusterIds();
+        if (dorisClusterIds.isEmpty()) {
+            return issues;
+        }
 
         LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
             .eq(DataTable::getStatus, "active")
             .isNotNull(DataTable::getClusterId)
+            .in(DataTable::getClusterId, dorisClusterIds)
             .isNotNull(DataTable::getDbName)
             .isNotNull(DataTable::getTableName);
         applyTableScope(tableWrapper, config);
         List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : tables) {
+            if (isViewTable(table)) {
+                continue;
+            }
             String actualTableName = resolveActualTableName(table.getTableName());
             if (!StringUtils.hasText(actualTableName)) {
                 continue;
@@ -294,16 +314,24 @@ public class InspectionService {
         long maxTabletBytes = maxTabletSizeMb * 1024L * 1024;
         long targetTabletBytes = targetTabletSizeMb * 1024L * 1024;
         long minTableBytesForSmallCheck = minTableSizeGbForSmallCheck * 1024L * 1024 * 1024;
+        Set<Long> dorisClusterIds = resolveDorisClusterIds();
+        if (dorisClusterIds.isEmpty()) {
+            return issues;
+        }
 
         LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
             .eq(DataTable::getStatus, "active")
             .isNotNull(DataTable::getClusterId)
+            .in(DataTable::getClusterId, dorisClusterIds)
             .isNotNull(DataTable::getDbName)
             .isNotNull(DataTable::getTableName);
         applyTableScope(tableWrapper, config);
         List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
 
         for (DataTable table : tables) {
+            if (isViewTable(table)) {
+                continue;
+            }
             if (table == null || table.getClusterId() == null || !StringUtils.hasText(table.getDbName())
                 || !StringUtils.hasText(table.getTableName())) {
                 continue;
@@ -370,6 +398,36 @@ public class InspectionService {
             }
         }
         return normalized;
+    }
+
+    private Set<Long> resolveDorisClusterIds() {
+        List<DorisCluster> clusters = dorisClusterService.listAll();
+        Set<Long> dorisClusterIds = new HashSet<>();
+        for (DorisCluster cluster : clusters) {
+            if (cluster == null || cluster.getId() == null) {
+                continue;
+            }
+            if ("DORIS".equalsIgnoreCase(cluster.getSourceType())) {
+                dorisClusterIds.add(cluster.getId());
+            }
+        }
+        return dorisClusterIds;
+    }
+
+    private boolean isViewTable(DataTable table) {
+        if (table == null) {
+            return false;
+        }
+        if (StringUtils.hasText(table.getTableType())) {
+            String tableType = table.getTableType().trim().toUpperCase(Locale.ROOT);
+            if (tableType.contains("VIEW")) {
+                return true;
+            }
+        }
+        if (!StringUtils.hasText(table.getDorisDdl())) {
+            return false;
+        }
+        return CREATE_VIEW_DDL_PATTERN.matcher(table.getDorisDdl().trim()).find();
     }
 
     private String generateTabletSizeSuggestion(long dataSize, long tabletCount,
@@ -1336,6 +1394,8 @@ public class InspectionService {
         }
 
         List<String> dbNames = toStringList(firstNonNull(scope, "dbNames", "dbName", "schemas", "schema"));
+        List<String> tableTypes = normalizeTableTypes(
+            toStringList(firstNonNull(scope, "tableTypes", "tableType", "resourceTypes", "resourceType")));
 
         if (!clusterIds.isEmpty()) {
             wrapper.in(DataTable::getClusterId, clusterIds);
@@ -1343,6 +1403,28 @@ public class InspectionService {
         if (!dbNames.isEmpty()) {
             wrapper.in(DataTable::getDbName, dbNames);
         }
+        if (!tableTypes.isEmpty()) {
+            wrapper.in(DataTable::getTableType, tableTypes);
+        }
+    }
+
+    private List<String> normalizeTableTypes(List<String> tableTypes) {
+        if (tableTypes == null || tableTypes.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> normalized = new ArrayList<>();
+        for (String item : tableTypes) {
+            if (!StringUtils.hasText(item)) {
+                continue;
+            }
+            String value = item.trim().toUpperCase(Locale.ROOT);
+            if ("TABLE".equals(value) || "BASE_TABLE".equals(value)) {
+                normalized.add("BASE TABLE");
+            } else {
+                normalized.add(value);
+            }
+        }
+        return normalized;
     }
 
     private Object firstNonNull(Map<String, Object> map, String... keys) {
