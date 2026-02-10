@@ -926,7 +926,7 @@ public class DorisConnectionService {
         DorisCluster cluster = resolveCluster(clusterId);
         List<Map<String, Object>> tables = new ArrayList<>();
 
-        String sql = "SELECT TABLE_NAME, TABLE_COMMENT, CREATE_TIME, UPDATE_TIME, TABLE_ROWS, DATA_LENGTH " +
+        String sql = "SELECT TABLE_NAME, TABLE_TYPE, TABLE_COMMENT, CREATE_TIME, UPDATE_TIME, TABLE_ROWS, DATA_LENGTH " +
                 "FROM information_schema.tables WHERE TABLE_SCHEMA = ?";
 
         try (Connection connection = getConnection(cluster, null);
@@ -938,6 +938,7 @@ public class DorisConnectionService {
                 while (rs.next()) {
                     Map<String, Object> table = new HashMap<>();
                     table.put("tableName", rs.getString("TABLE_NAME"));
+                    table.put("tableType", rs.getString("TABLE_TYPE"));
                     table.put("tableComment", rs.getString("TABLE_COMMENT"));
                     table.put("createTime", rs.getTimestamp("CREATE_TIME"));
                     table.put("updateTime", rs.getTimestamp("UPDATE_TIME"));
