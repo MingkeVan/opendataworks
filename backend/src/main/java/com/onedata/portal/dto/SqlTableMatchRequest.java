@@ -9,4 +9,9 @@ import lombok.Data;
 public class SqlTableMatchRequest {
 
     private String sql;
+
+    /**
+     * 任务节点类型（可选）
+     */
+    private String nodeType;
 }

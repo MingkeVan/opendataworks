@@ -178,7 +178,7 @@ public class DataTaskService {
      */
     @Transactional
     public DataTask create(DataTask task, List<Long> inputTableIds, List<Long> outputTableIds) {
-        validateTask(task);
+        validateTask(task, inputTableIds, outputTableIds);
 
         // 检查任务名称是否已存在
         if (isTaskNameExists(task.getTaskName())) {
@@ -251,7 +251,7 @@ public class DataTaskService {
      */
     @Transactional
     public DataTask update(DataTask task, List<Long> inputTableIds, List<Long> outputTableIds) {
-        validateTask(task);
+        validateTask(task, inputTableIds, outputTableIds);
         DataTask exists = dataTaskMapper.selectById(task.getId());
         if (exists == null) {
             throw new BusinessException("任务不存在");
@@ -318,7 +318,8 @@ public class DataTaskService {
     @Deprecated
     @Transactional
     public DataTask update(DataTask task) {
-        return update(task, null, null);
+        com.onedata.portal.controller.DataTaskController.TaskLineageResponse lineage = getTaskLineage(task.getId());
+        return update(task, lineage.getInputTableIds(), lineage.getOutputTableIds());
     }
 
     /**
@@ -1071,12 +1072,34 @@ public class DataTaskService {
         return status;
     }
 
-    private void validateTask(DataTask task) {
+    private void validateTask(DataTask task, List<Long> inputTableIds, List<Long> outputTableIds) {
+        if (task == null) {
+            throw new IllegalArgumentException("任务不能为空");
+        }
+        boolean enforceLineage = task.getId() == null || inputTableIds != null || outputTableIds != null;
         if ("SQL".equalsIgnoreCase(task.getDolphinNodeType())) {
             if (!StringUtils.hasText(task.getDatasourceName())) {
                 throw new IllegalArgumentException("SQL 任务必须选择数据源");
             }
+            if (enforceLineage && isEmptyTableSelection(inputTableIds)) {
+                throw new IllegalArgumentException("SQL 任务必须至少配置一个输入表");
+            }
+            if (enforceLineage && isEmptyTableSelection(outputTableIds)) {
+                throw new IllegalArgumentException("SQL 任务必须至少配置一个输出表");
+            }
+            return;
         }
+
+        if (enforceLineage && isEmptyTableSelection(outputTableIds)) {
+            throw new IllegalArgumentException("任务必须至少配置一个输出表");
+        }
+    }
+
+    private boolean isEmptyTableSelection(List<Long> tableIds) {
+        if (tableIds == null || tableIds.isEmpty()) {
+            return true;
+        }
+        return tableIds.stream().noneMatch(Objects::nonNull);
     }
 
     private List<Long> findTaskIdsByWorkflow(Long workflowId) {

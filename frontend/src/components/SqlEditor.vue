@@ -4,8 +4,8 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, placeholder } from '@codemirror/view'
-import { EditorState, Compartment } from '@codemirror/state'
+import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, placeholder, Decoration } from '@codemirror/view'
+import { EditorState, Compartment, RangeSetBuilder } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { autocompletion, acceptCompletion } from '@codemirror/autocomplete'
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
@@ -27,6 +27,10 @@ const props = defineProps({
   tableNames: {
     type: Array,
     default: () => []
+  },
+  highlights: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -40,6 +44,39 @@ const languageCompartment = new Compartment()
 const editableCompartment = new Compartment()
 const placeholderCompartment = new Compartment()
 const completionCompartment = new Compartment()
+const highlightCompartment = new Compartment()
+
+const normalizeHighlights = (highlights = []) => {
+  return (highlights || [])
+    .map((item) => {
+      const from = Number(item?.from)
+      const to = Number(item?.to)
+      const status = String(item?.status || 'matched').toLowerCase()
+      if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to <= from) {
+        return null
+      }
+      return { from, to, status }
+    })
+    .filter(Boolean)
+}
+
+const decorationClassByStatus = (status) => {
+  if (status === 'ambiguous') return 'cm-sql-table-hit-ambiguous'
+  if (status === 'unmatched') return 'cm-sql-table-hit-unmatched'
+  return 'cm-sql-table-hit-matched'
+}
+
+const buildHighlightExtension = (highlights = []) => {
+  const builder = new RangeSetBuilder()
+  normalizeHighlights(highlights).forEach((item) => {
+    builder.add(
+      item.from,
+      item.to,
+      Decoration.mark({ class: decorationClassByStatus(item.status) })
+    )
+  })
+  return EditorView.decorations.of(builder.finish())
+}
 
 const SQL_KEYWORDS = [
   'SELECT',
@@ -157,7 +194,8 @@ const buildExtensions = () => {
         override: [completionSource],
         activateOnTyping: true
       })
-    )
+    ),
+    highlightCompartment.of(buildHighlightExtension(props.highlights))
   )
 
   extensions.push(
@@ -182,6 +220,21 @@ const buildExtensions = () => {
         },
         '.cm-activeLine': {
           backgroundColor: '#f8fafc'
+        },
+        '.cm-sql-table-hit-matched': {
+          backgroundColor: 'rgba(34, 197, 94, 0.2)',
+          textDecoration: 'underline 1px #16a34a',
+          textUnderlineOffset: '2px'
+        },
+        '.cm-sql-table-hit-ambiguous': {
+          backgroundColor: 'rgba(245, 158, 11, 0.2)',
+          textDecoration: 'underline 1px #d97706',
+          textUnderlineOffset: '2px'
+        },
+        '.cm-sql-table-hit-unmatched': {
+          backgroundColor: 'rgba(239, 68, 68, 0.2)',
+          textDecoration: 'underline 1px #dc2626',
+          textUnderlineOffset: '2px'
         }
       },
       { dark: false }
@@ -203,9 +256,22 @@ const getDocText = () => {
   return view.state.doc.toString()
 }
 
+const scrollToRange = (from, to) => {
+  if (!view) return
+  const docLength = view.state.doc.length
+  const start = Math.max(0, Math.min(Number(from) || 0, docLength))
+  const end = Math.max(start, Math.min(Number(to) || start, docLength))
+  view.dispatch({
+    selection: { anchor: start, head: end },
+    scrollIntoView: true
+  })
+  view.focus()
+}
+
 defineExpose({
   getSelectionText,
   getDocText,
+  scrollToRange,
   focus: () => view?.focus()
 })
 
@@ -273,6 +339,14 @@ watch(
         activateOnTyping: true
       })
     )
+  },
+  { deep: true }
+)
+
+watch(
+  () => props.highlights,
+  (next) => {
+    reconfigure(highlightCompartment, buildHighlightExtension(next))
   },
   { deep: true }
 )

@@ -68,6 +68,11 @@ export const taskApi = {
     return request.get('/v1/dolphin/task-groups', { params })
   },
 
+  // SQL 表依赖解析（增强版）
+  analyzeSqlTables(payload) {
+    return request.post('/v1/sql-table-matcher/analyze', payload, { skipErrorMessage: true })
+  },
+
   // 获取 Dolphin worker group 列表（项目级）
   fetchWorkerGroups() {
     return request.get('/v1/dolphin/worker-groups')
