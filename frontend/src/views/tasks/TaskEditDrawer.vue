@@ -99,7 +99,7 @@
         </el-form-item>
 
         <el-form-item label="SQL 脚本" prop="task.taskSql" class="sql-editor-item">
-          <div class="sql-editor-wrapper">
+          <div class="sql-workbench">
             <SqlEditor
               ref="sqlEditorRef"
               v-model="form.task.taskSql"
@@ -108,77 +108,81 @@
               :table-names="[]"
               :highlights="sqlHighlights"
             />
-          </div>
-        </el-form-item>
 
-        <el-form-item label="SQL 解析" class="sql-analysis-item">
-          <div class="sql-analysis-panel">
-            <div class="sql-analysis-toolbar">
-              <div class="sql-analysis-tags">
-                <el-tag type="success" size="small">已命中 {{ analysisSummary.matched }}</el-tag>
-                <el-tag type="warning" size="small">歧义 {{ analysisSummary.ambiguous }}</el-tag>
-                <el-tag type="danger" size="small">未识别 {{ analysisSummary.unmatched }}</el-tag>
-                <el-tag v-if="analysisLoading" type="info" size="small">解析中...</el-tag>
+            <aside class="sql-analysis-panel">
+              <div class="sql-analysis-toolbar">
+                <div class="analysis-heading">表解析</div>
+                <div class="sql-analysis-actions">
+                  <el-button
+                    type="primary"
+                    link
+                    :disabled="!hasMatchedSuggestions"
+                    @click="applyMatchedSuggestions(false)"
+                  >
+                    应用建议
+                  </el-button>
+                  <el-button
+                    v-if="analysisSummary.unmatched > 0"
+                    type="warning"
+                    link
+                    @click="goToMetadataSync"
+                  >
+                    去元数据同步
+                  </el-button>
+                </div>
               </div>
-              <div class="sql-analysis-actions">
-                <el-button
-                  type="primary"
-                  link
-                  :disabled="!hasMatchedSuggestions"
-                  @click="applyMatchedSuggestions(false)"
-                >
-                  应用建议
-                </el-button>
-                <el-button
-                  v-if="analysisSummary.unmatched > 0"
-                  type="warning"
-                  link
-                  @click="goToMetadataSync"
-                >
-                  去元数据同步
-                </el-button>
-              </div>
-            </div>
 
-            <div v-if="analysisError" class="analysis-error">{{ analysisError }}</div>
-            <el-alert
-              v-if="analysisSummary.unmatched > 0 || analysisSummary.ambiguous > 0"
-              :closable="false"
-              show-icon
-              type="warning"
-              title="请人工核对解析结果；自动解析不会覆盖你已手工选择的输入/输出表。"
-              class="analysis-alert"
-            />
-
-            <div class="analysis-group">
-              <div class="analysis-title">输入表建议</div>
-              <el-empty v-if="!sqlAnalysis.inputRefs.length" description="暂无输入表建议" :image-size="60" />
-              <div
-                v-for="(item, idx) in sqlAnalysis.inputRefs"
-                :key="`in-${idx}-${item.rawName}`"
-                class="analysis-item"
-                @click="focusAnalyzeRef(item)"
-              >
-                <el-tag size="small" :type="analysisStatusType(item.matchStatus)">{{ analysisStatusText(item.matchStatus) }}</el-tag>
-                <span class="analysis-raw">{{ item.rawName }}</span>
-                <span class="analysis-target">{{ formatAnalyzeTarget(item) }}</span>
+              <div class="sql-analysis-stats">
+                <span>命中 <strong>{{ analysisSummary.matched }}</strong></span>
+                <span>歧义 <strong>{{ analysisSummary.ambiguous }}</strong></span>
+                <span>未识别 <strong>{{ analysisSummary.unmatched }}</strong></span>
+                <span v-if="analysisLoading">解析中...</span>
               </div>
-            </div>
 
-            <div class="analysis-group">
-              <div class="analysis-title">输出表建议</div>
-              <el-empty v-if="!sqlAnalysis.outputRefs.length" description="暂无输出表建议" :image-size="60" />
-              <div
-                v-for="(item, idx) in sqlAnalysis.outputRefs"
-                :key="`out-${idx}-${item.rawName}`"
-                class="analysis-item"
-                @click="focusAnalyzeRef(item)"
-              >
-                <el-tag size="small" :type="analysisStatusType(item.matchStatus)">{{ analysisStatusText(item.matchStatus) }}</el-tag>
-                <span class="analysis-raw">{{ item.rawName }}</span>
-                <span class="analysis-target">{{ formatAnalyzeTarget(item) }}</span>
+              <div v-if="analysisError" class="analysis-error">{{ analysisError }}</div>
+              <el-alert
+                v-if="analysisSummary.unmatched > 0 || analysisSummary.ambiguous > 0"
+                :closable="false"
+                show-icon
+                type="warning"
+                title="请人工核对解析结果；自动解析不会覆盖你已手工选择的输入/输出表。"
+                class="analysis-alert"
+              />
+
+              <div class="analysis-grid">
+                <section class="analysis-group">
+                  <div class="analysis-title">输入表建议</div>
+                  <el-empty v-if="!sqlAnalysis.inputRefs.length" description="暂无输入表建议" :image-size="54" />
+                  <div
+                    v-for="(item, idx) in sqlAnalysis.inputRefs"
+                    :key="`in-${idx}-${item.rawName}`"
+                    class="analysis-item"
+                    :class="`is-${item.matchStatus || 'unknown'}`"
+                    @click="focusAnalyzeRef(item)"
+                  >
+                    <span class="analysis-state">{{ analysisStatusText(item.matchStatus) }}</span>
+                    <span class="analysis-raw">{{ item.rawName }}</span>
+                    <span class="analysis-target">{{ formatAnalyzeTarget(item) }}</span>
+                  </div>
+                </section>
+
+                <section class="analysis-group">
+                  <div class="analysis-title">输出表建议</div>
+                  <el-empty v-if="!sqlAnalysis.outputRefs.length" description="暂无输出表建议" :image-size="54" />
+                  <div
+                    v-for="(item, idx) in sqlAnalysis.outputRefs"
+                    :key="`out-${idx}-${item.rawName}`"
+                    class="analysis-item"
+                    :class="`is-${item.matchStatus || 'unknown'}`"
+                    @click="focusAnalyzeRef(item)"
+                  >
+                    <span class="analysis-state">{{ analysisStatusText(item.matchStatus) }}</span>
+                    <span class="analysis-raw">{{ item.rawName }}</span>
+                    <span class="analysis-target">{{ formatAnalyzeTarget(item) }}</span>
+                  </div>
+                </section>
               </div>
-            </div>
+            </aside>
           </div>
         </el-form-item>
       </template>
@@ -688,13 +692,6 @@ const applyMatchedSuggestions = async (silent = false) => {
   }
 }
 
-const analysisStatusType = (status) => {
-  if (status === 'matched') return 'success'
-  if (status === 'ambiguous') return 'warning'
-  if (status === 'unmatched') return 'danger'
-  return 'info'
-}
-
 const analysisStatusText = (status) => {
   if (status === 'matched') return '命中'
   if (status === 'ambiguous') return '歧义'
@@ -984,44 +981,71 @@ defineExpose({
   border-color: #409eff;
 }
 
-.sql-editor-wrapper {
+.sql-workbench {
   width: 100%;
+  height: 392px;
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
 }
 
 .sql-codemirror {
-  width: 100%;
-  height: 320px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 4px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 6px;
   overflow: hidden;
+  background: #fff;
 }
 
 .sql-analysis-panel {
-  width: 100%;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 6px;
+  width: 332px;
+  flex: 0 0 332px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: #fff;
   padding: 10px;
-  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
 
 .sql-analysis-toolbar {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
-.sql-analysis-tags {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.analysis-heading {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
 }
 
 .sql-analysis-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.sql-analysis-stats {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.sql-analysis-stats strong {
+  color: var(--el-text-color-primary);
+  font-weight: 600;
 }
 
 .analysis-alert {
@@ -1034,39 +1058,123 @@ defineExpose({
   font-size: 12px;
 }
 
-.analysis-group {
+.analysis-grid {
   margin-top: 10px;
+  display: grid;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  max-height: 390px;
+  overflow: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--el-scrollbar-bg-color, #a8abb2) transparent;
+}
+
+.analysis-grid::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.analysis-grid::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+.analysis-grid::-webkit-scrollbar-thumb {
+  background-color: var(--el-scrollbar-bg-color, #a8abb2);
+  border-radius: 10px;
+}
+
+.analysis-grid::-webkit-scrollbar-thumb:hover {
+  background-color: var(--el-scrollbar-hover-bg-color, #909399);
+}
+
+.analysis-grid::-webkit-scrollbar-corner {
+  background-color: transparent;
+}
+
+.analysis-group {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 8px;
+  background: #fff;
+}
+
+.analysis-group :deep(.el-empty) {
+  padding: 6px 0;
 }
 
 .analysis-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  margin-bottom: 6px;
   color: var(--el-text-color-primary);
+  margin-bottom: 6px;
 }
 
 .analysis-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 4px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 6px;
   cursor: pointer;
+  background: #fff;
+  transition: border-color 0.16s ease;
+}
+
+.analysis-item:last-child {
+  margin-bottom: 0;
 }
 
 .analysis-item:hover {
-  background: #f0f7ff;
+  border-color: var(--el-border-color);
+}
+
+.analysis-state {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 4px;
 }
 
 .analysis-raw {
+  display: block;
   color: var(--el-text-color-primary);
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-family: 'JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
   font-size: 12px;
+  line-height: 1.45;
+  word-break: break-all;
 }
 
 .analysis-target {
+  display: block;
+  margin-top: 4px;
   color: var(--el-text-color-secondary);
   font-size: 12px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+@media (max-width: 1520px) {
+  .sql-workbench {
+    height: auto;
+    flex-direction: column;
+  }
+
+  .sql-codemirror {
+    height: 320px;
+    min-height: 320px;
+  }
+
+  .sql-analysis-panel {
+    width: 100%;
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 300px;
+  }
+
+  .analysis-grid {
+    max-height: 320px;
+  }
 }
 
 .error-text {

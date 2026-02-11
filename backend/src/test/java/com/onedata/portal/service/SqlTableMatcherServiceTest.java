@@ -158,6 +158,27 @@ class SqlTableMatcherServiceTest {
         assertTrue(response.getUnmatched().contains("dws.missing_tgt"));
     }
 
+    @Test
+    void analyzeDeleteFromShouldTreatTargetAsOutput() {
+        DataTable target = table(51L, 501L, "dwd", "user_snapshot", "snapshot");
+        DataTable source = table(52L, 501L, "ods", "user_delta", "delta");
+
+        when(dataTableMapper.selectActiveByDbAndTable("dwd", "user_snapshot")).thenReturn(Collections.singletonList(target));
+        when(dataTableMapper.selectActiveByDbAndTable("ods", "user_delta")).thenReturn(Collections.singletonList(source));
+        when(dorisClusterMapper.selectBatchIds(anyCollection())).thenReturn(Collections.singletonList(cluster(501L, "prod", "DORIS")));
+
+        String sql = "DELETE FROM dwd.user_snapshot WHERE id IN (SELECT id FROM ods.user_delta)";
+        SqlTableAnalyzeResponse response = service.analyze(sql, "SQL");
+
+        assertEquals(1, response.getOutputRefs().size());
+        assertEquals("dwd.user_snapshot", response.getOutputRefs().get(0).getRawName());
+        assertEquals("matched", response.getOutputRefs().get(0).getMatchStatus());
+
+        assertEquals(1, response.getInputRefs().size());
+        assertEquals("ods.user_delta", response.getInputRefs().get(0).getRawName());
+        assertEquals("matched", response.getInputRefs().get(0).getMatchStatus());
+    }
+
     private DataTable table(Long id, Long clusterId, String db, String name, String comment) {
         DataTable t = new DataTable();
         t.setId(id);

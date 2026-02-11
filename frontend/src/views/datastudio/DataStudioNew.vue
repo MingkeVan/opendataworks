@@ -2199,7 +2199,9 @@ const setupTableObserver = () => {
     accessStats: null,
     accessError: '',
     lineage: { upstreamTables: [], downstreamTables: [] },
-    tasks: { writeTasks: [], readTasks: [] }
+    tasks: { writeTasks: [], readTasks: [] },
+    dataLoading: false,
+    dataLoaded: false
   })
 }
 
@@ -2476,6 +2478,9 @@ const syncFromRoute = async () => {
 const loadTabData = async (tabId) => {
   const state = tabStates[tabId]
   if (!state?.table) return
+  if (state.dataLoading || state.dataLoaded) return
+
+  state.dataLoading = true
   if (!state.table.id && state.table.dbName && state.table.tableName) {
     try {
       const sourceId = state.table.sourceId || clusterId.value
@@ -2529,6 +2534,8 @@ const loadTabData = async (tabId) => {
     if (state.query.sql === '') {
       state.query.sql = buildDefaultSql(state.table)
     }
+    state.dataLoaded = true
+    state.dataLoading = false
     return
   }
   try {
@@ -2573,8 +2580,12 @@ const loadTabData = async (tabId) => {
     if (state.query.sql === '') {
       state.query.sql = buildDefaultSql(state.table)
     }
+    state.dataLoaded = true
   } catch (error) {
     console.error('加载表详情失败', error)
+    state.dataLoaded = false
+  } finally {
+    state.dataLoading = false
   }
 }
 
@@ -3797,6 +3808,9 @@ const handleTaskSuccess = async () => {
   const id = String(activeTab.value || '')
   const tab = getTabItemById(id)
   if (tab?.kind !== 'table') return
+  if (tabStates[id]) {
+    tabStates[id].dataLoaded = false
+  }
   await loadTabData(id)
 }
 
@@ -3954,6 +3968,11 @@ watch(
     }
     if (tab.kind === 'table') {
       selectedTableKey.value = String(tab.id)
+      const tabId = String(tab.id)
+      const state = tabStates[tabId]
+      if (state && !state.dataLoaded && !state.dataLoading) {
+        loadTabData(tabId)
+      }
     } else {
       selectedTableKey.value = ''
     }

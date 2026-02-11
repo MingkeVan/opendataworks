@@ -207,7 +207,28 @@ const buildExtensions = () => {
         },
         '.cm-scroller': {
           fontFamily: "'JetBrains Mono', Menlo, Consolas, monospace",
-          lineHeight: '1.55'
+          lineHeight: '1.55',
+          overflowX: 'auto',
+          overflowY: 'auto',
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'var(--el-scrollbar-bg-color, #a8abb2) transparent'
+        },
+        '.cm-scroller::-webkit-scrollbar': {
+          width: '10px',
+          height: '10px'
+        },
+        '.cm-scroller::-webkit-scrollbar-track': {
+          backgroundColor: 'transparent'
+        },
+        '.cm-scroller::-webkit-scrollbar-thumb': {
+          backgroundColor: 'var(--el-scrollbar-bg-color, #a8abb2)',
+          borderRadius: '10px'
+        },
+        '.cm-scroller::-webkit-scrollbar-thumb:hover': {
+          backgroundColor: 'var(--el-scrollbar-hover-bg-color, #909399)'
+        },
+        '.cm-scroller::-webkit-scrollbar-corner': {
+          backgroundColor: 'transparent'
         },
         '.cm-gutters': {
           backgroundColor: '#f8fafc',
