@@ -1056,7 +1056,7 @@
 
       <!-- Right: Meta/Lineage -->
       <aside class="studio-right" :style="{ width: `${rightPanelWidth}px` }">
-        <DataStudioRightPanel />
+        <DataStudioRightPanel visual-variant="clean-slate" />
       </aside>
     </div>
 
@@ -1091,6 +1091,7 @@ import {
   Warning
 } from '@element-plus/icons-vue'
 import { tableApi } from '@/api/table'
+import { lineageApi } from '@/api/lineage'
 import { dorisClusterApi } from '@/api/doris'
 import { dataQueryApi } from '@/api/query'
 import { businessDomainApi, dataDomainApi } from '@/api/domain'
@@ -2522,7 +2523,8 @@ const loadTabData = async (tabId) => {
     state.fieldsRemoved = []
     state.lineage = {
       upstreamTables: [],
-      downstreamTables: []
+      downstreamTables: [],
+      edges: []
     }
     state.tasks = {
       writeTasks: [],
@@ -2539,11 +2541,12 @@ const loadTabData = async (tabId) => {
     return
   }
   try {
-    const [tableInfo, fieldList, lineageData, tasksData] = await Promise.all([
+    const [tableInfo, fieldList, lineageData, tasksData, lineageGraphData] = await Promise.all([
       tableApi.getById(state.table.id),
       tableApi.getFields(state.table.id),
       tableApi.getLineage(state.table.id),
-      tableApi.getTasks(state.table.id)
+      tableApi.getTasks(state.table.id),
+      lineageApi.getLineageGraph({ tableId: state.table.id, depth: 1 }).catch(() => null)
     ])
     state.table = { ...state.table, ...tableInfo }
     state.metaForm = {
@@ -2567,7 +2570,8 @@ const loadTabData = async (tabId) => {
     state.fieldsRemoved = []
     state.lineage = {
       upstreamTables: lineageData?.upstreamTables || [],
-      downstreamTables: lineageData?.downstreamTables || []
+      downstreamTables: lineageData?.downstreamTables || [],
+      edges: lineageGraphData?.edges || []
     }
     lineageCache[state.table.id] = state.lineage
     state.tasks = {
@@ -4010,6 +4014,8 @@ watch(selectedTableKey, (value) => {
   catalogTreeRef.value?.setCurrentKey(value, false)
 })
 
+
+
   provide('dataStudioCtx', {
     clusterId,
     openTabs,
@@ -4502,12 +4508,10 @@ onBeforeUnmount(() => {
 .studio-right {
   display: flex;
   flex-direction: column;
-  background: #fff;
-  border-radius: 10px;
-  border: 1px solid #e6e9ef;
   overflow: hidden;
   min-height: 0;
 }
+
 
 .workspace-body {
   height: 100%;
@@ -4747,8 +4751,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background-color: #f5f7fa;
-  padding: 12px;
 }
 
 .result-tabs {
