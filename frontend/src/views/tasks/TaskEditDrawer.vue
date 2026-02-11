@@ -116,6 +116,15 @@
                   <el-button
                     type="primary"
                     link
+                    :disabled="!canReAnalyze"
+                    :loading="analysisLoading"
+                    @click="handleReAnalyzeClick"
+                  >
+                    重新解析
+                  </el-button>
+                  <el-button
+                    type="primary"
+                    link
                     :disabled="!hasMatchedSuggestions"
                     @click="applyMatchedSuggestions()"
                   >
@@ -491,6 +500,11 @@ const hasMatchedSuggestions = computed(() => {
   return inCount > 0 || outCount > 0
 })
 
+const canReAnalyze = computed(() => {
+  const sqlText = String(form.task.taskSql || '').trim()
+  return visible.value && form.task.dolphinNodeType === 'SQL' && !!sqlText && !analysisLoading.value
+})
+
 const sqlHighlights = computed(() => {
   const highlights = []
   const collect = (items = []) => {
@@ -601,7 +615,8 @@ const clearSqlAnalysis = () => {
   sqlAnalysis.ambiguous = []
 }
 
-const runSqlAnalyze = async (sqlText) => {
+const runSqlAnalyze = async (sqlText, options = {}) => {
+  const { autoApply = true } = options
   const seq = ++analyzeSeq
   analysisLoading.value = true
   analysisError.value = ''
@@ -619,7 +634,7 @@ const runSqlAnalyze = async (sqlText) => {
     sqlAnalysis.unmatched = Array.isArray(result?.unmatched) ? result.unmatched : []
     sqlAnalysis.ambiguous = Array.isArray(result?.ambiguous) ? result.ambiguous : []
 
-    if (!inputSelectionTouched.value && !outputSelectionTouched.value) {
+    if (autoApply && !inputSelectionTouched.value && !outputSelectionTouched.value) {
       await applyMatchedSuggestions({ silent: true, mode: 'replace' })
     }
   } catch (error) {
@@ -655,8 +670,22 @@ const scheduleSqlAnalyze = () => {
   }
 
   sqlAnalyzeTimer = setTimeout(() => {
-    runSqlAnalyze(sqlText)
+    runSqlAnalyze(sqlText, { autoApply: true })
   }, 600)
+}
+
+const handleReAnalyzeClick = () => {
+  if (sqlAnalyzeTimer) {
+    clearTimeout(sqlAnalyzeTimer)
+    sqlAnalyzeTimer = null
+  }
+
+  const sqlText = String(form.task.taskSql || '').trim()
+  if (!visible.value || form.task.dolphinNodeType !== 'SQL' || !sqlText || analysisLoading.value) {
+    return
+  }
+
+  runSqlAnalyze(sqlText, { autoApply: false })
 }
 
 const applyMatchedSuggestions = async ({ silent = false, mode = 'merge' } = {}) => {
