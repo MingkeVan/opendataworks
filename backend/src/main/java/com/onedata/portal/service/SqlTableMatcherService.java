@@ -56,12 +56,25 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SqlTableMatcherService {
 
+    private static final String TABLE_CAPTURE_PATTERN =
+        "((?:`?[a-z0-9_]+`?\\s*\\.\\s*)?`?[a-z0-9_]+`?)";
+
     private static final Pattern INPUT_CONTEXT_PATTERN = Pattern.compile(
-        "(?i)\\b(?:FROM|JOIN|USING)\\s+((?:`?[a-z0-9_]+`?\\s*\\.\\s*)?`?[a-z0-9_]+`?)"
+        "(?i)\\b(FROM|JOIN|USING)\\s+" + TABLE_CAPTURE_PATTERN
     );
 
     private static final Pattern OUTPUT_CONTEXT_PATTERN = Pattern.compile(
-        "(?i)\\b(?:INSERT\\s+(?:INTO|OVERWRITE(?:\\s+TABLE)?(?:\\s+INTO)?)|REPLACE\\s+INTO|MERGE\\s+INTO|CREATE\\s+TABLE(?:\\s+IF\\s+NOT\\s+EXISTS)?)\\s+((?:`?[a-z0-9_]+`?\\s*\\.\\s*)?`?[a-z0-9_]+`?)"
+        "(?i)\\b(?:INSERT\\s+(?:INTO|OVERWRITE(?:\\s+TABLE)?(?:\\s+INTO)?)|REPLACE\\s+INTO|MERGE\\s+INTO|CREATE\\s+TABLE(?:\\s+IF\\s+NOT\\s+EXISTS)?)\\s+"
+            + TABLE_CAPTURE_PATTERN
+    );
+
+    private static final Pattern DELETE_OUTPUT_CONTEXT_PATTERN = Pattern.compile(
+        "(?i)\\bDELETE\\b(?:\\s+LOW_PRIORITY|\\s+QUICK|\\s+IGNORE|\\s+`?[a-z0-9_]+`?|\\s*,\\s*)*\\s+FROM\\s+"
+            + TABLE_CAPTURE_PATTERN
+    );
+
+    private static final Pattern DELETE_FROM_PREFIX_PATTERN = Pattern.compile(
+        "(?is).*\\bDELETE\\b(?:\\s+LOW_PRIORITY|\\s+QUICK|\\s+IGNORE|\\s+`?[a-z0-9_]+`?|\\s*,\\s*)*\\s*$"
     );
 
     private static final Pattern CTE_ALIAS_PATTERN = Pattern.compile(
@@ -69,7 +82,7 @@ public class SqlTableMatcherService {
     );
 
     private static final Set<String> OUTPUT_STATEMENT_TYPES = new HashSet<>(
-        Arrays.asList("Insert", "Replace", "Merge", "CreateTable")
+        Arrays.asList("Insert", "Replace", "Merge", "CreateTable", "Delete")
     );
 
     private final DataTableMapper dataTableMapper;
@@ -340,20 +353,45 @@ public class SqlTableMatcherService {
     }
 
     private LinkedHashMap<String, TableReference> extractWithRegex(String maskedSql, Direction direction) {
-        Pattern pattern = direction == Direction.INPUT ? INPUT_CONTEXT_PATTERN : OUTPUT_CONTEXT_PATTERN;
         LinkedHashMap<String, TableReference> refs = new LinkedHashMap<>();
+        if (!StringUtils.hasText(maskedSql)) {
+            return refs;
+        }
+
+        if (direction == Direction.INPUT) {
+            collectRegexMatches(maskedSql, INPUT_CONTEXT_PATTERN, refs, direction, 2, true);
+            return refs;
+        }
+
+        collectRegexMatches(maskedSql, OUTPUT_CONTEXT_PATTERN, refs, direction, 1, false);
+        collectRegexMatches(maskedSql, DELETE_OUTPUT_CONTEXT_PATTERN, refs, direction, 1, false);
+        return refs;
+    }
+
+    private void collectRegexMatches(String maskedSql,
+            Pattern pattern,
+            LinkedHashMap<String, TableReference> refs,
+            Direction direction,
+            int tableGroupIndex,
+            boolean skipDeleteFromInput) {
         Matcher matcher = pattern.matcher(maskedSql);
         while (matcher.find()) {
-            String raw = matcher.group(1);
+            if (skipDeleteFromInput && isDeleteFromInputContext(maskedSql, matcher)) {
+                continue;
+            }
+
+            String raw = matcher.group(tableGroupIndex);
             ParsedName parsed = parseName(raw);
             if (parsed == null || !StringUtils.hasText(parsed.table)) {
                 continue;
             }
             TableReference ref = new TableReference(direction, parsed.database, parsed.table, parsed.rawName);
-            ref.getSpans().add(new SqlTableAnalyzeResponse.Span(matcher.start(1), matcher.end(1)));
+            ref.getSpans().add(new SqlTableAnalyzeResponse.Span(
+                matcher.start(tableGroupIndex),
+                matcher.end(tableGroupIndex)
+            ));
             addReference(refs, ref);
         }
-        return refs;
     }
 
     private LinkedHashMap<String, TableReference> decideFinalRefs(boolean astParsed,
@@ -406,18 +444,12 @@ public class SqlTableMatcherService {
     }
 
     private void fillSpansFromRegex(String maskedSql, Iterable<TableReference> refs, Direction direction) {
-        Pattern pattern = direction == Direction.INPUT ? INPUT_CONTEXT_PATTERN : OUTPUT_CONTEXT_PATTERN;
-        Matcher matcher = pattern.matcher(maskedSql);
-
         Map<String, List<SqlTableAnalyzeResponse.Span>> spanMap = new HashMap<>();
-        while (matcher.find()) {
-            ParsedName parsed = parseName(matcher.group(1));
-            if (parsed == null || !StringUtils.hasText(parsed.table)) {
-                continue;
-            }
-            String key = buildKey(direction, parsed.database, parsed.table);
-            spanMap.computeIfAbsent(key, k -> new ArrayList<>())
-                .add(new SqlTableAnalyzeResponse.Span(matcher.start(1), matcher.end(1)));
+        if (direction == Direction.INPUT) {
+            collectRegexSpans(maskedSql, INPUT_CONTEXT_PATTERN, spanMap, direction, 2, true);
+        } else {
+            collectRegexSpans(maskedSql, OUTPUT_CONTEXT_PATTERN, spanMap, direction, 1, false);
+            collectRegexSpans(maskedSql, DELETE_OUTPUT_CONTEXT_PATTERN, spanMap, direction, 1, false);
         }
 
         for (TableReference ref : refs) {
@@ -429,6 +461,53 @@ public class SqlTableMatcherService {
                 ref.getSpans().addAll(spans);
             }
         }
+    }
+
+    private void collectRegexSpans(String maskedSql,
+            Pattern pattern,
+            Map<String, List<SqlTableAnalyzeResponse.Span>> spanMap,
+            Direction direction,
+            int tableGroupIndex,
+            boolean skipDeleteFromInput) {
+        Matcher matcher = pattern.matcher(maskedSql);
+        while (matcher.find()) {
+            if (skipDeleteFromInput && isDeleteFromInputContext(maskedSql, matcher)) {
+                continue;
+            }
+
+            ParsedName parsed = parseName(matcher.group(tableGroupIndex));
+            if (parsed == null || !StringUtils.hasText(parsed.table)) {
+                continue;
+            }
+            String key = buildKey(direction, parsed.database, parsed.table);
+            spanMap.computeIfAbsent(key, k -> new ArrayList<>())
+                .add(new SqlTableAnalyzeResponse.Span(
+                    matcher.start(tableGroupIndex),
+                    matcher.end(tableGroupIndex)
+                ));
+        }
+    }
+
+    private boolean isDeleteFromInputContext(String maskedSql, Matcher matcher) {
+        if (matcher == null) {
+            return false;
+        }
+
+        String keyword = matcher.group(1);
+        if (!"from".equalsIgnoreCase(String.valueOf(keyword))) {
+            return false;
+        }
+        return isDeleteFromKeyword(maskedSql, matcher.start(1));
+    }
+
+    private boolean isDeleteFromKeyword(String maskedSql, int keywordStart) {
+        if (!StringUtils.hasText(maskedSql) || keywordStart < 0 || keywordStart > maskedSql.length()) {
+            return false;
+        }
+        int statementStart = maskedSql.lastIndexOf(';', Math.max(0, keywordStart - 1));
+        statementStart = statementStart >= 0 ? statementStart + 1 : 0;
+        String prefix = maskedSql.substring(statementStart, keywordStart);
+        return DELETE_FROM_PREFIX_PATTERN.matcher(prefix).matches();
     }
 
     private SqlTableAnalyzeResponse.TableRefMatch matchReference(TableReference ref) {
