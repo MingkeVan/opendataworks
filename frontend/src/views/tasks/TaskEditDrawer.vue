@@ -117,7 +117,7 @@
                     type="primary"
                     link
                     :disabled="!hasMatchedSuggestions"
-                    @click="applyMatchedSuggestions(false)"
+                    @click="applyMatchedSuggestions()"
                   >
                     应用建议
                   </el-button>
@@ -619,12 +619,8 @@ const runSqlAnalyze = async (sqlText) => {
     sqlAnalysis.unmatched = Array.isArray(result?.unmatched) ? result.unmatched : []
     sqlAnalysis.ambiguous = Array.isArray(result?.ambiguous) ? result.ambiguous : []
 
-    if (
-      !inputSelectionTouched.value &&
-      !outputSelectionTouched.value &&
-      (!form.inputTableIds?.length && !form.outputTableIds?.length)
-    ) {
-      await applyMatchedSuggestions(true)
+    if (!inputSelectionTouched.value && !outputSelectionTouched.value) {
+      await applyMatchedSuggestions({ silent: true, mode: 'replace' })
     }
   } catch (error) {
     if (seq !== analyzeSeq) return
@@ -663,7 +659,7 @@ const scheduleSqlAnalyze = () => {
   }, 600)
 }
 
-const applyMatchedSuggestions = async (silent = false) => {
+const applyMatchedSuggestions = async ({ silent = false, mode = 'merge' } = {}) => {
   const inputIds = (sqlAnalysis.inputRefs || [])
     .filter((item) => item?.matchStatus === 'matched' && item?.chosenTable?.tableId)
     .map((item) => item.chosenTable.tableId)
@@ -672,8 +668,17 @@ const applyMatchedSuggestions = async (silent = false) => {
     .filter((item) => item?.matchStatus === 'matched' && item?.chosenTable?.tableId)
     .map((item) => item.chosenTable.tableId)
 
-  const mergedInputs = [...new Set([...(form.inputTableIds || []), ...inputIds])]
-  const mergedOutputs = [...new Set([...(form.outputTableIds || []), ...outputIds])]
+  const uniqInputs = [...new Set(inputIds.filter(Boolean))]
+  const uniqOutputs = [...new Set(outputIds.filter(Boolean))]
+
+  const mergedInputs =
+    mode === 'replace'
+      ? (uniqInputs.length ? uniqInputs : [...(form.inputTableIds || [])])
+      : [...new Set([...(form.inputTableIds || []), ...uniqInputs])]
+  const mergedOutputs =
+    mode === 'replace'
+      ? (uniqOutputs.length ? uniqOutputs : [...(form.outputTableIds || [])])
+      : [...new Set([...(form.outputTableIds || []), ...uniqOutputs])]
 
   const changed =
     mergedInputs.length !== (form.inputTableIds || []).length ||
