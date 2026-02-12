@@ -1085,14 +1085,10 @@ public class DorisConnectionService {
                     }
                 }
 
-                // 解析分区字段
-                if (createTableSql.contains("PARTITION BY RANGE")) {
-                    int start = createTableSql.indexOf("PARTITION BY RANGE(") + 19;
-                    int end = createTableSql.indexOf(")", start);
-                    if (start > 18 && end > start) {
-                        String partitionField = createTableSql.substring(start, end).trim();
-                        info.put("partitionField", partitionField);
-                    }
+                // 解析分区字段（兼容大小写/换行/不同分区类型）
+                String partitionField = DorisCreateTableUtils.parsePartitionField(createTableSql);
+                if (StringUtils.hasText(partitionField)) {
+                    info.put("partitionField", partitionField);
                 }
 
                 // 解析分桶字段

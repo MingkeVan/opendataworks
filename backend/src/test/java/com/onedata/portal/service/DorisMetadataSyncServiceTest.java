@@ -5,6 +5,7 @@ import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.mapper.DataFieldMapper;
 import com.onedata.portal.mapper.DataTableMapper;
 import com.onedata.portal.mapper.DorisClusterMapper;
+import com.onedata.portal.mapper.TableStatisticsHistoryMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,6 +39,9 @@ class DorisMetadataSyncServiceTest {
 
     @Mock
     private DataFieldMapper dataFieldMapper;
+
+    @Mock
+    private TableStatisticsHistoryMapper tableStatisticsHistoryMapper;
 
     @InjectMocks
     private DorisMetadataSyncService service;

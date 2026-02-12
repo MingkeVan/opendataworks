@@ -66,5 +66,51 @@ class DorisCreateTableUtilsTest {
         assertNull(DorisCreateTableUtils.parseReplicationNum(null));
         assertNull(DorisCreateTableUtils.parseReplicationNum("CREATE TABLE t (id INT)"));
     }
-}
 
+    @Test
+    void parsePartitionField_parsesRangePartitionColumn() {
+        String ddl = "CREATE TABLE `db`.`t` (\n" +
+                "  `id` BIGINT,\n" +
+                "  `dt` DATE\n" +
+                ") ENGINE=OLAP\n" +
+                "DUPLICATE KEY(`id`)\n" +
+                "PARTITION BY RANGE(`dt`) (\n" +
+                "  PARTITION p202601 VALUES LESS THAN ('2026-02-01')\n" +
+                ")\n" +
+                "DISTRIBUTED BY HASH(`id`) BUCKETS 10\n" +
+                "PROPERTIES (\"replication_allocation\" = \"tag.location.default: 3\");";
+
+        assertEquals("dt", DorisCreateTableUtils.parsePartitionField(ddl));
+    }
+
+    @Test
+    void parsePartitionField_supportsLowercaseAndWhitespace() {
+        String ddl = "create table t (\n" +
+                "  id bigint,\n" +
+                "  biz_date date\n" +
+                ") engine=olap\n" +
+                "partition   by   range (  `biz_date`  )\n" +
+                "(partition p1 values less than ('2026-01-01'))";
+
+        assertEquals("biz_date", DorisCreateTableUtils.parsePartitionField(ddl));
+    }
+
+    @Test
+    void parsePartitionField_supportsExpressionPartition() {
+        String ddl = "CREATE TABLE t (\n" +
+                "  id BIGINT,\n" +
+                "  event_time DATETIME\n" +
+                ") ENGINE=OLAP\n" +
+                "PARTITION BY RANGE(date_trunc('day', `event_time`)) ()\n" +
+                "DISTRIBUTED BY HASH(`id`) BUCKETS 8";
+
+        assertEquals("date_trunc('day', `event_time`)", DorisCreateTableUtils.parsePartitionField(ddl));
+    }
+
+    @Test
+    void parsePartitionField_returnsNullWhenNoPartitionBy() {
+        assertNull(DorisCreateTableUtils.parsePartitionField(""));
+        assertNull(DorisCreateTableUtils.parsePartitionField(null));
+        assertNull(DorisCreateTableUtils.parsePartitionField("CREATE TABLE t (id INT) ENGINE=OLAP"));
+    }
+}

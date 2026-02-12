@@ -6,11 +6,13 @@ import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataField;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.DorisCluster;
+import com.onedata.portal.entity.TableStatisticsHistory;
 import com.onedata.portal.entity.TableTaskRelation;
 import com.onedata.portal.mapper.DataFieldMapper;
 import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTableMapper;
 import com.onedata.portal.mapper.DorisClusterMapper;
+import com.onedata.portal.mapper.TableStatisticsHistoryMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.util.TableNameUtils;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +40,7 @@ public class DorisMetadataSyncService {
     private final DataFieldMapper dataFieldMapper;
     private final TableTaskRelationMapper tableTaskRelationMapper;
     private final DataLineageMapper dataLineageMapper;
+    private final TableStatisticsHistoryMapper tableStatisticsHistoryMapper;
 
     private static final Set<String> IGNORED_DATABASES = new HashSet<>(Arrays.asList("performance_schema", "sys"));
     private static final int MAX_COMMENT_LENGTH = 5000;
@@ -424,8 +427,8 @@ public class DorisMetadataSyncService {
                 Timestamp lastUpdate = runtimeStats.getLastUpdate();
                 if (lastUpdate != null) {
                     LocalDateTime updateDateTime = lastUpdate.toLocalDateTime();
-                    if (!Objects.equals(updateDateTime, localTable.getLastUpdated())) {
-                        localTable.setLastUpdated(updateDateTime);
+                    if (!Objects.equals(updateDateTime, localTable.getDorisUpdateTime())) {
+                        localTable.setDorisUpdateTime(updateDateTime);
                         updated = true;
                     }
                 }
@@ -446,8 +449,8 @@ public class DorisMetadataSyncService {
                 Timestamp updateTime = (Timestamp) dorisTable.get("updateTime");
                 if (updateTime != null) {
                     LocalDateTime updateDateTime = updateTime.toLocalDateTime();
-                    if (!Objects.equals(updateDateTime, localTable.getLastUpdated())) {
-                        localTable.setLastUpdated(updateDateTime);
+                    if (!Objects.equals(updateDateTime, localTable.getDorisUpdateTime())) {
+                        localTable.setDorisUpdateTime(updateDateTime);
                         updated = true;
                     }
                 }
@@ -885,7 +888,7 @@ public class DorisMetadataSyncService {
 
         Timestamp updateTime = (Timestamp) dorisTable.get("updateTime");
         if (updateTime != null) {
-            newTable.setLastUpdated(updateTime.toLocalDateTime());
+            newTable.setDorisUpdateTime(updateTime.toLocalDateTime());
         }
 
         // 同步Doris创建时间
@@ -896,6 +899,7 @@ public class DorisMetadataSyncService {
 
         dataTableMapper.insert(newTable);
         result.addNewTable();
+        recordStatisticsSnapshot(clusterId, database, tableName, newTable);
 
         // 同步字段
         syncTableFields(newTable.getId(), columns, result);
@@ -915,6 +919,7 @@ public class DorisMetadataSyncService {
         boolean viewType = isViewType(tableType);
 
         boolean updated = false;
+        boolean statisticsUpdated = false;
 
         // 同步数据源
         if (!Objects.equals(localTable.getClusterId(), clusterId)) {
@@ -1058,20 +1063,23 @@ public class DorisMetadataSyncService {
         if (tableRows != null && !Objects.equals(tableRows, localTable.getRowCount())) {
             localTable.setRowCount(tableRows);
             updated = true;
+            statisticsUpdated = true;
         }
 
         Long dataLength = (Long) dorisTable.get("dataLength");
         if (dataLength != null && !Objects.equals(dataLength, localTable.getStorageSize())) {
             localTable.setStorageSize(dataLength);
             updated = true;
+            statisticsUpdated = true;
         }
 
         Timestamp updateTime = (Timestamp) dorisTable.get("updateTime");
         if (updateTime != null) {
             LocalDateTime updateDateTime = updateTime.toLocalDateTime();
-            if (!Objects.equals(updateDateTime, localTable.getLastUpdated())) {
-                localTable.setLastUpdated(updateDateTime);
+            if (!Objects.equals(updateDateTime, localTable.getDorisUpdateTime())) {
+                localTable.setDorisUpdateTime(updateDateTime);
                 updated = true;
+                statisticsUpdated = true;
             }
         }
 
@@ -1097,9 +1105,41 @@ public class DorisMetadataSyncService {
             dataTableMapper.updateById(localTable);
             result.addUpdatedTable();
         }
+        if (statisticsUpdated) {
+            recordStatisticsSnapshot(clusterId, database, tableName, localTable);
+        }
 
         // 同步字段（增量更新）
         syncTableFieldsIncremental(localTable.getId(), columns, result);
+    }
+
+    /**
+     * 记录统计快照，供趋势分析使用。
+     */
+    private void recordStatisticsSnapshot(Long clusterId, String database, String tableName, DataTable table) {
+        if (table == null || table.getId() == null) {
+            return;
+        }
+        if (table.getRowCount() == null && table.getStorageSize() == null && table.getDorisUpdateTime() == null) {
+            return;
+        }
+
+        try {
+            TableStatisticsHistory history = new TableStatisticsHistory();
+            history.setTableId(table.getId());
+            history.setClusterId(clusterId);
+            history.setDatabaseName(database);
+            history.setTableName(tableName);
+            history.setRowCount(table.getRowCount());
+            history.setDataSize(table.getStorageSize());
+            history.setReplicationNum(table.getReplicaNum());
+            history.setBucketNum(table.getBucketNum());
+            history.setTableLastUpdateTime(table.getDorisUpdateTime());
+            history.setStatisticsTime(LocalDateTime.now());
+            tableStatisticsHistoryMapper.insert(history);
+        } catch (Exception e) {
+            log.warn("Failed to record statistics snapshot for table {}.{}", database, tableName, e);
+        }
     }
 
     /**

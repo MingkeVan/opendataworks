@@ -1,8 +1,8 @@
 <template>
   <div :class="['data-studio', { 'is-resizing': isResizing }]">
-    <div class="studio-layout">
+    <div ref="studioLayoutRef" class="studio-layout">
       <!-- Left: Database Tree -->
-      <aside class="studio-sidebar" :style="{ width: `${sidebarWidth}px` }">
+      <aside class="studio-sidebar" :style="sidebarPaneStyle">
         <div class="sidebar-controls">
           <div class="search-row">
             <el-input
@@ -29,7 +29,9 @@
 	            <el-radio-group v-model="sortField" size="small" class="sort-group">
 	              <el-radio-button value="tableName">表名</el-radio-button>
 	              <el-radio-button value="createdAt">创建时间</el-radio-button>
-	              <el-radio-button value="rowCount">数据量</el-radio-button>
+	              <el-radio-button value="rowCount">行数</el-radio-button>
+	              <el-radio-button value="storageSize">数据量</el-radio-button>
+	              <el-radio-button value="dorisUpdateTime">更新时间</el-radio-button>
 	            </el-radio-group>
 	            <el-radio-group v-model="sortOrder" size="small" class="sort-group">
 	              <el-radio-button value="asc">升序</el-radio-button>
@@ -173,7 +175,7 @@
         </div>
       </aside>
 
-      <div class="sidebar-resizer" @mousedown="startResize"></div>
+      <div class="sidebar-resizer" title="拖动调整宽度" @mousedown="startResize"></div>
 
       <!-- Right: Workspace -->
       <section class="studio-workspace">
@@ -311,7 +313,7 @@
                     />
                   </div>
 
-                  <div class="left-resizer" @mousedown="startLeftResize(tab.id, $event)"></div>
+                  <div class="left-resizer" title="拖动调整高度" @mousedown="startLeftResize(tab.id, $event)"></div>
 
                   <div class="result-panel">
                     <el-tabs v-model="tabStates[tab.id].resultTab" type="border-card" class="result-tabs" style="height: 100%;">
@@ -1052,10 +1054,10 @@
 	        </div>
 	      </section>
 
-      <div class="workspace-resizer" @mousedown="startRightResize"></div>
+      <div class="workspace-resizer" title="拖动调整宽度" @mousedown="startRightResize"></div>
 
       <!-- Right: Meta/Lineage -->
-      <aside class="studio-right" :style="{ width: `${rightPanelWidth}px` }">
+      <aside class="studio-right" :style="rightPaneStyle">
         <DataStudioRightPanel visual-variant="clean-slate" />
       </aside>
     </div>
@@ -1104,8 +1106,39 @@ import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
 const clusterId = ref(null)
 const route = useRoute()
 const router = useRouter()
-const sidebarWidth = ref(540)
-const rightPanelWidth = ref(520)
+const studioLayoutRef = ref(null)
+const DEFAULT_SIDEBAR_RATIO = 0.2
+const DEFAULT_RIGHT_RATIO = 0.2
+const MIN_SIDEBAR_WIDTH = 220
+const MAX_SIDEBAR_WIDTH = 840
+const MIN_RIGHT_WIDTH = 320
+const MAX_RIGHT_WIDTH = 900
+const sidebarWidthRatio = ref(DEFAULT_SIDEBAR_RATIO)
+const rightPanelWidthRatio = ref(DEFAULT_RIGHT_RATIO)
+const getLayoutWidth = () => {
+  const width = studioLayoutRef.value?.getBoundingClientRect()?.width || window.innerWidth || 1
+  return Math.max(1, width)
+}
+const clampWidth = (value, min, max) => Math.max(min, Math.min(max, value))
+const clampSidebarWidth = (value) => clampWidth(value, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH)
+const clampRightWidth = (value) => clampWidth(value, MIN_RIGHT_WIDTH, MAX_RIGHT_WIDTH)
+const getSidebarWidthPx = () => clampSidebarWidth(getLayoutWidth() * sidebarWidthRatio.value)
+const getRightPanelWidthPx = () => clampRightWidth(getLayoutWidth() * rightPanelWidthRatio.value)
+const sidebarPaneStyle = computed(() => ({
+  width: `${(sidebarWidthRatio.value * 100).toFixed(2)}%`,
+  minWidth: `${MIN_SIDEBAR_WIDTH}px`,
+  maxWidth: `${MAX_SIDEBAR_WIDTH}px`
+}))
+const rightPaneStyle = computed(() => ({
+  width: `${(rightPanelWidthRatio.value * 100).toFixed(2)}%`,
+  minWidth: `${MIN_RIGHT_WIDTH}px`,
+  maxWidth: `${MAX_RIGHT_WIDTH}px`
+}))
+const normalizePaneRatios = () => {
+  const layoutWidth = getLayoutWidth()
+  sidebarWidthRatio.value = clampSidebarWidth(layoutWidth * sidebarWidthRatio.value) / layoutWidth
+  rightPanelWidthRatio.value = clampRightWidth(layoutWidth * rightPanelWidthRatio.value) / layoutWidth
+}
 const isResizing = ref(false)
 let resizeMoveHandler = null
 let resizeUpHandler = null
@@ -1517,6 +1550,7 @@ const loadTables = async (sourceId, database, force = false) => {
     const metaMap = new Map(metaList.map((item) => [item.tableName, item]))
     const list = (Array.isArray(tables) ? tables : []).map((item) => {
       const tableName = item.tableName || item.TABLE_NAME || ''
+      const meta = metaMap.get(tableName)
       const base = {
         ...item,
         sourceId: sourceKey,
@@ -1527,9 +1561,10 @@ const loadTables = async (sourceId, database, force = false) => {
         tableComment: item.tableComment || item.TABLE_COMMENT || '',
         rowCount: item.tableRows ?? item.table_rows ?? item.rowCount,
         storageSize: item.dataLength ?? item.data_length ?? item.storageSize,
-        createdAt: item.createTime || item.CREATE_TIME || item.createdAt
+        createdAt: item.createTime || item.CREATE_TIME || item.createdAt || meta?.dorisCreateTime || meta?.createdAt,
+        dorisCreateTime: item.createTime || item.CREATE_TIME || meta?.dorisCreateTime || null,
+        dorisUpdateTime: item.updateTime || item.UPDATE_TIME || meta?.dorisUpdateTime || null
       }
-      const meta = metaMap.get(tableName)
       if (!meta) return base
       return {
         ...meta,
@@ -1718,7 +1753,13 @@ const parseTimeValue = (value) => {
 const getTableSortValue = (table) => {
   const field = sortField.value
   if (field === 'rowCount') return getTableRowCount(table)
-  if (field === 'createdAt') return parseTimeValue(table?.createdAt ?? table?.createTime ?? table?.CREATE_TIME)
+  if (field === 'storageSize') return getTableStorageSize(table)
+  if (field === 'dorisUpdateTime') {
+    return parseTimeValue(table?.dorisUpdateTime)
+  }
+  if (field === 'createdAt') {
+    return parseTimeValue(table?.dorisCreateTime ?? table?.createTime ?? table?.CREATE_TIME ?? table?.createdAt)
+  }
   return String(table?.tableName || '').toLowerCase()
 }
 
@@ -3412,6 +3453,7 @@ const disposeChart = (tabId, resultIndex = null) => {
 }
 
 const handleResize = () => {
+  normalizePaneRatios()
   const tabId = activeTab.value
   if (!tabId) return
   syncResultPaneLayout(tabId)
@@ -3827,13 +3869,13 @@ const goLineage = (tabId) => {
 const startResize = (event) => {
   event.preventDefault()
   const startX = event.clientX
-  const startWidth = sidebarWidth.value
+  const startWidth = getSidebarWidthPx()
   isResizing.value = true
 
   resizeMoveHandler = (moveEvent) => {
     const delta = moveEvent.clientX - startX
-    const next = Math.max(220, Math.min(840, startWidth + delta))
-    sidebarWidth.value = next
+    const next = clampSidebarWidth(startWidth + delta)
+    sidebarWidthRatio.value = next / getLayoutWidth()
   }
   resizeUpHandler = () => {
     isResizing.value = false
@@ -3849,13 +3891,13 @@ const startResize = (event) => {
 const startRightResize = (event) => {
   event.preventDefault()
   const startX = event.clientX
-  const startWidth = rightPanelWidth.value
+  const startWidth = getRightPanelWidthPx()
   isResizing.value = true
 
   resizeRightMoveHandler = (moveEvent) => {
     const delta = startX - moveEvent.clientX
-    const next = Math.max(320, Math.min(900, startWidth + delta))
-    rightPanelWidth.value = next
+    const next = clampRightWidth(startWidth + delta)
+    rightPanelWidthRatio.value = next / getLayoutWidth()
   }
   resizeRightUpHandler = () => {
     isResizing.value = false
@@ -4063,6 +4105,8 @@ onMounted(async () => {
     createDrawerVisible.value = true
     clearCreateQuery()
   }
+  await nextTick()
+  normalizePaneRatios()
   window.addEventListener('resize', handleResize)
 })
 
@@ -4129,45 +4173,45 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-resizer {
-  width: 6px;
+  width: 10px;
   cursor: col-resize;
   position: relative;
   background: transparent;
 }
 
 .workspace-resizer {
-  width: 6px;
+  width: 10px;
   cursor: col-resize;
   position: relative;
   background: transparent;
 }
 
-.sidebar-resizer::before {
-  content: '';
+.sidebar-resizer::after,
+.workspace-resizer::after {
+  content: '⋮⋮';
   position: absolute;
-  top: 12px;
-  bottom: 12px;
+  top: 50%;
   left: 50%;
-  width: 1px;
-  background: #e2e8f0;
+  transform: translate(-50%, -50%);
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: -1px;
+  color: #94a3b8;
+  padding: 3px 4px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.workspace-resizer::before {
-  content: '';
-  position: absolute;
-  top: 12px;
-  bottom: 12px;
-  left: 50%;
-  width: 1px;
-  background: #e2e8f0;
-}
-
-.sidebar-resizer:hover::before {
-  background: #cbd5f5;
-}
-
-.workspace-resizer:hover::before {
-  background: #cbd5f5;
+.sidebar-resizer:hover::after,
+.workspace-resizer:hover::after,
+.data-studio.is-resizing .sidebar-resizer::after,
+.data-studio.is-resizing .workspace-resizer::after {
+  opacity: 1;
+  color: #64748b;
 }
 
 .data-studio.is-resizing {
@@ -4630,18 +4674,28 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
-.left-resizer::before {
-  content: '';
+.left-resizer::after {
+  content: '⋯';
   position: absolute;
-  left: 12px;
-  right: 12px;
   top: 50%;
-  height: 1px;
-  background: #e2e8f0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  line-height: 1;
+  color: #94a3b8;
+  padding: 0 8px 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.left-resizer:hover::before {
-  background: #cbd5f5;
+.left-resizer:hover::after,
+.data-studio.is-resizing .left-resizer::after {
+  opacity: 1;
+  color: #64748b;
 }
 
 .tab-right {

@@ -2,7 +2,14 @@
 <template>
   <section class="lineage-panel">
     <div class="lineage-header">
-      <div class="section-title">数据血缘流向</div>
+      <div class="header-main">
+        <div class="header-title-row">
+          <div class="section-title">数据血缘流向</div>
+          <el-tooltip content="点击上下游表先查看基本信息，再进入详情" placement="top">
+            <el-icon class="header-tip-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </div>
+      </div>
       <el-button type="primary" link size="small" @click="emit('go-lineage')">
         查看完整血缘
       </el-button>
@@ -19,16 +26,16 @@
           </div>
           <div class="node-list">
             <div
-              v-for="(item, index) in upstreamTables"
+              v-for="item in upstreamTables"
               :key="`up-${item.id}`"
               :data-node-id="`upstream-table-${item.id}`"
               class="lineage-node table-node"
-              @click="emit('open-table', item)"
+              @click="openTablePreview(item)"
             >
               <el-icon class="node-icon"><Grid /></el-icon>
               <div class="node-content">
-                <div class="node-name">{{ item.tableName }}</div>
-                <div class="node-desc">{{ item.tableComment || '-' }}</div>
+                <div class="node-name" :title="item.tableName">{{ item.tableName }}</div>
+                <div class="node-desc" :title="item.tableComment || '-'">{{ item.tableComment || '-' }}</div>
               </div>
               <el-tag v-if="item.layer" size="small" :type="getLayerType(item.layer)">{{ item.layer }}</el-tag>
             </div>
@@ -43,7 +50,7 @@
           </div>
           <div class="node-list">
             <div
-              v-for="(task, index) in writeTasks"
+              v-for="task in writeTasks"
               :key="`write-${task.id}`"
               :data-node-id="`write-task-${task.id}`"
               class="lineage-node task-node"
@@ -51,8 +58,8 @@
             >
               <el-icon class="node-icon"><Operation /></el-icon>
               <div class="node-content">
-                <div class="node-name">{{ task.taskName || '-' }}</div>
-                <div class="node-desc">{{ task.engine || '-' }}</div>
+                <div class="node-name" :title="task.taskName || '-'">{{ task.taskName || '-' }}</div>
+                <div class="node-desc" :title="task.engine || '-'">{{ task.engine || '-' }}</div>
               </div>
             </div>
             <div v-if="!writeTasks.length" class="empty-placeholder">暂无写入任务</div>
@@ -76,11 +83,15 @@
             <el-icon><Grid /></el-icon>
             当前表
           </div>
-          <div class="current-table-node" :data-node-id="`current-table-${currentTable?.id}`">
-            <el-icon class="current-node-icon"><Grid /></el-icon>
-            <div class="current-node-content">
-              <div class="current-node-name">{{ currentTable?.tableName || '-' }}</div>
-              <div class="current-node-desc">{{ currentTable?.tableComment || '-' }}</div>
+          <div class="lineage-node table-node current-table-node is-current" :data-node-id="`current-table-${currentTable?.id}`">
+            <el-icon class="node-icon current-node-icon"><Grid /></el-icon>
+            <div class="node-content current-node-content">
+              <div class="node-name current-node-name" :title="currentTable?.tableName || '-'">
+                {{ currentTable?.tableName || '-' }}
+              </div>
+              <div class="node-desc current-node-desc" :title="currentTable?.tableComment || '-'">
+                {{ currentTable?.tableComment || '-' }}
+              </div>
             </div>
           </div>
         </div>
@@ -121,11 +132,15 @@
             <el-icon><Grid /></el-icon>
             当前表
           </div>
-          <div class="current-table-node" :data-node-id="`current-table-down-${currentTable?.id}`">
-            <el-icon class="current-node-icon"><Grid /></el-icon>
-            <div class="current-node-content">
-              <div class="current-node-name">{{ currentTable?.tableName || '-' }}</div>
-              <div class="current-node-desc">{{ currentTable?.tableComment || '-' }}</div>
+          <div class="lineage-node table-node current-table-node is-current" :data-node-id="`current-table-down-${currentTable?.id}`">
+            <el-icon class="node-icon current-node-icon"><Grid /></el-icon>
+            <div class="node-content current-node-content">
+              <div class="node-name current-node-name" :title="currentTable?.tableName || '-'">
+                {{ currentTable?.tableName || '-' }}
+              </div>
+              <div class="node-desc current-node-desc" :title="currentTable?.tableComment || '-'">
+                {{ currentTable?.tableComment || '-' }}
+              </div>
             </div>
           </div>
         </div>
@@ -133,11 +148,11 @@
         <div class="diagram-column">
           <div class="column-header">
             <el-icon><Operation /></el-icon>
-            读取任务 ({{ readTasks.length }})
+            读取任务 ({{ orderedReadTasks.length }})
           </div>
           <div class="node-list">
             <div
-              v-for="(task, index) in readTasks"
+              v-for="task in orderedReadTasks"
               :key="`read-${task.id}`"
               :data-node-id="`read-task-${task.id}`"
               class="lineage-node task-node"
@@ -145,11 +160,11 @@
             >
               <el-icon class="node-icon"><Operation /></el-icon>
               <div class="node-content">
-                <div class="node-name">{{ task.taskName || '-' }}</div>
-                <div class="node-desc">{{ task.engine || '-' }}</div>
+                <div class="node-name" :title="task.taskName || '-'">{{ task.taskName || '-' }}</div>
+                <div class="node-desc" :title="task.engine || '-'">{{ task.engine || '-' }}</div>
               </div>
             </div>
-            <div v-if="!readTasks.length" class="empty-placeholder">暂无读取任务</div>
+            <div v-if="!orderedReadTasks.length" class="empty-placeholder">暂无读取任务</div>
           </div>
           <div class="node-actions">
             <el-button
@@ -168,24 +183,24 @@
         <div class="diagram-column">
           <div class="column-header">
             <el-icon><Grid /></el-icon>
-            下游表 ({{ downstreamTables.length }})
+            下游表 ({{ orderedDownstreamTables.length }})
           </div>
           <div class="node-list">
             <div
-              v-for="(item, index) in downstreamTables"
+              v-for="item in orderedDownstreamTables"
               :key="`down-${item.id}`"
               :data-node-id="`downstream-table-${item.id}`"
               class="lineage-node table-node"
-              @click="emit('open-table', item)"
+              @click="openTablePreview(item)"
             >
               <el-icon class="node-icon"><Grid /></el-icon>
               <div class="node-content">
-                <div class="node-name">{{ item.tableName }}</div>
-                <div class="node-desc">{{ item.tableComment || '-' }}</div>
+                <div class="node-name" :title="item.tableName">{{ item.tableName }}</div>
+                <div class="node-desc" :title="item.tableComment || '-'">{{ item.tableComment || '-' }}</div>
               </div>
               <el-tag v-if="item.layer" size="small" :type="getLayerType(item.layer)">{{ item.layer }}</el-tag>
             </div>
-            <div v-if="!downstreamTables.length" class="empty-placeholder">暂无下游表</div>
+            <div v-if="!orderedDownstreamTables.length" class="empty-placeholder">暂无下游表</div>
           </div>
         </div>
 
@@ -215,12 +230,25 @@
         </svg>
       </div>
     </div>
+
+    <el-dialog v-model="tablePreviewVisible" title="表基本信息" width="460px" append-to-body>
+      <el-descriptions v-if="tablePreview" :column="1" border size="small">
+        <el-descriptions-item label="表名">{{ tablePreview.tableName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="注释">{{ tablePreview.tableComment || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="分层">{{ tablePreview.layer || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="数据库">{{ resolveTableDatabase(tablePreview) }}</el-descriptions-item>
+      </el-descriptions>
+      <template #footer>
+        <el-button @click="tablePreviewVisible = false">关闭</el-button>
+        <el-button type="primary" @click="openTableFromPreview">查看详情</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { Grid, Operation, Plus } from '@element-plus/icons-vue'
+import { Grid, Operation, Plus, QuestionFilled } from '@element-plus/icons-vue'
 
 const props = defineProps({
   currentTable: {
@@ -255,8 +283,76 @@ const upstreamDiagramRef = ref(null)
 const downstreamDiagramRef = ref(null)
 const upstreamLines = ref([])
 const downstreamLines = ref([])
-const lineagePanelRef = ref(null)
 let resizeObserver = null
+const tablePreviewVisible = ref(false)
+const tablePreview = ref(null)
+const ORDER_FALLBACK = Number.MAX_SAFE_INTEGER
+
+const orderedDownstreamTables = computed(() => {
+  const tables = Array.isArray(props.downstreamTables) ? [...props.downstreamTables] : []
+  if (!tables.length || !Array.isArray(props.edges) || props.edges.length === 0) {
+    return tables
+  }
+
+  const currentTableId = String(props.currentTable?.id || '')
+  const readTaskOrder = new Map((props.readTasks || []).map((task, index) => [String(task.id), index]))
+  const originalOrder = new Map(tables.map((table, index) => [String(table.id), index]))
+  const rankByTable = new Map()
+
+  props.edges.forEach((edge) => {
+    const taskId = edge?.taskId !== undefined && edge?.taskId !== null ? String(edge.taskId) : ''
+    const targetId = edge?.target !== undefined && edge?.target !== null ? String(edge.target) : ''
+    if (!taskId || !targetId || targetId === currentTableId) return
+
+    const taskOrder = readTaskOrder.has(taskId) ? readTaskOrder.get(taskId) : ORDER_FALLBACK
+    const existing = rankByTable.get(targetId)
+    if (existing === undefined || taskOrder < existing) {
+      rankByTable.set(targetId, taskOrder)
+    }
+  })
+
+  return tables.sort((a, b) => {
+    const aId = String(a?.id || '')
+    const bId = String(b?.id || '')
+    const aRank = rankByTable.has(aId) ? rankByTable.get(aId) : ORDER_FALLBACK
+    const bRank = rankByTable.has(bId) ? rankByTable.get(bId) : ORDER_FALLBACK
+    if (aRank !== bRank) return aRank - bRank
+    return (originalOrder.get(aId) || 0) - (originalOrder.get(bId) || 0)
+  })
+})
+
+const orderedReadTasks = computed(() => {
+  const tasks = Array.isArray(props.readTasks) ? [...props.readTasks] : []
+  if (!tasks.length || !Array.isArray(props.edges) || props.edges.length === 0) {
+    return tasks
+  }
+
+  const currentTableId = String(props.currentTable?.id || '')
+  const downstreamOrder = new Map(orderedDownstreamTables.value.map((table, index) => [String(table.id), index]))
+  const originalOrder = new Map(tasks.map((task, index) => [String(task.id), index]))
+  const rankByTask = new Map()
+
+  props.edges.forEach((edge) => {
+    const taskId = edge?.taskId !== undefined && edge?.taskId !== null ? String(edge.taskId) : ''
+    const targetId = edge?.target !== undefined && edge?.target !== null ? String(edge.target) : ''
+    if (!taskId || !targetId || targetId === currentTableId) return
+
+    const tableOrder = downstreamOrder.has(targetId) ? downstreamOrder.get(targetId) : ORDER_FALLBACK
+    const existing = rankByTask.get(taskId)
+    if (existing === undefined || tableOrder < existing) {
+      rankByTask.set(taskId, tableOrder)
+    }
+  })
+
+  return tasks.sort((a, b) => {
+    const aId = String(a?.id || '')
+    const bId = String(b?.id || '')
+    const aRank = rankByTask.has(aId) ? rankByTask.get(aId) : ORDER_FALLBACK
+    const bRank = rankByTask.has(bId) ? rankByTask.get(bId) : ORDER_FALLBACK
+    if (aRank !== bRank) return aRank - bRank
+    return (originalOrder.get(aId) || 0) - (originalOrder.get(bId) || 0)
+  })
+})
 
 const getLayerType = (layer) => {
   const typeMap = {
@@ -267,6 +363,23 @@ const getLayerType = (layer) => {
     ADS: 'danger'
   }
   return typeMap[layer] || ''
+}
+
+const openTablePreview = (table) => {
+  if (!table) return
+  tablePreview.value = { ...table }
+  tablePreviewVisible.value = true
+}
+
+const openTableFromPreview = () => {
+  if (!tablePreview.value) return
+  emit('open-table', tablePreview.value)
+  tablePreviewVisible.value = false
+}
+
+const resolveTableDatabase = (table) => {
+  if (!table) return '-'
+  return table.dbName || table.databaseName || table.database || '-'
 }
 
 // 获取节点右边缘中心（用于连线起点）
@@ -397,7 +510,7 @@ const calculateDownstreamLines = () => {
   const lines = []
   const container = downstreamDiagramRef.value
   const currentTableId = String(props.currentTable?.id || '')
-  const readTaskIds = new Set(props.readTasks.map(t => String(t.id)))
+  const readTaskIds = new Set(orderedReadTasks.value.map(t => String(t.id)))
   const uniqueKeys = new Set()
 
   if (props.edges && props.edges.length > 0) {
@@ -442,7 +555,7 @@ const calculateDownstreamLines = () => {
   } else {
     // 无 edges 数据时，使用全连接 fallback
     // 当前表 -> 读取任务
-    props.readTasks.forEach((task) => {
+    orderedReadTasks.value.forEach((task) => {
       const start = getNodeRightEdge(container, `current-table-down-${props.currentTable?.id}`)
       const end = getNodeLeftEdge(container, `read-task-${task.id}`)
       if (start && end) {
@@ -455,8 +568,8 @@ const calculateDownstreamLines = () => {
     })
 
     // 读取任务 -> 下游表
-    props.readTasks.forEach((task) => {
-      props.downstreamTables.forEach((table) => {
+    orderedReadTasks.value.forEach((task) => {
+      orderedDownstreamTables.value.forEach((table) => {
         const start = getNodeRightEdge(container, `read-task-${task.id}`)
         const end = getNodeLeftEdge(container, `downstream-table-${table.id}`)
         if (start && end) {
@@ -483,7 +596,7 @@ const recalculateLines = () => {
 
 // 监听数据变化，重新计算连线
 watch(
-  () => [props.upstreamTables, props.writeTasks, props.readTasks, props.downstreamTables, props.edges, props.currentTable],
+  () => [props.upstreamTables, props.writeTasks, orderedReadTasks.value, orderedDownstreamTables.value, props.edges, props.currentTable],
   () => {
     recalculateLines()
   },
@@ -518,14 +631,16 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   background: var(--panel);
   padding: 10px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  height: 100%;
   min-height: 0;
-  max-height: 500px;
+  max-height: none;
   overflow-y: auto;
   overflow-x: hidden;
-  flex-shrink: 0;
+  flex: 1;
 }
 
 .lineage-header {
@@ -535,10 +650,31 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+.header-main {
+  min-width: 0;
+}
+
+.header-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .section-title {
   font-size: 14px;
   font-weight: 700;
   color: var(--text);
+}
+
+.header-tip-icon {
+  font-size: 14px;
+  color: var(--text-muted);
+  cursor: help;
+  transition: color 0.2s ease;
+}
+
+.header-tip-icon:hover {
+  color: var(--accent);
 }
 
 .flow-section {
@@ -615,6 +751,17 @@ onBeforeUnmount(() => {
   box-shadow: 0 2px 8px rgba(47, 106, 163, 0.15);
 }
 
+.lineage-node.is-current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 2px 8px rgba(47, 106, 163, 0.15);
+  cursor: default;
+}
+
+.lineage-node.is-current:hover {
+  transform: none;
+}
+
 .node-icon {
   color: var(--accent);
   flex-shrink: 0;
@@ -653,21 +800,11 @@ onBeforeUnmount(() => {
 }
 
 .current-table-node {
-  border: 2px solid var(--accent);
-  border-radius: 8px;
-  background: var(--accent-soft);
-  padding: 10px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 2px 8px rgba(47, 106, 163, 0.15);
   position: relative;
 }
 
 .current-node-icon {
-  color: var(--accent);
-  font-size: 20px;
-  flex-shrink: 0;
+  font-size: 16px;
 }
 
 .current-node-content {
@@ -676,17 +813,13 @@ onBeforeUnmount(() => {
 }
 
 .current-node-name {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-  line-height: 1.3;
-  margin-bottom: 2px;
+  margin-bottom: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .current-node-desc {
-  font-size: 11px;
-  color: var(--text-sub);
-  line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

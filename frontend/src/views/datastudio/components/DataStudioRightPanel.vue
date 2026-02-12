@@ -1,6 +1,6 @@
 <template>
   <div :class="rootClass">
-    <div v-if="hasTableTab && state" class="panel-shell">
+    <div v-if="hasTableTab && state" ref="panelShellRef" class="panel-shell" :style="panelShellStyle">
 
       <section class="meta-panel" @scroll.passive>
         <el-tabs v-model="state.metaTab" class="meta-tabs detail-tabs">
@@ -116,6 +116,34 @@
                       <el-descriptions-item label="数据库">
                         <span>{{ state.table.dbName || '-' }}</span>
                       </el-descriptions-item>
+                      <el-descriptions-item label="行数">
+                        <el-button
+                          link
+                          type="primary"
+                          class="metric-link"
+                          :disabled="!state.table?.id"
+                          @click="openTrendDialog('rowCount')"
+                        >
+                          {{ formatRowCountDisplay(resolveTableRowCount(state.table)) }}
+                        </el-button>
+                      </el-descriptions-item>
+                      <el-descriptions-item label="数据量">
+                        <el-button
+                          link
+                          type="primary"
+                          class="metric-link"
+                          :disabled="!state.table?.id"
+                          @click="openTrendDialog('dataSize')"
+                        >
+                          {{ formatStorageSizeDisplay(resolveTableStorageSize(state.table)) }}
+                        </el-button>
+                      </el-descriptions-item>
+                      <el-descriptions-item label="Doris创建时间">
+                        <span>{{ formatDateTime(resolveTableDorisCreateTime(state.table)) }}</span>
+                      </el-descriptions-item>
+                      <el-descriptions-item label="Doris更新时间">
+                        <span>{{ formatDateTime(resolveTableDorisUpdateTime(state.table)) }}</span>
+                      </el-descriptions-item>
                     </el-descriptions>
                   </el-scrollbar>
                 </section>
@@ -128,10 +156,18 @@
 
                   <el-scrollbar class="meta-scroll">
                     <el-descriptions :column="1" border size="small" class="meta-descriptions">
-                      <el-descriptions-item label="表模型">{{ state.table.tableModel || '-' }}</el-descriptions-item>
-                      <el-descriptions-item label="主键列">{{ state.table.keyColumns || '-' }}</el-descriptions-item>
-                      <el-descriptions-item label="分区字段">{{ state.table.partitionColumn || '-' }}</el-descriptions-item>
-                      <el-descriptions-item label="分桶字段">{{ state.table.distributionColumn || '-' }}</el-descriptions-item>
+                      <el-descriptions-item label="表模型">
+                        <span>{{ state.table.tableModel || '-' }}</span>
+                      </el-descriptions-item>
+                      <el-descriptions-item label="主键列">
+                        <span>{{ state.table.keyColumns || '-' }}</span>
+                      </el-descriptions-item>
+                      <el-descriptions-item label="分区字段">
+                        <span>{{ state.table.partitionField || state.table.partitionColumn || '-' }}</span>
+                      </el-descriptions-item>
+                      <el-descriptions-item label="分桶字段">
+                        <span>{{ state.table.distributionColumn || '-' }}</span>
+                      </el-descriptions-item>
                       <el-descriptions-item label="分桶数">
                         <el-input-number
                           v-if="state.metaEditing"
@@ -439,7 +475,10 @@
         </el-tabs>
       </section>
 
+      <div class="panel-resizer" title="拖动调整高度" @mousedown="startPanelResize"></div>
+
       <DataStudioRightPanelLineage
+        class="lineage-pane"
         :current-table="state.table"
         :upstream-tables="state.lineage.upstreamTables"
         :downstream-tables="state.lineage.downstreamTables"
@@ -451,6 +490,19 @@
         @create-task="(type) => goCreateRelatedTask(activeTabId, type)"
         @go-lineage="goLineage(activeTabId)"
       />
+
+      <el-dialog
+        v-model="trendDialogVisible"
+        :title="trendDialogTitle"
+        width="760px"
+        append-to-body
+        destroy-on-close
+      >
+        <div class="trend-dialog-body" v-loading="trendHistoryLoading">
+          <div v-if="trendSeries.length" ref="trendChartRef" class="trend-chart"></div>
+          <el-empty v-else description="暂无统计趋势数据（等待定时同步后可查看）" :image-size="72" />
+        </div>
+      </el-dialog>
     </div>
 
     <div v-else class="right-empty">
@@ -460,8 +512,10 @@
 </template>
 
 <script setup>
-import { computed, inject } from 'vue'
-import { Document, Grid, Plus, Warning, Operation } from '@element-plus/icons-vue'
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { Warning } from '@element-plus/icons-vue'
+import * as echarts from 'echarts'
+import { tableApi } from '@/api/table'
 import DataStudioRightPanelLineage from './DataStudioRightPanelLineage.vue'
 
 const props = defineProps({
@@ -518,7 +572,27 @@ const activeTabItem = computed(() => {
   return (openTabs.value || []).find((item) => String(item?.id) === id) || null
 })
 
-const rootClass = computed(() => ['right-root', `variant-${props.visualVariant}`])
+const panelShellRef = ref(null)
+const panelTopHeights = ref({})
+const isPanelResizing = ref(false)
+let panelResizeMoveHandler = null
+let panelResizeUpHandler = null
+const trendDialogVisible = ref(false)
+const trendMetric = ref('rowCount')
+const trendHistoryLoading = ref(false)
+const trendSeries = ref([])
+const trendChartRef = ref(null)
+let trendChartInstance = null
+const DEFAULT_TOP_HEIGHT = 340
+const MIN_TOP_HEIGHT = 260
+const MIN_BOTTOM_HEIGHT = 280
+const PANEL_RESIZER_HEIGHT = 6
+
+const rootClass = computed(() => [
+  'right-root',
+  `variant-${props.visualVariant}`,
+  { 'is-pane-resizing': isPanelResizing.value }
+])
 
 const emptyDescription = computed(() => {
   if (activeTabItem.value?.kind === 'query') return '没有可用的对象信息'
@@ -533,6 +607,295 @@ const state = computed(() => {
   const id = activeTabId.value
   if (!id) return null
   return tabStates[id] || null
+})
+
+const clampTopHeight = (height, containerHeight = 0) => {
+  const maxTop = containerHeight > 0
+    ? Math.max(MIN_TOP_HEIGHT, containerHeight - MIN_BOTTOM_HEIGHT - PANEL_RESIZER_HEIGHT)
+    : 520
+  return Math.max(MIN_TOP_HEIGHT, Math.min(maxTop, height))
+}
+
+const getCurrentTopHeight = (tabId) => {
+  if (!tabId) return DEFAULT_TOP_HEIGHT
+  const stored = panelTopHeights.value[tabId]
+  return Number.isFinite(stored) ? stored : DEFAULT_TOP_HEIGHT
+}
+
+const panelShellStyle = computed(() => {
+  if (!hasTableTab.value) return {}
+  return {
+    '--right-top': `${getCurrentTopHeight(activeTabId.value)}px`
+  }
+})
+
+const ensurePanelTopHeight = async (tabId) => {
+  if (!tabId || !hasTableTab.value) return
+  if (Number.isFinite(panelTopHeights.value[tabId])) return
+
+  await nextTick()
+  const containerHeight = panelShellRef.value?.getBoundingClientRect()?.height || 0
+  const expected = containerHeight > 0 ? Math.round(containerHeight * 0.42) : DEFAULT_TOP_HEIGHT
+  const next = clampTopHeight(expected, containerHeight)
+  panelTopHeights.value = {
+    ...panelTopHeights.value,
+    [tabId]: next
+  }
+}
+
+watch(
+  () => [activeTabId.value, hasTableTab.value],
+  ([tabId, enabled]) => {
+    if (!enabled || !tabId) return
+    void ensurePanelTopHeight(tabId)
+  },
+  { immediate: true }
+)
+
+const stopPanelResize = () => {
+  isPanelResizing.value = false
+  if (panelResizeMoveHandler) {
+    window.removeEventListener('mousemove', panelResizeMoveHandler)
+    panelResizeMoveHandler = null
+  }
+  if (panelResizeUpHandler) {
+    window.removeEventListener('mouseup', panelResizeUpHandler)
+    panelResizeUpHandler = null
+  }
+}
+
+const startPanelResize = (event) => {
+  const tabId = activeTabId.value
+  const container = panelShellRef.value
+  if (!tabId || !container) return
+  event.preventDefault()
+
+  const containerRect = container.getBoundingClientRect()
+  const startY = event.clientY
+  const startHeight = getCurrentTopHeight(tabId)
+  isPanelResizing.value = true
+
+  panelResizeMoveHandler = (moveEvent) => {
+    const delta = moveEvent.clientY - startY
+    const next = clampTopHeight(startHeight + delta, containerRect.height)
+    panelTopHeights.value = {
+      ...panelTopHeights.value,
+      [tabId]: next
+    }
+  }
+
+  panelResizeUpHandler = () => {
+    stopPanelResize()
+  }
+
+  window.addEventListener('mousemove', panelResizeMoveHandler)
+  window.addEventListener('mouseup', panelResizeUpHandler)
+}
+
+onBeforeUnmount(() => {
+  stopPanelResize()
+})
+
+const resolveTableRowCount = (table) => {
+  if (!table) return null
+  const value = table.rowCount ?? table.tableRows ?? table.table_rows
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const resolveTableStorageSize = (table) => {
+  if (!table) return null
+  const value = table.storageSize ?? table.dataSize ?? table.dataLength ?? table.data_length
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const resolveTableDorisCreateTime = (table) => {
+  if (!table) return ''
+  return table.dorisCreateTime || table.createTime || table.CREATE_TIME || ''
+}
+
+const resolveTableDorisUpdateTime = (table) => {
+  if (!table) return ''
+  return table.dorisUpdateTime || ''
+}
+
+const formatRowCountDisplay = (value) => {
+  if (value === null || value === undefined) return '-'
+  return Number(value).toLocaleString('zh-CN')
+}
+
+const formatStorageSizeDisplay = (value) => {
+  if (value === null || value === undefined) return '-'
+  if (value === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  let num = Number(value)
+  let unitIndex = 0
+  while (num >= 1024 && unitIndex < units.length - 1) {
+    num /= 1024
+    unitIndex += 1
+  }
+  return num >= 10 ? `${num.toFixed(0)} ${units[unitIndex]}` : `${num.toFixed(1)} ${units[unitIndex]}`
+}
+
+const parseTimeToMs = (value) => {
+  if (!value) return 0
+  if (typeof value === 'number') return value
+  const text = String(value)
+  const parsed = Date.parse(text)
+  if (!Number.isNaN(parsed)) return parsed
+  const fallback = Date.parse(text.replace(' ', 'T'))
+  return Number.isNaN(fallback) ? 0 : fallback
+}
+
+const trendDialogTitle = computed(() => {
+  const metricName = trendMetric.value === 'dataSize' ? '数据量' : '行数'
+  const tableName = state.value?.table?.tableName || '-'
+  return `${tableName} ${metricName}趋势`
+})
+
+const openTrendDialog = async (metric) => {
+  if (!state.value?.table?.id) return
+  trendMetric.value = metric === 'dataSize' ? 'dataSize' : 'rowCount'
+  trendDialogVisible.value = true
+  await loadTrendSeries()
+}
+
+const loadTrendSeries = async () => {
+  const tableId = state.value?.table?.id
+  if (!tableId) {
+    trendSeries.value = []
+    return
+  }
+
+  trendHistoryLoading.value = true
+  try {
+    const history = await tableApi.getStatisticsHistory(tableId, 60)
+    const list = Array.isArray(history) ? history : []
+    trendSeries.value = [...list].sort((a, b) => {
+      return parseTimeToMs(a?.statisticsTime || a?.createdAt) - parseTimeToMs(b?.statisticsTime || b?.createdAt)
+    })
+  } catch (error) {
+    trendSeries.value = []
+    console.error('加载统计趋势失败', error)
+  } finally {
+    trendHistoryLoading.value = false
+  }
+
+  await nextTick()
+  renderTrendChart()
+}
+
+const buildTrendValues = () => {
+  const labels = []
+  const values = []
+  trendSeries.value.forEach((item) => {
+    const time = item?.statisticsTime || item?.createdAt || ''
+    const value = trendMetric.value === 'dataSize'
+      ? Number(item?.dataSize ?? 0)
+      : Number(item?.rowCount ?? 0)
+    labels.push(formatDateTime(time))
+    values.push(Number.isFinite(value) ? value : 0)
+  })
+  return { labels, values }
+}
+
+const renderTrendChart = () => {
+  if (!trendDialogVisible.value || !trendChartRef.value || !trendSeries.value.length) return
+
+  if (!trendChartInstance) {
+    trendChartInstance = echarts.init(trendChartRef.value)
+  }
+
+  const { labels, values } = buildTrendValues()
+  const metricLabel = trendMetric.value === 'dataSize' ? '数据量' : '行数'
+
+  trendChartInstance.setOption({
+    animationDuration: 300,
+    grid: { top: 30, left: 56, right: 20, bottom: 66, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: (val) => (
+        trendMetric.value === 'dataSize'
+          ? formatStorageSizeDisplay(Number(val))
+          : formatRowCountDisplay(Number(val))
+      )
+    },
+    xAxis: {
+      type: 'category',
+      data: labels,
+      axisLabel: {
+        rotate: labels.length > 10 ? 28 : 0,
+        color: '#5d7491',
+        fontSize: 11
+      },
+      axisLine: { lineStyle: { color: '#d8e3f1' } }
+    },
+    yAxis: {
+      type: 'value',
+      name: metricLabel,
+      nameTextStyle: { color: '#5d7491', fontSize: 12 },
+      axisLine: { show: false },
+      axisLabel: {
+        color: '#5d7491',
+        fontSize: 11,
+        formatter: (val) => (
+          trendMetric.value === 'dataSize'
+            ? formatStorageSizeDisplay(Number(val))
+            : formatRowCountDisplay(Number(val))
+        )
+      },
+      splitLine: { lineStyle: { color: '#eef3fa' } }
+    },
+    series: [
+      {
+        name: metricLabel,
+        type: 'line',
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 6,
+        lineStyle: { width: 2, color: '#4178c1' },
+        itemStyle: { color: '#4178c1' },
+        areaStyle: { color: 'rgba(65, 120, 193, 0.16)' },
+        data: values
+      }
+    ]
+  })
+
+  trendChartInstance.resize()
+}
+
+watch(
+  () => trendMetric.value,
+  () => {
+    if (trendDialogVisible.value) {
+      renderTrendChart()
+    }
+  }
+)
+
+watch(
+  () => trendDialogVisible.value,
+  async (visible) => {
+    if (visible) {
+      await nextTick()
+      renderTrendChart()
+      return
+    }
+    if (trendChartInstance) {
+      trendChartInstance.dispose()
+      trendChartInstance = null
+    }
+  }
+)
+
+onBeforeUnmount(() => {
+  if (trendChartInstance) {
+    trendChartInstance.dispose()
+    trendChartInstance = null
+  }
 })
 
 const sourceTypeLabel = computed(() => {
@@ -740,11 +1103,12 @@ const formatAccessDuration = (value) => {
 }
 
 .panel-shell {
+  --right-top: 340px;
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-rows: var(--right-top) 6px minmax(280px, 1fr);
+  gap: 0;
 }
 
 
@@ -754,7 +1118,54 @@ const formatAccessDuration = (value) => {
   background: var(--panel);
   overflow: hidden;
   min-height: 0;
-  flex: 1;
+}
+
+.panel-resizer {
+  cursor: row-resize;
+  position: relative;
+  background: transparent;
+}
+
+.panel-resizer::after {
+  content: '⋯';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
+  padding: 0 8px 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.panel-resizer:hover::after,
+.right-root.is-pane-resizing .panel-resizer::after {
+  opacity: 1;
+  color: var(--text-sub);
+}
+
+.lineage-pane {
+  min-height: 0;
+  height: 100%;
+}
+
+.trend-dialog-body {
+  min-height: 320px;
+}
+
+.trend-chart {
+  width: 100%;
+  height: 320px;
+}
+
+.right-root.is-pane-resizing {
+  user-select: none;
 }
 
 .meta-tabs {
@@ -908,8 +1319,19 @@ const formatAccessDuration = (value) => {
   color: var(--text-sub);
 }
 
+.meta-descriptions :deep(.el-descriptions__content.is-bordered-content) {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
 .meta-input {
   width: 100%;
+}
+
+.metric-link {
+  padding: 0;
+  font-weight: 600;
 }
 
 .replica-edit {
@@ -1021,14 +1443,16 @@ const formatAccessDuration = (value) => {
   border-radius: 10px;
   background: var(--panel);
   padding: 10px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  height: 100%;
   min-height: 0;
-  max-height: 500px;
+  max-height: none;
   overflow-y: auto;
   overflow-x: hidden;
-  flex-shrink: 0;
+  flex: 1;
 }
 
 .lineage-header {
