@@ -3,6 +3,7 @@ package com.onedata.portal.dto;
 import lombok.Data;
 
 import javax.validation.constraints.NotBlank;
+import java.util.List;
 
 /**
  * SQL 查询请求
@@ -28,7 +29,7 @@ public class SqlQueryRequest {
     private String database;
 
     /**
-     * 查询 SQL，仅允许只读语句
+     * 待执行 SQL 文本
      */
     @NotBlank(message = "SQL 不能为空")
     private String sql;
@@ -37,4 +38,32 @@ public class SqlQueryRequest {
      * 返回数据的最大行数
      */
     private Integer limit;
+
+    /**
+     * 高风险语句确认信息（按 statementIndex 对应）
+     */
+    private List<SqlConfirmation> confirmations;
+
+    @Data
+    public static class SqlConfirmation {
+        /**
+         * 语句索引（从 1 开始）
+         */
+        private Integer statementIndex;
+
+        /**
+         * 目标对象（表名或库表名）
+         */
+        private String targetObject;
+
+        /**
+         * 用户输入的确认文本
+         */
+        private String inputText;
+
+        /**
+         * 由 analyze 返回的确认令牌
+         */
+        private String confirmToken;
+    }
 }

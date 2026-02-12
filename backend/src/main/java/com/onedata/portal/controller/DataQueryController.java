@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.onedata.portal.annotation.RequireAuth;
 import com.onedata.portal.context.UserContextHolder;
 import com.onedata.portal.dto.Result;
+import com.onedata.portal.dto.SqlAnalyzeRequest;
+import com.onedata.portal.dto.SqlAnalyzeResponse;
 import com.onedata.portal.dto.StopQueryRequest;
 import com.onedata.portal.dto.SqlQueryRequest;
 import com.onedata.portal.dto.SqlQueryResponse;
@@ -22,6 +24,12 @@ import org.springframework.web.bind.annotation.*;
 public class DataQueryController {
 
     private final DataQueryService dataQueryService;
+
+    @RequireAuth
+    @PostMapping("/analyze")
+    public Result<SqlAnalyzeResponse> analyze(@Validated @RequestBody SqlAnalyzeRequest request) {
+        return Result.success(dataQueryService.analyzeQuery(request));
+    }
 
     @RequireAuth
     @PostMapping("/execute")

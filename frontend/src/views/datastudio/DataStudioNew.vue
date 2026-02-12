@@ -307,7 +307,7 @@
                     <SqlEditor
                       v-model="tabStates[tab.id].query.sql"
                       class="sql-editor"
-                      placeholder="-- 输入 SQL，支持 SELECT/SHOW/DESC/EXPLAIN 等只读语句"
+                      placeholder="-- 输入 SQL，支持查询与变更语句（高风险语句需强确认）"
                       :table-names="getSqlCompletionTables(tab.id)"
                       @selection-change="(payload) => handleSqlSelectionChange(tab.id, payload)"
                     />
@@ -317,6 +317,64 @@
 
                   <div class="result-panel">
                     <el-tabs v-model="tabStates[tab.id].resultTab" type="border-card" class="result-tabs" style="height: 100%;">
+                      <el-tab-pane name="info">
+                        <template #label>
+                          <span class="result-label"><el-icon><Document /></el-icon> 信息</span>
+                        </template>
+
+                        <div class="table-toolbar">
+                          <div class="meta-info">
+                            <span class="meta-item">
+                              <el-icon><Timer /></el-icon>
+                              {{ formatDuration(getLiveDurationMs(tab.id)) }}
+                            </span>
+                            <span class="meta-item">
+                              <el-tag v-if="tabStates[tab.id].queryLoading" size="small" type="info">运行中</el-tag>
+                              <el-tag v-else-if="tabStates[tab.id].queryResult.cancelled" size="small" type="warning">已停止</el-tag>
+                              <el-tag v-else size="small" type="success">已完成</el-tag>
+                            </span>
+                            <span v-if="tabStates[tab.id].queryResult.executedAt" class="meta-item">
+                              <el-icon><Clock /></el-icon>
+                              {{ formatDateTime(tabStates[tab.id].queryResult.executedAt) }}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div class="result-view-container">
+                          <div class="table-wrapper">
+                            <el-empty
+                              v-if="!(tabStates[tab.id].queryResult.statementInfos || []).length"
+                              description="暂无执行信息"
+                              :image-size="80"
+                            />
+                            <el-table
+                              v-else
+                              :data="tabStates[tab.id].queryResult.statementInfos || []"
+                              border
+                              stripe
+                              size="small"
+                              height="100%"
+                            >
+                              <el-table-column prop="statementIndex" label="#" width="70" />
+                              <el-table-column label="状态" width="120">
+                                <template #default="{ row }">
+                                  <el-tag size="small" :type="getStatementStatusTagType(row.status)">
+                                    {{ row.status || '-' }}
+                                  </el-tag>
+                                </template>
+                              </el-table-column>
+                              <el-table-column label="耗时" width="110">
+                                <template #default="{ row }">
+                                  {{ formatDuration(row.durationMs || 0) }}
+                                </template>
+                              </el-table-column>
+                              <el-table-column prop="sqlSnippet" label="SQL 摘要" min-width="320" show-overflow-tooltip />
+                              <el-table-column prop="resultInfo" label="结果信息" min-width="220" show-overflow-tooltip />
+                            </el-table>
+                          </div>
+                        </div>
+                      </el-tab-pane>
+
                       <el-tab-pane
                         v-for="(resultSet, idx) in getDisplayResultSets(tab.id)"
                         :key="String(idx)"
@@ -352,28 +410,36 @@
                                 {{ tabStates[tab.id].queryResult.message }}
                               </span>
                             </template>
-                            <span class="meta-item"><el-icon><Files /></el-icon> {{ (resultSet.rows || []).length }} 行</span>
+                            <span class="meta-item">
+                              <el-icon><Files /></el-icon>
+                              {{ getResultSetCountText(resultSet) }}
+                            </span>
                             <span v-if="resultSet.hasMore" class="meta-item truncate">
                               <el-icon><Warning /></el-icon> 结果已截断
                             </span>
-	                          </div>
-		                          <div class="export-actions">
-		                            <el-radio-group v-model="tabStates[tab.id].resultViewTabs[idx]" size="small" class="result-view-switch">
-		                              <el-radio-button value="table">
-		                                <span class="view-label"><el-icon><Grid /></el-icon> 表格</span>
-		                              </el-radio-button>
-		                              <el-radio-button value="chart">
-		                                <span class="view-label"><el-icon><TrendCharts /></el-icon> 图表</span>
-		                              </el-radio-button>
-		                            </el-radio-group>
-		                            <el-button
-		                              size="small"
-	                              :disabled="!(resultSet.rows || []).length"
-	                              @click="exportResult(tab.id, idx)"
-	                            >
-	                              导出 CSV
-	                            </el-button>
-	                          </div>
+                          </div>
+                          <div class="export-actions">
+                            <el-radio-group
+                              v-if="isResultSetType(resultSet)"
+                              v-model="tabStates[tab.id].resultViewTabs[idx]"
+                              size="small"
+                              class="result-view-switch"
+                            >
+                              <el-radio-button value="table">
+                                <span class="view-label"><el-icon><Grid /></el-icon> 表格</span>
+                              </el-radio-button>
+                              <el-radio-button value="chart">
+                                <span class="view-label"><el-icon><TrendCharts /></el-icon> 图表</span>
+                              </el-radio-button>
+                            </el-radio-group>
+                            <el-button
+                              size="small"
+                              :disabled="!isResultSetType(resultSet) || !(resultSet.rows || []).length"
+                              @click="exportResult(tab.id, idx)"
+                            >
+                              导出 CSV
+                            </el-button>
+                          </div>
 	                        </div>
 
                         <div v-if="tabStates[tab.id].queryResult.errorMessage" class="result-message">
@@ -397,15 +463,23 @@
                         </div>
 
 	                        <div class="result-view-container">
-	                          <div
-	                            v-show="(tabStates[tab.id].resultViewTabs?.[idx] || 'table') === 'table'"
-	                            class="table-wrapper"
-	                          >
-	                            <el-empty
-	                              v-if="!(resultSet.rows || []).length && !tabStates[tab.id].queryLoading"
-	                              description="暂无数据"
-	                              :image-size="80"
-	                            />
+                          <div
+                            v-show="!isResultSetType(resultSet) || (tabStates[tab.id].resultViewTabs?.[idx] || 'table') === 'table'"
+                            class="table-wrapper"
+                          >
+                            <div v-if="!isResultSetType(resultSet)" class="statement-result-card">
+                              <el-alert
+                                :type="getResultSetAlertType(resultSet)"
+                                :closable="false"
+                                show-icon
+                                :title="resultSet.message || '语句执行完成'"
+                              />
+                            </div>
+                            <el-empty
+                              v-else-if="!(resultSet.rows || []).length && !tabStates[tab.id].queryLoading"
+                              description="暂无数据"
+                              :image-size="80"
+                            />
 	                            <el-table
 	                              v-else
 	                              :ref="(el) => setResultTableRef(tab.id, idx, el)"
@@ -426,10 +500,11 @@
 	                            </el-table>
 	                          </div>
 	
-	                          <div
-	                            v-show="(tabStates[tab.id].resultViewTabs?.[idx] || 'table') === 'chart'"
-	                            class="result-chart"
-	                          >
+                          <div
+                            v-if="isResultSetType(resultSet)"
+                            v-show="(tabStates[tab.id].resultViewTabs?.[idx] || 'table') === 'chart'"
+                            class="result-chart"
+                          >
 	                            <div class="chart-grid">
 	                              <div class="chart-config">
 	                                <div class="config-title">图表类型</div>
@@ -2071,13 +2146,188 @@ const formatDateTime = (value) => {
   return String(value).replace('T', ' ').split('.')[0]
 }
 
+const INFO_TAB_NAME = 'info'
+const RESULT_TYPE_RESULT_SET = 'RESULT_SET'
+const RESULT_TYPE_UPDATE_COUNT = 'UPDATE_COUNT'
+
 const EMPTY_RESULT_SET = Object.freeze({
   index: 1,
+  statementIndex: 1,
+  status: 'SUCCESS',
+  resultType: RESULT_TYPE_RESULT_SET,
+  affectedRows: null,
+  message: '',
+  sqlSnippet: '',
+  durationMs: 0,
   columns: [],
   rows: [],
   hasMore: false,
   previewRowCount: 0
 })
+
+const splitSqlStatements = (sqlText) => {
+  const text = String(sqlText || '')
+  const statements = []
+  let current = ''
+  let inSingle = false
+  let inDouble = false
+  let inLineComment = false
+  let inHashComment = false
+  let inBlockComment = false
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]
+    const next = text[i + 1] || ''
+
+    if (inLineComment) {
+      current += ch
+      if (ch === '\n' || ch === '\r') inLineComment = false
+      continue
+    }
+    if (inHashComment) {
+      current += ch
+      if (ch === '\n' || ch === '\r') inHashComment = false
+      continue
+    }
+    if (inBlockComment) {
+      current += ch
+      if (ch === '*' && next === '/') {
+        current += next
+        inBlockComment = false
+        i += 1
+      }
+      continue
+    }
+    if (inSingle) {
+      current += ch
+      if (ch === '\'' && next === '\'') {
+        current += next
+        i += 1
+        continue
+      }
+      if (ch === '\'') inSingle = false
+      continue
+    }
+    if (inDouble) {
+      current += ch
+      if (ch === '"' && next === '"') {
+        current += next
+        i += 1
+        continue
+      }
+      if (ch === '"') inDouble = false
+      continue
+    }
+
+    if (ch === '-' && next === '-') {
+      inLineComment = true
+      current += ch + next
+      i += 1
+      continue
+    }
+    if (ch === '#') {
+      inHashComment = true
+      current += ch
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      inBlockComment = true
+      current += ch + next
+      i += 1
+      continue
+    }
+    if (ch === '\'') {
+      inSingle = true
+      current += ch
+      continue
+    }
+    if (ch === '"') {
+      inDouble = true
+      current += ch
+      continue
+    }
+
+    if (ch === ';') {
+      const stmt = current.trim()
+      if (stmt) statements.push(stmt)
+      current = ''
+      continue
+    }
+    current += ch
+  }
+
+  const tail = current.trim()
+  if (tail) statements.push(tail)
+  return statements
+}
+
+const buildRunningStatementInfos = (sqlText) => {
+  const statements = splitSqlStatements(sqlText)
+  return statements.map((statement, idx) => ({
+    statementIndex: idx + 1,
+    status: idx === 0 ? 'RUNNING' : 'PENDING',
+    durationMs: 0,
+    sqlSnippet: abbreviateSql(statement),
+    resultInfo: idx === 0 ? '正在执行' : '等待执行'
+  }))
+}
+
+const buildStatementInfosFromResultSets = (resultSets) => {
+  const sets = Array.isArray(resultSets) ? resultSets : []
+  return sets.map((set, idx) => {
+    const status = String(set?.status || (set?.resultType === 'ERROR' ? 'ERROR' : 'SUCCESS')).toUpperCase()
+    let resultInfo = set?.message || ''
+    if (!resultInfo) {
+      if (String(set?.resultType || '') === RESULT_TYPE_UPDATE_COUNT) {
+        const affected = set?.affectedRows
+        resultInfo = affected === null || affected === undefined ? '语句执行成功' : `影响 ${affected} 行`
+      } else {
+        const rows = Array.isArray(set?.rows) ? set.rows.length : 0
+        resultInfo = `返回 ${rows} 行`
+      }
+    }
+    return {
+      statementIndex: Number(set?.statementIndex || idx + 1),
+      status,
+      durationMs: Number(set?.durationMs || 0),
+      sqlSnippet: set?.sqlSnippet || '',
+      resultInfo
+    }
+  })
+}
+
+const getStatementStatusTagType = (status) => {
+  const value = String(status || '').toUpperCase()
+  if (value === 'SUCCESS') return 'success'
+  if (value === 'RUNNING') return 'info'
+  if (value === 'BLOCKED' || value === 'ERROR') return 'danger'
+  if (value === 'SKIPPED') return 'warning'
+  return 'info'
+}
+
+const abbreviateSql = (sqlText) => {
+  const text = String(sqlText || '').replace(/\s+/g, ' ').trim()
+  if (!text) return ''
+  return text.length > 180 ? `${text.slice(0, 180)}...` : text
+}
+
+const isResultSetType = (resultSet) => String(resultSet?.resultType || RESULT_TYPE_RESULT_SET) === RESULT_TYPE_RESULT_SET
+
+const getResultSetCountText = (resultSet) => {
+  const type = String(resultSet?.resultType || RESULT_TYPE_RESULT_SET)
+  if (type === RESULT_TYPE_UPDATE_COUNT) {
+    const affected = resultSet?.affectedRows
+    return affected === null || affected === undefined ? '影响行数未知' : `影响 ${affected} 行`
+  }
+  return `${(resultSet?.rows || []).length} 行`
+}
+
+const getResultSetAlertType = (resultSet) => {
+  const status = String(resultSet?.status || '').toUpperCase()
+  if (status === 'ERROR' || status === 'BLOCKED') return 'error'
+  if (status === 'SKIPPED') return 'warning'
+  return 'success'
+}
 
 const getDisplayResultSets = (tabId) => {
   const state = tabStates[tabId]
@@ -2194,10 +2444,11 @@ const setupTableObserver = () => {
 	      resultSets: [],
 	      columns: [],
 	      rows: [],
-	      hasMore: false,
+      hasMore: false,
 	      durationMs: 0,
 	      executedAt: '',
 	      cancelled: false,
+	      statementInfos: [],
 	      message: '',
 	      errorMessage: ''
 		    },
@@ -2873,23 +3124,127 @@ const syncAutoSelectSqlIfSchemaMismatch = (state) => {
   if (!sqlToRun.trim()) {
     state.queryResult.errorMessage = '请输入 SQL'
     state.queryResult.message = ''
-    state.resultTab = 'result-0'
+    state.resultTab = INFO_TAB_NAME
     return
   }
   if (!state.table?.dbName) {
     state.queryResult.errorMessage = '请先选择数据库'
     state.queryResult.message = ''
-    state.resultTab = 'result-0'
+    state.resultTab = INFO_TAB_NAME
     return
   }
   const sourceId = state.table?.sourceId || clusterId.value
 	  if (!sourceId) {
 	    state.queryResult.errorMessage = '请选择数据源'
 	    state.queryResult.message = ''
-	    state.resultTab = 'result-0'
+	    state.resultTab = INFO_TAB_NAME
 	    return
 	  }
-	  if (state.queryAbortController) {
+
+  let analyzeRes = null
+  try {
+    analyzeRes = await dataQueryApi.analyze({
+      clientQueryId: String(tabId),
+      clusterId: sourceId || undefined,
+      database: state.table.dbName || undefined,
+      sql: sqlToRun
+    })
+  } catch (error) {
+    const message = error?.response?.data?.message || error?.message || 'SQL 分析失败'
+    state.queryResult = {
+      resultSets: [],
+      columns: [],
+      rows: [],
+      hasMore: false,
+      durationMs: 0,
+      executedAt: '',
+      cancelled: false,
+      statementInfos: [
+        {
+          statementIndex: 1,
+          status: 'ERROR',
+          durationMs: 0,
+          sqlSnippet: abbreviateSql(sqlToRun),
+          resultInfo: message
+        }
+      ],
+      message: '',
+      errorMessage: message
+    }
+    state.resultTab = INFO_TAB_NAME
+    return
+  }
+
+  const blockedRiskItem = Array.isArray(analyzeRes?.riskItems)
+    ? analyzeRes.riskItems.find((item) => item?.blocked)
+    : null
+  const blockedStatementIndex = Number(blockedRiskItem?.statementIndex || 0) || null
+  const confirmChallenges = Array.isArray(analyzeRes?.confirmChallenges)
+    ? [...analyzeRes.confirmChallenges]
+      .filter((item) => {
+        const idx = Number(item?.statementIndex || 0)
+        return !blockedStatementIndex || (idx > 0 && idx < blockedStatementIndex)
+      })
+      .sort((a, b) => Number(a?.statementIndex || 0) - Number(b?.statementIndex || 0))
+    : []
+  const confirmations = []
+  for (const challenge of confirmChallenges) {
+    const expected = String(challenge?.targetObject || '').trim()
+    try {
+      const { value } = await ElMessageBox.prompt(
+        `语句 #${challenge.statementIndex} 为高风险操作，请输入对象名确认执行：${expected}`,
+        '高风险 SQL 强确认',
+        {
+          type: 'warning',
+          confirmButtonText: '确认执行',
+          cancelButtonText: '取消',
+          inputValue: '',
+          inputPlaceholder: expected,
+          inputValidator: (input) => {
+            if (String(input || '').trim() !== expected) {
+              return `请输入对象名：${expected}`
+            }
+            return true
+          }
+        }
+      )
+      confirmations.push({
+        statementIndex: Number(challenge?.statementIndex || 0),
+        targetObject: expected,
+        inputText: String(value || '').trim(),
+        confirmToken: challenge?.confirmToken || ''
+      })
+    } catch (error) {
+      if (error === 'cancel' || error === 'close') {
+        break
+      }
+      const message = error?.response?.data?.message || error?.message || '强确认失败'
+      state.queryResult = {
+        resultSets: [],
+        columns: [],
+        rows: [],
+        hasMore: false,
+        durationMs: 0,
+        executedAt: '',
+        cancelled: false,
+        statementInfos: [
+          {
+            statementIndex: Number(challenge?.statementIndex || 1),
+            status: 'ERROR',
+            durationMs: 0,
+            sqlSnippet: challenge?.targetObject || abbreviateSql(sqlToRun),
+            resultInfo: message
+          }
+        ],
+        message: '',
+        errorMessage: message
+      }
+      state.resultTab = INFO_TAB_NAME
+      return
+    }
+  }
+
+		  if (state.queryAbortController) {
 	    try {
 	      state.queryAbortController.abort()
 	    } catch (_) {
@@ -2904,6 +3259,8 @@ const syncAutoSelectSqlIfSchemaMismatch = (state) => {
 	  state.queryResult.errorMessage = ''
 	  state.queryResult.message = ''
 	  state.queryResult.cancelled = false
+	  state.queryResult.statementInfos = buildRunningStatementInfos(sqlToRun)
+	  state.resultTab = INFO_TAB_NAME
 	  startQueryTimer(tabId)
 	  disposeChart(tabId)
 	  try {
@@ -2912,19 +3269,32 @@ const syncAutoSelectSqlIfSchemaMismatch = (state) => {
 	      clusterId: sourceId || undefined,
 	      database: state.table.dbName || undefined,
 	      sql: sqlToRun,
-	      limit: state.query.limit
+	      limit: state.query.limit,
+	      confirmations
 	    }, { signal: state.queryAbortController?.signal })
 	    if (state.queryRunId !== runId) return
 
 	    const resultSets = Array.isArray(res.resultSets) ? res.resultSets : []
     const fallbackResultSet = {
       index: 1,
+      statementIndex: 1,
+      status: 'SUCCESS',
+      resultType: RESULT_TYPE_RESULT_SET,
+      affectedRows: null,
+      message: res.message || '',
+      sqlSnippet: abbreviateSql(sqlToRun),
+      durationMs: Number(res.durationMs || 0),
       columns: res.columns || [],
       rows: res.rows || [],
       hasMore: !!res.hasMore,
       previewRowCount: (res.rows || []).length
     }
     const normalizedSets = resultSets.length ? resultSets : [fallbackResultSet]
+    const statementInfos = buildStatementInfosFromResultSets(normalizedSets)
+    const hasFailure = normalizedSets.some((item) => {
+      const status = String(item?.status || '').toUpperCase()
+      return status === 'BLOCKED' || status === 'ERROR' || status === 'SKIPPED'
+    })
 
 		    state.queryResult = {
 		      resultSets: normalizedSets,
@@ -2934,6 +3304,7 @@ const syncAutoSelectSqlIfSchemaMismatch = (state) => {
       durationMs: res.durationMs,
       executedAt: res.executedAt,
       cancelled: !!res.cancelled,
+		      statementInfos,
 		      message: res.message || '',
 		      errorMessage: ''
 		    }
@@ -2941,7 +3312,7 @@ const syncAutoSelectSqlIfSchemaMismatch = (state) => {
 		    state.queryAbortController = null
 		    stopNowTickerIfIdle()
 		    state.page.current = 1
-		    state.resultTab = 'result-0'
+		    state.resultTab = !res.cancelled && !hasFailure ? 'result-0' : INFO_TAB_NAME
 			    state.charts = normalizedSets.map(() => ({
 			      type: 'bar',
 		      xAxis: '',
@@ -2979,10 +3350,21 @@ const syncAutoSelectSqlIfSchemaMismatch = (state) => {
 	      durationMs: 0,
 	      executedAt: '',
 	      cancelled: false,
+		      statementInfos: maybeStillRunning
+		        ? (Array.isArray(state.queryResult?.statementInfos) ? state.queryResult.statementInfos : buildRunningStatementInfos(sqlToRun))
+		        : [
+		          {
+		            statementIndex: 1,
+		            status: 'ERROR',
+		            durationMs: 0,
+		            sqlSnippet: abbreviateSql(sqlToRun),
+		            resultInfo: message
+		          }
+		        ],
 		      message: maybeStillRunning ? '查询请求超时/网络异常，可能仍在执行，可点击“停止”' : '',
 		      errorMessage: message
 		    }
-			    state.resultTab = 'result-0'
+			    state.resultTab = INFO_TAB_NAME
 		    state.charts = [
 		      {
 		        type: 'bar',
@@ -3020,12 +3402,25 @@ const syncAutoSelectSqlIfSchemaMismatch = (state) => {
 	    state.queryResult.cancelled = true
 	    state.queryResult.message = '查询已停止'
 	    state.queryResult.errorMessage = ''
+	    const existingInfos = Array.isArray(state.queryResult.statementInfos) ? state.queryResult.statementInfos : []
+	    state.queryResult.statementInfos = existingInfos.map((item, idx) => {
+	      const status = String(item?.status || '').toUpperCase()
+	      if (status === 'SUCCESS' || status === 'ERROR' || status === 'BLOCKED') return item
+	      return {
+	        statementIndex: Number(item?.statementIndex || idx + 1),
+	        status: 'SKIPPED',
+	        durationMs: Number(item?.durationMs || 0),
+	        sqlSnippet: item?.sqlSnippet || '',
+	        resultInfo: '查询已停止'
+	      }
+	    })
+	    state.resultTab = INFO_TAB_NAME
 	  } catch (error) {
 	    state.queryStopping = false
 	    const message = error?.response?.data?.message || error?.message || '停止失败'
 	    state.queryResult.errorMessage = message
 	    state.queryResult.message = ''
-	    state.resultTab = 'result-0'
+	    state.resultTab = INFO_TAB_NAME
 	  }
 	}
 
@@ -3137,18 +3532,32 @@ const handleDeleteTable = async () => {
   }
 
   try {
+    const rawName = String(table.tableName || '').trim()
+    const expectedName = dorisTable ? (rawName.includes('.') ? rawName.split('.').pop() : rawName) : rawName
     const message = dorisTable
       ? `确定要删除表 “${table.tableName}” 吗？删除后将重命名为 deprecated_时间戳，数据不会丢失。`
       : `确定要删除表 “${table.tableName}” 吗？将仅删除平台元数据记录。`
-    await ElMessageBox.confirm(
-      message,
+    const { value } = await ElMessageBox.prompt(
+      `${message}\n请输入表名以确认：${expectedName}`,
       '删除表确认',
-      { type: 'warning' }
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+        inputPlaceholder: expectedName,
+        inputValidator: (input) => {
+          if (String(input || '').trim() !== expectedName) {
+            return `请输入正确表名：${expectedName}`
+          }
+          return true
+        }
+      }
     )
+    const confirmTableName = String(value || '').trim()
     if (dorisTable) {
-      await tableApi.softDelete(table.id, clusterId.value || null)
+      await tableApi.softDelete(table.id, clusterId.value || null, confirmTableName)
     } else {
-      await tableApi.delete(table.id)
+      await tableApi.delete(table.id, confirmTableName)
     }
     ElMessage.success('删除表成功')
     const dbName = table.dbName || table.databaseName || table.database
@@ -3160,7 +3569,7 @@ const handleDeleteTable = async () => {
     }
     handleTabRemove(active)
   } catch (error) {
-    if (error !== 'cancel') {
+    if (error !== 'cancel' && error !== 'close') {
       ElMessage.error('删除表失败')
     }
   }

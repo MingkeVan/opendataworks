@@ -142,8 +142,10 @@ export const tableApi = {
   },
 
   // 删除表
-  delete(id) {
-    return request.delete(`/v1/tables/${id}`)
+  delete(id, confirmTableName) {
+    return request.delete(`/v1/tables/${id}`, {
+      params: { confirmTableName }
+    })
   },
 
   // 修改表注释（同时更新Doris）
@@ -154,9 +156,12 @@ export const tableApi = {
   },
 
   // 软删除表（重命名为 deprecated）
-  softDelete(id, clusterId = null) {
+  softDelete(id, clusterId = null, confirmTableName) {
     return request.post(`/v1/tables/${id}/soft-delete`, null, {
-      params: { clusterId }
+      params: {
+        ...(clusterId === null || clusterId === undefined ? {} : { clusterId }),
+        confirmTableName
+      }
     })
   },
 
@@ -175,9 +180,12 @@ export const tableApi = {
   },
 
   // 立即清理废弃表
-  purgeNow(id, clusterId = null) {
+  purgeNow(id, clusterId = null, confirmTableName) {
     return request.post(`/v1/tables/${id}/purge-now`, null, {
-      params: clusterId === null || clusterId === undefined ? {} : { clusterId }
+      params: {
+        ...(clusterId === null || clusterId === undefined ? {} : { clusterId }),
+        confirmTableName
+      }
     })
   },
 

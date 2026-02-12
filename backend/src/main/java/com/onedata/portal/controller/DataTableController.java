@@ -387,7 +387,15 @@ public class DataTableController {
      * 删除表
      */
     @DeleteMapping("/{id}")
-    public Result<Void> delete(@PathVariable Long id) {
+    public Result<Void> delete(@PathVariable Long id,
+                               @RequestParam String confirmTableName) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            return Result.fail("表不存在");
+        }
+        if (!isConfirmTableNameMatched(confirmTableName, table.getTableName())) {
+            return Result.fail("确认失败：请输入正确的表名 " + table.getTableName());
+        }
         dataTableService.delete(id);
         return Result.success();
     }
@@ -448,7 +456,8 @@ public class DataTableController {
     @PostMapping("/{id}/soft-delete")
     public Result<Void> softDeleteTable(
             @PathVariable Long id,
-            @RequestParam(required = false) Long clusterId) {
+            @RequestParam(required = false) Long clusterId,
+            @RequestParam String confirmTableName) {
         DataTable table = dataTableService.getById(id);
         if (table == null) {
             return Result.fail("表不存在");
@@ -475,6 +484,9 @@ public class DataTableController {
             actualTableName = parts[1];
         } else {
             return Result.fail("表未配置数据库名，请先设置 dbName 字段");
+        }
+        if (!isConfirmTableNameMatched(confirmTableName, actualTableName)) {
+            return Result.fail("确认失败：请输入正确的表名 " + actualTableName);
         }
 
         try {
@@ -582,7 +594,8 @@ public class DataTableController {
     @PostMapping("/{id}/purge-now")
     public Result<Void> purgeTableNow(
             @PathVariable Long id,
-            @RequestParam(required = false) Long clusterId) {
+            @RequestParam(required = false) Long clusterId,
+            @RequestParam String confirmTableName) {
         DataTable table = dataTableService.getById(id);
         if (table == null) {
             return Result.fail("表不存在");
@@ -595,6 +608,9 @@ public class DataTableController {
         TableRef tableRef = resolveTableRef(table);
         if (tableRef == null) {
             return Result.fail("表未配置数据库名，请先设置 dbName 字段");
+        }
+        if (!isConfirmTableNameMatched(confirmTableName, tableRef.tableName)) {
+            return Result.fail("确认失败：请输入正确的表名 " + tableRef.tableName);
         }
 
         try {
@@ -609,6 +625,13 @@ public class DataTableController {
         } catch (Exception e) {
             return Result.fail("立即清理失败: " + e.getMessage());
         }
+    }
+
+    private boolean isConfirmTableNameMatched(String confirmTableName, String expectedTableName) {
+        if (!StringUtils.hasText(confirmTableName) || !StringUtils.hasText(expectedTableName)) {
+            return false;
+        }
+        return confirmTableName.trim().equals(expectedTableName.trim());
     }
 
     /**
