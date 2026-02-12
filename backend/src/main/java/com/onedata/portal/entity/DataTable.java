@@ -74,7 +74,8 @@ public class DataTable {
 
     private Long rowCount;
 
-    private LocalDateTime lastUpdated;
+    @TableField("doris_update_time")
+    private LocalDateTime dorisUpdateTime;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

@@ -14,6 +14,7 @@ public final class DorisCreateTableUtils {
 
     private static final Pattern PROPERTY_PATTERN = Pattern.compile("\"([^\"]+)\"\\s*=\\s*\"([^\"]*)\"");
     private static final Pattern ALLOCATION_REPLICA_PATTERN = Pattern.compile(":\\s*(\\d+)");
+    private static final Pattern PARTITION_BY_PATTERN = Pattern.compile("(?is)PARTITION\\s+BY\\b");
 
     private DorisCreateTableUtils() {
     }
@@ -74,6 +75,55 @@ public final class DorisCreateTableUtils {
         return parsePositiveInt(properties.get("replication_num"));
     }
 
+    /**
+     * 解析 PARTITION BY 中的分区字段（或分区表达式）。
+     */
+    public static String parsePartitionField(String createTableSql) {
+        if (!StringUtils.hasText(createTableSql)) {
+            return null;
+        }
+
+        Matcher matcher = PARTITION_BY_PATTERN.matcher(createTableSql);
+        if (!matcher.find()) {
+            return null;
+        }
+
+        int openIndex = createTableSql.indexOf('(', matcher.end());
+        if (openIndex < 0 || openIndex >= createTableSql.length() - 1) {
+            return null;
+        }
+
+        String raw = extractBracketContent(createTableSql, openIndex);
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+
+        String normalized = raw.trim();
+        if (normalized.startsWith("`") && normalized.endsWith("`")
+                && normalized.indexOf('`', 1) == normalized.length() - 1) {
+            normalized = normalized.substring(1, normalized.length() - 1);
+        }
+        return normalized;
+    }
+
+    private static String extractBracketContent(String sql, int openIndex) {
+        int depth = 1;
+        int cursor = openIndex + 1;
+        while (cursor < sql.length()) {
+            char ch = sql.charAt(cursor);
+            if (ch == '(') {
+                depth++;
+            } else if (ch == ')') {
+                depth--;
+                if (depth == 0) {
+                    return sql.substring(openIndex + 1, cursor);
+                }
+            }
+            cursor++;
+        }
+        return null;
+    }
+
     private static boolean isDynamicPartitionEnabled(Map<String, String> properties) {
         String enabled = properties.get("dynamic_partition.enable");
         return "true".equalsIgnoreCase(enabled);
@@ -118,4 +168,3 @@ public final class DorisCreateTableUtils {
         }
     }
 }
-

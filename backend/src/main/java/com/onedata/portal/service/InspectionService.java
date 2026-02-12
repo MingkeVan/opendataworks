@@ -677,17 +677,17 @@ public class InspectionService {
             LocalDateTime threshold = LocalDateTime.now().minusHours(thresholdHours);
 
             // 检查最后更新时间
-            if (table.getLastUpdated() == null || table.getLastUpdated().isBefore(threshold)) {
+            if (table.getDorisUpdateTime() == null || table.getDorisUpdateTime().isBefore(threshold)) {
                 InspectionIssue issue = createIssue(recordId, rule, table);
 
                 // 根据延迟时间设置严重程度
-                long delayHours = calculateDelayHours(table.getLastUpdated(), expectedHours);
+                long delayHours = calculateDelayHours(table.getDorisUpdateTime(), expectedHours);
                 issue.setSeverity(calculateFreshnessSeverity(delayHours, expectedHours));
 
                 issue.setIssueDescription(String.format("表更新频率为 %s,但数据已 %d 小时未更新",
                     getCycleDescription(cycle), delayHours));
-                issue.setCurrentValue(table.getLastUpdated() != null ?
-                    table.getLastUpdated().toString() + " (已延迟 " + delayHours + " 小时)" : "从未更新");
+                issue.setCurrentValue(table.getDorisUpdateTime() != null ?
+                    table.getDorisUpdateTime().toString() + " (已延迟 " + delayHours + " 小时)" : "从未更新");
                 issue.setExpectedValue("更新频率: " + getCycleDescription(cycle));
                 issue.setSuggestion(generateFreshnessSuggestion(cycle, delayHours));
 
@@ -747,14 +747,14 @@ public class InspectionService {
     /**
      * 计算数据延迟的小时数
      */
-    private long calculateDelayHours(LocalDateTime lastUpdated, int expectedHours) {
-        if (lastUpdated == null) {
+    private long calculateDelayHours(LocalDateTime dorisUpdateTime, int expectedHours) {
+        if (dorisUpdateTime == null) {
             return Long.MAX_VALUE; // 从未更新
         }
 
         LocalDateTime expectedTime = LocalDateTime.now().minusHours(expectedHours);
-        if (lastUpdated.isBefore(expectedTime)) {
-            return Duration.between(lastUpdated, LocalDateTime.now()).toHours();
+        if (dorisUpdateTime.isBefore(expectedTime)) {
+            return Duration.between(dorisUpdateTime, LocalDateTime.now()).toHours();
         }
 
         return 0;
@@ -888,8 +888,8 @@ public class InspectionService {
                 issue.setSuggestion("请检查:\n1. 是否存在数据重复写入\n2. 是否需要启用数据归档\n3. 是否需要调整分区策略\n4. 考虑数据生命周期管理");
                 inspectionIssueMapper.insert(issue);
                 issues.add(issue);
-            } else if (currentRowCount < 100 && table.getLastUpdated() != null &&
-                       table.getLastUpdated().isBefore(LocalDateTime.now().minusDays(1))) {
+            } else if (currentRowCount < 100 && table.getDorisUpdateTime() != null &&
+                       table.getDorisUpdateTime().isBefore(LocalDateTime.now().minusDays(1))) {
                 // 数据量很小且长时间未更新
                 InspectionIssue issue = createIssue(recordId, rule, table);
                 issue.setSeverity("low");

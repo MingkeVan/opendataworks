@@ -133,9 +133,9 @@ public class DataTableService {
                 break;
             case "createdAt":
                 if (isAsc)
-                    wrapper.orderByAsc(DataTable::getCreatedAt);
+                    wrapper.orderByAsc(DataTable::getDorisCreateTime).orderByAsc(DataTable::getCreatedAt);
                 else
-                    wrapper.orderByDesc(DataTable::getCreatedAt);
+                    wrapper.orderByDesc(DataTable::getDorisCreateTime).orderByDesc(DataTable::getCreatedAt);
                 break;
             case "updatedAt":
                 if (isAsc)
@@ -143,11 +143,11 @@ public class DataTableService {
                 else
                     wrapper.orderByDesc(DataTable::getUpdatedAt);
                 break;
-            case "lastUpdated":
+            case "dorisUpdateTime":
                 if (isAsc)
-                    wrapper.orderByAsc(DataTable::getLastUpdated);
+                    wrapper.orderByAsc(DataTable::getDorisUpdateTime);
                 else
-                    wrapper.orderByDesc(DataTable::getLastUpdated);
+                    wrapper.orderByDesc(DataTable::getDorisUpdateTime);
                 break;
             case "rowCount":
                 if (isAsc)
