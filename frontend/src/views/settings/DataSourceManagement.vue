@@ -724,18 +724,24 @@ const handleRestoreTable = async row => {
 
 const handlePurgeNow = async row => {
   if (!row?.id || !pendingDeletionCluster.value?.id) return
+  const rawName = String(row.tableName || '').trim()
+  const expectedName = rawName.includes('.') ? rawName.split('.').pop() : rawName
   try {
-    await ElMessageBox.confirm(`确认立即删除表「${row.tableName}」吗？该操作不可恢复。`, '立即删除确认', {
-      confirmButtonText: '确认删除',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
+    await ElMessageBox.confirm(
+      `确认立即删除表「${row.tableName}」吗？该操作不可恢复。`,
+      '立即删除确认',
+      {
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
   } catch {
     return
   }
 
   try {
-    await tableApi.purgeNow(row.id, pendingDeletionCluster.value.id)
+    await tableApi.purgeNow(row.id, pendingDeletionCluster.value.id, expectedName)
     ElMessage.success('已立即删除')
     await loadPendingDeletion()
   } catch (error) {
