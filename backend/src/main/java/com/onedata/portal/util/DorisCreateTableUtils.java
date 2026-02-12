@@ -79,7 +79,7 @@ public final class DorisCreateTableUtils {
     /**
      * 解析 PARTITION BY 中的分区字段（或分区表达式）。
      */
-    public static String parsePartitionField(String createTableSql) {
+    public static String parsePartitionColumn(String createTableSql) {
         if (!StringUtils.hasText(createTableSql)) {
             return null;
         }

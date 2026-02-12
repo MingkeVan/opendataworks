@@ -516,11 +516,11 @@ public class DorisMetadataSyncService {
                 }
 
                 // 比对分区字段
-                if (tableCreateInfo.containsKey("partitionField")) {
-                    String dorisPartitionField = (String) tableCreateInfo.get("partitionField");
-                    if (!Objects.equals(dorisPartitionField, localTable.getPartitionField())) {
+                if (tableCreateInfo.containsKey("partitionColumn")) {
+                    String dorisPartitionColumn = (String) tableCreateInfo.get("partitionColumn");
+                    if (!Objects.equals(dorisPartitionColumn, localTable.getPartitionColumn())) {
                         diff.addChange(String.format("分区字段不同: 平台='%s', Doris='%s'",
-                                localTable.getPartitionField(), dorisPartitionField));
+                                localTable.getPartitionColumn(), dorisPartitionColumn));
                     }
                 }
             }
@@ -851,8 +851,8 @@ public class DorisMetadataSyncService {
             if (tableCreateInfo.containsKey("replicationNum")) {
                 newTable.setReplicaNum((Integer) tableCreateInfo.get("replicationNum"));
             }
-            if (tableCreateInfo.containsKey("partitionField")) {
-                newTable.setPartitionField((String) tableCreateInfo.get("partitionField"));
+            if (tableCreateInfo.containsKey("partitionColumn")) {
+                newTable.setPartitionColumn((String) tableCreateInfo.get("partitionColumn"));
             }
             if (tableCreateInfo.containsKey("distributionColumn")) {
                 newTable.setDistributionColumn((String) tableCreateInfo.get("distributionColumn"));
@@ -866,7 +866,7 @@ public class DorisMetadataSyncService {
         } else {
             newTable.setBucketNum(null);
             newTable.setReplicaNum(null);
-            newTable.setPartitionField(null);
+            newTable.setPartitionColumn(null);
             newTable.setDistributionColumn(null);
             newTable.setKeyColumns(null);
             newTable.setTableModel(null);
@@ -978,10 +978,10 @@ public class DorisMetadataSyncService {
             }
 
             // 更新分区字段
-            if (tableCreateInfo.containsKey("partitionField")) {
-                String partitionField = (String) tableCreateInfo.get("partitionField");
-                if (!Objects.equals(partitionField, localTable.getPartitionField())) {
-                    localTable.setPartitionField(partitionField);
+            if (tableCreateInfo.containsKey("partitionColumn")) {
+                String partitionColumn = (String) tableCreateInfo.get("partitionColumn");
+                if (!Objects.equals(partitionColumn, localTable.getPartitionColumn())) {
+                    localTable.setPartitionColumn(partitionColumn);
                     updated = true;
                 }
             }
@@ -1030,8 +1030,8 @@ public class DorisMetadataSyncService {
                 localTable.setReplicaNum(null);
                 updated = true;
             }
-            if (StringUtils.hasText(localTable.getPartitionField())) {
-                localTable.setPartitionField(null);
+            if (StringUtils.hasText(localTable.getPartitionColumn())) {
+                localTable.setPartitionColumn(null);
                 updated = true;
             }
             if (StringUtils.hasText(localTable.getDistributionColumn())) {

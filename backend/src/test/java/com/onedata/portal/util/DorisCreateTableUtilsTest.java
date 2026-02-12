@@ -68,7 +68,7 @@ class DorisCreateTableUtilsTest {
     }
 
     @Test
-    void parsePartitionField_parsesRangePartitionColumn() {
+    void parsePartitionColumn_parsesRangePartitionColumn() {
         String ddl = "CREATE TABLE `db`.`t` (\n" +
                 "  `id` BIGINT,\n" +
                 "  `dt` DATE\n" +
@@ -80,11 +80,11 @@ class DorisCreateTableUtilsTest {
                 "DISTRIBUTED BY HASH(`id`) BUCKETS 10\n" +
                 "PROPERTIES (\"replication_allocation\" = \"tag.location.default: 3\");";
 
-        assertEquals("dt", DorisCreateTableUtils.parsePartitionField(ddl));
+        assertEquals("dt", DorisCreateTableUtils.parsePartitionColumn(ddl));
     }
 
     @Test
-    void parsePartitionField_supportsLowercaseAndWhitespace() {
+    void parsePartitionColumn_supportsLowercaseAndWhitespace() {
         String ddl = "create table t (\n" +
                 "  id bigint,\n" +
                 "  biz_date date\n" +
@@ -92,11 +92,11 @@ class DorisCreateTableUtilsTest {
                 "partition   by   range (  `biz_date`  )\n" +
                 "(partition p1 values less than ('2026-01-01'))";
 
-        assertEquals("biz_date", DorisCreateTableUtils.parsePartitionField(ddl));
+        assertEquals("biz_date", DorisCreateTableUtils.parsePartitionColumn(ddl));
     }
 
     @Test
-    void parsePartitionField_unescapesEscapedBackticks() {
+    void parsePartitionColumn_unescapesEscapedBackticks() {
         String ddl = "CREATE TABLE t (\n" +
                 "  id BIGINT,\n" +
                 "  dt DATE\n" +
@@ -104,11 +104,11 @@ class DorisCreateTableUtilsTest {
                 "PARTITION BY RANGE(\\`dt\\`) ()\n" +
                 "DISTRIBUTED BY HASH(`id`) BUCKETS 8";
 
-        assertEquals("dt", DorisCreateTableUtils.parsePartitionField(ddl));
+        assertEquals("dt", DorisCreateTableUtils.parsePartitionColumn(ddl));
     }
 
     @Test
-    void parsePartitionField_supportsExpressionPartition() {
+    void parsePartitionColumn_supportsExpressionPartition() {
         String ddl = "CREATE TABLE t (\n" +
                 "  id BIGINT,\n" +
                 "  event_time DATETIME\n" +
@@ -116,13 +116,13 @@ class DorisCreateTableUtilsTest {
                 "PARTITION BY RANGE(date_trunc('day', `event_time`)) ()\n" +
                 "DISTRIBUTED BY HASH(`id`) BUCKETS 8";
 
-        assertEquals("date_trunc('day', `event_time`)", DorisCreateTableUtils.parsePartitionField(ddl));
+        assertEquals("date_trunc('day', `event_time`)", DorisCreateTableUtils.parsePartitionColumn(ddl));
     }
 
     @Test
-    void parsePartitionField_returnsNullWhenNoPartitionBy() {
-        assertNull(DorisCreateTableUtils.parsePartitionField(""));
-        assertNull(DorisCreateTableUtils.parsePartitionField(null));
-        assertNull(DorisCreateTableUtils.parsePartitionField("CREATE TABLE t (id INT) ENGINE=OLAP"));
+    void parsePartitionColumn_returnsNullWhenNoPartitionBy() {
+        assertNull(DorisCreateTableUtils.parsePartitionColumn(""));
+        assertNull(DorisCreateTableUtils.parsePartitionColumn(null));
+        assertNull(DorisCreateTableUtils.parsePartitionColumn("CREATE TABLE t (id INT) ENGINE=OLAP"));
     }
 }

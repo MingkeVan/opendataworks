@@ -654,7 +654,7 @@
                               <el-descriptions :column="1" border size="small" class="meta-descriptions">
                                 <el-descriptions-item label="表模型">{{ tabStates[tab.id].table.tableModel || '-' }}</el-descriptions-item>
                                 <el-descriptions-item label="主键列">{{ tabStates[tab.id].table.keyColumns || '-' }}</el-descriptions-item>
-                                <el-descriptions-item label="分区字段">{{ tabStates[tab.id].table.partitionField || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="分区字段">{{ tabStates[tab.id].table.partitionColumn || '-' }}</el-descriptions-item>
                                 <el-descriptions-item label="分桶字段">{{ tabStates[tab.id].table.distributionColumn || '-' }}</el-descriptions-item>
                                 <el-descriptions-item label="分桶数">
                                   <el-input-number
@@ -2044,7 +2044,7 @@ const isDorisTable = (table) => {
     hasPositiveNumber(table.replicaNum) ||
     hasText(table.distributionColumn) ||
     hasText(table.keyColumns) ||
-    hasText(table.partitionField)
+    hasText(table.partitionColumn)
   )
 }
 
