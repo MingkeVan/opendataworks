@@ -654,7 +654,7 @@
                               <el-descriptions :column="1" border size="small" class="meta-descriptions">
                                 <el-descriptions-item label="表模型">{{ tabStates[tab.id].table.tableModel || '-' }}</el-descriptions-item>
                                 <el-descriptions-item label="主键列">{{ tabStates[tab.id].table.keyColumns || '-' }}</el-descriptions-item>
-                                <el-descriptions-item label="分区字段">{{ tabStates[tab.id].table.partitionColumn || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="分区字段">{{ tabStates[tab.id].table.partitionField || '-' }}</el-descriptions-item>
                                 <el-descriptions-item label="分桶字段">{{ tabStates[tab.id].table.distributionColumn || '-' }}</el-descriptions-item>
                                 <el-descriptions-item label="分桶数">
                                   <el-input-number
@@ -1108,7 +1108,7 @@ const route = useRoute()
 const router = useRouter()
 const studioLayoutRef = ref(null)
 const DEFAULT_SIDEBAR_RATIO = 0.2
-const DEFAULT_RIGHT_RATIO = 0.2
+const DEFAULT_RIGHT_RATIO = 0.23
 const MIN_SIDEBAR_WIDTH = 220
 const MAX_SIDEBAR_WIDTH = 840
 const MIN_RIGHT_WIDTH = 320
@@ -2044,8 +2044,7 @@ const isDorisTable = (table) => {
     hasPositiveNumber(table.replicaNum) ||
     hasText(table.distributionColumn) ||
     hasText(table.keyColumns) ||
-    hasText(table.partitionField) ||
-    hasText(table.partitionColumn)
+    hasText(table.partitionField)
   )
 }
 

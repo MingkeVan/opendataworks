@@ -163,7 +163,7 @@
                         <span>{{ state.table.keyColumns || '-' }}</span>
                       </el-descriptions-item>
                       <el-descriptions-item label="分区字段">
-                        <span>{{ state.table.partitionField || state.table.partitionColumn || '-' }}</span>
+                        <span>{{ state.table.partitionField || '-' }}</span>
                       </el-descriptions-item>
                       <el-descriptions-item label="分桶字段">
                         <span>{{ state.table.distributionColumn || '-' }}</span>

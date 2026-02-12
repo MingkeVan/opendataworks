@@ -96,6 +96,18 @@ class DorisCreateTableUtilsTest {
     }
 
     @Test
+    void parsePartitionField_unescapesEscapedBackticks() {
+        String ddl = "CREATE TABLE t (\n" +
+                "  id BIGINT,\n" +
+                "  dt DATE\n" +
+                ") ENGINE=OLAP\n" +
+                "PARTITION BY RANGE(\\`dt\\`) ()\n" +
+                "DISTRIBUTED BY HASH(`id`) BUCKETS 8";
+
+        assertEquals("dt", DorisCreateTableUtils.parsePartitionField(ddl));
+    }
+
+    @Test
     void parsePartitionField_supportsExpressionPartition() {
         String ddl = "CREATE TABLE t (\n" +
                 "  id BIGINT,\n" +
