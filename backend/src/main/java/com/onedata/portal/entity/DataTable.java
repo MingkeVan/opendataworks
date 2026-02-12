@@ -55,7 +55,8 @@ public class DataTable {
 
     private Integer lifecycleDays;
 
-    private String partitionField;
+    @TableField("partition_column")
+    private String partitionColumn;
 
     private String distributionColumn;
 

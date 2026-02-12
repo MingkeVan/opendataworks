@@ -310,7 +310,7 @@ public class DataTableController {
                 || isPositive(table.getReplicaNum())
                 || StringUtils.hasText(table.getDistributionColumn())
                 || StringUtils.hasText(table.getKeyColumns())
-                || StringUtils.hasText(table.getPartitionField());
+                || StringUtils.hasText(table.getPartitionColumn());
     }
 
     private boolean isPositive(Integer value) {

@@ -1108,7 +1108,7 @@ const route = useRoute()
 const router = useRouter()
 const studioLayoutRef = ref(null)
 const DEFAULT_SIDEBAR_RATIO = 0.2
-const DEFAULT_RIGHT_RATIO = 0.2
+const DEFAULT_RIGHT_RATIO = 0.23
 const MIN_SIDEBAR_WIDTH = 220
 const MAX_SIDEBAR_WIDTH = 840
 const MIN_RIGHT_WIDTH = 320
@@ -2044,7 +2044,6 @@ const isDorisTable = (table) => {
     hasPositiveNumber(table.replicaNum) ||
     hasText(table.distributionColumn) ||
     hasText(table.keyColumns) ||
-    hasText(table.partitionField) ||
     hasText(table.partitionColumn)
   )
 }

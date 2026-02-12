@@ -2,6 +2,7 @@ import request from '@/utils/request'
 
 const withCluster = (clusterId) =>
   clusterId === null || clusterId === undefined ? {} : { params: { clusterId } }
+const METADATA_SYNC_TIMEOUT = 10 * 60 * 1000
 
 export const tableApi = {
   // 获取表列表
@@ -183,28 +184,32 @@ export const tableApi = {
   // 稽核/比对 Doris 元数据（只检查差异，不同步）
   auditMetadata(clusterId = null) {
     return request.post('/v1/tables/audit-metadata', null, {
-      params: { clusterId }
+      params: { clusterId },
+      timeout: METADATA_SYNC_TIMEOUT
     })
   },
 
   // 同步 Doris 元数据（全量同步）
   syncMetadata(clusterId = null) {
     return request.post('/v1/tables/sync-metadata', null, {
-      params: { clusterId }
+      params: { clusterId },
+      timeout: METADATA_SYNC_TIMEOUT
     })
   },
 
   // 同步指定数据库的元数据
   syncDatabaseMetadata(database, clusterId = null) {
     return request.post(`/v1/tables/sync-metadata/database/${database}`, null, {
-      params: { clusterId }
+      params: { clusterId },
+      timeout: METADATA_SYNC_TIMEOUT
     })
   },
 
   // 同步指定表的元数据
   syncTableMetadata(id, clusterId = null) {
     return request.post(`/v1/tables/${id}/sync-metadata`, null, {
-      params: { clusterId }
+      params: { clusterId },
+      timeout: METADATA_SYNC_TIMEOUT
     })
   }
 }

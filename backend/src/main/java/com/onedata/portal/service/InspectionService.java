@@ -1730,7 +1730,7 @@ public class InspectionService {
         }
 
         String distributionColumn = toStringValue(createInfo.get("distributionColumn"));
-        String partitionField = toStringValue(createInfo.get("partitionField"));
+        String partitionColumn = toStringValue(createInfo.get("partitionColumn"));
         String partitionMode = resolvePartitionMode(dynamicPartitionEnabled, createSql);
 
         List<String> officialRecommendations = Arrays.asList(
@@ -1743,7 +1743,7 @@ public class InspectionService {
         String strategy;
         String modeRecommendation = "keep_current_mode";
 
-        boolean likelyTimeSeries = isLikelyTimeSeriesPartitionField(partitionField);
+        boolean likelyTimeSeries = isLikelyTimeSeriesPartitionColumn(partitionColumn);
 
         if (dynamicPartitionEnabled) {
             strategy = "adjust_dynamic_partition_buckets";
@@ -1830,11 +1830,11 @@ public class InspectionService {
         return createSql.toUpperCase(Locale.ROOT).contains("PARTITION BY") ? "static_partition" : "single_partition";
     }
 
-    private boolean isLikelyTimeSeriesPartitionField(String partitionField) {
-        if (!StringUtils.hasText(partitionField)) {
+    private boolean isLikelyTimeSeriesPartitionColumn(String partitionColumn) {
+        if (!StringUtils.hasText(partitionColumn)) {
             return false;
         }
-        String normalized = partitionField.toLowerCase(Locale.ROOT);
+        String normalized = partitionColumn.toLowerCase(Locale.ROOT);
         return normalized.contains("dt") || normalized.contains("date") || normalized.contains("time")
             || normalized.contains("day");
     }

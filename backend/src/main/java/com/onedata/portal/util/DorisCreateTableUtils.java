@@ -15,6 +15,7 @@ public final class DorisCreateTableUtils {
     private static final Pattern PROPERTY_PATTERN = Pattern.compile("\"([^\"]+)\"\\s*=\\s*\"([^\"]*)\"");
     private static final Pattern ALLOCATION_REPLICA_PATTERN = Pattern.compile(":\\s*(\\d+)");
     private static final Pattern PARTITION_BY_PATTERN = Pattern.compile("(?is)PARTITION\\s+BY\\b");
+    private static final Pattern ESCAPED_BACKTICK_PATTERN = Pattern.compile("\\\\+`");
 
     private DorisCreateTableUtils() {
     }
@@ -78,7 +79,7 @@ public final class DorisCreateTableUtils {
     /**
      * 解析 PARTITION BY 中的分区字段（或分区表达式）。
      */
-    public static String parsePartitionField(String createTableSql) {
+    public static String parsePartitionColumn(String createTableSql) {
         if (!StringUtils.hasText(createTableSql)) {
             return null;
         }
@@ -98,7 +99,7 @@ public final class DorisCreateTableUtils {
             return null;
         }
 
-        String normalized = raw.trim();
+        String normalized = normalizePartitionExpression(raw);
         if (normalized.startsWith("`") && normalized.endsWith("`")
                 && normalized.indexOf('`', 1) == normalized.length() - 1) {
             normalized = normalized.substring(1, normalized.length() - 1);
@@ -122,6 +123,15 @@ public final class DorisCreateTableUtils {
             cursor++;
         }
         return null;
+    }
+
+    private static String normalizePartitionExpression(String expression) {
+        String normalized = expression == null ? "" : expression.trim();
+        if (!StringUtils.hasText(normalized)) {
+            return normalized;
+        }
+        // Some JDBC / SQL transport chains return escaped backticks such as \`dt\`.
+        return ESCAPED_BACKTICK_PATTERN.matcher(normalized).replaceAll("`");
     }
 
     private static boolean isDynamicPartitionEnabled(Map<String, String> properties) {

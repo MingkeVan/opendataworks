@@ -1086,9 +1086,9 @@ public class DorisConnectionService {
                 }
 
                 // 解析分区字段（兼容大小写/换行/不同分区类型）
-                String partitionField = DorisCreateTableUtils.parsePartitionField(createTableSql);
-                if (StringUtils.hasText(partitionField)) {
-                    info.put("partitionField", partitionField);
+                String partitionColumn = DorisCreateTableUtils.parsePartitionColumn(createTableSql);
+                if (StringUtils.hasText(partitionColumn)) {
+                    info.put("partitionColumn", partitionColumn);
                 }
 
                 // 解析分桶字段

@@ -138,7 +138,7 @@ public class TableCreateService {
         table.setTableModel(resolveTableModel(request.getTableModel()));
         table.setBucketNum(request.getBucketNum() != null ? request.getBucketNum() : 10);
         table.setReplicaNum(request.getReplicaNum() != null ? request.getReplicaNum() : 3);
-        table.setPartitionField(request.getPartitionColumn());
+        table.setPartitionColumn(request.getPartitionColumn());
         table.setDistributionColumn(joinColumns(request.getDistributionColumns()));
         table.setKeyColumns(joinColumns(request.getKeyColumns()));
         table.setDorisDdl(ddl);
