@@ -89,6 +89,31 @@ public class DataWorkflow {
      */
     private Boolean scheduleAutoOnline;
 
+    /**
+     * 同步来源: manual/runtime
+     */
+    private String syncSource;
+
+    /**
+     * 最近一次运行态同步快照哈希
+     */
+    private String runtimeSyncHash;
+
+    /**
+     * 最近一次运行态同步状态: success/failed
+     */
+    private String runtimeSyncStatus;
+
+    /**
+     * 最近一次运行态同步信息
+     */
+    private String runtimeSyncMessage;
+
+    /**
+     * 最近一次运行态同步时间
+     */
+    private LocalDateTime runtimeSyncAt;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

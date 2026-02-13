@@ -29,9 +29,12 @@
           <el-button type="primary" :icon="Search" @click="handleSearch">查询</el-button>
           <el-button @click="handleReset">重置</el-button>
         </div>
-        <el-button type="primary" :icon="Plus" plain @click="openCreateDrawer">
-          新建工作流
-        </el-button>
+        <div class="toolbar-actions">
+          <el-button @click="openRuntimeSyncDialog">从 Dolphin 同步</el-button>
+          <el-button type="primary" :icon="Plus" plain @click="openCreateDrawer">
+            新建工作流
+          </el-button>
+        </div>
       </div>
 
       <el-table
@@ -122,7 +125,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="380" fixed="right">
+        <el-table-column label="操作" width="460" fixed="right">
           <template #default="{ row }">
             <el-button
               link
@@ -184,6 +187,14 @@
             >
               详情
             </el-button>
+            <el-button
+              v-if="isRuntimeSynced(row)"
+              link
+              type="warning"
+              @click="openRuntimeDiff(row)"
+            >
+              比对差异
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -214,6 +225,16 @@
       :workflow="backfillTarget"
       @submitted="handleBackfillSubmitted"
     />
+
+    <WorkflowRuntimeSyncDialog
+      v-model="runtimeSyncDialogVisible"
+      @synced="handleRuntimeSynced"
+    />
+
+    <WorkflowRuntimeDiffDrawer
+      v-model="runtimeDiffDrawerVisible"
+      :workflow="runtimeDiffTarget"
+    />
   </div>
 </template>
 
@@ -227,6 +248,8 @@ import { workflowApi } from '@/api/workflow'
 import { taskApi } from '@/api/task'
 import WorkflowCreateDrawer from './WorkflowCreateDrawer.vue'
 import WorkflowBackfillDialog from './WorkflowBackfillDialog.vue'
+import WorkflowRuntimeSyncDialog from './WorkflowRuntimeSyncDialog.vue'
+import WorkflowRuntimeDiffDrawer from './WorkflowRuntimeDiffDrawer.vue'
 
 const router = useRouter()
 const loading = ref(false)
@@ -254,6 +277,9 @@ const editingWorkflowId = ref(null)
 const actionLoading = reactive({})
 const backfillDialogVisible = ref(false)
 const backfillTarget = ref(null)
+const runtimeSyncDialogVisible = ref(false)
+const runtimeDiffDrawerVisible = ref(false)
+const runtimeDiffTarget = ref(null)
 
 const loadWorkflows = async () => {
   loading.value = true
@@ -299,6 +325,24 @@ const handleCreateSuccess = () => {
   closeWorkflowDrawer()
   pagination.pageNum = 1
   loadWorkflows()
+}
+
+const openRuntimeSyncDialog = () => {
+  runtimeSyncDialogVisible.value = true
+}
+
+const handleRuntimeSynced = () => {
+  loadWorkflows()
+}
+
+const isRuntimeSynced = (workflow) => {
+  if (!workflow) return false
+  return workflow.syncSource === 'runtime' || !!workflow.runtimeSyncAt
+}
+
+const openRuntimeDiff = (workflow) => {
+  runtimeDiffTarget.value = workflow || null
+  runtimeDiffDrawerVisible.value = true
 }
 
 const handleUpdateSuccess = (workflowId) => {
@@ -748,6 +792,12 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .filters {

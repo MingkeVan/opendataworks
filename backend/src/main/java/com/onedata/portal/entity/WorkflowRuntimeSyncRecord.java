@@ -10,36 +10,42 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 工作流版本快照
+ * 运行态反向同步记录
  */
 @Data
-@TableName("workflow_version")
-public class WorkflowVersion {
+@TableName("workflow_runtime_sync_record")
+public class WorkflowRuntimeSyncRecord {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
     private Long workflowId;
 
-    private Integer versionNo;
+    private Long projectCode;
 
-    private String structureSnapshot;
+    private Long workflowCode;
 
-    private String changeSummary;
+    private String snapshotHash;
 
-    private String triggerSource;
+    private String snapshotJson;
 
-    private String createdBy;
-
-    /**
-     * 快照结构版本，1=legacy，2=canonical
-     */
-    private Integer snapshotSchemaVersion;
+    private String diffJson;
 
     /**
-     * 回退来源版本ID（仅回退产生的新版本会记录）
+     * 成功同步后关联的版本ID
      */
-    private Long rollbackFromVersionId;
+    private Long versionId;
+
+    /**
+     * success / failed
+     */
+    private String status;
+
+    private String errorCode;
+
+    private String errorMessage;
+
+    private String operator;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

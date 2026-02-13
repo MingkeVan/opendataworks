@@ -143,16 +143,35 @@
               </div>
             </el-descriptions-item>
             <el-descriptions-item label="Dolphin 流程编码">
-              <el-link 
-                v-if="canJumpToDolphin(workflow?.workflow)" 
-                type="primary" 
-                underline="never"
-                @click="openDolphin(workflow?.workflow)"
-              >
-                {{ workflow?.workflow?.workflowCode }}
-                <el-icon class="el-icon--right"><Link /></el-icon>
-              </el-link>
-              <span v-else>{{ workflow?.workflow?.workflowCode || '-' }}</span>
+              <div class="dolphin-code-cell">
+                <el-link
+                  v-if="canJumpToDolphin(workflow?.workflow)"
+                  type="primary"
+                  underline="never"
+                  @click="openDolphin(workflow?.workflow)"
+                >
+                  {{ workflow?.workflow?.workflowCode }}
+                  <el-icon class="el-icon--right"><Link /></el-icon>
+                </el-link>
+                <span v-else>{{ workflow?.workflow?.workflowCode || '-' }}</span>
+                <div class="dolphin-code-actions">
+                  <el-button
+                    link
+                    type="primary"
+                    :disabled="!workflow?.workflow?.workflowCode || !workflow?.workflow?.projectCode"
+                    @click="openRuntimeSyncDialog"
+                  >
+                    手动同步
+                  </el-button>
+                  <el-button
+                    link
+                    :disabled="!workflow?.workflow?.id"
+                    @click="openSyncRecordDrawer"
+                  >
+                    同步记录
+                  </el-button>
+                </div>
+              </div>
             </el-descriptions-item>
             <!-- Editable Description Field -->
             <el-descriptions-item label="描述" :span="2">
@@ -487,38 +506,84 @@
             />
           </el-tab-pane>
           <el-tab-pane label="变更记录" name="changes">
-            <el-table
-              v-if="workflow?.publishRecords?.length"
-              :data="workflow.publishRecords"
-              border
-              size="small"
-            >
-              <el-table-column prop="operation" label="操作" width="120">
-                <template #default="{ row }">
-                  {{ getOperationText(row.operation) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="status" label="状态" width="140">
-                <template #default="{ row }">
-                  <el-tag size="small" :type="getPublishRecordStatusType(row.status)">
-                    {{ getPublishRecordStatusText(row.status) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="versionId" label="版本ID" width="120" />
-              <el-table-column prop="operator" label="操作人" width="120" />
-              <el-table-column prop="createdAt" label="时间" width="170">
-                <template #default="{ row }">
-                  {{ formatDateTime(row.createdAt) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="log" label="备注">
-                <template #default="{ row }">
-                  {{ formatLog(row.log) }}
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-empty v-else description="暂无发布记录" />
+            <div class="change-toolbar">
+              <el-button v-if="changeMode === 'list'" type="primary" plain @click="openCompareWithLatest">
+                比较版本历史
+              </el-button>
+              <el-button v-else @click="backToPublishRecords">
+                返回记录列表
+              </el-button>
+            </div>
+
+            <template v-if="changeMode === 'list'">
+              <el-table
+                v-if="workflow?.publishRecords?.length"
+                :data="workflow.publishRecords"
+                border
+                size="small"
+              >
+                <el-table-column prop="operation" label="操作" width="120">
+                  <template #default="{ row }">
+                    {{ getOperationText(row.operation) }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="status" label="状态" width="140">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="getPublishRecordStatusType(row.status)">
+                      {{ getPublishRecordStatusText(row.status) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="versionId" label="版本ID" width="120" />
+                <el-table-column prop="operator" label="操作人" width="120" />
+                <el-table-column prop="createdAt" label="时间" width="170">
+                  <template #default="{ row }">
+                    {{ formatDateTime(row.createdAt) }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="log" label="备注">
+                  <template #default="{ row }">
+                    {{ formatLog(row.log) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="180" fixed="right">
+                  <template #default="{ row }">
+                    <el-button
+                      link
+                      type="primary"
+                      :disabled="!row.versionId"
+                      @click="viewVersionDiff(row)"
+                    >
+                      查看变化
+                    </el-button>
+                    <el-button
+                      link
+                      type="danger"
+                      :disabled="!row.versionId"
+                      :loading="rollbackLoadingVersionId === Number(row.versionId)"
+                      @click="rollbackToVersion(row.versionId)"
+                    >
+                      恢复到该版本
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <el-empty v-else description="暂无发布记录" />
+            </template>
+
+            <WorkflowVersionComparePanel
+              v-else
+              :versions="versionListDesc"
+              :left-version-id="leftVersionId"
+              :right-version-id="rightVersionId"
+              :compare-result="versionCompareResult"
+              :loading="compareLoading"
+              :rollback-loading-id="rollbackLoadingVersionId"
+              @back="backToPublishRecords"
+              @step="stepVersionCompare"
+              @select-right="selectRightVersion"
+              @rollback="rollbackFromBlock"
+            />
           </el-tab-pane>
           <el-tab-pane label="全局变量" name="globals">
             <div class="global-params-section">
@@ -583,6 +648,17 @@
       :workflow="backfillTarget"
       @submitted="handleBackfillSubmitted"
     />
+
+    <WorkflowRuntimeSyncDialog
+      v-model="runtimeSyncDialogVisible"
+      :preset-workflow="runtimeSyncPresetWorkflow"
+      @synced="handleRuntimeSynced"
+    />
+
+    <WorkflowSyncRecordDrawer
+      v-model="syncRecordDrawerVisible"
+      :workflow-id="workflow?.workflow?.id || null"
+    />
   </div>
 </template>
 
@@ -597,6 +673,9 @@ import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import WorkflowTaskManager from './WorkflowTaskManager.vue'
 import WorkflowBackfillDialog from './WorkflowBackfillDialog.vue'
+import WorkflowRuntimeSyncDialog from './WorkflowRuntimeSyncDialog.vue'
+import WorkflowSyncRecordDrawer from './WorkflowSyncRecordDrawer.vue'
+import WorkflowVersionComparePanel from './WorkflowVersionComparePanel.vue'
 import QuartzCronBuilder from '@/components/QuartzCronBuilder.vue'
 
 const route = useRoute()
@@ -609,6 +688,14 @@ const pendingApprovalFlags = reactive({})
 const actionLoading = reactive({})
 const backfillDialogVisible = ref(false)
 const backfillTarget = ref(null)
+const runtimeSyncDialogVisible = ref(false)
+const syncRecordDrawerVisible = ref(false)
+const changeMode = ref('list')
+const compareLoading = ref(false)
+const versionCompareResult = ref(null)
+const leftVersionId = ref(null)
+const rightVersionId = ref(null)
+const rollbackLoadingVersionId = ref(null)
 
 // Schedule states
 const scheduleFormRef = ref(null)
@@ -853,6 +940,39 @@ const savingParams = ref(false)
 const workflowTaskIds = computed(() => {
   const relations = workflow.value?.taskRelations || []
   return relations.map(r => Number(r.taskId)).filter(id => Number.isFinite(id))
+})
+
+const versionList = computed(() => {
+  const list = workflow.value?.versions || []
+  return [...list].sort((a, b) => (a.versionNo || 0) - (b.versionNo || 0))
+})
+
+const versionListDesc = computed(() => {
+  return [...versionList.value].reverse()
+})
+
+const versionById = computed(() => {
+  return versionList.value.reduce((acc, version) => {
+    if (version?.id) {
+      acc[version.id] = version
+    }
+    return acc
+  }, {})
+})
+
+const runtimeSyncPresetWorkflow = computed(() => {
+  const wf = workflow.value?.workflow
+  if (!wf?.workflowCode || !wf?.projectCode) {
+    return null
+  }
+  return {
+    workflowCode: wf.workflowCode,
+    projectCode: wf.projectCode,
+    workflowName: wf.workflowName,
+    localWorkflowId: wf.id,
+    synced: true,
+    lastRuntimeSyncAt: wf.runtimeSyncAt
+  }
 })
 
 // Inline edit methods
@@ -1232,6 +1352,162 @@ const formatLog = (log) => {
   }
 }
 
+const openRuntimeSyncDialog = () => {
+  if (!workflow.value?.workflow?.workflowCode || !workflow.value?.workflow?.projectCode) {
+    ElMessage.warning('当前工作流缺少 Dolphin 编码或项目编码，无法手动同步')
+    return
+  }
+  runtimeSyncDialogVisible.value = true
+}
+
+const openSyncRecordDrawer = () => {
+  if (!workflow.value?.workflow?.id) {
+    return
+  }
+  syncRecordDrawerVisible.value = true
+}
+
+const handleRuntimeSynced = () => {
+  loadWorkflowDetail()
+}
+
+const backToPublishRecords = () => {
+  changeMode.value = 'list'
+}
+
+const resolveLeftVersionId = (targetRightVersionId) => {
+  const rightId = Number(targetRightVersionId)
+  const index = versionList.value.findIndex((item) => Number(item.id) === rightId)
+  if (index <= 0) {
+    return null
+  }
+  return versionList.value[index - 1]?.id || null
+}
+
+const loadVersionCompare = async (leftId, rightId) => {
+  const wf = workflow.value?.workflow
+  const normalizedRightId = Number(rightId)
+  if (!wf?.id || !Number.isFinite(normalizedRightId)) {
+    return
+  }
+  compareLoading.value = true
+  try {
+    const result = await workflowApi.compareVersions(wf.id, {
+      leftVersionId: leftId ?? null,
+      rightVersionId: normalizedRightId,
+      operator: 'portal-ui'
+    })
+    versionCompareResult.value = result
+    leftVersionId.value = result.leftVersionId ?? null
+    rightVersionId.value = result.rightVersionId ?? normalizedRightId
+    changeMode.value = 'compare'
+  } catch (error) {
+    console.error('加载版本差异失败', error)
+    ElMessage.error(error.message || '加载版本差异失败')
+  } finally {
+    compareLoading.value = false
+  }
+}
+
+const openCompareWithLatest = async () => {
+  if (!versionList.value.length) {
+    ElMessage.warning('暂无可比对版本')
+    return
+  }
+  const latest = versionList.value[versionList.value.length - 1]
+  const left = resolveLeftVersionId(latest.id)
+  await loadVersionCompare(left, latest.id)
+}
+
+const viewVersionDiff = async (row) => {
+  if (!row?.versionId) {
+    ElMessage.warning('该记录未关联版本')
+    return
+  }
+  const left = resolveLeftVersionId(row.versionId)
+  await loadVersionCompare(left, row.versionId)
+}
+
+const selectRightVersion = async (version) => {
+  if (!version?.id) {
+    return
+  }
+  const left = resolveLeftVersionId(version.id)
+  await loadVersionCompare(left, version.id)
+}
+
+const stepVersionCompare = async (direction) => {
+  if (!rightVersionId.value || !versionList.value.length) {
+    return
+  }
+  const currentRightId = Number(rightVersionId.value)
+  const index = versionList.value.findIndex((item) => Number(item.id) === currentRightId)
+  if (index < 0) {
+    return
+  }
+
+  if (direction === 'left') {
+    const nextRightIndex = index - 1
+    if (nextRightIndex < 0) {
+      return
+    }
+    const right = versionList.value[nextRightIndex]
+    const left = nextRightIndex > 0 ? versionList.value[nextRightIndex - 1]?.id : null
+    await loadVersionCompare(left, right.id)
+    return
+  }
+
+  const nextRightIndex = index + 1
+  if (nextRightIndex >= versionList.value.length) {
+    return
+  }
+  const right = versionList.value[nextRightIndex]
+  const left = versionList.value[index]?.id || null
+  await loadVersionCompare(left, right.id)
+}
+
+const rollbackToVersion = async (versionId) => {
+  const wf = workflow.value?.workflow
+  const normalizedVersionId = Number(versionId)
+  if (!wf?.id || !Number.isFinite(normalizedVersionId)) {
+    return
+  }
+  const version = versionById.value[normalizedVersionId]
+  const label = version ? `v${version.versionNo}` : `#${versionId}`
+  try {
+    await ElMessageBox.confirm(
+      `确认恢复到版本 ${label} 吗？恢复后会生成一个新版本。`,
+      '确认恢复',
+      {
+        type: 'warning',
+        confirmButtonText: '确认恢复',
+        cancelButtonText: '取消'
+      }
+    )
+  } catch {
+    return
+  }
+
+  rollbackLoadingVersionId.value = normalizedVersionId
+  try {
+    const response = await workflowApi.rollbackVersion(wf.id, normalizedVersionId, {
+      operator: 'portal-ui'
+    })
+    ElMessage.success(`恢复成功，已生成版本 v${response.newVersionNo}`)
+    backToPublishRecords()
+    await loadWorkflowDetail()
+  } catch (error) {
+    console.error('恢复版本失败', error)
+    ElMessage.error(error.message || '恢复版本失败')
+  } finally {
+    rollbackLoadingVersionId.value = null
+  }
+}
+
+const rollbackFromBlock = async (version) => {
+  await rollbackToVersion(version?.id)
+}
+
 const buildDolphinWorkflowUrl = (workflow) => {
   if (!dolphinWebuiUrl.value || !workflow?.projectCode || !workflow?.workflowCode) {
     return ''
@@ -1602,6 +1878,22 @@ onMounted(() => {
 
 .name {
   margin-right: 8px;
+}
+
+.dolphin-code-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dolphin-code-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.change-toolbar {
+  margin-bottom: 10px;
 }
 
 .basic-info-section {

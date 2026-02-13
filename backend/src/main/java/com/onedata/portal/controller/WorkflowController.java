@@ -5,16 +5,25 @@ import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
 import com.onedata.portal.dto.workflow.WorkflowApprovalRequest;
 import com.onedata.portal.dto.workflow.WorkflowBackfillRequest;
+import com.onedata.portal.dto.workflow.WorkflowVersionCompareRequest;
+import com.onedata.portal.dto.workflow.WorkflowVersionCompareResponse;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowDetailResponse;
 import com.onedata.portal.dto.workflow.WorkflowPublishRequest;
 import com.onedata.portal.dto.workflow.WorkflowQueryRequest;
+import com.onedata.portal.dto.workflow.WorkflowVersionRollbackRequest;
+import com.onedata.portal.dto.workflow.WorkflowVersionRollbackResponse;
 import com.onedata.portal.dto.workflow.WorkflowScheduleRequest;
+import com.onedata.portal.dto.workflow.runtime.RuntimeSyncRecordDetailResponse;
+import com.onedata.portal.dto.workflow.runtime.RuntimeSyncRecordListItem;
+import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowDiffResponse;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.WorkflowPublishRecord;
 import com.onedata.portal.service.WorkflowPublishService;
+import com.onedata.portal.service.WorkflowRuntimeSyncService;
 import com.onedata.portal.service.WorkflowScheduleService;
 import com.onedata.portal.service.WorkflowService;
+import com.onedata.portal.service.WorkflowVersionOperationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,6 +38,8 @@ public class WorkflowController {
     private final WorkflowService workflowService;
     private final WorkflowPublishService workflowPublishService;
     private final WorkflowScheduleService workflowScheduleService;
+    private final WorkflowRuntimeSyncService workflowRuntimeSyncService;
+    private final WorkflowVersionOperationService workflowVersionOperationService;
 
     @GetMapping
     public Result<PageResult<DataWorkflow>> list(WorkflowQueryRequest request) {
@@ -39,6 +50,37 @@ public class WorkflowController {
     @GetMapping("/{id}")
     public Result<WorkflowDetailResponse> detail(@PathVariable Long id) {
         return Result.success(workflowService.getDetail(id));
+    }
+
+    @GetMapping("/{id}/runtime-diff")
+    public Result<RuntimeWorkflowDiffResponse> runtimeDiff(@PathVariable Long id) {
+        return Result.success(workflowRuntimeSyncService.runtimeDiff(id));
+    }
+
+    @GetMapping("/{id}/runtime-sync-records")
+    public Result<PageResult<RuntimeSyncRecordListItem>> listRuntimeSyncRecords(@PathVariable Long id,
+                                                                                 @RequestParam(defaultValue = "1") Integer pageNum,
+                                                                                 @RequestParam(defaultValue = "20") Integer pageSize) {
+        return Result.success(workflowRuntimeSyncService.listSyncRecords(id, pageNum, pageSize));
+    }
+
+    @GetMapping("/{id}/runtime-sync-records/{recordId}")
+    public Result<RuntimeSyncRecordDetailResponse> getRuntimeSyncRecord(@PathVariable Long id,
+                                                                         @PathVariable Long recordId) {
+        return Result.success(workflowRuntimeSyncService.getSyncRecordDetail(id, recordId));
+    }
+
+    @PostMapping("/{id}/versions/compare")
+    public Result<WorkflowVersionCompareResponse> compareVersions(@PathVariable Long id,
+                                                                  @RequestBody WorkflowVersionCompareRequest request) {
+        return Result.success(workflowVersionOperationService.compare(id, request));
+    }
+
+    @PostMapping("/{id}/versions/{versionId}/rollback")
+    public Result<WorkflowVersionRollbackResponse> rollbackVersion(@PathVariable Long id,
+                                                                   @PathVariable Long versionId,
+                                                                   @RequestBody WorkflowVersionRollbackRequest request) {
+        return Result.success(workflowVersionOperationService.rollback(id, versionId, request));
     }
 
     @PostMapping

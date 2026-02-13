@@ -50,75 +50,116 @@
 
 | 脚本 | 功能 |
 | --- | --- |
-| `backend/scripts/prepare-test-env.sh` | 校验 DolphinScheduler 连接并指导创建测试项目/工作流 |
-| `backend/scripts/run-integration-test.sh` | 针对 `DolphinSchedulerClientIntegrationTest` 的快捷入口 |
-| `mvn test -Dtest=DolphinSchedulerClientIntegrationTest -Dspring.profiles.active=test` | 直接通过 Maven 运行集成测试 |
+| `backend/scripts/prepare-test-env.sh` | 校验 DolphinScheduler 连接并给出基础环境准备提示（遗留脚本） |
+| `backend/scripts/run-integration-test.sh` | Dolphin 集成测试快捷入口（当前默认测试类较老，建议使用下方 Maven 命令） |
+| `mvn -f backend/pom.xml -Dtest=WorkflowRuntimeDiffServiceTest,WorkflowRuntimeSyncServicePreviewTest,WorkflowVersionOperationServiceTest,WorkflowRuntimeSyncRealIntegrationTest -DfailIfNoTests=false test` | 运行运行态同步/版本治理完整集成回归 |
 
 运行示例：
 
 ```bash
-# 运行集成测试
-(cd backend && bash scripts/run-integration-test.sh)
+# 推荐：直接运行完整回归集
+mvn -f backend/pom.xml \
+  -Dtest=WorkflowRuntimeDiffServiceTest,WorkflowRuntimeSyncServicePreviewTest,WorkflowVersionOperationServiceTest,WorkflowRuntimeSyncRealIntegrationTest \
+  -DfailIfNoTests=false test
 ```
 
 ## DolphinScheduler 集成测试
 
 ### 覆盖范围
-- `DolphinSchedulerClient` REST 调用链路（登录、拉取/发布/下线工作流、任务增删改）
-- 与 `backend/src/test/resources/application-test.yml` 同步的项目/工作流配置
-- 控制台及 DolphinScheduler UI 中的工作流拓扑/版本历史
+- 正向发布（设计态 -> 运行态）：创建/更新任务、发布、上线、调度配置同步。
+- 反向同步（运行态 -> 设计态）：预检、执行同步、差异比对、同步历史记录。
+- 血缘驱动关系重建：基于 SQL 自动解析输入/输出表，重建 `table_task_relation` 和 `workflow_task_relation`。
+- 版本治理：版本快照、版本比较、版本回退相关后端契约。
+- 真实执行校验：在真实 MySQL 表上执行工作流并核对结果数据。
+
+### 关键测试类
+- `backend/src/test/java/com/onedata/portal/service/WorkflowRuntimeSyncRealIntegrationTest.java`
+- `backend/src/test/java/com/onedata/portal/service/WorkflowRuntimeSyncServicePreviewTest.java`
+- `backend/src/test/java/com/onedata/portal/service/WorkflowRuntimeDiffServiceTest.java`
+- `backend/src/test/java/com/onedata/portal/service/WorkflowVersionOperationServiceTest.java`
 
 ### 测试前准备
 1. 启动 DolphinScheduler，本地默认地址 `http://localhost:12345/dolphinscheduler`。
-2. 运行 `backend/scripts/prepare-test-env.sh`，确认登录、创建项目 `opendataworks-test`、创建工作流 `opendataworks-test-workflow` 均成功。
-3. 若脚本失败，可在 UI 手动创建，并记录 `project-code` 与 `workflow-code`；也可使用 README 中的 cURL 模板调用 REST API 创建。
-4. 确认 MySQL 存在 `opendataworks` 数据库，字符集 `utf8mb4`。
+2. 启动 MySQL（可用独立库，也可直接用 `opendataworks` 库）。
+3. 测试允许 Dolphin 初始为空：缺失 Token/项目/数据源/工作流由测试启动逻辑自动补齐。
+4. 不要把容器重启逻辑写入测试代码；容器异常重启属于测试环境运维动作。
+5. 确认本地资源足够，避免 Dolphin 因 OOM 或内存阈值保护进入过载状态。
 
 ### 配置参数
-集成测试使用独立的 `DolphinConfig` 配置，通常通过环境变量 `DS_BASE_URL` 等注入（见 `backend/scripts/prepare-test-env.sh`）。
+集成测试使用独立的 `DolphinConfig` 配置，通常通过环境变量 `DS_BASE_URL` 等注入。
 
-若需调试 `RealDolphinSchedulerIntegrationTest`，请按照脚本提示导出环境变量。
+若需调试真实集成场景，可按需导出环境变量：
 
-```yaml
-# backend/src/test/resources/application-test.yml
-# 已移除 dolphin 配置段，改为代码动态加载或环境变量注入
-
-  project-code: <FROM_UI_OR_API>
-  tenant-code: default
-  worker-group: default
-  execution-type: PARALLEL
-logging:
-  level:
-    com.onedata.portal.client.dolphin: TRACE   # 需要定位问题时打开
+```bash
+export DS_BASE_URL=http://localhost:12345/dolphinscheduler
+export DS_USERNAME=admin
+export DS_PASSWORD=dolphinscheduler123
+export DS_PROJECT_NAME=it_rt_sync_project
+export IT_MYSQL_HOST=127.0.0.1
+export IT_MYSQL_PORT=3306
+export IT_MYSQL_DATABASE=opendataworks
+export IT_MYSQL_USERNAME=opendataworks
+export IT_MYSQL_PASSWORD=opendataworks123
 ```
 
 ### 执行方式
-- 推荐：`backend/scripts/run-integration-test.sh`
-- Maven：`mvn test -Dtest=DolphinSchedulerClientIntegrationTest -Dspring.profiles.active=test`
-- IDE：右键 `DolphinSchedulerClientIntegrationTest` 运行；排查时可开启 `-Dlogging.level.com.onedata.portal=DEBUG`
+- 推荐：  
+  `mvn -f backend/pom.xml -Dtest=WorkflowRuntimeDiffServiceTest,WorkflowRuntimeSyncServicePreviewTest,WorkflowVersionOperationServiceTest,WorkflowRuntimeSyncRealIntegrationTest -DfailIfNoTests=false test`
+- 仅跑真实运行态同步集成：  
+  `mvn -f backend/pom.xml -Dtest=WorkflowRuntimeSyncRealIntegrationTest -DfailIfNoTests=false test`
+- IDE：直接运行上述四个测试类；排查时可打开 `-Dlogging.level.com.onedata.portal=DEBUG`。
 
-### 验证要点
-- 控制台预期输出 6 个用例依次通过，形如 `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`。
-- DolphinScheduler UI 中，目标工作流的 DAG/版本历史与测试操作保持一致。
-- 勾选清单：
-  - [ ] 登录并获取工作流定义成功，返回的 code/name 与预期匹配。
-  - [ ] 生成的任务编码可用于新增任务。
-  - [ ] 工作流下线、添加任务、发布、删除任务均无错误日志。
-  - [ ] 最终状态为 ONLINE，且 UI 中历史记录可见。
+### 必测场景清单（运行态同步）
+- 至少 5-6 个任务的 DAG，必须同时包含串行、并行、多依赖汇聚。
+- 使用真实 SQL、真实表、真实数据；同步后必须执行工作流并校验目标结果表数据变化。
+- 工作流演进场景必须覆盖：
+  - 新增任务；
+  - 删除任务；
+  - 修改任务 SQL；
+  - 增加依赖表；
+  - 减少依赖表；
+  - 调度配置变化（cron/timezone/start/end）；
+  - 任务组配置变化（taskGroupId/taskGroupName）。
+- 同步历史与版本历史必须校验：
+  - `workflow_runtime_sync_record` 写入成功/失败记录；
+  - 成功同步记录关联 `version_id`；
+  - 版本号递增；
+  - `trigger_source=runtime_sync`；
+  - 快照和 diff 内容与实际变更一致。
+- 边差异策略必须校验：
+  - 运行态显式边与血缘推断边不一致时，预检返回告警；
+  - 执行同步需人工确认差异后继续；
+  - 同步后以血缘推断边为准。
+
+### 版本比较/回退契约回归项
+- `leftVersionId` 可以为空（空基线，展示全新增）。
+- `left > right` 时后端自动交换大小。
+- `left == right` 返回 `VERSION_COMPARE_INVALID`。
+- 回退写入新版本（`trigger_source=version_rollback`），不覆盖旧版本。
+- 回退不自动发布到 Dolphin，需单独发布/上线。
+
+### 一次性通过基线
+- 完整回归命令执行结果应为：`Failures: 0, Errors: 0`。
+- 参考基线：`Tests run: 12, Failures: 0, Errors: 0, Skipped: 0`（四个测试类合计）。
 
 ### 常见问题速查
 | 症状 | 排查步骤 |
 | --- | --- |
 | `Connection refused` | 检查服务端口、系统管理中的 Dolphin 配置 URL 与 Token |
 | 登录失败 | 确认账号 `admin/dolphinscheduler123`，必要时重置密码 |
-| `工作流不存在` | 校验 `workflow-code`、`project-code`，确认已在 UI 创建 |
+| `工作流不存在 (50003)` | Dolphin 重启后 projectCode 可能变化，先重新拉取/重建测试项目与工作流，再执行测试 |
 | `权限不足` | 确认使用 admin 或具备权限的租户 |
 | `JsonMappingException` | 打开 TRACE 日志，核对 DTO 与 API 响应字段 |
+| `The current server is overload, cannot consumes commands` | 检查 Dolphin 日志是否出现 `reserved.memory=0.1` 触发；测试环境可下调 `application.yaml` 中 master/worker `reserved-memory` 并重启容器 |
+| `delete process definition ... there are process instances in executing` | 删除前先确认实例已结束；必要时等待或重试清理 |
+| `State event handle error ... SUCCESS -> RUNNING` | Dolphin 任务状态事件乱序告警，优先以任务最终状态与结果表校验为准 |
 
 ### 调试技巧
 - `logging.level.reactor.netty.http.client=DEBUG` 查看 HTTP 请求。
 - 在测试中对关键响应设断点，确认 Dolphin API 返回值。
 - 使用 Postman/Insomnia 重放脚本中的请求，快速定位接口问题。
+- 实时观察 Dolphin 容器日志，重点关键字：`overload`、`reserved.memory`、`process definition ... does not exist`。
+- 当宿主机命令环境没有 `docker` 只有 `podman` 时，使用等价 `podman` 命令进行运维操作。
 
 ### 测试报告模板
 ```
@@ -134,6 +175,11 @@ DolphinScheduler 版本: ______
 | 添加任务到工作流 | | |
 | 发布工作流 | | |
 | 从工作流删除任务 | | |
+| 运行态反向同步（预检/执行） | | |
+| 运行态差异比对 | | |
+| 工作流演进（增删任务/SQL/依赖） | | |
+| 同步历史与版本历史校验 | | |
+| 版本比较与回退校验 | | |
 
 问题记录:
 - 描述:
