@@ -13,4 +13,6 @@ public final class WorkflowVersionErrorCodes {
     public static final String VERSION_SNAPSHOT_UNSUPPORTED = "VERSION_SNAPSHOT_UNSUPPORTED";
     public static final String VERSION_TASK_NOT_FOUND = "VERSION_TASK_NOT_FOUND";
     public static final String VERSION_ROLLBACK_FAILED = "VERSION_ROLLBACK_FAILED";
+    public static final String VERSION_DELETE_FORBIDDEN = "VERSION_DELETE_FORBIDDEN";
+    public static final String VERSION_DELETE_FAILED = "VERSION_DELETE_FAILED";
 }

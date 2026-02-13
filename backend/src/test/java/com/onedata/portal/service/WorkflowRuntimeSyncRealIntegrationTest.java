@@ -98,6 +98,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("integration")
 @TestPropertySource(properties = {
         "workflow.runtime-sync.enabled=true",
+        "workflow.runtime-sync.ingest-mode=legacy",
         "spring.task.scheduling.enabled=false"
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)

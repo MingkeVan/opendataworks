@@ -69,6 +69,10 @@ export const workflowApi = {
     return request.post(`/v1/workflows/${id}/versions/${versionId}/rollback`, payload)
   },
 
+  deleteVersion(id, versionId) {
+    return request.delete(`/v1/workflows/${id}/versions/${versionId}`)
+  },
+
   listRuntimeSyncRecords(id, params = {}) {
     return request.get(`/v1/workflows/${id}/runtime-sync-records`, { params })
   },

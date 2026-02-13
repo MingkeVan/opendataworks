@@ -15,6 +15,7 @@ import com.onedata.portal.dto.workflow.runtime.RuntimeSyncErrorCodes;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncExecuteRequest;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncExecuteResponse;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncIssue;
+import com.onedata.portal.dto.workflow.runtime.RuntimeSyncParitySummary;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncRecordDetailResponse;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncRecordListItem;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncPreviewRequest;
@@ -81,12 +82,20 @@ public class WorkflowRuntimeSyncService {
 
     private static final String ENGINE_DOLPHIN = "dolphin";
     private static final String EDGE_MISMATCH_WARNING_CODE = "EDGE_MISMATCH";
+    private static final String EXPORT_FALLBACK_WARNING_CODE = "EXPORT_FALLBACK_LEGACY";
+    private static final String INGEST_MODE_LEGACY = "legacy";
+    private static final String INGEST_MODE_EXPORT_SHADOW = "export_shadow";
+    private static final String INGEST_MODE_EXPORT_ONLY = "export_only";
 
-    @Value("${workflow.runtime-sync.enabled:false}")
+    @Value("${workflow.runtime-sync.enabled:true}")
     private boolean runtimeSyncEnabled;
+
+    @Value("${workflow.runtime-sync.ingest-mode:export_shadow}")
+    private String runtimeSyncIngestMode;
 
     private final DolphinRuntimeDefinitionService runtimeDefinitionService;
     private final WorkflowRuntimeDiffService runtimeDiffService;
+    private final RuntimeSyncParityService runtimeSyncParityService;
     private final SqlTableMatcherService sqlTableMatcherService;
     private final DolphinSchedulerService dolphinSchedulerService;
     private final DataTaskMapper dataTaskMapper;
@@ -158,12 +167,17 @@ public class WorkflowRuntimeSyncService {
     public RuntimeSyncPreviewResponse preview(RuntimeSyncPreviewRequest request) {
         if (!runtimeSyncEnabled) {
             RuntimeSyncPreviewResponse disabled = new RuntimeSyncPreviewResponse();
+            disabled.setIngestMode(resolveIngestMode());
+            disabled.setParityStatus(RuntimeSyncParityService.STATUS_NOT_CHECKED);
             disabled.getErrors().add(RuntimeSyncIssue.error(
                     RuntimeSyncErrorCodes.RUNTIME_SYNC_DISABLED, "运行态同步功能未开启"));
             return disabled;
         }
         PreviewContext context = buildPreviewContext(request.getProjectCode(), request.getWorkflowCode(), false);
         RuntimeSyncPreviewResponse response = new RuntimeSyncPreviewResponse();
+        response.setIngestMode(context.getIngestMode());
+        response.setParityStatus(context.getParityStatus());
+        response.setParitySummary(context.getParitySummary());
         response.setCanSync(context.getErrors().isEmpty());
         response.setErrors(context.getErrors());
         response.setWarnings(context.getWarnings());
@@ -176,6 +190,8 @@ public class WorkflowRuntimeSyncService {
     public RuntimeSyncExecuteResponse sync(RuntimeSyncExecuteRequest request) {
         RuntimeSyncExecuteResponse response = new RuntimeSyncExecuteResponse();
         if (!runtimeSyncEnabled) {
+            response.setIngestMode(resolveIngestMode());
+            response.setParityStatus(RuntimeSyncParityService.STATUS_NOT_CHECKED);
             response.getErrors().add(RuntimeSyncIssue.error(
                     RuntimeSyncErrorCodes.RUNTIME_SYNC_DISABLED, "运行态同步功能未开启"));
             return response;
@@ -183,6 +199,9 @@ public class WorkflowRuntimeSyncService {
 
         String operator = resolveOperator(request.getOperator());
         PreviewContext context = buildPreviewContext(request.getProjectCode(), request.getWorkflowCode(), true);
+        response.setIngestMode(context.getIngestMode());
+        response.setParityStatus(context.getParityStatus());
+        response.setParitySummary(context.getParitySummary());
         response.setWarnings(context.getWarnings());
         response.setErrors(context.getErrors());
         response.setDiffSummary(context.getDiffSummary());
@@ -193,6 +212,20 @@ public class WorkflowRuntimeSyncService {
                     firstIssueCode(context.getErrors()),
                     firstIssueMessage(context.getErrors()),
                     operator);
+            response.setSyncRecordId(recordId);
+            return response;
+        }
+
+        if (runtimeSyncParityService.isInconsistent(context.getParityStatus())) {
+            RuntimeSyncIssue issue = RuntimeSyncIssue.error(
+                    RuntimeSyncErrorCodes.DEFINITION_PARITY_MISMATCH,
+                    "导出定义与旧路径解析结果不一致，请先处理一致性差异后再执行同步");
+            if (context.getDefinition() != null) {
+                issue.setWorkflowCode(context.getDefinition().getWorkflowCode());
+                issue.setWorkflowName(context.getDefinition().getWorkflowName());
+            }
+            response.getErrors().add(issue);
+            Long recordId = saveFailedSyncRecord(context, issue.getCode(), issue.getMessage(), operator);
             response.setSyncRecordId(recordId);
             return response;
         }
@@ -290,6 +323,11 @@ public class WorkflowRuntimeSyncService {
         response.setWorkflowCode(record.getWorkflowCode());
         response.setVersionId(record.getVersionId());
         response.setStatus(record.getStatus());
+        response.setIngestMode(record.getIngestMode());
+        response.setParityStatus(record.getParityStatus());
+        response.setParityDetailJson(record.getParityDetailJson());
+        response.setRawDefinitionJson(record.getRawDefinitionJson());
+        response.setParitySummary(runtimeSyncParityService.parse(record.getParityDetailJson()));
         response.setSnapshotHash(record.getSnapshotHash());
         response.setSnapshotJson(record.getSnapshotJson());
         response.setDiffSummary(parseDiffSummary(record.getDiffJson()));
@@ -304,6 +342,10 @@ public class WorkflowRuntimeSyncService {
         PreviewContext context = new PreviewContext();
         context.setProjectCode(projectCode);
         context.setWorkflowCode(workflowCode);
+        context.setIngestMode(resolveIngestMode());
+        RuntimeSyncParitySummary defaultParitySummary = new RuntimeSyncParitySummary();
+        context.setParitySummary(defaultParitySummary);
+        context.setParityStatus(defaultParitySummary.getStatus());
 
         if (workflowCode == null || workflowCode <= 0) {
             context.getErrors().add(RuntimeSyncIssue.error(
@@ -311,20 +353,80 @@ public class WorkflowRuntimeSyncService {
             return context;
         }
 
-        RuntimeWorkflowDefinition definition;
-        try {
-            definition = runtimeDefinitionService.loadRuntimeDefinition(projectCode, workflowCode);
-        } catch (Exception ex) {
-            String code = RuntimeSyncErrorCodes.RUNTIME_WORKFLOW_NOT_FOUND;
-            String message = ex.getMessage();
-            if (StringUtils.hasText(message) && !message.contains("未找到")) {
-                code = RuntimeSyncErrorCodes.DEFINITION_FORMAT_UNSUPPORTED;
-            } else if (strictDefinitionError) {
-                code = RuntimeSyncErrorCodes.DEFINITION_FORMAT_UNSUPPORTED;
+        RuntimeWorkflowDefinition definition = null;
+        RuntimeWorkflowDefinition shadowDefinition = null;
+        boolean primaryFromExport = false;
+        String configuredMode = context.getIngestMode();
+        if (INGEST_MODE_LEGACY.equals(configuredMode)) {
+            try {
+                definition = runtimeDefinitionService.loadRuntimeDefinition(projectCode, workflowCode);
+            } catch (Exception ex) {
+                context.getErrors().add(RuntimeSyncIssue.error(
+                        resolveDefinitionErrorCode(ex.getMessage(), strictDefinitionError),
+                        ex.getMessage()));
+                return context;
             }
-            context.getErrors().add(RuntimeSyncIssue.error(code, ex.getMessage()));
+        } else {
+            try {
+                definition = runtimeDefinitionService.loadRuntimeDefinitionFromExport(projectCode, workflowCode);
+                primaryFromExport = true;
+            } catch (Exception exportEx) {
+                if (INGEST_MODE_EXPORT_ONLY.equals(configuredMode)) {
+                    context.getErrors().add(RuntimeSyncIssue.error(
+                            resolveDefinitionErrorCode(exportEx.getMessage(), strictDefinitionError),
+                            exportEx.getMessage()));
+                    return context;
+                }
+
+                RuntimeSyncIssue warning = RuntimeSyncIssue.warning(
+                        EXPORT_FALLBACK_WARNING_CODE,
+                        "导出 JSON 解析失败，已自动回退到旧路径: " + exportEx.getMessage());
+                context.getWarnings().add(warning);
+                context.setIngestMode(INGEST_MODE_LEGACY);
+                try {
+                    definition = runtimeDefinitionService.loadRuntimeDefinition(projectCode, workflowCode);
+                } catch (Exception legacyEx) {
+                    context.getErrors().add(RuntimeSyncIssue.error(
+                            resolveDefinitionErrorCode(legacyEx.getMessage(), strictDefinitionError),
+                            legacyEx.getMessage()));
+                    return context;
+                }
+            }
+        }
+
+        if (definition != null && primaryFromExport && INGEST_MODE_EXPORT_SHADOW.equals(configuredMode)) {
+            try {
+                shadowDefinition = runtimeDefinitionService.loadRuntimeDefinition(projectCode, workflowCode);
+            } catch (Exception shadowEx) {
+                context.getWarnings().add(RuntimeSyncIssue.warning(
+                        EXPORT_FALLBACK_WARNING_CODE,
+                        "影子路径解析失败，无法执行一致性校验: " + shadowEx.getMessage()));
+            }
+
+            if (shadowDefinition != null) {
+                RuntimeSyncParitySummary paritySummary = runtimeSyncParityService.compare(definition, shadowDefinition);
+                context.setParitySummary(paritySummary);
+                context.setParityStatus(paritySummary != null
+                        ? paritySummary.getStatus()
+                        : RuntimeSyncParityService.STATUS_NOT_CHECKED);
+                if (runtimeSyncParityService.isInconsistent(context.getParityStatus())) {
+                    RuntimeSyncIssue warning = RuntimeSyncIssue.warning(
+                            RuntimeSyncErrorCodes.DEFINITION_PARITY_MISMATCH,
+                            "导出定义与旧路径解析结果不一致，预检可继续，但执行同步将被阻断");
+                    warning.setWorkflowCode(definition.getWorkflowCode());
+                    warning.setWorkflowName(definition.getWorkflowName());
+                    context.getWarnings().add(warning);
+                }
+            }
+        }
+
+        if (definition == null) {
+            context.getErrors().add(RuntimeSyncIssue.error(
+                    RuntimeSyncErrorCodes.DEFINITION_FORMAT_UNSUPPORTED,
+                    "运行态定义解析结果为空"));
             return context;
         }
+
         context.setDefinition(definition);
         context.setProjectCode(definition.getProjectCode());
         context.setWorkflowCode(definition.getWorkflowCode());
@@ -353,6 +455,16 @@ public class WorkflowRuntimeSyncService {
         buildEdgeWarnings(context);
         buildPreviewArtifacts(context);
         return context;
+    }
+
+    private String resolveDefinitionErrorCode(String message, boolean strictDefinitionError) {
+        String code = RuntimeSyncErrorCodes.RUNTIME_WORKFLOW_NOT_FOUND;
+        if (StringUtils.hasText(message) && !message.contains("未找到")) {
+            code = RuntimeSyncErrorCodes.DEFINITION_FORMAT_UNSUPPORTED;
+        } else if (strictDefinitionError) {
+            code = RuntimeSyncErrorCodes.DEFINITION_FORMAT_UNSUPPORTED;
+        }
+        return code;
     }
 
     private void normalizeAndValidateTasks(PreviewContext context) {
@@ -683,6 +795,10 @@ public class WorkflowRuntimeSyncService {
         syncRecord.setSnapshotJson(context.getSnapshot().getSnapshotJson());
         syncRecord.setDiffJson(toJson(context.getDiffSummary()));
         syncRecord.setVersionId(workflow.getCurrentVersionId());
+        syncRecord.setIngestMode(context.getIngestMode());
+        syncRecord.setParityStatus(context.getParityStatus());
+        syncRecord.setParityDetailJson(runtimeSyncParityService.toJson(context.getParitySummary()));
+        syncRecord.setRawDefinitionJson(context.getDefinition() != null ? context.getDefinition().getRawDefinitionJson() : null);
         syncRecord.setStatus("success");
         syncRecord.setOperator(operator);
         workflowRuntimeSyncRecordMapper.insert(syncRecord);
@@ -811,6 +927,12 @@ public class WorkflowRuntimeSyncService {
         if (context != null && context.getDiffSummary() != null) {
             record.setDiffJson(toJson(context.getDiffSummary()));
         }
+        record.setIngestMode(context != null ? context.getIngestMode() : resolveIngestMode());
+        record.setParityStatus(context != null ? context.getParityStatus() : RuntimeSyncParityService.STATUS_NOT_CHECKED);
+        record.setParityDetailJson(runtimeSyncParityService.toJson(context != null ? context.getParitySummary() : null));
+        record.setRawDefinitionJson(context != null && context.getDefinition() != null
+                ? context.getDefinition().getRawDefinitionJson()
+                : null);
         record.setStatus("failed");
         record.setErrorCode(errorCode);
         record.setErrorMessage(errorMessage);
@@ -1079,6 +1201,18 @@ public class WorkflowRuntimeSyncService {
         return "runtime-sync";
     }
 
+    private String resolveIngestMode() {
+        String configured = StringUtils.hasText(runtimeSyncIngestMode)
+                ? runtimeSyncIngestMode.trim().toLowerCase(Locale.ROOT)
+                : INGEST_MODE_EXPORT_SHADOW;
+        if (INGEST_MODE_LEGACY.equals(configured)
+                || INGEST_MODE_EXPORT_SHADOW.equals(configured)
+                || INGEST_MODE_EXPORT_ONLY.equals(configured)) {
+            return configured;
+        }
+        return INGEST_MODE_EXPORT_SHADOW;
+    }
+
     private RuntimeSyncRecordListItem toSyncRecordListItem(WorkflowRuntimeSyncRecord record) {
         RuntimeSyncRecordListItem item = new RuntimeSyncRecordListItem();
         item.setId(record.getId());
@@ -1087,6 +1221,8 @@ public class WorkflowRuntimeSyncService {
         item.setWorkflowCode(record.getWorkflowCode());
         item.setVersionId(record.getVersionId());
         item.setStatus(record.getStatus());
+        item.setIngestMode(record.getIngestMode());
+        item.setParityStatus(record.getParityStatus());
         item.setSnapshotHash(record.getSnapshotHash());
         item.setDiffSummary(parseDiffSummary(record.getDiffJson()));
         item.setErrorCode(record.getErrorCode());
@@ -1144,6 +1280,9 @@ public class WorkflowRuntimeSyncService {
     private static class PreviewContext {
         private Long projectCode;
         private Long workflowCode;
+        private String ingestMode = INGEST_MODE_EXPORT_SHADOW;
+        private String parityStatus = RuntimeSyncParityService.STATUS_NOT_CHECKED;
+        private RuntimeSyncParitySummary paritySummary;
         private RuntimeWorkflowDefinition definition;
         private DataWorkflow localWorkflow;
         private WorkflowRuntimeDiffService.RuntimeSnapshot snapshot;

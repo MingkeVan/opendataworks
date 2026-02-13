@@ -505,70 +505,105 @@
               description="暂无执行记录"
             />
           </el-tab-pane>
-          <el-tab-pane label="变更记录" name="changes">
+          <el-tab-pane label="版本历史" name="changes">
             <div class="change-toolbar">
-              <el-button v-if="changeMode === 'list'" type="primary" plain @click="openCompareWithLatest">
-                比较版本历史
-              </el-button>
-              <el-button v-else @click="backToPublishRecords">
-                返回记录列表
+              <el-button
+                v-if="changeMode === 'list'"
+                type="primary"
+                :disabled="!canCompareSelected"
+                @click="compareSelectedVersions"
+              >
+                比较所选版本
               </el-button>
             </div>
 
             <template v-if="changeMode === 'list'">
               <el-table
-                v-if="workflow?.publishRecords?.length"
-                :data="workflow.publishRecords"
+                v-if="versionHistoryRows.length"
+                ref="versionHistoryTableRef"
+                :data="versionHistoryRows"
                 border
                 size="small"
+                row-key="id"
+                @selection-change="handleVersionSelectionChange"
               >
-                <el-table-column prop="operation" label="操作" width="120">
+                <el-table-column
+                  type="selection"
+                  width="56"
+                  :selectable="isVersionSelectable"
+                />
+                <el-table-column label="版本" min-width="200">
                   <template #default="{ row }">
-                    {{ getOperationText(row.operation) }}
+                    <span class="version-label" :class="{ 'is-current': row.isCurrent }">
+                      {{ row.versionLabel }}
+                    </span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="status" label="状态" width="140">
-                  <template #default="{ row }">
-                    <el-tag size="small" :type="getPublishRecordStatusType(row.status)">
-                      {{ getPublishRecordStatusText(row.status) }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="versionId" label="版本ID" width="120" />
-                <el-table-column prop="operator" label="操作人" width="120" />
-                <el-table-column prop="createdAt" label="时间" width="170">
+                <el-table-column prop="createdAt" label="日期" width="180">
                   <template #default="{ row }">
                     {{ formatDateTime(row.createdAt) }}
                   </template>
                 </el-table-column>
-                <el-table-column prop="log" label="备注">
+                <el-table-column prop="createdBy" label="变更者" width="160">
                   <template #default="{ row }">
-                    {{ formatLog(row.log) }}
+                    {{ row.createdBy || '-' }}
                   </template>
                 </el-table-column>
-                <el-table-column label="操作" width="180" fixed="right">
+                <el-table-column label="状态" width="150">
+                  <template #default="{ row }">
+                    <el-button link type="primary" @click="openVersionPublishRecords(row)">
+                      <el-tag size="small" :type="row.statusType">
+                        {{ row.statusText }}
+                      </el-tag>
+                    </el-button>
+                  </template>
+                </el-table-column>
+                <el-table-column label="评论" min-width="220" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    {{ row.comment }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="行动" width="200" fixed="right" align="left">
                   <template #default="{ row }">
                     <el-button
                       link
                       type="primary"
-                      :disabled="!row.versionId"
-                      @click="viewVersionDiff(row)"
+                      :disabled="row.isCurrent"
+                      :loading="rollbackLoadingVersionId === Number(row.id)"
+                      @click="rollbackToVersion(row.id)"
                     >
-                      查看变化
+                      恢复
                     </el-button>
-                    <el-button
-                      link
-                      type="danger"
-                      :disabled="!row.versionId"
-                      :loading="rollbackLoadingVersionId === Number(row.versionId)"
-                      @click="rollbackToVersion(row.versionId)"
+                    <el-tooltip
+                      :disabled="!getVersionDeleteDisabledReason(row)"
+                      :content="getVersionDeleteDisabledReason(row)"
                     >
-                      恢复到该版本
-                    </el-button>
+                      <span>
+                        <el-button
+                          link
+                          type="danger"
+                          :disabled="Boolean(getVersionDeleteDisabledReason(row))"
+                          :loading="deleteLoadingVersionId === Number(row.id)"
+                          @click="deleteVersion(row)"
+                        >
+                          删除
+                        </el-button>
+                      </span>
+                    </el-tooltip>
                   </template>
                 </el-table-column>
               </el-table>
-              <el-empty v-else description="暂无发布记录" />
+              <el-empty v-else description="暂无版本记录" />
+
+              <div class="change-toolbar change-toolbar-bottom">
+                <el-button
+                  type="primary"
+                  :disabled="!canCompareSelected"
+                  @click="compareSelectedVersions"
+                >
+                  比较所选版本
+                </el-button>
+              </div>
             </template>
 
             <WorkflowVersionComparePanel
@@ -578,11 +613,8 @@
               :right-version-id="rightVersionId"
               :compare-result="versionCompareResult"
               :loading="compareLoading"
-              :rollback-loading-id="rollbackLoadingVersionId"
               @back="backToPublishRecords"
               @step="stepVersionCompare"
-              @select-right="selectRightVersion"
-              @rollback="rollbackFromBlock"
             />
           </el-tab-pane>
           <el-tab-pane label="全局变量" name="globals">
@@ -643,6 +675,49 @@
       </div>
     </el-card>
 
+    <el-dialog
+      v-model="versionPublishRecordDialogVisible"
+      :title="versionPublishRecordDialogTitle"
+      width="900px"
+    >
+      <el-table
+        v-if="activeVersionPublishRecords.length"
+        :data="activeVersionPublishRecords"
+        border
+        size="small"
+      >
+        <el-table-column label="版本" width="120">
+          <template #default="{ row }">
+            {{ renderVersionLabel(row.versionId) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="operation" label="操作" width="120">
+          <template #default="{ row }">
+            {{ getOperationText(row.operation) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="getPublishRecordStatusType(row.status)">
+              {{ getPublishRecordStatusText(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="operator" label="发布人" width="140" />
+        <el-table-column prop="createdAt" label="发布时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.createdAt) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="备注" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ formatLog(row.log) }}
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-else description="该版本暂无发布记录" />
+    </el-dialog>
+
     <WorkflowBackfillDialog
       v-model="backfillDialogVisible"
       :workflow="backfillTarget"
@@ -695,7 +770,13 @@ const compareLoading = ref(false)
 const versionCompareResult = ref(null)
 const leftVersionId = ref(null)
 const rightVersionId = ref(null)
+const versionHistoryTableRef = ref(null)
+const selectedHistoryVersions = ref([])
 const rollbackLoadingVersionId = ref(null)
+const deleteLoadingVersionId = ref(null)
+const versionPublishRecordDialogVisible = ref(false)
+const activeVersionPublishRecords = ref([])
+const activeVersionForRecords = ref(null)
 
 // Schedule states
 const scheduleFormRef = ref(null)
@@ -960,6 +1041,86 @@ const versionById = computed(() => {
   }, {})
 })
 
+const publishRecords = computed(() => workflow.value?.publishRecords || [])
+
+const publishRecordsSorted = computed(() => {
+  return [...publishRecords.value].sort((left, right) => {
+    const leftTs = dayjs(left?.createdAt).valueOf()
+    const rightTs = dayjs(right?.createdAt).valueOf()
+    if (leftTs !== rightTs) {
+      return rightTs - leftTs
+    }
+    return Number(right?.id || 0) - Number(left?.id || 0)
+  })
+})
+
+const publishRecordsByVersionId = computed(() => {
+  return publishRecordsSorted.value.reduce((acc, item) => {
+    const versionId = Number(item?.versionId)
+    if (!Number.isFinite(versionId)) {
+      return acc
+    }
+    if (!acc[versionId]) {
+      acc[versionId] = []
+    }
+    acc[versionId].push(item)
+    return acc
+  }, {})
+})
+
+const latestPublishRecordByVersionId = computed(() => {
+  return Object.entries(publishRecordsByVersionId.value).reduce((acc, [versionId, items]) => {
+    if (Array.isArray(items) && items.length) {
+      acc[Number(versionId)] = items[0]
+    }
+    return acc
+  }, {})
+})
+
+const lastSuccessfulPublishedVersionId = computed(() => {
+  const record = publishRecordsSorted.value.find((item) => {
+    return item?.status === 'success' && Number.isFinite(Number(item?.versionId))
+  })
+  return record ? Number(record.versionId) : null
+})
+
+const versionHistoryRows = computed(() => {
+  const currentVersionId = Number(workflow.value?.workflow?.currentVersionId)
+  return versionListDesc.value.map((version) => {
+    const versionId = Number(version?.id)
+    const latestRecord = Number.isFinite(versionId)
+      ? latestPublishRecordByVersionId.value[versionId]
+      : null
+    const statusType = latestRecord ? getPublishRecordStatusType(latestRecord.status) : 'info'
+    const statusText = latestRecord ? getPublishRecordStatusText(latestRecord.status) : '未发布'
+    const isCurrent = Number.isFinite(currentVersionId) && currentVersionId === versionId
+    return {
+      ...version,
+      isCurrent,
+      statusType,
+      statusText,
+      latestPublishRecord: latestRecord || null,
+      versionLabel: isCurrent ? `当前（版本 ${version.versionNo}）` : `版本 ${version.versionNo}`,
+      comment: version?.changeSummary || '-'
+    }
+  })
+})
+
+const selectedHistoryVersionIds = computed(() => {
+  return selectedHistoryVersions.value
+    .map((item) => Number(item?.id))
+    .filter((id) => Number.isFinite(id))
+})
+
+const canCompareSelected = computed(() => selectedHistoryVersionIds.value.length === 2)
+
+const versionPublishRecordDialogTitle = computed(() => {
+  const versionNo = activeVersionForRecords.value?.versionNo
+  return Number.isFinite(Number(versionNo))
+    ? `版本 ${versionNo} 发布记录`
+    : '发布记录'
+})
+
 const runtimeSyncPresetWorkflow = computed(() => {
   const wf = workflow.value?.workflow
   if (!wf?.workflowCode || !wf?.projectCode) {
@@ -1137,6 +1298,13 @@ const saveGlobalParams = async () => {
     }
 }
 
+const clearVersionHistorySelection = () => {
+  selectedHistoryVersions.value = []
+  nextTick(() => {
+    versionHistoryTableRef.value?.clearSelection()
+  })
+}
+
 const loadWorkflowDetail = async () => {
   const id = route.params.id
   if (!id) return
@@ -1167,6 +1335,7 @@ const loadWorkflowDetail = async () => {
 
     syncScheduleForm()
     syncPendingFlag(workflow.value?.workflow?.id, workflow.value?.publishRecords || [])
+    clearVersionHistorySelection()
   } catch (error) {
     console.error('加载工作流详情失败', error)
     ElMessage.error('加载工作流详情失败')
@@ -1283,6 +1452,18 @@ const formatDateTime = (value) => {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'
 }
 
+const renderVersionLabel = (versionId) => {
+  const id = Number(versionId)
+  if (!Number.isFinite(id)) {
+    return '-'
+  }
+  const version = versionById.value[id]
+  if (version?.versionNo !== null && version?.versionNo !== undefined) {
+    return `v${version.versionNo}`
+  }
+  return `#${id}`
+}
+
 const syncScheduleForm = () => {
   const wf = workflow.value?.workflow
   if (!wf) return
@@ -1375,6 +1556,37 @@ const backToPublishRecords = () => {
   changeMode.value = 'list'
 }
 
+const isVersionSelectable = (row) => {
+  const versionId = Number(row?.id)
+  if (!Number.isFinite(versionId)) {
+    return false
+  }
+  if (selectedHistoryVersionIds.value.length < 2) {
+    return true
+  }
+  return selectedHistoryVersionIds.value.includes(versionId)
+}
+
+const handleVersionSelectionChange = (rows) => {
+  if (!Array.isArray(rows)) {
+    selectedHistoryVersions.value = []
+    return
+  }
+  if (rows.length <= 2) {
+    selectedHistoryVersions.value = rows
+    return
+  }
+  ElMessage.warning('最多选择两个版本进行比较')
+  const keepRows = rows.slice(0, 2)
+  selectedHistoryVersions.value = keepRows
+  nextTick(() => {
+    versionHistoryTableRef.value?.clearSelection()
+    keepRows.forEach((item) => {
+      versionHistoryTableRef.value?.toggleRowSelection(item, true)
+    })
+  })
+}
+
 const resolveLeftVersionId = (targetRightVersionId) => {
   const rightId = Number(targetRightVersionId)
   const index = versionList.value.findIndex((item) => Number(item.id) === rightId)
@@ -1409,31 +1621,22 @@ const loadVersionCompare = async (leftId, rightId) => {
   }
 }
 
-const openCompareWithLatest = async () => {
-  if (!versionList.value.length) {
-    ElMessage.warning('暂无可比对版本')
+const compareSelectedVersions = async () => {
+  if (!canCompareSelected.value) {
+    ElMessage.warning('请选择两个版本进行比较')
     return
   }
-  const latest = versionList.value[versionList.value.length - 1]
-  const left = resolveLeftVersionId(latest.id)
-  await loadVersionCompare(left, latest.id)
-}
-
-const viewVersionDiff = async (row) => {
-  if (!row?.versionId) {
-    ElMessage.warning('该记录未关联版本')
-    return
-  }
-  const left = resolveLeftVersionId(row.versionId)
-  await loadVersionCompare(left, row.versionId)
-}
-
-const selectRightVersion = async (version) => {
-  if (!version?.id) {
-    return
-  }
-  const left = resolveLeftVersionId(version.id)
-  await loadVersionCompare(left, version.id)
+  const sorted = [...selectedHistoryVersions.value].sort((left, right) => {
+    const leftNo = Number(left?.versionNo || 0)
+    const rightNo = Number(right?.versionNo || 0)
+    if (leftNo !== rightNo) {
+      return leftNo - rightNo
+    }
+    return Number(left?.id || 0) - Number(right?.id || 0)
+  })
+  const leftVersion = sorted[0]
+  const rightVersion = sorted[1]
+  await loadVersionCompare(leftVersion?.id || null, rightVersion?.id || null)
 }
 
 const stepVersionCompare = async (direction) => {
@@ -1466,6 +1669,17 @@ const stepVersionCompare = async (direction) => {
   await loadVersionCompare(left, right.id)
 }
 
+const openVersionPublishRecords = (row) => {
+  activeVersionForRecords.value = row || null
+  const versionId = Number(row?.id)
+  if (Number.isFinite(versionId)) {
+    activeVersionPublishRecords.value = publishRecordsByVersionId.value[versionId] || []
+  } else {
+    activeVersionPublishRecords.value = []
+  }
+  versionPublishRecordDialogVisible.value = true
+}
+
 const rollbackToVersion = async (versionId) => {
   const wf = workflow.value?.workflow
   const normalizedVersionId = Number(versionId)
@@ -1473,10 +1687,10 @@ const rollbackToVersion = async (versionId) => {
     return
   }
   const version = versionById.value[normalizedVersionId]
-  const label = version ? `v${version.versionNo}` : `#${versionId}`
+  const label = version ? `版本 ${version.versionNo}` : `#${versionId}`
   try {
     await ElMessageBox.confirm(
-      `确认恢复到版本 ${label} 吗？恢复后会生成一个新版本。`,
+      `确认恢复到${label}吗？恢复后会生成一个新版本。`,
       '确认恢复',
       {
         type: 'warning',
@@ -1504,8 +1718,59 @@ const rollbackToVersion = async (versionId) => {
   }
 }
 
-const rollbackFromBlock = async (version) => {
-  await rollbackToVersion(version?.id)
+const getVersionDeleteDisabledReason = (row) => {
+  const versionId = Number(row?.id)
+  if (!Number.isFinite(versionId)) {
+    return '无效版本'
+  }
+  const currentVersionId = Number(workflow.value?.workflow?.currentVersionId)
+  if (Number.isFinite(currentVersionId) && currentVersionId === versionId) {
+    return '当前版本不可删除'
+  }
+  if (lastSuccessfulPublishedVersionId.value !== null
+    && versionId === Number(lastSuccessfulPublishedVersionId.value)) {
+    return '最后一次成功发布版本不可删除'
+  }
+  return ''
+}
+
+const deleteVersion = async (row) => {
+  const wf = workflow.value?.workflow
+  const versionId = Number(row?.id)
+  if (!wf?.id || !Number.isFinite(versionId)) {
+    return
+  }
+  const disabledReason = getVersionDeleteDisabledReason(row)
+  if (disabledReason) {
+    ElMessage.warning(disabledReason)
+    return
+  }
+  const label = row?.versionNo ? `版本 ${row.versionNo}` : `#${versionId}`
+  try {
+    await ElMessageBox.confirm(
+      `确认删除${label}吗？删除后不可恢复。`,
+      '确认删除版本',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消'
+      }
+    )
+  } catch {
+    return
+  }
+
+  deleteLoadingVersionId.value = versionId
+  try {
+    await workflowApi.deleteVersion(wf.id, versionId)
+    ElMessage.success('版本删除成功')
+    await loadWorkflowDetail()
+  } catch (error) {
+    console.error('删除版本失败', error)
+    ElMessage.error(error.message || '删除版本失败')
+  } finally {
+    deleteLoadingVersionId.value = null
+  }
 }
 
 const buildDolphinWorkflowUrl = (workflow) => {
@@ -1883,17 +2148,39 @@ onMounted(() => {
 .dolphin-code-cell {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
+  width: 100%;
 }
 
 .dolphin-code-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 12px;
+  width: 100%;
 }
 
 .change-toolbar {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
   margin-bottom: 10px;
+}
+
+.change-toolbar-bottom {
+  margin-top: 10px;
+  margin-bottom: 0;
+}
+
+.version-label {
+  color: #409eff;
+  font-weight: 500;
+}
+
+.version-label.is-current {
+  color: #303133;
+  font-weight: 600;
 }
 
 .basic-info-section {

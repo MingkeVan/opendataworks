@@ -11,13 +11,18 @@ import com.onedata.portal.dto.workflow.WorkflowVersionCompareResponse;
 import com.onedata.portal.dto.workflow.WorkflowVersionDiffSection;
 import com.onedata.portal.dto.workflow.WorkflowVersionDiffSummary;
 import com.onedata.portal.dto.workflow.WorkflowVersionErrorCodes;
+import com.onedata.portal.dto.workflow.WorkflowVersionDeleteResponse;
 import com.onedata.portal.dto.workflow.WorkflowVersionRollbackRequest;
 import com.onedata.portal.dto.workflow.WorkflowVersionRollbackResponse;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
+import com.onedata.portal.entity.WorkflowPublishRecord;
+import com.onedata.portal.entity.WorkflowRuntimeSyncRecord;
 import com.onedata.portal.entity.WorkflowVersion;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
+import com.onedata.portal.mapper.WorkflowPublishRecordMapper;
+import com.onedata.portal.mapper.WorkflowRuntimeSyncRecordMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -30,12 +35,14 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -53,6 +60,8 @@ public class WorkflowVersionOperationService {
     private final WorkflowVersionMapper workflowVersionMapper;
     private final DataWorkflowMapper dataWorkflowMapper;
     private final DataTaskMapper dataTaskMapper;
+    private final WorkflowPublishRecordMapper workflowPublishRecordMapper;
+    private final WorkflowRuntimeSyncRecordMapper workflowRuntimeSyncRecordMapper;
     private final DataTaskService dataTaskService;
     private final WorkflowService workflowService;
     private final ObjectMapper objectMapper;
@@ -107,6 +116,7 @@ public class WorkflowVersionOperationService {
         summary.setModified(totalCount(response.getModified()));
         summary.setUnchanged(totalCount(response.getUnchanged()));
         response.setChanged(summary.getAdded() > 0 || summary.getRemoved() > 0 || summary.getModified() > 0);
+        response.setRawDiff(buildUnifiedRawDiff(left.getRoot(), right.getRoot(), leftVersion, rightVersion));
         return response;
     }
 
@@ -158,6 +168,58 @@ public class WorkflowVersionOperationService {
         response.setNewVersionNo(newVersion.getVersionNo());
         response.setRollbackFromVersionId(targetVersion.getId());
         response.setRollbackFromVersionNo(targetVersion.getVersionNo());
+        return response;
+    }
+
+    @Transactional
+    public WorkflowVersionDeleteResponse deleteVersion(Long workflowId, Long versionId) {
+        DataWorkflow workflow = dataWorkflowMapper.selectById(workflowId);
+        if (workflow == null) {
+            throw badRequest(WorkflowVersionErrorCodes.VERSION_NOT_FOUND, "工作流不存在: " + workflowId);
+        }
+
+        WorkflowVersion targetVersion = requireVersion(workflowId, versionId);
+        Long lastSuccessfulPublishedVersionId = resolveLastSuccessfulPublishedVersionId(workflowId);
+        boolean isCurrentVersion = Objects.equals(workflow.getCurrentVersionId(), versionId);
+
+        if (isCurrentVersion) {
+            throw badRequest(WorkflowVersionErrorCodes.VERSION_DELETE_FORBIDDEN, "当前版本不可删除");
+        }
+        if (Objects.equals(lastSuccessfulPublishedVersionId, versionId)) {
+            throw badRequest(WorkflowVersionErrorCodes.VERSION_DELETE_FORBIDDEN, "最后一次成功发布版本不可删除");
+        }
+
+        workflowPublishRecordMapper.delete(
+                Wrappers.<WorkflowPublishRecord>lambdaQuery()
+                        .eq(WorkflowPublishRecord::getWorkflowId, workflowId)
+                        .eq(WorkflowPublishRecord::getVersionId, versionId));
+
+        workflowRuntimeSyncRecordMapper.update(
+                null,
+                Wrappers.<WorkflowRuntimeSyncRecord>lambdaUpdate()
+                        .eq(WorkflowRuntimeSyncRecord::getWorkflowId, workflowId)
+                        .eq(WorkflowRuntimeSyncRecord::getVersionId, versionId)
+                        .set(WorkflowRuntimeSyncRecord::getVersionId, null));
+
+        workflowVersionMapper.update(
+                null,
+                Wrappers.<WorkflowVersion>lambdaUpdate()
+                        .eq(WorkflowVersion::getWorkflowId, workflowId)
+                        .eq(WorkflowVersion::getRollbackFromVersionId, versionId)
+                        .set(WorkflowVersion::getRollbackFromVersionId, null));
+
+        int deleted = workflowVersionMapper.delete(
+                Wrappers.<WorkflowVersion>lambdaQuery()
+                        .eq(WorkflowVersion::getId, versionId)
+                        .eq(WorkflowVersion::getWorkflowId, workflowId));
+        if (deleted <= 0) {
+            throw badRequest(WorkflowVersionErrorCodes.VERSION_DELETE_FAILED, "删除版本失败: " + versionId);
+        }
+
+        WorkflowVersionDeleteResponse response = new WorkflowVersionDeleteResponse();
+        response.setWorkflowId(workflowId);
+        response.setDeletedVersionId(versionId);
+        response.setDeletedVersionNo(targetVersion.getVersionNo());
         return response;
     }
 
@@ -349,6 +411,108 @@ public class WorkflowVersionOperationService {
                 + section.getTasks().size()
                 + section.getEdges().size()
                 + section.getSchedules().size();
+    }
+
+    private String buildUnifiedRawDiff(JsonNode leftRoot,
+                                       JsonNode rightRoot,
+                                       WorkflowVersion leftVersion,
+                                       WorkflowVersion rightVersion) {
+        String leftText = toPrettyJson(leftRoot);
+        String rightText = toPrettyJson(rightRoot);
+
+        List<String> leftLines = Arrays.asList(leftText.split("\\R", -1));
+        List<String> rightLines = Arrays.asList(rightText.split("\\R", -1));
+        int[][] lcs = buildLcsMatrix(leftLines, rightLines);
+        LinkedList<String> diffLines = buildDiffLines(leftLines, rightLines, lcs);
+
+        String leftLabel = leftVersion != null && leftVersion.getVersionNo() != null
+                ? "v" + leftVersion.getVersionNo()
+                : "empty";
+        String rightLabel = rightVersion != null && rightVersion.getVersionNo() != null
+                ? "v" + rightVersion.getVersionNo()
+                : "unknown";
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("--- ").append(leftLabel).append('\n');
+        builder.append("+++ ").append(rightLabel).append('\n');
+        builder.append("@@ JSON Snapshot @@").append('\n');
+        for (String line : diffLines) {
+            builder.append(line).append('\n');
+        }
+        return builder.toString();
+    }
+
+    private int[][] buildLcsMatrix(List<String> leftLines, List<String> rightLines) {
+        int leftSize = leftLines.size();
+        int rightSize = rightLines.size();
+        int[][] matrix = new int[leftSize + 1][rightSize + 1];
+        for (int i = 1; i <= leftSize; i++) {
+            for (int j = 1; j <= rightSize; j++) {
+                if (Objects.equals(leftLines.get(i - 1), rightLines.get(j - 1))) {
+                    matrix[i][j] = matrix[i - 1][j - 1] + 1;
+                } else {
+                    matrix[i][j] = Math.max(matrix[i - 1][j], matrix[i][j - 1]);
+                }
+            }
+        }
+        return matrix;
+    }
+
+    private LinkedList<String> buildDiffLines(List<String> leftLines,
+                                              List<String> rightLines,
+                                              int[][] lcsMatrix) {
+        int i = leftLines.size();
+        int j = rightLines.size();
+        LinkedList<String> diffLines = new LinkedList<>();
+        while (i > 0 && j > 0) {
+            String leftLine = leftLines.get(i - 1);
+            String rightLine = rightLines.get(j - 1);
+            if (Objects.equals(leftLine, rightLine)) {
+                diffLines.addFirst(" " + leftLine);
+                i--;
+                j--;
+                continue;
+            }
+            if (lcsMatrix[i - 1][j] >= lcsMatrix[i][j - 1]) {
+                diffLines.addFirst("-" + leftLine);
+                i--;
+            } else {
+                diffLines.addFirst("+" + rightLine);
+                j--;
+            }
+        }
+        while (i > 0) {
+            diffLines.addFirst("-" + leftLines.get(i - 1));
+            i--;
+        }
+        while (j > 0) {
+            diffLines.addFirst("+" + rightLines.get(j - 1));
+            j--;
+        }
+        return diffLines;
+    }
+
+    private String toPrettyJson(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return "{}";
+        }
+        try {
+            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(node);
+        } catch (Exception ex) {
+            return node.toString();
+        }
+    }
+
+    private Long resolveLastSuccessfulPublishedVersionId(Long workflowId) {
+        WorkflowPublishRecord latestSuccess = workflowPublishRecordMapper.selectOne(
+                Wrappers.<WorkflowPublishRecord>lambdaQuery()
+                        .eq(WorkflowPublishRecord::getWorkflowId, workflowId)
+                        .eq(WorkflowPublishRecord::getStatus, "success")
+                        .isNotNull(WorkflowPublishRecord::getVersionId)
+                        .orderByDesc(WorkflowPublishRecord::getCreatedAt)
+                        .orderByDesc(WorkflowPublishRecord::getId)
+                        .last("limit 1"));
+        return latestSuccess != null ? latestSuccess.getVersionId() : null;
     }
 
     private WorkflowVersion requireVersion(Long workflowId, Long versionId) {

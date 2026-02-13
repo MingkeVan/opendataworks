@@ -19,11 +19,6 @@
       </div>
       <div class="version-meta">{{ formatDateTime(version.createdAt) }}</div>
       <div class="version-meta">{{ version.createdBy || '-' }}</div>
-      <div class="version-actions" @click.stop>
-        <el-button link type="danger" size="small" :loading="rollbackLoadingId === version.id" @click="$emit('rollback', version)">
-          恢复到此版本
-        </el-button>
-      </div>
     </div>
   </div>
 </template>
@@ -43,14 +38,10 @@ const props = defineProps({
   rightVersionId: {
     type: Number,
     default: null
-  },
-  rollbackLoadingId: {
-    type: Number,
-    default: null
   }
 })
 
-const emit = defineEmits(['select-right', 'rollback'])
+const emit = defineEmits(['select-right'])
 
 const handleSelect = (version) => {
   if (!version?.id) {
@@ -110,9 +101,5 @@ const formatDateTime = (value) => {
   font-size: 12px;
   color: #909399;
   line-height: 1.5;
-}
-
-.version-actions {
-  margin-top: 6px;
 }
 </style>

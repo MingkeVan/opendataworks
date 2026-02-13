@@ -61,4 +61,5 @@ auth:
 
 workflow:
   runtime-sync:
-    enabled: false
+    enabled: true
+    ingest-mode: export_shadow

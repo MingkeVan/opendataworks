@@ -13,6 +13,21 @@ public class RuntimeSyncExecuteResponse {
 
     private Boolean success = false;
 
+    /**
+     * 运行态定义采集模式: legacy/export_shadow/export_only
+     */
+    private String ingestMode;
+
+    /**
+     * 一致性状态: not_checked/consistent/inconsistent
+     */
+    private String parityStatus = "not_checked";
+
+    /**
+     * 导出路径与旧路径一致性摘要
+     */
+    private RuntimeSyncParitySummary paritySummary;
+
     private Long workflowId;
 
     private Integer versionNo;
