@@ -6,6 +6,7 @@ import com.onedata.portal.dto.workflow.runtime.RuntimeDiffSummary;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncErrorCodes;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncExecuteRequest;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncExecuteResponse;
+import com.onedata.portal.dto.workflow.runtime.RuntimeSyncParitySummary;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncPreviewRequest;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncPreviewResponse;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskDefinition;
@@ -54,6 +55,9 @@ class WorkflowRuntimeSyncServicePreviewTest {
     private WorkflowRuntimeDiffService runtimeDiffService;
 
     @Mock
+    private RuntimeSyncParityService runtimeSyncParityService;
+
+    @Mock
     private SqlTableMatcherService sqlTableMatcherService;
 
     @Mock
@@ -100,6 +104,7 @@ class WorkflowRuntimeSyncServicePreviewTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(service, "runtimeSyncEnabled", true);
+        ReflectionTestUtils.setField(service, "runtimeSyncIngestMode", "legacy");
 
         WorkflowRuntimeDiffService.RuntimeSnapshot snapshot = new WorkflowRuntimeDiffService.RuntimeSnapshot();
         snapshot.setSnapshotHash("hash");
@@ -107,6 +112,12 @@ class WorkflowRuntimeSyncServicePreviewTest {
         snapshot.setSnapshotNode(new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode());
         lenient().when(runtimeDiffService.buildSnapshot(any(), any())).thenReturn(snapshot);
         lenient().when(runtimeDiffService.buildDiff(any(), any())).thenReturn(new RuntimeDiffSummary());
+        RuntimeSyncParitySummary paritySummary = new RuntimeSyncParitySummary();
+        paritySummary.setStatus(RuntimeSyncParityService.STATUS_NOT_CHECKED);
+        lenient().when(runtimeSyncParityService.compare(any(), any())).thenReturn(paritySummary);
+        lenient().when(runtimeSyncParityService.isInconsistent(anyString())).thenReturn(false);
+        lenient().when(runtimeSyncParityService.toJson(any())).thenReturn(null);
+        lenient().when(runtimeSyncParityService.parse(anyString())).thenReturn(null);
 
         lenient().when(dataTaskMapper.selectList(any())).thenReturn(Collections.emptyList());
         lenient().when(dataWorkflowMapper.selectOne(any())).thenReturn(null);
@@ -209,6 +220,80 @@ class WorkflowRuntimeSyncServicePreviewTest {
         assertTrue(response.getErrors().stream()
                 .anyMatch(issue -> RuntimeSyncErrorCodes.EDGE_MISMATCH_CONFIRM_REQUIRED.equals(issue.getCode())));
         assertTrue(response.getEdgeMismatchDetail() != null);
+    }
+
+    @Test
+    void previewShouldAllowButWarnWhenParityMismatchExists() {
+        ReflectionTestUtils.setField(service, "runtimeSyncIngestMode", "export_shadow");
+
+        RuntimeWorkflowDefinition exportDefinition = baseDefinition();
+        RuntimeTaskDefinition task = sqlTask(1L, "task_a", "SELECT * FROM dwd.t1", 10L);
+        exportDefinition.setTasks(Collections.singletonList(task));
+        exportDefinition.setExplicitEdges(Collections.emptyList());
+
+        RuntimeWorkflowDefinition legacyDefinition = baseDefinition();
+        RuntimeTaskDefinition legacyTask = sqlTask(1L, "task_a_legacy", "SELECT * FROM dwd.t1", 10L);
+        legacyDefinition.setTasks(Collections.singletonList(legacyTask));
+        legacyDefinition.setExplicitEdges(Collections.emptyList());
+
+        RuntimeSyncParitySummary paritySummary = new RuntimeSyncParitySummary();
+        paritySummary.setStatus(RuntimeSyncParityService.STATUS_INCONSISTENT);
+        paritySummary.setChanged(true);
+        paritySummary.setWorkflowFieldDiffCount(1);
+
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 1001L)).thenReturn(exportDefinition);
+        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(legacyDefinition);
+        when(runtimeSyncParityService.compare(any(), any())).thenReturn(paritySummary);
+        when(runtimeSyncParityService.isInconsistent(eq(RuntimeSyncParityService.STATUS_INCONSISTENT))).thenReturn(true);
+        when(sqlTableMatcherService.analyze(eq(task.getSql()), eq("SQL"))).thenReturn(matchedAnalyze(11L, 22L));
+
+        RuntimeSyncPreviewRequest request = new RuntimeSyncPreviewRequest();
+        request.setProjectCode(1L);
+        request.setWorkflowCode(1001L);
+        RuntimeSyncPreviewResponse response = service.preview(request);
+
+        assertTrue(response.getCanSync());
+        assertEquals(RuntimeSyncParityService.STATUS_INCONSISTENT, response.getParityStatus());
+        assertTrue(response.getWarnings().stream()
+                .anyMatch(issue -> RuntimeSyncErrorCodes.DEFINITION_PARITY_MISMATCH.equals(issue.getCode())));
+    }
+
+    @Test
+    void syncShouldBlockWhenParityMismatchExists() {
+        ReflectionTestUtils.setField(service, "runtimeSyncIngestMode", "export_shadow");
+
+        RuntimeWorkflowDefinition exportDefinition = baseDefinition();
+        RuntimeTaskDefinition task = sqlTask(1L, "task_a", "SELECT * FROM dwd.t1", 10L);
+        exportDefinition.setTasks(Collections.singletonList(task));
+        exportDefinition.setExplicitEdges(Collections.emptyList());
+
+        RuntimeWorkflowDefinition legacyDefinition = baseDefinition();
+        RuntimeTaskDefinition legacyTask = sqlTask(1L, "task_a_legacy", "SELECT * FROM dwd.t1", 10L);
+        legacyDefinition.setTasks(Collections.singletonList(legacyTask));
+        legacyDefinition.setExplicitEdges(Collections.emptyList());
+
+        RuntimeSyncParitySummary paritySummary = new RuntimeSyncParitySummary();
+        paritySummary.setStatus(RuntimeSyncParityService.STATUS_INCONSISTENT);
+        paritySummary.setChanged(true);
+        paritySummary.setWorkflowFieldDiffCount(1);
+
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 1001L)).thenReturn(exportDefinition);
+        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(legacyDefinition);
+        when(runtimeSyncParityService.compare(any(), any())).thenReturn(paritySummary);
+        when(runtimeSyncParityService.isInconsistent(eq(RuntimeSyncParityService.STATUS_INCONSISTENT))).thenReturn(true);
+        when(sqlTableMatcherService.analyze(eq(task.getSql()), eq("SQL"))).thenReturn(matchedAnalyze(11L, 22L));
+
+        RuntimeSyncExecuteRequest request = new RuntimeSyncExecuteRequest();
+        request.setProjectCode(1L);
+        request.setWorkflowCode(1001L);
+        request.setOperator("tester");
+        request.setConfirmEdgeMismatch(true);
+
+        RuntimeSyncExecuteResponse response = service.sync(request);
+
+        assertFalse(Boolean.TRUE.equals(response.getSuccess()));
+        assertTrue(response.getErrors().stream()
+                .anyMatch(issue -> RuntimeSyncErrorCodes.DEFINITION_PARITY_MISMATCH.equals(issue.getCode())));
     }
 
     private RuntimeWorkflowDefinition baseDefinition() {

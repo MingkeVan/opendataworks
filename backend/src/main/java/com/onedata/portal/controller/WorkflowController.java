@@ -13,6 +13,7 @@ import com.onedata.portal.dto.workflow.WorkflowPublishRequest;
 import com.onedata.portal.dto.workflow.WorkflowQueryRequest;
 import com.onedata.portal.dto.workflow.WorkflowVersionRollbackRequest;
 import com.onedata.portal.dto.workflow.WorkflowVersionRollbackResponse;
+import com.onedata.portal.dto.workflow.WorkflowVersionDeleteResponse;
 import com.onedata.portal.dto.workflow.WorkflowScheduleRequest;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncRecordDetailResponse;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncRecordListItem;
@@ -81,6 +82,12 @@ public class WorkflowController {
                                                                    @PathVariable Long versionId,
                                                                    @RequestBody WorkflowVersionRollbackRequest request) {
         return Result.success(workflowVersionOperationService.rollback(id, versionId, request));
+    }
+
+    @DeleteMapping("/{id}/versions/{versionId}")
+    public Result<WorkflowVersionDeleteResponse> deleteVersion(@PathVariable Long id,
+                                                               @PathVariable Long versionId) {
+        return Result.success(workflowVersionOperationService.deleteVersion(id, versionId));
     }
 
     @PostMapping

@@ -113,6 +113,77 @@ public class DolphinRuntimeDefinitionService {
         return result;
     }
 
+    /**
+     * 通过 Dolphin 导出 JSON 获取运行态定义（导出主路）。
+     */
+    public RuntimeWorkflowDefinition loadRuntimeDefinitionFromExport(Long projectCode, Long workflowCode) {
+        if (workflowCode == null || workflowCode <= 0) {
+            throw new IllegalArgumentException("workflowCode 不能为空");
+        }
+
+        long resolvedProjectCode = resolveProjectCode(projectCode);
+        JsonNode exported = openApiClient.exportDefinitionByCode(resolvedProjectCode, workflowCode);
+        if (exported == null || exported.isNull() || exported.isMissingNode()) {
+            throw new IllegalStateException("导出工作流定义为空");
+        }
+
+        JsonNode definition = readNode(exported, "workflowDefinition", "processDefinition");
+        if (definition == null || definition.isNull() || definition.isMissingNode()) {
+            definition = unwrapDefinition(exported);
+        }
+        if (definition == null || definition.isNull() || definition.isMissingNode()) {
+            throw new IllegalStateException("导出工作流定义缺少 workflowDefinition");
+        }
+
+        Long exportedWorkflowCode = readLong(definition, "code", "workflowCode", "processDefinitionCode");
+        long resolvedWorkflowCode = exportedWorkflowCode != null && exportedWorkflowCode > 0
+                ? exportedWorkflowCode
+                : workflowCode;
+
+        RuntimeWorkflowDefinition result = new RuntimeWorkflowDefinition();
+        result.setProjectCode(resolvedProjectCode);
+        result.setWorkflowCode(resolvedWorkflowCode);
+        result.setWorkflowName(readText(definition, "name", "workflowName"));
+        result.setDescription(readText(definition, "description", "desc"));
+        result.setReleaseState(readText(definition, "releaseState", "publishStatus", "scheduleReleaseState"));
+        result.setGlobalParams(normalizeJsonField(definition.get("globalParams")));
+
+        RuntimeWorkflowSchedule schedule = parseScheduleNode(readNode(exported, "schedule"));
+        if (schedule == null || schedule.getScheduleId() == null || schedule.getScheduleId() <= 0) {
+            schedule = extractSchedule(definition, resolvedWorkflowCode);
+        }
+        result.setSchedule(schedule);
+
+        List<RuntimeTaskDefinition> tasks = parseTaskDefinitionsFromNode(readNode(exported, "taskDefinitionList"));
+        if (tasks.isEmpty()) {
+            tasks = parseTaskDefinitions(definition);
+        }
+
+        List<RuntimeTaskEdge> explicitEdges = parseTaskEdgesFromNode(
+                readNode(exported, "workflowTaskRelationList", "processTaskRelationList"));
+        if (explicitEdges.isEmpty()) {
+            explicitEdges = parseTaskEdges(definition);
+        }
+
+        // 导出格式异常时，最小化兜底到现有查询接口，保证可解析性
+        JsonNode tasksNode = openApiClient.getProcessDefinitionTasks(resolvedProjectCode, resolvedWorkflowCode);
+        if (tasks.isEmpty()) {
+            tasks = parseTaskDefinitionsFromNode(tasksNode);
+        }
+        if (explicitEdges.isEmpty()) {
+            explicitEdges = parseTaskEdgesFromNode(tasksNode);
+        }
+        if (tasks.isEmpty()) {
+            JsonNode taskDefinitionList = openApiClient.queryTaskDefinitionList(resolvedProjectCode, resolvedWorkflowCode);
+            tasks = parseTaskDefinitionsFromNode(taskDefinitionList);
+        }
+
+        result.setTasks(tasks);
+        result.setExplicitEdges(explicitEdges);
+        result.setRawDefinitionJson(toJson(exported));
+        return result;
+    }
+
     private RuntimeWorkflowSchedule extractSchedule(JsonNode definition, Long workflowCode) {
         JsonNode scheduleNode = readNode(definition, "schedule");
         RuntimeWorkflowSchedule schedule = parseScheduleNode(scheduleNode);

@@ -17,8 +17,11 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -478,6 +481,51 @@ public class DolphinOpenApiClient {
     }
 
     /**
+     * Export runtime definition JSON by workflow/process code.
+     *
+     * <p>
+     * DS 3.4.x path:
+     * POST /projects/{projectCode}/workflow-definition/batch-export
+     * </p>
+     *
+     * <p>
+     * DS 3.2.x path:
+     * POST /projects/{projectCode}/process-definition/batch-export
+     * </p>
+     *
+     * <p>
+     * Response is a JSON file stream (blob), not regular code/data envelope.
+     * </p>
+     */
+    public JsonNode exportDefinitionByCode(long projectCode, long workflowCode) {
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+        formData.add("codes", String.valueOf(workflowCode));
+
+        List<String> paths = Arrays.asList(
+                String.format("/projects/%d/workflow-definition/batch-export", projectCode),
+                String.format("/projects/%d/process-definition/batch-export", projectCode));
+
+        RuntimeException lastError = null;
+        for (String path : paths) {
+            try {
+                byte[] payload = postFormRaw(path, formData);
+                JsonNode exported = parseExportPayload(payload);
+                if (exported != null && !exported.isNull() && !exported.isMissingNode()) {
+                    return exported;
+                }
+            } catch (Exception ex) {
+                lastError = new RuntimeException("Failed export via " + path + ": " + ex.getMessage(), ex);
+                log.debug("Failed to export definition from {}", path, ex);
+            }
+        }
+
+        if (lastError != null) {
+            throw lastError;
+        }
+        throw new RuntimeException("Failed to export workflow definition: empty response");
+    }
+
+    /**
      * List process definitions (paged).
      *
      * <p>
@@ -893,6 +941,25 @@ public class DolphinOpenApiClient {
                 .body(BodyInserters.fromFormData(formData)));
     }
 
+    private byte[] postFormRaw(String path, MultiValueMap<String, String> formData) {
+        try {
+            byte[] response = getWebClient().post()
+                    .uri(path)
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .body(BodyInserters.fromFormData(formData))
+                    .retrieve()
+                    .bodyToMono(byte[].class)
+                    .timeout(DEFAULT_TIMEOUT)
+                    .block();
+            if (response == null || response.length == 0) {
+                throw new RuntimeException("empty response");
+            }
+            return response;
+        } catch (Exception ex) {
+            throw new RuntimeException(ex.getMessage(), ex);
+        }
+    }
+
     private JsonNode postJson(String path, Object payload) {
         return executeRequest(getWebClient(), getWebClient().post()
                 .uri(path)
@@ -935,6 +1002,39 @@ public class DolphinOpenApiClient {
         } catch (Exception e) {
             // Wrap in RuntimeException to keep signatures clean
             throw new RuntimeException(e.getMessage(), e);
+        }
+    }
+
+    private JsonNode parseExportPayload(byte[] payload) {
+        String raw = new String(payload, StandardCharsets.UTF_8).trim();
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(raw);
+            if (root == null || root.isNull()) {
+                return null;
+            }
+            if (root.isArray()) {
+                return root.size() > 0 ? root.get(0) : null;
+            }
+            JsonNode codeNode = root.get("code");
+            if (codeNode != null && codeNode.isIntegralNumber() && codeNode.asInt() != 0) {
+                String msg = root.path("msg").asText("unknown export error");
+                throw new RuntimeException("API Error " + codeNode.asInt() + ": " + msg);
+            }
+            if (root.has("data") && !root.get("data").isNull()) {
+                JsonNode data = root.get("data");
+                if (data.isArray()) {
+                    return data.size() > 0 ? data.get(0) : null;
+                }
+                if (data.isObject()) {
+                    return data;
+                }
+            }
+            return root;
+        } catch (IOException ex) {
+            throw new RuntimeException("Invalid export payload json", ex);
         }
     }
 }

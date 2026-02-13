@@ -27,4 +27,9 @@ public class WorkflowVersionCompareResponse {
     private WorkflowVersionDiffSection unchanged = new WorkflowVersionDiffSection();
 
     private WorkflowVersionDiffSummary summary = new WorkflowVersionDiffSummary();
+
+    /**
+     * 原始快照文本差异（unified diff）
+     */
+    private String rawDiff;
 }

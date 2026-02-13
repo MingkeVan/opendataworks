@@ -17,6 +17,7 @@ public final class RuntimeSyncErrorCodes {
     public static final String TASK_CODE_DUPLICATE = "TASK_CODE_DUPLICATE";
     public static final String WORKFLOW_BINDING_CONFLICT = "WORKFLOW_BINDING_CONFLICT";
     public static final String EDGE_MISMATCH_CONFIRM_REQUIRED = "EDGE_MISMATCH_CONFIRM_REQUIRED";
+    public static final String DEFINITION_PARITY_MISMATCH = "DEFINITION_PARITY_MISMATCH";
     public static final String RUNTIME_SYNC_DISABLED = "RUNTIME_SYNC_DISABLED";
     public static final String RUNTIME_WORKFLOW_NOT_FOUND = "RUNTIME_WORKFLOW_NOT_FOUND";
     public static final String SYNC_FAILED = "SYNC_FAILED";
