@@ -293,7 +293,11 @@ public class DolphinSchedulerService {
             }
 
             JsonNode definitionFromList = findProcessDefinitionFromList(projectCode, workflowCode);
-            return parseScheduleFromDefinitionNode(definitionFromList);
+            schedule = parseScheduleFromDefinitionNode(definitionFromList);
+            if (schedule != null) {
+                return schedule;
+            }
+            return findScheduleFromScheduleList(projectCode, workflowCode);
         } catch (Exception e) {
             log.debug("Failed to query workflow schedule {}: {}", workflowCode, e.getMessage());
             return null;
@@ -349,6 +353,44 @@ public class DolphinSchedulerService {
                 return null;
             }
             if (!list.isArray() || list.size() < pageSize) {
+                return null;
+            }
+            pageNo++;
+        }
+        return null;
+    }
+
+    private DolphinSchedule findScheduleFromScheduleList(long projectCode, long workflowCode) {
+        int pageNo = 1;
+        int pageSize = 100;
+        int maxPages = 10;
+
+        while (pageNo <= maxPages) {
+            DolphinPageData<DolphinSchedule> page = openApiClient.listSchedules(projectCode, pageNo, pageSize, workflowCode);
+            if (page == null || page.getTotalList() == null || page.getTotalList().isEmpty()) {
+                return null;
+            }
+
+            DolphinSchedule unspecifiedCandidate = null;
+            for (DolphinSchedule schedule : page.getTotalList()) {
+                if (schedule == null || schedule.getId() == null || schedule.getId() <= 0) {
+                    continue;
+                }
+                if (Objects.equals(schedule.getProcessDefinitionCode(), workflowCode)) {
+                    return schedule;
+                }
+                if (schedule.getProcessDefinitionCode() == null && unspecifiedCandidate == null) {
+                    unspecifiedCandidate = schedule;
+                }
+            }
+            if (unspecifiedCandidate != null && page.getTotalList().size() == 1) {
+                return unspecifiedCandidate;
+            }
+
+            if (page.getTotalPage() > 0 && pageNo >= page.getTotalPage()) {
+                return null;
+            }
+            if (page.getTotalList().size() < pageSize) {
                 return null;
             }
             pageNo++;

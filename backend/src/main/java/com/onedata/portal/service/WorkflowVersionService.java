@@ -24,6 +24,17 @@ public class WorkflowVersionService {
                                          String changeSummary,
                                          String triggerSource,
                                          String operator) {
+        return createVersion(workflowId, snapshot, changeSummary, triggerSource, operator, 1, null);
+    }
+
+    @Transactional
+    public WorkflowVersion createVersion(Long workflowId,
+                                         String snapshot,
+                                         String changeSummary,
+                                         String triggerSource,
+                                         String operator,
+                                         Integer snapshotSchemaVersion,
+                                         Long rollbackFromVersionId) {
         WorkflowVersion latest = workflowVersionMapper.selectOne(
             Wrappers.<WorkflowVersion>lambdaQuery()
                 .eq(WorkflowVersion::getWorkflowId, workflowId)
@@ -39,6 +50,8 @@ public class WorkflowVersionService {
         version.setChangeSummary(changeSummary);
         version.setTriggerSource(triggerSource);
         version.setCreatedBy(operator);
+        version.setSnapshotSchemaVersion(snapshotSchemaVersion);
+        version.setRollbackFromVersionId(rollbackFromVersionId);
         workflowVersionMapper.insert(version);
         return version;
     }

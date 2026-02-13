@@ -16,6 +16,7 @@ import com.onedata.portal.dto.workflow.WorkflowTaskBinding;
 import com.onedata.portal.dto.workflow.WorkflowTopologyResult;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
+import com.onedata.portal.entity.TableTaskRelation;
 import com.onedata.portal.entity.TaskExecutionLog;
 import com.onedata.portal.entity.WorkflowInstanceCache;
 import com.onedata.portal.entity.WorkflowPublishRecord;
@@ -40,6 +41,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -63,6 +65,7 @@ public class WorkflowService {
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
     };
+    private static final int SNAPSHOT_SCHEMA_VERSION_CANONICAL = 2;
 
     private final DataWorkflowMapper dataWorkflowMapper;
     private final WorkflowTaskRelationMapper workflowTaskRelationMapper;
@@ -435,13 +438,7 @@ public class WorkflowService {
     }
 
     private WorkflowVersion snapshotWorkflow(DataWorkflow workflow, WorkflowDefinitionRequest request) {
-        Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("workflowId", workflow.getId());
-        snapshot.put("workflowName", workflow.getWorkflowName());
-        snapshot.put("definitionJson", workflow.getDefinitionJson());
-        snapshot.put("taskGroupName", workflow.getTaskGroupName());
-        snapshot.put("tasks", request.getTasks());
-        snapshot.put("updatedBy", request.getOperator());
+        Map<String, Object> snapshot = buildCanonicalSnapshot(workflow, request);
         String snapshotJson = toJson(snapshot);
         boolean isInitial = workflow.getCurrentVersionId() == null;
         String changeSummary = isInitial ? "initial workflow definition" : "updated workflow definition";
@@ -450,7 +447,240 @@ public class WorkflowService {
                 snapshotJson,
                 StringUtils.hasText(request.getDescription()) ? request.getDescription() : changeSummary,
                 request.getTriggerSource(),
-                request.getOperator());
+                request.getOperator(),
+                SNAPSHOT_SCHEMA_VERSION_CANONICAL,
+                null);
+    }
+
+    private Map<String, Object> buildCanonicalSnapshot(DataWorkflow workflow, WorkflowDefinitionRequest request) {
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("schemaVersion", SNAPSHOT_SCHEMA_VERSION_CANONICAL);
+        root.put("workflow", buildWorkflowSnapshotNode(workflow));
+        List<Map<String, Object>> taskNodes = buildTaskSnapshotNodes(request != null ? request.getTasks() : null);
+        root.put("tasks", taskNodes);
+        root.put("edges", inferTaskEdges(taskNodes));
+        root.put("schedule", buildScheduleSnapshotNode(workflow));
+
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("triggerSource", request != null ? request.getTriggerSource() : null);
+        meta.put("operator", request != null ? request.getOperator() : null);
+        meta.put("snapshotAt", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+        root.put("meta", meta);
+        return root;
+    }
+
+    private Map<String, Object> buildWorkflowSnapshotNode(DataWorkflow workflow) {
+        Map<String, Object> node = new LinkedHashMap<>();
+        if (workflow == null) {
+            return node;
+        }
+        node.put("workflowId", workflow.getId());
+        node.put("workflowCode", workflow.getWorkflowCode());
+        node.put("projectCode", workflow.getProjectCode());
+        node.put("workflowName", workflow.getWorkflowName());
+        node.put("description", workflow.getDescription());
+        node.put("definitionJson", defaultJson(workflow.getDefinitionJson()));
+        node.put("globalParams", workflow.getGlobalParams());
+        node.put("taskGroupName", workflow.getTaskGroupName());
+        node.put("status", workflow.getStatus());
+        node.put("publishStatus", workflow.getPublishStatus());
+        node.put("syncSource", workflow.getSyncSource());
+        return node;
+    }
+
+    private Map<String, Object> buildScheduleSnapshotNode(DataWorkflow workflow) {
+        Map<String, Object> schedule = new LinkedHashMap<>();
+        if (workflow == null) {
+            return schedule;
+        }
+        schedule.put("dolphinScheduleId", workflow.getDolphinScheduleId());
+        schedule.put("scheduleState", workflow.getScheduleState());
+        schedule.put("scheduleCron", workflow.getScheduleCron());
+        schedule.put("scheduleTimezone", workflow.getScheduleTimezone());
+        schedule.put("scheduleStartTime", toDateTimeText(workflow.getScheduleStartTime()));
+        schedule.put("scheduleEndTime", toDateTimeText(workflow.getScheduleEndTime()));
+        schedule.put("scheduleFailureStrategy", workflow.getScheduleFailureStrategy());
+        schedule.put("scheduleWarningType", workflow.getScheduleWarningType());
+        schedule.put("scheduleWarningGroupId", workflow.getScheduleWarningGroupId());
+        schedule.put("scheduleProcessInstancePriority", workflow.getScheduleProcessInstancePriority());
+        schedule.put("scheduleWorkerGroup", workflow.getScheduleWorkerGroup());
+        schedule.put("scheduleTenantCode", workflow.getScheduleTenantCode());
+        schedule.put("scheduleEnvironmentCode", workflow.getScheduleEnvironmentCode());
+        schedule.put("scheduleAutoOnline", workflow.getScheduleAutoOnline());
+        return schedule;
+    }
+
+    private List<Map<String, Object>> buildTaskSnapshotNodes(List<WorkflowTaskBinding> bindings) {
+        List<Long> taskIds = collectTaskIds(bindings);
+        if (CollectionUtils.isEmpty(taskIds)) {
+            return Collections.emptyList();
+        }
+
+        List<DataTask> taskRows = dataTaskMapper.selectBatchIds(taskIds);
+        Map<Long, DataTask> taskById = taskRows.stream()
+                .filter(Objects::nonNull)
+                .filter(item -> item.getId() != null)
+                .collect(Collectors.toMap(DataTask::getId, item -> item, (left, right) -> left));
+
+        Map<Long, WorkflowTaskBinding> bindingByTaskId = new LinkedHashMap<>();
+        if (!CollectionUtils.isEmpty(bindings)) {
+            for (WorkflowTaskBinding binding : bindings) {
+                if (binding == null || binding.getTaskId() == null) {
+                    continue;
+                }
+                bindingByTaskId.putIfAbsent(binding.getTaskId(), binding);
+            }
+        }
+
+        Map<Long, List<Long>> readTablesByTask = loadTaskTableRelationMap(taskIds, "read");
+        Map<Long, List<Long>> writeTablesByTask = loadTaskTableRelationMap(taskIds, "write");
+
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        for (Long taskId : taskIds) {
+            DataTask task = taskById.get(taskId);
+            if (task == null) {
+                continue;
+            }
+            WorkflowTaskBinding binding = bindingByTaskId.get(taskId);
+            Map<String, Object> node = new LinkedHashMap<>();
+            node.put("taskId", task.getId());
+            node.put("taskCode", task.getTaskCode());
+            node.put("taskName", task.getTaskName());
+            node.put("taskType", task.getTaskType());
+            node.put("engine", task.getEngine());
+            node.put("dolphinNodeType", task.getDolphinNodeType());
+            node.put("taskSql", normalizeSql(task.getTaskSql()));
+            node.put("taskDesc", task.getTaskDesc());
+            node.put("datasourceName", task.getDatasourceName());
+            node.put("datasourceType", task.getDatasourceType());
+            node.put("taskGroupName", task.getTaskGroupName());
+            node.put("retryTimes", task.getRetryTimes());
+            node.put("retryInterval", task.getRetryInterval());
+            node.put("timeoutSeconds", task.getTimeoutSeconds());
+            node.put("priority", task.getPriority());
+            node.put("dolphinTaskCode", task.getDolphinTaskCode());
+            node.put("dolphinTaskVersion", task.getDolphinTaskVersion());
+            node.put("inputTableIds", readTablesByTask.getOrDefault(taskId, Collections.emptyList()));
+            node.put("outputTableIds", writeTablesByTask.getOrDefault(taskId, Collections.emptyList()));
+            node.put("entry", binding != null ? binding.getEntry() : null);
+            node.put("exit", binding != null ? binding.getExit() : null);
+            node.put("nodeAttrs", binding != null ? binding.getNodeAttrs() : null);
+            nodes.add(node);
+        }
+        return nodes;
+    }
+
+    private Map<Long, List<Long>> loadTaskTableRelationMap(List<Long> taskIds, String relationType) {
+        if (CollectionUtils.isEmpty(taskIds)) {
+            return Collections.emptyMap();
+        }
+        List<TableTaskRelation> relations = tableTaskRelationMapper.selectList(
+                Wrappers.<TableTaskRelation>lambdaQuery()
+                        .in(TableTaskRelation::getTaskId, taskIds)
+                        .eq(TableTaskRelation::getRelationType, relationType)
+                        .orderByAsc(TableTaskRelation::getTaskId)
+                        .orderByAsc(TableTaskRelation::getTableId));
+        if (CollectionUtils.isEmpty(relations)) {
+            return Collections.emptyMap();
+        }
+        Map<Long, LinkedHashSet<Long>> grouped = new LinkedHashMap<>();
+        for (TableTaskRelation relation : relations) {
+            if (relation == null || relation.getTaskId() == null || relation.getTableId() == null) {
+                continue;
+            }
+            grouped.computeIfAbsent(relation.getTaskId(), key -> new LinkedHashSet<>()).add(relation.getTableId());
+        }
+        Map<Long, List<Long>> result = new LinkedHashMap<>();
+        grouped.forEach((taskId, tableIds) -> result.put(taskId, new ArrayList<>(tableIds)));
+        return result;
+    }
+
+    private List<Map<String, Object>> inferTaskEdges(List<Map<String, Object>> taskNodes) {
+        if (CollectionUtils.isEmpty(taskNodes)) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> sorted = taskNodes.stream()
+                .filter(Objects::nonNull)
+                .sorted(Comparator.comparing(item -> asLong(item.get("taskId")), Comparator.nullsLast(Long::compareTo)))
+                .collect(Collectors.toList());
+        Set<String> edgeSet = new LinkedHashSet<>();
+        List<Map<String, Object>> edges = new ArrayList<>();
+        for (Map<String, Object> downstream : sorted) {
+            Long downstreamTaskId = asLong(downstream.get("taskId"));
+            Set<Long> downstreamReads = new LinkedHashSet<>(toLongList(downstream.get("inputTableIds")));
+            if (downstreamTaskId == null || downstreamReads.isEmpty()) {
+                continue;
+            }
+            for (Map<String, Object> upstream : sorted) {
+                Long upstreamTaskId = asLong(upstream.get("taskId"));
+                if (upstreamTaskId == null || Objects.equals(upstreamTaskId, downstreamTaskId)) {
+                    continue;
+                }
+                Set<Long> upstreamWrites = new LinkedHashSet<>(toLongList(upstream.get("outputTableIds")));
+                if (upstreamWrites.isEmpty()) {
+                    continue;
+                }
+                Set<Long> intersection = new LinkedHashSet<>(upstreamWrites);
+                intersection.retainAll(downstreamReads);
+                if (intersection.isEmpty()) {
+                    continue;
+                }
+                String edgeKey = upstreamTaskId + "->" + downstreamTaskId;
+                if (edgeSet.add(edgeKey)) {
+                    Map<String, Object> edge = new LinkedHashMap<>();
+                    edge.put("upstreamTaskId", upstreamTaskId);
+                    edge.put("downstreamTaskId", downstreamTaskId);
+                    edges.add(edge);
+                }
+            }
+        }
+        edges.sort(Comparator
+                .comparing((Map<String, Object> edge) -> asLong(edge.get("upstreamTaskId")), Comparator.nullsLast(Long::compareTo))
+                .thenComparing(edge -> asLong(edge.get("downstreamTaskId")), Comparator.nullsLast(Long::compareTo)));
+        return edges;
+    }
+
+    private Long asLong(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private List<Long> toLongList(Object value) {
+        if (!(value instanceof List<?>)) {
+            return Collections.emptyList();
+        }
+        List<?> source = (List<?>) value;
+        if (source.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Long> result = new ArrayList<>();
+        for (Object item : source) {
+            Long converted = asLong(item);
+            if (converted != null) {
+                result.add(converted);
+            }
+        }
+        return result;
+    }
+
+    private String normalizeSql(String sql) {
+        if (!StringUtils.hasText(sql)) {
+            return null;
+        }
+        return sql.replace("\r\n", "\n").trim();
+    }
+
+    private String toDateTimeText(LocalDateTime value) {
+        return value == null ? null : value.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
 
     private void persistTaskRelations(Long workflowId,

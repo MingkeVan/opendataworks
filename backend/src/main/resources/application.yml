@@ -58,3 +58,7 @@ auth:
     enabled: true
     user-id: 1
     username: admin
+
+workflow:
+  runtime-sync:
+    enabled: false

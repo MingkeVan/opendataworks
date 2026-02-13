@@ -401,6 +401,34 @@ public class DolphinOpenApiClient {
     }
 
     /**
+     * Update process definition basic info.
+     *
+     * <p>
+     * Endpoint: PUT /projects/{projectCode}/process-definition/{code}/basic-info
+     * </p>
+     */
+    public void updateProcessDefinitionBasicInfo(long projectCode,
+            long processCode,
+            String name,
+            String description,
+            String globalParams,
+            String executionType) {
+        try {
+            String path = String.format("/projects/%d/process-definition/%d/basic-info", projectCode, processCode);
+            MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+            formData.add("name", name);
+            formData.add("description", description != null ? description : "");
+            formData.add("globalParams", StringUtils.hasText(globalParams) ? globalParams : "[]");
+            formData.add("executionType", StringUtils.hasText(executionType) ? executionType : "PARALLEL");
+            formData.add("timeout", "0");
+            putForm(path, formData);
+        } catch (Exception e) {
+            log.error("Failed to update process definition basic info {}", processCode, e);
+            throw new RuntimeException("Failed to update process definition basic info: " + e.getMessage());
+        }
+    }
+
+    /**
      * Query process definition.
      */
     public JsonNode getProcessDefinition(long projectCode, long processCode) {
@@ -410,6 +438,42 @@ public class DolphinOpenApiClient {
         } catch (Exception e) {
             log.error("Failed to query process definition {}", processCode, e);
             throw new RuntimeException("Failed to query process definition: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Query process definition node list by definition code.
+     *
+     * <p>
+     * Endpoint: GET /projects/{projectCode}/process-definition/{code}/tasks
+     * </p>
+     */
+    public JsonNode getProcessDefinitionTasks(long projectCode, long processCode) {
+        try {
+            String path = String.format("/projects/%d/process-definition/%d/tasks", projectCode, processCode);
+            return get(path, null);
+        } catch (Exception e) {
+            log.warn("Failed to query process definition tasks for {}", processCode, e);
+            return null;
+        }
+    }
+
+    /**
+     * Query task definition list by process definition code.
+     *
+     * <p>
+     * Endpoint: GET /projects/{projectCode}/process-definition/query-task-definition-list
+     * </p>
+     */
+    public JsonNode queryTaskDefinitionList(long projectCode, long processDefinitionCode) {
+        try {
+            String path = String.format("/projects/%d/process-definition/query-task-definition-list", projectCode);
+            MultiValueMap<String, String> query = new LinkedMultiValueMap<>();
+            query.add("processDefinitionCode", String.valueOf(processDefinitionCode));
+            return getWithParams(path, query);
+        } catch (Exception e) {
+            log.warn("Failed to query task definition list for process {}", processDefinitionCode, e);
+            return null;
         }
     }
 
@@ -427,15 +491,59 @@ public class DolphinOpenApiClient {
      * </p>
      */
     public JsonNode listProcessDefinitions(long projectCode, int pageNo, int pageSize) {
+        return listProcessDefinitions(projectCode, pageNo, pageSize, null);
+    }
+
+    /**
+     * List process definitions (paged) with optional keyword.
+     */
+    public JsonNode listProcessDefinitions(long projectCode, int pageNo, int pageSize, String searchVal) {
         try {
             String path = String.format("/projects/%d/process-definition", projectCode);
             MultiValueMap<String, String> query = new LinkedMultiValueMap<>();
             query.add("pageNo", String.valueOf(pageNo > 0 ? pageNo : 1));
             query.add("pageSize", String.valueOf(pageSize > 0 ? pageSize : 100));
+            if (StringUtils.hasText(searchVal)) {
+                query.add("searchVal", searchVal.trim());
+            }
             return getWithParams(path, query);
         } catch (Exception e) {
             log.warn("Failed to list process definitions for project {}", projectCode, e);
             return null;
+        }
+    }
+
+    /**
+     * List schedules (timing definitions) in project.
+     *
+     * <p>
+     * Endpoint: GET /projects/{projectCode}/schedules
+     * Different DS versions may use processDefinitionCode / workflowDefinitionCode.
+     * </p>
+     */
+    public DolphinPageData<DolphinSchedule> listSchedules(long projectCode,
+            int pageNo,
+            int pageSize,
+            Long workflowCode) {
+        try {
+            String path = String.format("/projects/%d/schedules", projectCode);
+            MultiValueMap<String, String> query = new LinkedMultiValueMap<>();
+            query.add("pageNo", String.valueOf(pageNo > 0 ? pageNo : 1));
+            query.add("pageSize", String.valueOf(pageSize > 0 ? pageSize : 100));
+            if (workflowCode != null && workflowCode > 0) {
+                String codeText = String.valueOf(workflowCode);
+                query.add("processDefinitionCode", codeText);
+                query.add("workflowDefinitionCode", codeText);
+            }
+            JsonNode data = getWithParams(path, query);
+            if (data == null) {
+                return new DolphinPageData<>();
+            }
+            return objectMapper.readerFor(new TypeReference<DolphinPageData<DolphinSchedule>>() {
+            }).readValue(data);
+        } catch (Exception e) {
+            log.debug("Failed to list schedules for project {}", projectCode, e);
+            return new DolphinPageData<>();
         }
     }
 

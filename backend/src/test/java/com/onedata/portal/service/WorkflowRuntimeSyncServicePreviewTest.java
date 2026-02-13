@@ -1,0 +1,258 @@
+package com.onedata.portal.service;
+
+import com.onedata.portal.dto.DolphinDatasourceOption;
+import com.onedata.portal.dto.SqlTableAnalyzeResponse;
+import com.onedata.portal.dto.workflow.runtime.RuntimeDiffSummary;
+import com.onedata.portal.dto.workflow.runtime.RuntimeSyncErrorCodes;
+import com.onedata.portal.dto.workflow.runtime.RuntimeSyncExecuteRequest;
+import com.onedata.portal.dto.workflow.runtime.RuntimeSyncExecuteResponse;
+import com.onedata.portal.dto.workflow.runtime.RuntimeSyncPreviewRequest;
+import com.onedata.portal.dto.workflow.runtime.RuntimeSyncPreviewResponse;
+import com.onedata.portal.dto.workflow.runtime.RuntimeTaskDefinition;
+import com.onedata.portal.dto.workflow.runtime.RuntimeTaskEdge;
+import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowDefinition;
+import com.onedata.portal.entity.DataWorkflow;
+import com.onedata.portal.entity.DataTask;
+import com.onedata.portal.entity.WorkflowRuntimeSyncRecord;
+import com.onedata.portal.entity.WorkflowTaskRelation;
+import com.onedata.portal.mapper.DataTaskMapper;
+import com.onedata.portal.mapper.DataWorkflowMapper;
+import com.onedata.portal.mapper.WorkflowRuntimeSyncRecordMapper;
+import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
+import com.onedata.portal.mapper.WorkflowVersionMapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import java.util.Arrays;
+import java.util.Collections;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class WorkflowRuntimeSyncServicePreviewTest {
+
+    @Mock
+    private DolphinRuntimeDefinitionService runtimeDefinitionService;
+
+    @Mock
+    private WorkflowRuntimeDiffService runtimeDiffService;
+
+    @Mock
+    private SqlTableMatcherService sqlTableMatcherService;
+
+    @Mock
+    private DolphinSchedulerService dolphinSchedulerService;
+
+    @Mock
+    private DataTaskMapper dataTaskMapper;
+
+    @Mock
+    private DataWorkflowMapper dataWorkflowMapper;
+
+    @Mock
+    private WorkflowTaskRelationMapper workflowTaskRelationMapper;
+
+    @Mock
+    private WorkflowVersionMapper workflowVersionMapper;
+
+    @Mock
+    private WorkflowRuntimeSyncRecordMapper workflowRuntimeSyncRecordMapper;
+
+    @Mock
+    private DataTaskService dataTaskService;
+
+    @Mock
+    private WorkflowService workflowService;
+
+    @Mock
+    private TransactionTemplate transactionTemplate;
+
+    @Mock
+    private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+
+    @InjectMocks
+    private WorkflowRuntimeSyncService service;
+
+    static {
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(), "");
+        TableInfoHelper.initTableInfo(assistant, DataTask.class);
+        TableInfoHelper.initTableInfo(assistant, DataWorkflow.class);
+        TableInfoHelper.initTableInfo(assistant, WorkflowRuntimeSyncRecord.class);
+        TableInfoHelper.initTableInfo(assistant, WorkflowTaskRelation.class);
+    }
+
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(service, "runtimeSyncEnabled", true);
+
+        WorkflowRuntimeDiffService.RuntimeSnapshot snapshot = new WorkflowRuntimeDiffService.RuntimeSnapshot();
+        snapshot.setSnapshotHash("hash");
+        snapshot.setSnapshotJson("{}");
+        snapshot.setSnapshotNode(new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode());
+        lenient().when(runtimeDiffService.buildSnapshot(any(), any())).thenReturn(snapshot);
+        lenient().when(runtimeDiffService.buildDiff(any(), any())).thenReturn(new RuntimeDiffSummary());
+
+        lenient().when(dataTaskMapper.selectList(any())).thenReturn(Collections.emptyList());
+        lenient().when(dataWorkflowMapper.selectOne(any())).thenReturn(null);
+        lenient().when(workflowRuntimeSyncRecordMapper.selectOne(any())).thenReturn(null);
+        lenient().when(dolphinSchedulerService.listDatasources(any(), any()))
+                .thenReturn(Collections.singletonList(datasource(10L, "doris_ds")));
+    }
+
+    @Test
+    void previewShouldFailWhenContainsNonSqlTask() {
+        RuntimeWorkflowDefinition definition = baseDefinition();
+        RuntimeTaskDefinition shellTask = new RuntimeTaskDefinition();
+        shellTask.setTaskCode(1L);
+        shellTask.setTaskName("shell-node");
+        shellTask.setNodeType("SHELL");
+        definition.setTasks(Collections.singletonList(shellTask));
+
+        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+
+        RuntimeSyncPreviewRequest request = new RuntimeSyncPreviewRequest();
+        request.setProjectCode(1L);
+        request.setWorkflowCode(1001L);
+        RuntimeSyncPreviewResponse response = service.preview(request);
+
+        assertFalse(response.getCanSync());
+        assertTrue(response.getErrors().stream()
+                .anyMatch(issue -> RuntimeSyncErrorCodes.UNSUPPORTED_NODE_TYPE.equals(issue.getCode())));
+    }
+
+    @Test
+    void previewShouldFailWhenSqlTableAmbiguous() {
+        RuntimeWorkflowDefinition definition = baseDefinition();
+        RuntimeTaskDefinition sqlTask = sqlTask(1L, "task_a", "INSERT INTO dws.t1 SELECT * FROM ods.t0", 10L);
+        definition.setTasks(Collections.singletonList(sqlTask));
+
+        SqlTableAnalyzeResponse analyze = matchedAnalyze(11L, 22L);
+        analyze.setAmbiguous(Collections.singletonList("dws.t1"));
+        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(sqlTableMatcherService.analyze(eq(sqlTask.getSql()), eq("SQL"))).thenReturn(analyze);
+
+        RuntimeSyncPreviewRequest request = new RuntimeSyncPreviewRequest();
+        request.setProjectCode(1L);
+        request.setWorkflowCode(1001L);
+        RuntimeSyncPreviewResponse response = service.preview(request);
+
+        assertFalse(response.getCanSync());
+        assertTrue(response.getErrors().stream()
+                .anyMatch(issue -> RuntimeSyncErrorCodes.SQL_TABLE_AMBIGUOUS.equals(issue.getCode())));
+    }
+
+    @Test
+    void previewShouldWarnWhenExplicitAndInferredEdgesMismatch() {
+        RuntimeWorkflowDefinition definition = baseDefinition();
+        RuntimeTaskDefinition taskA = sqlTask(1L, "task_a", "SQL_A", 10L);
+        RuntimeTaskDefinition taskB = sqlTask(2L, "task_b", "SQL_B", 10L);
+        definition.setTasks(Arrays.asList(taskA, taskB));
+        // explicit edges intentionally empty, inferred edges should include 1->2
+        definition.setExplicitEdges(Collections.<RuntimeTaskEdge>emptyList());
+
+        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(sqlTableMatcherService.analyze(eq("SQL_A"), eq("SQL")))
+                .thenReturn(matchedAnalyze(101L, 201L));
+        when(sqlTableMatcherService.analyze(eq("SQL_B"), eq("SQL")))
+                .thenReturn(matchedAnalyze(201L, 301L));
+
+        RuntimeSyncPreviewRequest request = new RuntimeSyncPreviewRequest();
+        request.setProjectCode(1L);
+        request.setWorkflowCode(1001L);
+        RuntimeSyncPreviewResponse response = service.preview(request);
+
+        assertTrue(response.getCanSync());
+        assertEquals(0, response.getErrors().size());
+        assertTrue(response.getWarnings().stream()
+                .anyMatch(issue -> "EDGE_MISMATCH".equals(issue.getCode())));
+    }
+
+    @Test
+    void syncShouldRequireManualConfirmationWhenEdgeMismatchExists() {
+        RuntimeWorkflowDefinition definition = baseDefinition();
+        RuntimeTaskDefinition taskA = sqlTask(1L, "task_a", "SQL_A", 10L);
+        RuntimeTaskDefinition taskB = sqlTask(2L, "task_b", "SQL_B", 10L);
+        definition.setTasks(Arrays.asList(taskA, taskB));
+        definition.setExplicitEdges(Collections.<RuntimeTaskEdge>emptyList());
+
+        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(sqlTableMatcherService.analyze(eq("SQL_A"), eq("SQL")))
+                .thenReturn(matchedAnalyze(101L, 201L));
+        when(sqlTableMatcherService.analyze(eq("SQL_B"), eq("SQL")))
+                .thenReturn(matchedAnalyze(201L, 301L));
+
+        RuntimeSyncExecuteRequest request = new RuntimeSyncExecuteRequest();
+        request.setProjectCode(1L);
+        request.setWorkflowCode(1001L);
+        request.setOperator("tester");
+        request.setConfirmEdgeMismatch(false);
+
+        RuntimeSyncExecuteResponse response = service.sync(request);
+
+        assertFalse(Boolean.TRUE.equals(response.getSuccess()));
+        assertTrue(response.getErrors().stream()
+                .anyMatch(issue -> RuntimeSyncErrorCodes.EDGE_MISMATCH_CONFIRM_REQUIRED.equals(issue.getCode())));
+        assertTrue(response.getEdgeMismatchDetail() != null);
+    }
+
+    private RuntimeWorkflowDefinition baseDefinition() {
+        RuntimeWorkflowDefinition definition = new RuntimeWorkflowDefinition();
+        definition.setProjectCode(1L);
+        definition.setWorkflowCode(1001L);
+        definition.setWorkflowName("wf_runtime");
+        definition.setGlobalParams("[]");
+        return definition;
+    }
+
+    private RuntimeTaskDefinition sqlTask(Long taskCode, String taskName, String sql, Long datasourceId) {
+        RuntimeTaskDefinition task = new RuntimeTaskDefinition();
+        task.setTaskCode(taskCode);
+        task.setTaskName(taskName);
+        task.setNodeType("SQL");
+        task.setSql(sql);
+        task.setDatasourceId(datasourceId);
+        task.setDatasourceType("DORIS");
+        return task;
+    }
+
+    private SqlTableAnalyzeResponse matchedAnalyze(Long inputTableId, Long outputTableId) {
+        SqlTableAnalyzeResponse response = new SqlTableAnalyzeResponse();
+        response.getInputRefs().add(matchedRef("input_tbl", inputTableId));
+        response.getOutputRefs().add(matchedRef("output_tbl", outputTableId));
+        return response;
+    }
+
+    private SqlTableAnalyzeResponse.TableRefMatch matchedRef(String rawName, Long tableId) {
+        SqlTableAnalyzeResponse.TableRefMatch ref = new SqlTableAnalyzeResponse.TableRefMatch();
+        ref.setRawName(rawName);
+        ref.setMatchStatus("matched");
+        SqlTableAnalyzeResponse.TableCandidate chosen = new SqlTableAnalyzeResponse.TableCandidate();
+        chosen.setTableId(tableId);
+        ref.setChosenTable(chosen);
+        return ref;
+    }
+
+    private DolphinDatasourceOption datasource(Long id, String name) {
+        DolphinDatasourceOption option = new DolphinDatasourceOption();
+        option.setId(id);
+        option.setName(name);
+        option.setType("DORIS");
+        return option;
+    }
+}
