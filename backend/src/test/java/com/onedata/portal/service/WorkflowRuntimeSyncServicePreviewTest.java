@@ -169,13 +169,85 @@ class WorkflowRuntimeSyncServicePreviewTest {
     }
 
     @Test
+    void previewShouldAllowSqlWithoutInputButWithOutput() {
+        RuntimeWorkflowDefinition definition = baseDefinition();
+        RuntimeTaskDefinition sqlTask = sqlTask(1L, "task_a", "UPDATE dws.t1 SET c1 = 1", 10L);
+        definition.setTasks(Collections.singletonList(sqlTask));
+
+        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(sqlTableMatcherService.analyze(eq(sqlTask.getSql()), eq("SQL")))
+                .thenReturn(outputOnlyAnalyze(22L));
+
+        RuntimeSyncPreviewRequest request = new RuntimeSyncPreviewRequest();
+        request.setProjectCode(1L);
+        request.setWorkflowCode(1001L);
+        RuntimeSyncPreviewResponse response = service.preview(request);
+
+        assertTrue(response.getCanSync());
+        assertTrue(response.getErrors().stream()
+                .noneMatch(issue -> RuntimeSyncErrorCodes.SQL_LINEAGE_INCOMPLETE.equals(issue.getCode())));
+    }
+
+    @Test
+    void previewShouldPassWhenUpdateHeadFeedsDownstreamAndLineageEdgesMatch() {
+        RuntimeWorkflowDefinition definition = baseDefinition();
+        RuntimeTaskDefinition taskUpdate = sqlTask(1L, "task_update", "UPDATE ods.user_tag SET tag = 1", 10L);
+        RuntimeTaskDefinition taskInsert = sqlTask(2L, "task_insert",
+                "INSERT INTO dws.user_tag_di SELECT * FROM ods.user_tag", 10L);
+        definition.setTasks(Arrays.asList(taskUpdate, taskInsert));
+        definition.setExplicitEdges(Collections.singletonList(new RuntimeTaskEdge(1L, 2L)));
+
+        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(sqlTableMatcherService.analyze(eq(taskUpdate.getSql()), eq("SQL")))
+                .thenReturn(outputOnlyAnalyze(501L));
+        when(sqlTableMatcherService.analyze(eq(taskInsert.getSql()), eq("SQL")))
+                .thenReturn(matchedAnalyze(501L, 601L));
+
+        RuntimeSyncPreviewRequest request = new RuntimeSyncPreviewRequest();
+        request.setProjectCode(1L);
+        request.setWorkflowCode(1001L);
+        RuntimeSyncPreviewResponse response = service.preview(request);
+
+        assertTrue(response.getCanSync(), "UPDATE 首节点仅输出场景预检应通过");
+        assertTrue(response.getErrors().isEmpty(), "预检不应返回错误");
+        assertTrue(response.getWarnings().stream().noneMatch(issue -> "EDGE_MISMATCH".equals(issue.getCode())),
+                "平台存储边与 SQL 推断边应一致，不应出现 EDGE_MISMATCH");
+        assertTrue(response.getEdgeMismatchDetail() == null, "边一致时不应返回 mismatch detail");
+    }
+
+    @Test
+    void previewShouldFailWhenRuntimeExplicitEdgesMissingInStrictMode() {
+        RuntimeWorkflowDefinition definition = baseDefinition();
+        RuntimeTaskDefinition taskUpdate = sqlTask(1L, "task_update", "UPDATE ods.user_tag SET tag = 1", 10L);
+        RuntimeTaskDefinition taskInsert = sqlTask(2L, "task_insert",
+                "INSERT INTO dws.user_tag_di SELECT * FROM ods.user_tag", 10L);
+        definition.setTasks(Arrays.asList(taskUpdate, taskInsert));
+        definition.setExplicitEdges(Collections.emptyList());
+
+        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(sqlTableMatcherService.analyze(eq(taskUpdate.getSql()), eq("SQL")))
+                .thenReturn(outputOnlyAnalyze(501L));
+        when(sqlTableMatcherService.analyze(eq(taskInsert.getSql()), eq("SQL")))
+                .thenReturn(matchedAnalyze(501L, 601L));
+
+        RuntimeSyncPreviewRequest request = new RuntimeSyncPreviewRequest();
+        request.setProjectCode(1L);
+        request.setWorkflowCode(1001L);
+        RuntimeSyncPreviewResponse response = service.preview(request);
+
+        assertFalse(response.getCanSync(), "严格模式下显式边缺失应阻断预检");
+        assertTrue(response.getErrors().stream()
+                .anyMatch(issue -> RuntimeSyncErrorCodes.DOLPHIN_EXPLICIT_EDGE_MISSING.equals(issue.getCode())));
+    }
+
+    @Test
     void previewShouldWarnWhenExplicitAndInferredEdgesMismatch() {
         RuntimeWorkflowDefinition definition = baseDefinition();
         RuntimeTaskDefinition taskA = sqlTask(1L, "task_a", "SQL_A", 10L);
         RuntimeTaskDefinition taskB = sqlTask(2L, "task_b", "SQL_B", 10L);
         definition.setTasks(Arrays.asList(taskA, taskB));
-        // explicit edges intentionally empty, inferred edges should include 1->2
-        definition.setExplicitEdges(Collections.<RuntimeTaskEdge>emptyList());
+        // explicit edges intentionally set to opposite direction, inferred edges should include 1->2
+        definition.setExplicitEdges(Collections.singletonList(new RuntimeTaskEdge(2L, 1L)));
 
         when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
         when(sqlTableMatcherService.analyze(eq("SQL_A"), eq("SQL")))
@@ -200,7 +272,7 @@ class WorkflowRuntimeSyncServicePreviewTest {
         RuntimeTaskDefinition taskA = sqlTask(1L, "task_a", "SQL_A", 10L);
         RuntimeTaskDefinition taskB = sqlTask(2L, "task_b", "SQL_B", 10L);
         definition.setTasks(Arrays.asList(taskA, taskB));
-        definition.setExplicitEdges(Collections.<RuntimeTaskEdge>emptyList());
+        definition.setExplicitEdges(Collections.singletonList(new RuntimeTaskEdge(2L, 1L)));
 
         when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
         when(sqlTableMatcherService.analyze(eq("SQL_A"), eq("SQL")))
@@ -319,6 +391,12 @@ class WorkflowRuntimeSyncServicePreviewTest {
     private SqlTableAnalyzeResponse matchedAnalyze(Long inputTableId, Long outputTableId) {
         SqlTableAnalyzeResponse response = new SqlTableAnalyzeResponse();
         response.getInputRefs().add(matchedRef("input_tbl", inputTableId));
+        response.getOutputRefs().add(matchedRef("output_tbl", outputTableId));
+        return response;
+    }
+
+    private SqlTableAnalyzeResponse outputOnlyAnalyze(Long outputTableId) {
+        SqlTableAnalyzeResponse response = new SqlTableAnalyzeResponse();
         response.getOutputRefs().add(matchedRef("output_tbl", outputTableId));
         return response;
     }

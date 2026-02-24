@@ -297,7 +297,11 @@ public class DolphinRuntimeDefinitionService {
     }
 
     private List<RuntimeTaskEdge> parseTaskEdges(JsonNode definition) {
-        JsonNode relationNode = firstPresentNode(definition, "taskRelationJson", "taskRelationList");
+        JsonNode relationNode = firstPresentNode(definition,
+                "taskRelationJson",
+                "taskRelationList",
+                "processTaskRelationList",
+                "workflowTaskRelationList");
         return parseTaskEdgesFromNode(relationNode);
     }
 
@@ -307,6 +311,8 @@ public class DolphinRuntimeDefinitionService {
             JsonNode inner = firstPresentNode(normalized,
                     "taskRelationJson",
                     "taskRelationList",
+                    "processTaskRelationList",
+                    "workflowTaskRelationList",
                     "edges");
             if (inner != null && !inner.isMissingNode() && !inner.isNull()) {
                 normalized = normalizeNode(inner);

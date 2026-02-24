@@ -15,6 +15,7 @@ import com.onedata.portal.dto.workflow.WorkflowTaskBinding;
 import com.onedata.portal.dto.workflow.runtime.RuntimeDiffSummary;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncExecuteRequest;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncExecuteResponse;
+import com.onedata.portal.dto.workflow.runtime.RuntimeSyncErrorCodes;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncPreviewRequest;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncPreviewResponse;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskDefinition;
@@ -869,6 +870,116 @@ class WorkflowRuntimeSyncRealIntegrationTest {
                 2L,
                 new BigDecimal("275.00"),
                 "it-runtime-sync");
+    }
+
+    @Test
+    @DisplayName("首节点 UPDATE 无输入仅输出时，严格模式优先校验 Dolphin 显式边")
+    void reversePreviewShouldPassForUpdateHeadWithoutInput() {
+        bootstrapOrSkip();
+        cleanupHistoricalITData();
+
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String dbName = "opendataworks";
+        String odsUpdateTable = IT_PREFIX + "ods_update_head_" + suffix;
+        String dwsResultTable = IT_PREFIX + "dws_update_result_" + suffix;
+
+        String odsFullName = dbName + "." + odsUpdateTable;
+        String dwsFullName = dbName + "." + dwsResultTable;
+        executeJdbc("DROP TABLE IF EXISTS " + odsFullName);
+        executeJdbc("DROP TABLE IF EXISTS " + dwsFullName);
+        if (!createdPhysicalTables.contains(odsFullName)) {
+            createdPhysicalTables.add(odsFullName);
+        }
+        if (!createdPhysicalTables.contains(dwsFullName)) {
+            createdPhysicalTables.add(dwsFullName);
+        }
+
+        executeJdbc(String.format("CREATE TABLE %s.%s (user_id BIGINT, tag INT)", dbName, odsUpdateTable));
+        executeJdbc(String.format("CREATE TABLE %s.%s (user_id BIGINT, tag INT)", dbName, dwsResultTable));
+        executeJdbc(String.format("INSERT INTO %s.%s (user_id, tag) VALUES (1,0),(2,0)", dbName, odsUpdateTable));
+
+        Long odsUpdateTableId = createMetadataTable(dbName, odsUpdateTable, "ODS");
+        Long dwsResultTableId = createMetadataTable(dbName, dwsResultTable, "DWS");
+
+        String taskUpdateName = IT_PREFIX + "task_update_head_" + suffix;
+        String taskInsertName = IT_PREFIX + "task_insert_after_update_" + suffix;
+
+        DataTask updateTask = createSqlTask(
+                taskUpdateName,
+                taskUpdateName,
+                String.format("UPDATE %s.%s SET tag = 1 WHERE user_id > 0", dbName, odsUpdateTable),
+                Collections.emptyList(),
+                Collections.singletonList(odsUpdateTableId));
+
+        DataTask insertTask = createSqlTask(
+                taskInsertName,
+                taskInsertName,
+                String.format("INSERT INTO %s.%s SELECT user_id, tag FROM %s.%s",
+                        dbName, dwsResultTable, dbName, odsUpdateTable),
+                Collections.singletonList(odsUpdateTableId),
+                Collections.singletonList(dwsResultTableId));
+
+        assertTrue(readTableIds(updateTask.getId()).isEmpty(), "首节点 UPDATE 的平台读依赖应为空");
+        assertEquals(Collections.singleton(odsUpdateTableId), writeTableIds(updateTask.getId()),
+                "首节点 UPDATE 的平台写依赖应为目标表");
+        assertEquals(Collections.singleton(odsUpdateTableId), readTableIds(insertTask.getId()),
+                "下游节点平台读依赖应为首节点输出表");
+
+        DataWorkflow workflow = createWorkflow(
+                IT_PREFIX + "wf_update_head_" + suffix,
+                Arrays.asList(updateTask.getId(), insertTask.getId()),
+                effectiveProjectCode);
+        createdWorkflowIds.add(workflow.getId());
+
+        WorkflowPublishRequest deployRequest = new WorkflowPublishRequest();
+        deployRequest.setOperation("deploy");
+        deployRequest.setOperator("it-runtime-sync");
+        deployRequest.setRequireApproval(false);
+        WorkflowPublishRecord deployRecord = workflowPublishService.publish(workflow.getId(), deployRequest);
+        assertEquals("success", deployRecord.getStatus(), "发布应成功");
+
+        DataWorkflow deployedWorkflow = dataWorkflowMapper.selectById(workflow.getId());
+        assertNotNull(deployedWorkflow);
+        Long runtimeWorkflowCode = deployedWorkflow.getWorkflowCode();
+        assertNotNull(runtimeWorkflowCode, "发布后应生成 runtime workflowCode");
+        createdRuntimeWorkflowCodes.add(runtimeWorkflowCode);
+
+        RuntimeWorkflowDefinition runtimeDefinition = dolphinRuntimeDefinitionService.loadRuntimeDefinition(
+                effectiveProjectCode,
+                runtimeWorkflowCode);
+        assertNotNull(runtimeDefinition, "运行态定义必须可读取");
+        Map<String, RuntimeTaskDefinition> runtimeTasksByName = runtimeDefinition.getTasks().stream()
+                .filter(Objects::nonNull)
+                .filter(task -> StringUtils.hasText(task.getTaskName()))
+                .collect(Collectors.toMap(RuntimeTaskDefinition::getTaskName, item -> item, (a, b) -> a));
+        RuntimeTaskDefinition runtimeUpdateTask = runtimeTasksByName.get(taskUpdateName);
+        RuntimeTaskDefinition runtimeInsertTask = runtimeTasksByName.get(taskInsertName);
+        assertNotNull(runtimeUpdateTask, "运行态应包含 UPDATE 首节点");
+        assertNotNull(runtimeInsertTask, "运行态应包含下游节点");
+
+        RuntimeSyncPreviewRequest previewRequest = new RuntimeSyncPreviewRequest();
+        previewRequest.setProjectCode(effectiveProjectCode);
+        previewRequest.setWorkflowCode(runtimeWorkflowCode);
+        previewRequest.setOperator("it-runtime-sync");
+        RuntimeSyncPreviewResponse preview = workflowRuntimeSyncService.preview(previewRequest);
+
+        if (runtimeDefinition.getExplicitEdges() == null || runtimeDefinition.getExplicitEdges().isEmpty()) {
+            assertFalse(Boolean.TRUE.equals(preview.getCanSync()),
+                    "严格模式下，Dolphin 未返回显式边时预检必须失败");
+            assertTrue(preview.getErrors().stream()
+                            .anyMatch(issue -> RuntimeSyncErrorCodes.DOLPHIN_EXPLICIT_EDGE_MISSING.equals(issue.getCode())),
+                    "应返回 DOLPHIN_EXPLICIT_EDGE_MISSING, actualErrors=" + safeJson(preview.getErrors()));
+            return;
+        }
+
+        assertTrue(Boolean.TRUE.equals(preview.getCanSync()),
+                "UPDATE 首节点场景预检应通过, errors=" + safeJson(preview.getErrors())
+                        + ", warnings=" + safeJson(preview.getWarnings()));
+        assertTrue(preview.getErrors().isEmpty(), "预检不应返回错误, errors=" + safeJson(preview.getErrors()));
+        assertTrue(preview.getWarnings().stream()
+                        .noneMatch(issue -> "EDGE_MISMATCH".equals(issue.getCode())),
+                "平台存储血缘边与 Dolphin SQL 推断边应一致, warnings=" + safeJson(preview.getWarnings()));
+        assertTrue(preview.getEdgeMismatchDetail() == null, "边一致时不应返回 edgeMismatchDetail");
     }
 
     @Test

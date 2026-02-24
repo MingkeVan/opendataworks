@@ -1081,9 +1081,6 @@ public class DataTaskService {
             if (!StringUtils.hasText(task.getDatasourceName())) {
                 throw new IllegalArgumentException("SQL 任务必须选择数据源");
             }
-            if (enforceLineage && isEmptyTableSelection(inputTableIds)) {
-                throw new IllegalArgumentException("SQL 任务必须至少配置一个输入表");
-            }
             if (enforceLineage && isEmptyTableSelection(outputTableIds)) {
                 throw new IllegalArgumentException("SQL 任务必须至少配置一个输出表");
             }
