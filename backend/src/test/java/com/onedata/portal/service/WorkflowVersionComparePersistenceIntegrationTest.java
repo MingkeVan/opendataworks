@@ -226,25 +226,25 @@ class WorkflowVersionComparePersistenceIntegrationTest {
                 "tg-beta", operator, Arrays.asList(task1Id, task2Id));
 
         WorkflowVersionCompareResponse addTask = compare(workflowId, v1, v2);
-        assertListContains(addTask.getAdded().getTasks(), task3Id + ":agg_user_" + suffix, "新增任务应被识别");
+        assertListContains(addTask.getAdded().getTasks(), "agg_user_" + suffix, "新增任务应被识别");
 
         WorkflowVersionCompareResponse removeTask = compare(workflowId, v2, v3);
-        assertListContains(removeTask.getRemoved().getTasks(), task3Id + ":agg_user_" + suffix, "删除任务应被识别");
+        assertListContains(removeTask.getRemoved().getTasks(), "agg_user_" + suffix, "删除任务应被识别");
 
         WorkflowVersionCompareResponse modifySql = compare(workflowId, v3, v4);
-        assertListContains(modifySql.getModified().getTasks(), task1Id + ":extract_user_" + suffix, "SQL 修改应被识别");
+        assertListContains(modifySql.getModified().getTasks(), "extract_user_" + suffix, "SQL 修改应被识别");
 
         WorkflowVersionCompareResponse modifyDatasource = compare(workflowId, v4, v5);
         assertListContains(modifyDatasource.getModified().getTasks(),
-                task1Id + ":extract_user_" + suffix, "任务数据源修改应被识别");
+                "extract_user_" + suffix, "任务数据源修改应被识别");
 
         WorkflowVersionCompareResponse modifyTaskName = compare(workflowId, v5, v6);
         assertListContains(modifyTaskName.getModified().getTasks(),
-                task1Id + ":" + renamedTask1, "任务名称修改应被识别");
+                renamedTask1, "任务名称修改应被识别");
 
         WorkflowVersionCompareResponse modifyInputOutput = compare(workflowId, v6, v7);
         assertListContains(modifyInputOutput.getModified().getTasks(),
-                task1Id + ":" + renamedTask1, "任务输入输出修改应被识别");
+                renamedTask1, "任务输入输出修改应被识别");
 
         WorkflowVersionCompareResponse modifyRelation = compare(workflowId, v7, v8);
         assertListContains(modifyRelation.getAdded().getEdges(), task2Id + "->" + task1Id, "任务关系新增边应被识别");

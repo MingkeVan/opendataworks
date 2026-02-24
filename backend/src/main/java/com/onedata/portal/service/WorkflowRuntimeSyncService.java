@@ -679,9 +679,11 @@ public class WorkflowRuntimeSyncService {
     }
 
     private void buildEdgeWarnings(PreviewContext context) {
+        Map<String, String> taskNameByCode = buildTaskNameByCode(context.getDefinition().getTasks());
         Set<String> explicitEdges = toEdgeSet(context.getDefinition().getExplicitEdges());
-        Set<String> inferredEdges = toEdgeSet(inferEdgesFromLineage(context.getDefinition().getTasks()));
-        context.setInferredEdges(inferEdgesFromLineage(context.getDefinition().getTasks()));
+        List<RuntimeTaskEdge> inferredEdgesList = inferEdgesFromLineage(context.getDefinition().getTasks());
+        Set<String> inferredEdges = toEdgeSet(inferredEdgesList);
+        context.setInferredEdges(inferredEdgesList);
         if (explicitEdges.isEmpty() && !inferredEdges.isEmpty()) {
             RuntimeSyncIssue issue = RuntimeSyncIssue.error(
                     RuntimeSyncErrorCodes.DOLPHIN_EXPLICIT_EDGE_MISSING,
@@ -694,10 +696,10 @@ public class WorkflowRuntimeSyncService {
         }
         if (!Objects.equals(explicitEdges, inferredEdges)) {
             RuntimeEdgeMismatchDetail detail = new RuntimeEdgeMismatchDetail();
-            detail.setExplicitEdges(sortStrings(explicitEdges));
-            detail.setInferredEdges(sortStrings(inferredEdges));
-            detail.setOnlyInExplicit(sortStrings(diffSet(explicitEdges, inferredEdges)));
-            detail.setOnlyInInferred(sortStrings(diffSet(inferredEdges, explicitEdges)));
+            detail.setExplicitEdges(sortEdgeStrings(explicitEdges, taskNameByCode));
+            detail.setInferredEdges(sortEdgeStrings(inferredEdges, taskNameByCode));
+            detail.setOnlyInExplicit(sortEdgeStrings(diffSet(explicitEdges, inferredEdges), taskNameByCode));
+            detail.setOnlyInInferred(sortEdgeStrings(diffSet(inferredEdges, explicitEdges), taskNameByCode));
             context.setEdgeMismatchDetail(detail);
 
             RuntimeSyncIssue warning = RuntimeSyncIssue.warning(
@@ -724,14 +726,65 @@ public class WorkflowRuntimeSyncService {
         return result;
     }
 
-    private List<String> sortStrings(Set<String> values) {
-        if (CollectionUtils.isEmpty(values)) {
+    private Map<String, String> buildTaskNameByCode(List<RuntimeTaskDefinition> tasks) {
+        if (CollectionUtils.isEmpty(tasks)) {
+            return Collections.emptyMap();
+        }
+        Map<String, String> taskNameByCode = new LinkedHashMap<>();
+        for (RuntimeTaskDefinition task : tasks) {
+            if (task == null || task.getTaskCode() == null) {
+                continue;
+            }
+            String code = String.valueOf(task.getTaskCode());
+            if (!StringUtils.hasText(code)) {
+                continue;
+            }
+            String name = StringUtils.hasText(task.getTaskName())
+                    ? task.getTaskName().trim()
+                    : null;
+            taskNameByCode.putIfAbsent(code, name);
+        }
+        return taskNameByCode;
+    }
+
+    private List<String> sortEdgeStrings(Set<String> edges, Map<String, String> taskNameByCode) {
+        if (CollectionUtils.isEmpty(edges)) {
             return Collections.emptyList();
         }
-        return values.stream()
+        return edges.stream()
                 .filter(StringUtils::hasText)
+                .map(edge -> formatEdgeWithTaskName(edge, taskNameByCode))
                 .sorted()
                 .collect(Collectors.toList());
+    }
+
+    private String formatEdgeWithTaskName(String edge, Map<String, String> taskNameByCode) {
+        if (!StringUtils.hasText(edge)) {
+            return edge;
+        }
+        String[] parts = edge.split("->", 2);
+        if (parts.length != 2) {
+            return edge;
+        }
+        String upstreamCode = parts[0].trim();
+        String downstreamCode = parts[1].trim();
+        String upstream = resolveTaskDisplayName(upstreamCode, taskNameByCode);
+        String downstream = resolveTaskDisplayName(downstreamCode, taskNameByCode);
+        if (Objects.equals(upstream, upstreamCode) && Objects.equals(downstream, downstreamCode)) {
+            return edge;
+        }
+        return upstream + " -> " + downstream + " [" + edge + "]";
+    }
+
+    private String resolveTaskDisplayName(String taskCode, Map<String, String> taskNameByCode) {
+        if (!StringUtils.hasText(taskCode)) {
+            return taskCode;
+        }
+        String taskName = taskNameByCode != null ? taskNameByCode.get(taskCode) : null;
+        if (!StringUtils.hasText(taskName)) {
+            return taskCode;
+        }
+        return taskName + "(" + taskCode + ")";
     }
 
     private void buildPreviewArtifacts(PreviewContext context) {
