@@ -43,5 +43,29 @@ export const dorisClusterApi = {
 
   getSyncHistoryDetail(id, runId) {
     return request.get(`/v1/doris-clusters/${id}/sync-history/${runId}`)
+  },
+
+  listSchemaBackups(id) {
+    return request.get(`/v1/doris-clusters/${id}/schema-backups`)
+  },
+
+  getSchemaBackup(id, schema) {
+    return request.get(`/v1/doris-clusters/${id}/schema-backups/${encodeURIComponent(schema)}`)
+  },
+
+  saveSchemaBackup(id, schema, data) {
+    return request.put(`/v1/doris-clusters/${id}/schema-backups/${encodeURIComponent(schema)}`, data)
+  },
+
+  triggerSchemaBackup(id, schema) {
+    return request.post(`/v1/doris-clusters/${id}/schema-backups/${encodeURIComponent(schema)}/backup`)
+  },
+
+  listSchemaSnapshots(id, schema) {
+    return request.get(`/v1/doris-clusters/${id}/schema-backups/${encodeURIComponent(schema)}/snapshots`)
+  },
+
+  restoreSchemaSnapshot(id, schema, data) {
+    return request.post(`/v1/doris-clusters/${id}/schema-backups/${encodeURIComponent(schema)}/restore`, data)
   }
 }
