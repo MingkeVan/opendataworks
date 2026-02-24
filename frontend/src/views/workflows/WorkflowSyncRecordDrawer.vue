@@ -114,6 +114,96 @@
           </div>
         </div>
 
+        <div class="detail-section" v-if="detail.diffSummary?.workflowFieldChanges?.length">
+          <div class="detail-subtitle">Workflow 字段变更详情</div>
+          <div class="tag-wrap">
+            <el-tag
+              v-for="item in detail.diffSummary.workflowFieldChanges"
+              :key="`wf-${item}`"
+              class="item-tag"
+            >
+              {{ item }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="detail-section" v-if="detail.diffSummary?.taskAdded?.length">
+          <div class="detail-subtitle">任务新增详情</div>
+          <div class="tag-wrap">
+            <el-tag
+              v-for="item in detail.diffSummary.taskAdded"
+              :key="`task-add-${item}`"
+              type="success"
+              class="item-tag"
+            >
+              {{ item }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="detail-section" v-if="detail.diffSummary?.taskRemoved?.length">
+          <div class="detail-subtitle">任务删除详情</div>
+          <div class="tag-wrap">
+            <el-tag
+              v-for="item in detail.diffSummary.taskRemoved"
+              :key="`task-rm-${item}`"
+              type="danger"
+              class="item-tag"
+            >
+              {{ item }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="detail-section" v-if="detail.diffSummary?.taskModified?.length">
+          <div class="detail-subtitle">任务修改详情</div>
+          <div class="tag-wrap">
+            <el-tag
+              v-for="item in detail.diffSummary.taskModified"
+              :key="`task-mod-${item}`"
+              type="warning"
+              class="item-tag"
+            >
+              {{ item }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="detail-section" v-if="detail.diffSummary?.edgeAdded?.length || detail.diffSummary?.edgeRemoved?.length">
+          <div class="detail-subtitle">边变更详情</div>
+          <div class="tag-wrap">
+            <el-tag
+              v-for="item in detail.diffSummary.edgeAdded"
+              :key="`edge-add-${item}`"
+              type="success"
+              class="item-tag"
+            >
+              + {{ item }}
+            </el-tag>
+            <el-tag
+              v-for="item in detail.diffSummary.edgeRemoved"
+              :key="`edge-rm-${item}`"
+              type="danger"
+              class="item-tag"
+            >
+              - {{ item }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="detail-section" v-if="detail.diffSummary?.scheduleChanges?.length">
+          <div class="detail-subtitle">调度变更详情</div>
+          <div class="tag-wrap">
+            <el-tag
+              v-for="item in detail.diffSummary.scheduleChanges"
+              :key="`sch-${item}`"
+              class="item-tag"
+            >
+              {{ item }}
+            </el-tag>
+          </div>
+        </div>
+
         <div class="detail-section" v-if="detail.parityDetailJson">
           <div class="detail-subtitle">一致性详情 JSON</div>
           <pre class="json-block">{{ formatJson(detail.parityDetailJson) }}</pre>
@@ -338,6 +428,11 @@ const formatJson = (value) => {
 }
 
 .sample-tag {
+  margin: 0 8px 8px 0;
+  max-width: 100%;
+}
+
+.item-tag {
   margin: 0 8px 8px 0;
   max-width: 100%;
 }

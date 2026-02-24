@@ -127,6 +127,36 @@
           />
         </div>
 
+        <div class="section" v-if="previewResult.paritySummary && parityChecked">
+          <div class="section-title">导出定义一致性详情</div>
+          <div class="diff-grid">
+            <span>状态: {{ parityText(previewResult.parityStatus) }}</span>
+            <span>结果: {{ previewResult.paritySummary?.changed ? '存在差异' : '一致' }}</span>
+            <span>主路 Hash: {{ shortHash(previewResult.paritySummary?.primaryHash) }}</span>
+            <span>影子 Hash: {{ shortHash(previewResult.paritySummary?.shadowHash) }}</span>
+            <span>workflow 字段差异: {{ previewResult.paritySummary?.workflowFieldDiffCount || 0 }}</span>
+            <span>任务新增差异: {{ previewResult.paritySummary?.taskAddedDiffCount || 0 }}</span>
+            <span>任务删除差异: {{ previewResult.paritySummary?.taskRemovedDiffCount || 0 }}</span>
+            <span>任务修改差异: {{ previewResult.paritySummary?.taskModifiedDiffCount || 0 }}</span>
+            <span>边新增差异: {{ previewResult.paritySummary?.edgeAddedDiffCount || 0 }}</span>
+            <span>边删除差异: {{ previewResult.paritySummary?.edgeRemovedDiffCount || 0 }}</span>
+            <span>调度差异: {{ previewResult.paritySummary?.scheduleDiffCount || 0 }}</span>
+          </div>
+          <div class="parity-samples" v-if="previewResult.paritySummary?.sampleMismatches?.length">
+            <div class="detail-tip">不一致样例（前 {{ previewResult.paritySummary.sampleMismatches.length }} 条）</div>
+            <div class="tag-wrap">
+              <el-tag
+                v-for="(sample, index) in previewResult.paritySummary.sampleMismatches"
+                :key="`parity-sample-${index}`"
+                type="warning"
+                class="diff-tag"
+              >
+                {{ sample }}
+              </el-tag>
+            </div>
+          </div>
+        </div>
+
         <div class="section edge-confirm-section" v-if="edgeMismatchRequired">
           <div class="section-title">边差异确认</div>
           <el-alert
@@ -184,6 +214,96 @@
             <span>调度变更: {{ previewResult.diffSummary.scheduleChanges?.length || 0 }}</span>
           </div>
         </div>
+
+        <div class="section" v-if="previewResult.diffSummary?.workflowFieldChanges?.length">
+          <div class="section-title">Workflow 字段变更详情</div>
+          <div class="tag-wrap">
+            <el-tag
+              v-for="item in previewResult.diffSummary.workflowFieldChanges"
+              :key="`wf-${item}`"
+              class="diff-tag"
+            >
+              {{ item }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="section" v-if="previewResult.diffSummary?.taskAdded?.length">
+          <div class="section-title">任务新增详情</div>
+          <div class="tag-wrap">
+            <el-tag
+              v-for="item in previewResult.diffSummary.taskAdded"
+              :key="`task-add-${item}`"
+              type="success"
+              class="diff-tag"
+            >
+              {{ item }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="section" v-if="previewResult.diffSummary?.taskRemoved?.length">
+          <div class="section-title">任务删除详情</div>
+          <div class="tag-wrap">
+            <el-tag
+              v-for="item in previewResult.diffSummary.taskRemoved"
+              :key="`task-rm-${item}`"
+              type="danger"
+              class="diff-tag"
+            >
+              {{ item }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="section" v-if="previewResult.diffSummary?.taskModified?.length">
+          <div class="section-title">任务修改详情</div>
+          <div class="tag-wrap">
+            <el-tag
+              v-for="item in previewResult.diffSummary.taskModified"
+              :key="`task-mod-${item}`"
+              type="warning"
+              class="diff-tag"
+            >
+              {{ item }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="section" v-if="previewResult.diffSummary?.edgeAdded?.length || previewResult.diffSummary?.edgeRemoved?.length">
+          <div class="section-title">边变更详情</div>
+          <div class="tag-wrap">
+            <el-tag
+              v-for="item in previewResult.diffSummary.edgeAdded"
+              :key="`edge-add-${item}`"
+              type="success"
+              class="diff-tag"
+            >
+              + {{ item }}
+            </el-tag>
+            <el-tag
+              v-for="item in previewResult.diffSummary.edgeRemoved"
+              :key="`edge-rm-${item}`"
+              type="danger"
+              class="diff-tag"
+            >
+              - {{ item }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="section" v-if="previewResult.diffSummary?.scheduleChanges?.length">
+          <div class="section-title">调度变更详情</div>
+          <div class="tag-wrap">
+            <el-tag
+              v-for="item in previewResult.diffSummary.scheduleChanges"
+              :key="`sch-${item}`"
+              class="diff-tag"
+            >
+              {{ item }}
+            </el-tag>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -200,6 +320,7 @@ import { ElMessage } from 'element-plus'
 import { workflowApi } from '@/api/workflow'
 
 const EDGE_MISMATCH_CODE = 'EDGE_MISMATCH'
+const PARITY_MISMATCH_CODE = 'DEFINITION_PARITY_MISMATCH'
 
 const props = defineProps({
   modelValue: {
@@ -244,6 +365,10 @@ const isPresetMode = computed(() => {
 
 const edgeMismatchDetail = computed(() => previewResult.value?.edgeMismatchDetail || null)
 const edgeMismatchRequired = computed(() => !!edgeMismatchDetail.value)
+const parityChecked = computed(() => {
+  const status = String(previewResult.value?.parityStatus || '').toLowerCase()
+  return status === 'consistent' || status === 'inconsistent'
+})
 const canSubmitSync = computed(() => {
   if (!selectedWorkflow.value || !previewResult.value || !previewResult.value.canSync) {
     return false
@@ -375,6 +500,8 @@ const handlePreview = async () => {
     if (previewResult.value?.canSync) {
       if (hasEdgeMismatchWarning(previewResult.value)) {
         ElMessage.warning('检测到边差异，请人工确认后再同步')
+      } else if (hasParityMismatchWarning(previewResult.value)) {
+        ElMessage.warning('预检通过，但导出定义与旧路径解析存在不一致，请先核对一致性详情')
       } else {
         ElMessage.success('预检通过')
       }
@@ -432,6 +559,10 @@ const hasEdgeMismatchWarning = (result) => {
   return (result?.warnings || []).some((issue) => issue?.code === EDGE_MISMATCH_CODE)
 }
 
+const hasParityMismatchWarning = (result) => {
+  return (result?.warnings || []).some((issue) => issue?.code === PARITY_MISMATCH_CODE)
+}
+
 const cancelEdgeMismatchSync = () => {
   edgeMismatchConfirmed.value = false
   visible.value = false
@@ -457,6 +588,20 @@ const formatIssue = (issue) => {
 
 const formatDateTime = (value) => {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'
+}
+
+const shortHash = (value) => {
+  if (!value) return '-'
+  return String(value).slice(0, 12)
+}
+
+const parityText = (status) => {
+  const map = {
+    consistent: '一致',
+    inconsistent: '不一致',
+    not_checked: '未校验'
+  }
+  return map[status] || status || '未校验'
 }
 </script>
 
@@ -533,6 +678,26 @@ const formatDateTime = (value) => {
   gap: 8px;
   font-size: 13px;
   color: #606266;
+}
+
+.tag-wrap {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.diff-tag {
+  margin: 0 8px 8px 0;
+  max-width: 100%;
+}
+
+.parity-samples {
+  margin-top: 8px;
+}
+
+.detail-tip {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #909399;
 }
 
 .edge-confirm-section :deep(.el-alert) {

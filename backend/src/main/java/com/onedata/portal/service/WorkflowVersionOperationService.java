@@ -44,6 +44,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -104,7 +105,7 @@ public class WorkflowVersionOperationService {
                 response.getModified().getTasks(), response.getUnchanged().getTasks());
 
         compareEdgeSets(left.getEdges(), right.getEdges(), response.getAdded().getEdges(), response.getRemoved().getEdges(),
-                response.getUnchanged().getEdges());
+                response.getUnchanged().getEdges(), left.getTasks(), right.getTasks());
 
         compareFlatFields(left.getSchedule(), right.getSchedule(), response.getAdded().getSchedules(),
                 response.getRemoved().getSchedules(), response.getModified().getSchedules(),
@@ -345,7 +346,7 @@ public class WorkflowVersionOperationService {
             if (Objects.equals(leftNode, rightNode)) {
                 unchanged.add(describeTask(rightNode, key));
             } else {
-                modified.add(describeTask(rightNode, key));
+                modified.add(describeModifiedTask(leftNode, rightNode, key));
             }
         }
     }
@@ -354,20 +355,23 @@ public class WorkflowVersionOperationService {
                                  Set<String> right,
                                  List<String> added,
                                  List<String> removed,
-                                 List<String> unchanged) {
+                                 List<String> unchanged,
+                                 Map<String, JsonNode> leftTasks,
+                                 Map<String, JsonNode> rightTasks) {
+        Map<String, JsonNode> taskLookup = buildTaskLookupForEdges(leftTasks, rightTasks);
         for (String edge : right) {
             if (!left.contains(edge)) {
-                added.add(edge);
+                added.add(describeEdge(edge, taskLookup));
             }
         }
         for (String edge : left) {
             if (!right.contains(edge)) {
-                removed.add(edge);
+                removed.add(describeEdge(edge, taskLookup));
             }
         }
         for (String edge : left) {
             if (right.contains(edge)) {
-                unchanged.add(edge);
+                unchanged.add(describeEdge(edge, taskLookup));
             }
         }
     }
@@ -651,14 +655,159 @@ public class WorkflowVersionOperationService {
     }
 
     private String describeTask(JsonNode taskNode, String key) {
+        String taskId = firstText(taskNode, "taskId", "id");
+        String taskCode = firstText(taskNode, "taskCode", "code");
+        String identity = buildTaskIdentity(taskId, taskCode, key);
+        if (taskNode == null || taskNode.isNull()) {
+            return identity;
+        }
+        String name = firstText(taskNode, "taskName", "name");
+        if (StringUtils.hasText(name)) {
+            if (StringUtils.hasText(identity)) {
+                return name + " [" + identity + "]";
+            }
+            return name;
+        }
+        return identity;
+    }
+
+    private String describeModifiedTask(JsonNode beforeTask, JsonNode afterTask, String key) {
+        JsonNode preferred = afterTask != null && !afterTask.isNull() ? afterTask : beforeTask;
+        String base = describeTask(preferred, key);
+        List<String> changedFields = collectChangedTaskFields(beforeTask, afterTask);
+        if (changedFields.isEmpty()) {
+            return base;
+        }
+        return base + " | 变更: " + String.join("; ", changedFields);
+    }
+
+    private List<String> collectChangedTaskFields(JsonNode beforeTask, JsonNode afterTask) {
+        Set<String> keys = new LinkedHashSet<>();
+        keys.addAll(fieldNames(beforeTask));
+        keys.addAll(fieldNames(afterTask));
+        if (keys.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> changed = new ArrayList<>();
+        List<String> ordered = new ArrayList<>(keys);
+        Collections.sort(ordered);
+        for (String field : ordered) {
+            JsonNode beforeValue = beforeTask != null ? beforeTask.get(field) : null;
+            JsonNode afterValue = afterTask != null ? afterTask.get(field) : null;
+            if (Objects.equals(beforeValue, afterValue)) {
+                continue;
+            }
+            changed.add(formatTaskFieldDiff(field, beforeValue, afterValue));
+        }
+        return changed;
+    }
+
+    private String formatTaskFieldDiff(String field, JsonNode beforeValue, JsonNode afterValue) {
+        String beforeText = summarizeText(toText(beforeValue));
+        String afterText = summarizeText(toText(afterValue));
+        if (shouldOnlyShowFieldName(field, beforeText, afterText)) {
+            return field;
+        }
+        return field + ": " + beforeText + " -> " + afterText;
+    }
+
+    private boolean shouldOnlyShowFieldName(String field, String beforeText, String afterText) {
+        String lowerField = field != null ? field.toLowerCase(Locale.ROOT) : "";
+        if (lowerField.contains("sql") || lowerField.contains("json")) {
+            return true;
+        }
+        return isLongInlineText(beforeText) || isLongInlineText(afterText);
+    }
+
+    private boolean isLongInlineText(String value) {
+        if (!StringUtils.hasText(value)) {
+            return false;
+        }
+        return value.length() > 48 || value.contains("\n") || value.contains("\r");
+    }
+
+    private String summarizeText(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "null";
+        }
+        String compact = value.replace('\n', ' ').replace('\r', ' ').trim();
+        if (compact.length() <= 48) {
+            return compact;
+        }
+        return compact.substring(0, 45) + "...";
+    }
+
+    private String describeEdge(String edge, Map<String, JsonNode> taskLookup) {
+        if (!StringUtils.hasText(edge)) {
+            return edge;
+        }
+        String[] parts = edge.split("->", 2);
+        if (parts.length != 2) {
+            return edge;
+        }
+        String upstreamKey = parts[0].trim();
+        String downstreamKey = parts[1].trim();
+        JsonNode upstreamTask = taskLookup != null ? taskLookup.get(upstreamKey) : null;
+        JsonNode downstreamTask = taskLookup != null ? taskLookup.get(downstreamKey) : null;
+
+        String upstream = describeTaskBrief(upstreamTask, upstreamKey);
+        String downstream = describeTaskBrief(downstreamTask, downstreamKey);
+        if (Objects.equals(upstream, upstreamKey) && Objects.equals(downstream, downstreamKey)) {
+            return edge;
+        }
+        return upstream + " -> " + downstream + " [" + edge + "]";
+    }
+
+    private String describeTaskBrief(JsonNode taskNode, String key) {
         if (taskNode == null || taskNode.isNull()) {
             return key;
         }
         String name = firstText(taskNode, "taskName", "name");
-        if (StringUtils.hasText(name)) {
-            return key + ":" + name;
+        if (!StringUtils.hasText(name)) {
+            return key;
         }
-        return key;
+        return StringUtils.hasText(key) ? name + "(" + key + ")" : name;
+    }
+
+    private String buildTaskIdentity(String taskId, String taskCode, String fallbackKey) {
+        List<String> parts = new ArrayList<>();
+        if (StringUtils.hasText(taskId)) {
+            parts.add("taskId=" + taskId);
+        }
+        if (StringUtils.hasText(taskCode) && !Objects.equals(taskCode, taskId)) {
+            parts.add("taskCode=" + taskCode);
+        }
+        if (parts.isEmpty() && StringUtils.hasText(fallbackKey)) {
+            parts.add("key=" + fallbackKey);
+        }
+        return String.join(", ", parts);
+    }
+
+    private Map<String, JsonNode> buildTaskLookupForEdges(Map<String, JsonNode> leftTasks,
+                                                          Map<String, JsonNode> rightTasks) {
+        Map<String, JsonNode> lookup = new LinkedHashMap<>();
+        registerTaskLookupEntries(lookup, leftTasks);
+        registerTaskLookupEntries(lookup, rightTasks);
+        return lookup;
+    }
+
+    private void registerTaskLookupEntries(Map<String, JsonNode> lookup, Map<String, JsonNode> source) {
+        if (lookup == null || source == null || source.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, JsonNode> entry : source.entrySet()) {
+            JsonNode taskNode = entry.getValue();
+            registerTaskAlias(lookup, entry.getKey(), taskNode);
+            registerTaskAlias(lookup, firstText(taskNode, "taskId", "id"), taskNode);
+            registerTaskAlias(lookup, firstText(taskNode, "taskCode", "code"), taskNode);
+        }
+    }
+
+    private void registerTaskAlias(Map<String, JsonNode> lookup, String alias, JsonNode taskNode) {
+        if (lookup == null || !StringUtils.hasText(alias) || taskNode == null || taskNode.isNull()) {
+            return;
+        }
+        lookup.putIfAbsent(alias, taskNode);
     }
 
     private void copyIfExists(JsonNode source, ObjectNode target, String field) {

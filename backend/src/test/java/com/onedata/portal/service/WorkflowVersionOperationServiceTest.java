@@ -339,22 +339,22 @@ class WorkflowVersionOperationServiceTest {
         });
 
         WorkflowVersionCompareResponse addTask = compare(workflowId, v1.getId(), v2.getId());
-        assertListContains(addTask.getAdded().getTasks(), "3:agg_user", "新增任务应被识别");
+        assertListContains(addTask.getAdded().getTasks(), "agg_user", "新增任务应被识别");
 
         WorkflowVersionCompareResponse removeTask = compare(workflowId, v2.getId(), v3.getId());
-        assertListContains(removeTask.getRemoved().getTasks(), "3:agg_user", "删除任务应被识别");
+        assertListContains(removeTask.getRemoved().getTasks(), "agg_user", "删除任务应被识别");
 
         WorkflowVersionCompareResponse modifySql = compare(workflowId, v3.getId(), v4.getId());
-        assertListContains(modifySql.getModified().getTasks(), "1:extract_user", "任务 SQL 修改应被识别");
+        assertListContains(modifySql.getModified().getTasks(), "extract_user", "任务 SQL 修改应被识别");
 
         WorkflowVersionCompareResponse modifyDatasource = compare(workflowId, v4.getId(), v5.getId());
-        assertListContains(modifyDatasource.getModified().getTasks(), "1:extract_user", "任务数据源修改应被识别");
+        assertListContains(modifyDatasource.getModified().getTasks(), "extract_user", "任务数据源修改应被识别");
 
         WorkflowVersionCompareResponse modifyTaskName = compare(workflowId, v5.getId(), v6.getId());
-        assertListContains(modifyTaskName.getModified().getTasks(), "1:extract_user_v2", "任务名称修改应被识别");
+        assertListContains(modifyTaskName.getModified().getTasks(), "extract_user_v2", "任务名称修改应被识别");
 
         WorkflowVersionCompareResponse modifyInputOutput = compare(workflowId, v6.getId(), v7.getId());
-        assertListContains(modifyInputOutput.getModified().getTasks(), "1:extract_user_v2", "输入输出表修改应被识别");
+        assertListContains(modifyInputOutput.getModified().getTasks(), "extract_user_v2", "输入输出表修改应被识别");
 
         WorkflowVersionCompareResponse modifyRelation = compare(workflowId, v7.getId(), v8.getId());
         assertListContains(modifyRelation.getAdded().getEdges(), "2->1", "任务关系新增边应被识别");
@@ -497,7 +497,7 @@ class WorkflowVersionOperationServiceTest {
         assertListContains(modifyGlobalParams.getModified().getWorkflowFields(),
                 "workflow.globalParams", "全局变量修改应被识别");
         assertListContains(modifyGlobalParams.getUnchanged().getTasks(),
-                "1:extract_user", "仅改全局变量时任务应保持不变");
+                "extract_user", "仅改全局变量时任务应保持不变");
 
         WorkflowVersionCompareResponse modifyDescription = compare(workflowId, v2.getId(), v3.getId());
         assertListContains(modifyDescription.getModified().getWorkflowFields(),
