@@ -76,6 +76,11 @@ services:
 networks:
   opendataworks-network:
     driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: ${OPENDATAWORKS_PROD_SUBNET:-10.71.0.0/24}
+          gateway: ${OPENDATAWORKS_PROD_GATEWAY:-10.71.0.1}
 
 volumes:
   mysql-data:
