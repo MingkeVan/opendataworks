@@ -538,10 +538,10 @@ public class WorkflowRuntimeSyncService {
 
             task.setInputTableIds(inputTableIds);
             task.setOutputTableIds(outputTableIds);
-            if (inputTableIds.isEmpty() || outputTableIds.isEmpty()) {
+            if (outputTableIds.isEmpty()) {
                 RuntimeSyncIssue issue = RuntimeSyncIssue.error(
                         RuntimeSyncErrorCodes.SQL_LINEAGE_INCOMPLETE,
-                        "SQL 任务输入/输出表推断不完整");
+                        "SQL 任务输出表推断不完整");
                 fillTaskIssue(issue, context.getDefinition(), task);
                 context.getErrors().add(issue);
             }
@@ -681,6 +681,17 @@ public class WorkflowRuntimeSyncService {
     private void buildEdgeWarnings(PreviewContext context) {
         Set<String> explicitEdges = toEdgeSet(context.getDefinition().getExplicitEdges());
         Set<String> inferredEdges = toEdgeSet(inferEdgesFromLineage(context.getDefinition().getTasks()));
+        context.setInferredEdges(inferEdgesFromLineage(context.getDefinition().getTasks()));
+        if (explicitEdges.isEmpty() && !inferredEdges.isEmpty()) {
+            RuntimeSyncIssue issue = RuntimeSyncIssue.error(
+                    RuntimeSyncErrorCodes.DOLPHIN_EXPLICIT_EDGE_MISSING,
+                    "Dolphin 未返回显式边，严格模式下无法完成边一致性比对");
+            issue.setWorkflowCode(context.getDefinition().getWorkflowCode());
+            issue.setWorkflowName(context.getDefinition().getWorkflowName());
+            context.getErrors().add(issue);
+            context.setEdgeMismatchDetail(null);
+            return;
+        }
         if (!Objects.equals(explicitEdges, inferredEdges)) {
             RuntimeEdgeMismatchDetail detail = new RuntimeEdgeMismatchDetail();
             detail.setExplicitEdges(sortStrings(explicitEdges));
@@ -700,7 +711,6 @@ public class WorkflowRuntimeSyncService {
         } else {
             context.setEdgeMismatchDetail(null);
         }
-        context.setInferredEdges(inferEdgesFromLineage(context.getDefinition().getTasks()));
     }
 
     private Set<String> diffSet(Set<String> left, Set<String> right) {

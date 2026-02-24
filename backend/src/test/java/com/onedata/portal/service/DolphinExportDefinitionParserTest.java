@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskDefinition;
+import com.onedata.portal.dto.workflow.runtime.RuntimeTaskEdge;
 import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowDefinition;
 import com.onedata.portal.service.dolphin.DolphinOpenApiClient;
 import org.junit.jupiter.api.BeforeEach;
@@ -143,5 +144,40 @@ class DolphinExportDefinitionParserTest {
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> service.loadRuntimeDefinitionFromExport(1L, 1004L));
         assertTrue(ex.getMessage().contains("导出工作流定义"));
+    }
+
+    @Test
+    void shouldParseProcessTaskRelationListWhenLoadingRuntimeDefinition() {
+        ObjectNode definition = objectMapper.createObjectNode();
+        definition.put("code", 1005L);
+        definition.put("name", "wf_runtime_process_relation");
+
+        ArrayNode taskDefinitions = definition.putArray("taskDefinitionList");
+        ObjectNode task1 = taskDefinitions.addObject();
+        task1.put("code", 3101L);
+        task1.put("name", "task_update");
+        task1.put("taskType", "SQL");
+        task1.put("taskParams", "{\"sql\":\"UPDATE ods.t1 SET c1=1\",\"datasource\":10,\"type\":\"MYSQL\"}");
+
+        ObjectNode task2 = taskDefinitions.addObject();
+        task2.put("code", 3102L);
+        task2.put("name", "task_insert");
+        task2.put("taskType", "SQL");
+        task2.put("taskParams", "{\"sql\":\"INSERT INTO dws.t2 SELECT * FROM ods.t1\",\"datasource\":10,\"type\":\"MYSQL\"}");
+
+        ArrayNode relations = definition.putArray("processTaskRelationList");
+        ObjectNode relation = relations.addObject();
+        relation.put("preTaskCode", 3101L);
+        relation.put("postTaskCode", 3102L);
+
+        when(openApiClient.getProcessDefinition(1L, 1005L)).thenReturn(definition);
+
+        RuntimeWorkflowDefinition runtime = service.loadRuntimeDefinition(1L, 1005L);
+
+        assertEquals(2, runtime.getTasks().size());
+        assertEquals(1, runtime.getExplicitEdges().size());
+        RuntimeTaskEdge edge = runtime.getExplicitEdges().get(0);
+        assertEquals(3101L, edge.getUpstreamTaskCode());
+        assertEquals(3102L, edge.getDownstreamTaskCode());
     }
 }

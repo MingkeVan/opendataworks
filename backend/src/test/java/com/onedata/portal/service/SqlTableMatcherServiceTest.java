@@ -179,6 +179,24 @@ class SqlTableMatcherServiceTest {
         assertEquals("matched", response.getInputRefs().get(0).getMatchStatus());
     }
 
+    @Test
+    void analyzeUpdateSetShouldTreatTargetAsOutputOnly() {
+        DataTable target = table(61L, 601L, "dwd", "user_snapshot", "snapshot");
+
+        when(dataTableMapper.selectActiveByDbAndTable("dwd", "user_snapshot"))
+                .thenReturn(Collections.singletonList(target));
+        when(dorisClusterMapper.selectBatchIds(anyCollection()))
+                .thenReturn(Collections.singletonList(cluster(601L, "prod", "DORIS")));
+
+        String sql = "UPDATE dwd.user_snapshot SET status = 'inactive' WHERE dt = '2026-02-24'";
+        SqlTableAnalyzeResponse response = service.analyze(sql, "SQL");
+
+        assertTrue(response.getInputRefs().isEmpty(), "纯 UPDATE SET 不应推断输入表");
+        assertEquals(1, response.getOutputRefs().size());
+        assertEquals("dwd.user_snapshot", response.getOutputRefs().get(0).getRawName());
+        assertEquals("matched", response.getOutputRefs().get(0).getMatchStatus());
+    }
+
     private DataTable table(Long id, Long clusterId, String db, String name, String comment) {
         DataTable t = new DataTable();
         t.setId(id);

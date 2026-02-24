@@ -421,7 +421,6 @@ const fetchDatasourceOptions = async () => {
   }
 }
 
-const inputTableRule = [{ type: 'array', required: true, min: 1, message: '请选择至少一个输入表', trigger: 'change' }]
 const outputTableRule = [{ type: 'array', required: true, min: 1, message: '请选择至少一个输出表', trigger: 'change' }]
 
 const rules = computed(() => {
@@ -433,7 +432,6 @@ const rules = computed(() => {
   if (form.task.dolphinNodeType === 'SQL') {
     return {
       ...baseRules,
-      inputTableIds: inputTableRule,
       'task.datasourceName': [{ required: true, message: '请选择数据源', trigger: 'change' }],
       'task.taskSql': [{ required: true, message: 'SQL 脚本不能为空', trigger: 'blur' }]
     }

@@ -56,15 +56,14 @@ class DataTaskServiceValidationTest {
     private DataTaskService dataTaskService;
 
     @Test
-    void validateTaskShouldRejectSqlWithoutInput() {
+    void validateTaskShouldAllowSqlWithoutInput() {
         DataTask task = sqlTask();
 
-        assertThrows(IllegalArgumentException.class,
-                () -> ReflectionTestUtils.invokeMethod(dataTaskService,
-                        "validateTask",
-                        task,
-                        Collections.emptyList(),
-                        Collections.singletonList(100L)));
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(dataTaskService,
+                "validateTask",
+                task,
+                Collections.emptyList(),
+                Collections.singletonList(100L)));
     }
 
     @Test

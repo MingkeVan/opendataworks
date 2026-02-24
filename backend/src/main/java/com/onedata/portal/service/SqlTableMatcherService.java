@@ -73,6 +73,10 @@ public class SqlTableMatcherService {
             + TABLE_CAPTURE_PATTERN
     );
 
+    private static final Pattern UPDATE_OUTPUT_CONTEXT_PATTERN = Pattern.compile(
+        "(?is)(?:^|;)\\s*UPDATE\\b(?:\\s+LOW_PRIORITY|\\s+IGNORE)*\\s+" + TABLE_CAPTURE_PATTERN
+    );
+
     private static final Pattern DELETE_FROM_PREFIX_PATTERN = Pattern.compile(
         "(?is).*\\bDELETE\\b(?:\\s+LOW_PRIORITY|\\s+QUICK|\\s+IGNORE|\\s+`?[a-z0-9_]+`?|\\s*,\\s*)*\\s*$"
     );
@@ -82,7 +86,7 @@ public class SqlTableMatcherService {
     );
 
     private static final Set<String> OUTPUT_STATEMENT_TYPES = new HashSet<>(
-        Arrays.asList("Insert", "Replace", "Merge", "CreateTable", "Delete")
+        Arrays.asList("Insert", "Replace", "Merge", "CreateTable", "Delete", "Update")
     );
 
     private final DataTableMapper dataTableMapper;
@@ -365,6 +369,7 @@ public class SqlTableMatcherService {
 
         collectRegexMatches(maskedSql, OUTPUT_CONTEXT_PATTERN, refs, direction, 1, false);
         collectRegexMatches(maskedSql, DELETE_OUTPUT_CONTEXT_PATTERN, refs, direction, 1, false);
+        collectRegexMatches(maskedSql, UPDATE_OUTPUT_CONTEXT_PATTERN, refs, direction, 1, false);
         return refs;
     }
 
@@ -450,6 +455,7 @@ public class SqlTableMatcherService {
         } else {
             collectRegexSpans(maskedSql, OUTPUT_CONTEXT_PATTERN, spanMap, direction, 1, false);
             collectRegexSpans(maskedSql, DELETE_OUTPUT_CONTEXT_PATTERN, spanMap, direction, 1, false);
+            collectRegexSpans(maskedSql, UPDATE_OUTPUT_CONTEXT_PATTERN, spanMap, direction, 1, false);
         }
 
         for (TableReference ref : refs) {
