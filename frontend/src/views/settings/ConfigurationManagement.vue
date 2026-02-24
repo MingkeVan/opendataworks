@@ -4,12 +4,25 @@
       <h2>配置管理</h2>
     </div>
 
-    <DolphinConfig />
+    <el-card shadow="never" class="config-tabs-card">
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="Dolphin 配置" name="dolphin">
+          <DolphinConfig />
+        </el-tab-pane>
+        <el-tab-pane label="MinIO 环境" name="minio">
+          <MinioConfigManagement />
+        </el-tab-pane>
+      </el-tabs>
+    </el-card>
   </div>
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import DolphinConfig from './DolphinConfig.vue'
+import MinioConfigManagement from './MinioConfigManagement.vue'
+
+const activeTab = ref('dolphin')
 </script>
 
 <style scoped>
@@ -29,5 +42,9 @@ import DolphinConfig from './DolphinConfig.vue'
   font-size: 24px;
   font-weight: 600;
   color: #1a1a1a;
+}
+
+.config-tabs-card :deep(.el-card__body) {
+  padding: 16px;
 }
 </style>

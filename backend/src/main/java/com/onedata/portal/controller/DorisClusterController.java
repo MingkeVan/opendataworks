@@ -2,6 +2,12 @@ package com.onedata.portal.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.onedata.portal.annotation.RequireAuth;
+import com.onedata.portal.dto.backup.SchemaBackupConfigRequest;
+import com.onedata.portal.dto.backup.SchemaBackupItem;
+import com.onedata.portal.dto.backup.SchemaBackupRestoreRequest;
+import com.onedata.portal.dto.backup.SchemaBackupRestoreResponse;
+import com.onedata.portal.dto.backup.SchemaBackupSnapshot;
+import com.onedata.portal.dto.backup.SchemaBackupTriggerResponse;
 import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
 import com.onedata.portal.entity.DorisCluster;
@@ -9,6 +15,7 @@ import com.onedata.portal.entity.MetadataSyncHistory;
 import com.onedata.portal.service.DorisClusterService;
 import com.onedata.portal.service.DorisConnectionService;
 import com.onedata.portal.service.MetadataSyncHistoryService;
+import com.onedata.portal.service.SchemaBackupService;
 import com.onedata.portal.util.TableNameUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -29,6 +36,7 @@ public class DorisClusterController {
     private final DorisClusterService dorisClusterService;
     private final DorisConnectionService dorisConnectionService;
     private final MetadataSyncHistoryService metadataSyncHistoryService;
+    private final SchemaBackupService schemaBackupService;
 
     @GetMapping
     public Result<List<DorisCluster>> list() {
@@ -116,5 +124,53 @@ public class DorisClusterController {
             return Result.fail("同步记录不存在");
         }
         return Result.success(history);
+    }
+
+    @RequireAuth
+    @GetMapping("/{id}/schema-backups")
+    public Result<List<SchemaBackupItem>> listSchemaBackups(@PathVariable Long id) {
+        return Result.success(schemaBackupService.listSchemaBackupItems(id));
+    }
+
+    @RequireAuth
+    @GetMapping("/{id}/schema-backups/{schema}")
+    public Result<SchemaBackupItem> getSchemaBackup(
+            @PathVariable Long id,
+            @PathVariable String schema) {
+        return Result.success(schemaBackupService.getSchemaBackupItem(id, schema));
+    }
+
+    @RequireAuth
+    @PutMapping("/{id}/schema-backups/{schema}")
+    public Result<SchemaBackupItem> saveSchemaBackup(
+            @PathVariable Long id,
+            @PathVariable String schema,
+            @RequestBody SchemaBackupConfigRequest request) {
+        return Result.success(schemaBackupService.upsertConfig(id, schema, request));
+    }
+
+    @RequireAuth
+    @PostMapping("/{id}/schema-backups/{schema}/backup")
+    public Result<SchemaBackupTriggerResponse> triggerSchemaBackup(
+            @PathVariable Long id,
+            @PathVariable String schema) {
+        return Result.success(schemaBackupService.triggerBackup(id, schema, "manual"));
+    }
+
+    @RequireAuth
+    @GetMapping("/{id}/schema-backups/{schema}/snapshots")
+    public Result<List<SchemaBackupSnapshot>> listSnapshots(
+            @PathVariable Long id,
+            @PathVariable String schema) {
+        return Result.success(schemaBackupService.listSnapshots(id, schema));
+    }
+
+    @RequireAuth
+    @PostMapping("/{id}/schema-backups/{schema}/restore")
+    public Result<SchemaBackupRestoreResponse> restoreSnapshot(
+            @PathVariable Long id,
+            @PathVariable String schema,
+            @RequestBody SchemaBackupRestoreRequest request) {
+        return Result.success(schemaBackupService.restoreSnapshot(id, schema, request));
     }
 }

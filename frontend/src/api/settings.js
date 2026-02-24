@@ -25,5 +25,50 @@ export const settingsApi = {
             method: 'post',
             data
         })
+    },
+
+    listMinioConfigs(params = {}) {
+        return request({
+            url: '/v1/settings/minio',
+            method: 'get',
+            params
+        })
+    },
+
+    getMinioConfig(id) {
+        return request({
+            url: `/v1/settings/minio/${id}`,
+            method: 'get'
+        })
+    },
+
+    createMinioConfig(data) {
+        return request({
+            url: '/v1/settings/minio',
+            method: 'post',
+            data
+        })
+    },
+
+    updateMinioConfig(id, data) {
+        return request({
+            url: `/v1/settings/minio/${id}`,
+            method: 'put',
+            data
+        })
+    },
+
+    deleteMinioConfig(id) {
+        return request({
+            url: `/v1/settings/minio/${id}`,
+            method: 'delete'
+        })
+    },
+
+    setDefaultMinioConfig(id) {
+        return request({
+            url: `/v1/settings/minio/${id}/default`,
+            method: 'post'
+        })
     }
 }

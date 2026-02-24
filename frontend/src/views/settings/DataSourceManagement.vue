@@ -16,6 +16,11 @@
       </template>
 
       <el-table v-loading="loading" :data="clusters" border style="width: 100%">
+        <el-table-column type="expand" width="42">
+          <template #default="{ row }">
+            <SchemaBackupManager :cluster="row" />
+          </template>
+        </el-table-column>
         <el-table-column prop="clusterName" label="数据源名称" min-width="160" />
         <el-table-column label="类型" min-width="110">
           <template #default="{ row }">
@@ -367,6 +372,7 @@ import { Plus, Refresh, Warning, CircleCheck } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { dorisClusterApi } from '@/api/doris'
 import { tableApi } from '@/api/table'
+import SchemaBackupManager from '@/views/settings/components/SchemaBackupManager.vue'
 
 const loading = ref(false)
 const saving = ref(false)
