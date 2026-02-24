@@ -116,18 +116,33 @@
 
         <div class="section" v-if="previewResult.warnings?.length">
           <div class="section-title">告警信息</div>
-          <el-alert
-            v-for="(issue, index) in previewResult.warnings"
-            :key="`warning-${index}`"
-            type="warning"
-            :closable="false"
-            class="issue-alert"
-            :title="issue.code || 'WARNING'"
-            :description="formatIssue(issue)"
-          />
+          <div v-for="(issue, index) in previewResult.warnings" :key="`warning-${index}`">
+            <el-alert
+              type="warning"
+              :closable="false"
+              class="issue-alert"
+              :title="issue.code || 'WARNING'"
+              :description="formatIssue(issue)"
+            />
+            <div class="issue-action" v-if="resolveIssueTarget(issue)">
+              <el-button
+                link
+                size="small"
+                type="primary"
+                @click="scrollToSection(resolveIssueTarget(issue))"
+              >
+                查看详情
+              </el-button>
+            </div>
+          </div>
         </div>
 
-        <div class="section" v-if="previewResult.paritySummary && parityChecked">
+        <div
+          class="section"
+          v-if="previewResult.paritySummary && parityChecked"
+          :ref="(el) => setSectionRef('parity', el)"
+          :class="{ 'section-highlight': activeSectionKey === 'parity' }"
+        >
           <div class="section-title">导出定义一致性详情</div>
           <div class="diff-grid">
             <span>状态: {{ parityText(previewResult.parityStatus) }}</span>
@@ -157,7 +172,12 @@
           </div>
         </div>
 
-        <div class="section edge-confirm-section" v-if="edgeMismatchRequired">
+        <div
+          class="section edge-confirm-section"
+          v-if="edgeMismatchRequired"
+          :ref="(el) => setSectionRef('edgeMismatch', el)"
+          :class="{ 'section-highlight': activeSectionKey === 'edgeMismatch' }"
+        >
           <div class="section-title">边差异确认</div>
           <el-alert
             type="warning"
@@ -202,20 +222,79 @@
           </div>
         </div>
 
-        <div class="section" v-if="previewResult.diffSummary">
+        <div
+          class="section"
+          v-if="previewResult.diffSummary"
+          :ref="(el) => setSectionRef('diffSummary', el)"
+          :class="{ 'section-highlight': activeSectionKey === 'diffSummary' }"
+        >
           <div class="section-title">差异摘要</div>
           <div class="diff-grid">
-            <span>workflow 字段变更: {{ previewResult.diffSummary.workflowFieldChanges?.length || 0 }}</span>
-            <span>任务新增: {{ previewResult.diffSummary.taskAdded?.length || 0 }}</span>
-            <span>任务删除: {{ previewResult.diffSummary.taskRemoved?.length || 0 }}</span>
-            <span>任务修改: {{ previewResult.diffSummary.taskModified?.length || 0 }}</span>
-            <span>边新增: {{ previewResult.diffSummary.edgeAdded?.length || 0 }}</span>
-            <span>边删除: {{ previewResult.diffSummary.edgeRemoved?.length || 0 }}</span>
-            <span>调度变更: {{ previewResult.diffSummary.scheduleChanges?.length || 0 }}</span>
+            <button
+              type="button"
+              class="summary-link"
+              :class="{ 'is-disabled': !hasDiffItems('workflowFieldChanges') }"
+              @click="handleDiffSummaryClick('workflowFieldChanges')"
+            >
+              workflow 字段变更: {{ previewResult.diffSummary.workflowFieldChanges?.length || 0 }}
+            </button>
+            <button
+              type="button"
+              class="summary-link"
+              :class="{ 'is-disabled': !hasDiffItems('taskAdded') }"
+              @click="handleDiffSummaryClick('taskAdded')"
+            >
+              任务新增: {{ previewResult.diffSummary.taskAdded?.length || 0 }}
+            </button>
+            <button
+              type="button"
+              class="summary-link"
+              :class="{ 'is-disabled': !hasDiffItems('taskRemoved') }"
+              @click="handleDiffSummaryClick('taskRemoved')"
+            >
+              任务删除: {{ previewResult.diffSummary.taskRemoved?.length || 0 }}
+            </button>
+            <button
+              type="button"
+              class="summary-link"
+              :class="{ 'is-disabled': !hasDiffItems('taskModified') }"
+              @click="handleDiffSummaryClick('taskModified')"
+            >
+              任务修改: {{ previewResult.diffSummary.taskModified?.length || 0 }}
+            </button>
+            <button
+              type="button"
+              class="summary-link"
+              :class="{ 'is-disabled': !hasDiffItems('edgeAdded') }"
+              @click="handleDiffSummaryClick('edgeAdded')"
+            >
+              边新增: {{ previewResult.diffSummary.edgeAdded?.length || 0 }}
+            </button>
+            <button
+              type="button"
+              class="summary-link"
+              :class="{ 'is-disabled': !hasDiffItems('edgeRemoved') }"
+              @click="handleDiffSummaryClick('edgeRemoved')"
+            >
+              边删除: {{ previewResult.diffSummary.edgeRemoved?.length || 0 }}
+            </button>
+            <button
+              type="button"
+              class="summary-link"
+              :class="{ 'is-disabled': !hasDiffItems('scheduleChanges') }"
+              @click="handleDiffSummaryClick('scheduleChanges')"
+            >
+              调度变更: {{ previewResult.diffSummary.scheduleChanges?.length || 0 }}
+            </button>
           </div>
         </div>
 
-        <div class="section" v-if="previewResult.diffSummary?.workflowFieldChanges?.length">
+        <div
+          class="section"
+          v-if="previewResult.diffSummary?.workflowFieldChanges?.length"
+          :ref="(el) => setSectionRef('workflowFieldChanges', el)"
+          :class="{ 'section-highlight': activeSectionKey === 'workflowFieldChanges' }"
+        >
           <div class="section-title">Workflow 字段变更详情</div>
           <div class="tag-wrap">
             <el-tag
@@ -228,7 +307,12 @@
           </div>
         </div>
 
-        <div class="section" v-if="previewResult.diffSummary?.taskAdded?.length">
+        <div
+          class="section"
+          v-if="previewResult.diffSummary?.taskAdded?.length"
+          :ref="(el) => setSectionRef('taskAdded', el)"
+          :class="{ 'section-highlight': activeSectionKey === 'taskAdded' }"
+        >
           <div class="section-title">任务新增详情</div>
           <div class="tag-wrap">
             <el-tag
@@ -242,7 +326,12 @@
           </div>
         </div>
 
-        <div class="section" v-if="previewResult.diffSummary?.taskRemoved?.length">
+        <div
+          class="section"
+          v-if="previewResult.diffSummary?.taskRemoved?.length"
+          :ref="(el) => setSectionRef('taskRemoved', el)"
+          :class="{ 'section-highlight': activeSectionKey === 'taskRemoved' }"
+        >
           <div class="section-title">任务删除详情</div>
           <div class="tag-wrap">
             <el-tag
@@ -256,7 +345,12 @@
           </div>
         </div>
 
-        <div class="section" v-if="previewResult.diffSummary?.taskModified?.length">
+        <div
+          class="section"
+          v-if="previewResult.diffSummary?.taskModified?.length"
+          :ref="(el) => setSectionRef('taskModified', el)"
+          :class="{ 'section-highlight': activeSectionKey === 'taskModified' }"
+        >
           <div class="section-title">任务修改详情</div>
           <div class="tag-wrap">
             <el-tag
@@ -270,7 +364,12 @@
           </div>
         </div>
 
-        <div class="section" v-if="previewResult.diffSummary?.edgeAdded?.length || previewResult.diffSummary?.edgeRemoved?.length">
+        <div
+          class="section"
+          v-if="previewResult.diffSummary?.edgeAdded?.length || previewResult.diffSummary?.edgeRemoved?.length"
+          :ref="(el) => setSectionRef('edgeChanges', el)"
+          :class="{ 'section-highlight': activeSectionKey === 'edgeChanges' }"
+        >
           <div class="section-title">边变更详情</div>
           <div class="tag-wrap">
             <el-tag
@@ -292,7 +391,12 @@
           </div>
         </div>
 
-        <div class="section" v-if="previewResult.diffSummary?.scheduleChanges?.length">
+        <div
+          class="section"
+          v-if="previewResult.diffSummary?.scheduleChanges?.length"
+          :ref="(el) => setSectionRef('scheduleChanges', el)"
+          :class="{ 'section-highlight': activeSectionKey === 'scheduleChanges' }"
+        >
           <div class="section-title">调度变更详情</div>
           <div class="tag-wrap">
             <el-tag
@@ -314,7 +418,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import { workflowApi } from '@/api/workflow'
@@ -347,6 +451,8 @@ const runtimeWorkflows = ref([])
 const selectedWorkflow = ref(null)
 const previewResult = ref(null)
 const edgeMismatchConfirmed = ref(false)
+const activeSectionKey = ref('')
+const sectionRefs = reactive({})
 
 const query = reactive({
   keyword: '',
@@ -369,6 +475,17 @@ const parityChecked = computed(() => {
   const status = String(previewResult.value?.parityStatus || '').toLowerCase()
   return status === 'consistent' || status === 'inconsistent'
 })
+
+const DIFF_TARGET_MAP = {
+  workflowFieldChanges: 'workflowFieldChanges',
+  taskAdded: 'taskAdded',
+  taskRemoved: 'taskRemoved',
+  taskModified: 'taskModified',
+  edgeAdded: 'edgeChanges',
+  edgeRemoved: 'edgeChanges',
+  scheduleChanges: 'scheduleChanges'
+}
+
 const canSubmitSync = computed(() => {
   if (!selectedWorkflow.value || !previewResult.value || !previewResult.value.canSync) {
     return false
@@ -563,6 +680,60 @@ const hasParityMismatchWarning = (result) => {
   return (result?.warnings || []).some((issue) => issue?.code === PARITY_MISMATCH_CODE)
 }
 
+const setSectionRef = (key, el) => {
+  if (!key) return
+  if (el) {
+    sectionRefs[key] = el
+  } else {
+    delete sectionRefs[key]
+  }
+}
+
+const resolveIssueTarget = (issue) => {
+  if (!issue?.code) return ''
+  if (issue.code === PARITY_MISMATCH_CODE) {
+    return 'parity'
+  }
+  if (issue.code === EDGE_MISMATCH_CODE) {
+    return 'edgeMismatch'
+  }
+  return ''
+}
+
+const hasDiffItems = (field) => {
+  const list = previewResult.value?.diffSummary?.[field]
+  return Array.isArray(list) && list.length > 0
+}
+
+const handleDiffSummaryClick = (field) => {
+  if (!hasDiffItems(field)) {
+    return
+  }
+  const target = DIFF_TARGET_MAP[field]
+  if (target) {
+    scrollToSection(target)
+  }
+}
+
+const scrollToSection = async (key) => {
+  if (!key) return
+  await nextTick()
+  const el = sectionRefs[key]
+  if (!el || typeof el.scrollIntoView !== 'function') {
+    return
+  }
+  activeSectionKey.value = key
+  el.scrollIntoView({
+    behavior: 'smooth',
+    block: 'start'
+  })
+  window.setTimeout(() => {
+    if (activeSectionKey.value === key) {
+      activeSectionKey.value = ''
+    }
+  }, 1800)
+}
+
 const cancelEdgeMismatchSync = () => {
   edgeMismatchConfirmed.value = false
   visible.value = false
@@ -663,6 +834,13 @@ const parityText = (status) => {
   margin-top: 14px;
 }
 
+.section-highlight {
+  border-left: 3px solid #409eff;
+  padding-left: 10px;
+  background: #f4f8ff;
+  border-radius: 4px;
+}
+
 .section-title {
   font-weight: 600;
   margin-bottom: 8px;
@@ -670,6 +848,10 @@ const parityText = (status) => {
 
 .issue-alert {
   margin-bottom: 8px;
+}
+
+.issue-action {
+  margin: -4px 0 8px 6px;
 }
 
 .diff-grid {
@@ -688,6 +870,30 @@ const parityText = (status) => {
 .diff-tag {
   margin: 0 8px 8px 0;
   max-width: 100%;
+}
+
+.summary-link {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 13px;
+  color: #409eff;
+  cursor: pointer;
+}
+
+.summary-link:hover {
+  text-decoration: underline;
+}
+
+.summary-link.is-disabled {
+  color: #c0c4cc;
+  cursor: not-allowed;
+}
+
+.summary-link.is-disabled:hover {
+  text-decoration: none;
 }
 
 .parity-samples {
