@@ -9,6 +9,12 @@
 ### Changed
 - 待补充。
 
+## [0.7.1] - 2026-02-24
+
+### Fixed
+- 修复 V37 迁移脚本在 MySQL 上 `ADD COLUMN IF NOT EXISTS` 语法不兼容导致的 Flyway 执行失败问题。
+- 调整 MinIO 关联字段与索引迁移为基于 `INFORMATION_SCHEMA` 的幂等条件执行。
+
 ## [0.7.0] - 2026-02-24
 
 ### Added
@@ -74,7 +80,8 @@
 
 以上早期版本请参考 GitHub Releases 与 Git tags 历史记录。
 
-[Unreleased]: https://github.com/MingkeVan/opendataworks/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/MingkeVan/opendataworks/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/MingkeVan/opendataworks/releases/tag/v0.7.1
 [0.7.0]: https://github.com/MingkeVan/opendataworks/releases/tag/v0.7.0
 [0.6.2]: https://github.com/MingkeVan/opendataworks/releases/tag/v0.6.2
 [0.6.1]: https://github.com/MingkeVan/opendataworks/releases/tag/v0.6.1

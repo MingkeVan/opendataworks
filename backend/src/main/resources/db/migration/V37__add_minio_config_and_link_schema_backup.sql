@@ -18,8 +18,38 @@ CREATE TABLE IF NOT EXISTS `minio_config` (
     KEY `idx_minio_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='MinIO环境配置表';
 
-ALTER TABLE `schema_backup_config`
-    ADD COLUMN IF NOT EXISTS `minio_config_id` BIGINT DEFAULT NULL COMMENT '关联的MinIO环境ID' AFTER `repository_name`;
+SET @has_minio_config_id := (
+    SELECT COUNT(1)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'schema_backup_config'
+      AND COLUMN_NAME = 'minio_config_id'
+);
 
-ALTER TABLE `schema_backup_config`
-    ADD INDEX `idx_schema_backup_minio_config_id` (`minio_config_id`);
+SET @sql_add_minio_config_id := IF(
+    @has_minio_config_id = 0,
+    'ALTER TABLE `schema_backup_config` ADD COLUMN `minio_config_id` BIGINT DEFAULT NULL COMMENT ''关联的MinIO环境ID'' AFTER `repository_name`',
+    'SELECT 1'
+);
+
+PREPARE stmt_add_minio_config_id FROM @sql_add_minio_config_id;
+EXECUTE stmt_add_minio_config_id;
+DEALLOCATE PREPARE stmt_add_minio_config_id;
+
+SET @has_idx_schema_backup_minio_config_id := (
+    SELECT COUNT(1)
+    FROM INFORMATION_SCHEMA.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'schema_backup_config'
+      AND INDEX_NAME = 'idx_schema_backup_minio_config_id'
+);
+
+SET @sql_add_idx_schema_backup_minio_config_id := IF(
+    @has_idx_schema_backup_minio_config_id = 0,
+    'ALTER TABLE `schema_backup_config` ADD INDEX `idx_schema_backup_minio_config_id` (`minio_config_id`)',
+    'SELECT 1'
+);
+
+PREPARE stmt_add_idx_schema_backup_minio_config_id FROM @sql_add_idx_schema_backup_minio_config_id;
+EXECUTE stmt_add_idx_schema_backup_minio_config_id;
+DEALLOCATE PREPARE stmt_add_idx_schema_backup_minio_config_id;
