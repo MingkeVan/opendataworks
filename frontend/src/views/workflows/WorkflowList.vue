@@ -242,10 +242,11 @@
 import { ref, reactive, onMounted, watch } from 'vue'
 import dayjs from 'dayjs'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Link, Plus } from '@element-plus/icons-vue'
 import { workflowApi } from '@/api/workflow'
 import { taskApi } from '@/api/task'
+import { buildPublishPreviewHtml, firstPreviewErrorMessage, isDialogCancel } from './publishPreviewHelper'
 import WorkflowCreateDrawer from './WorkflowCreateDrawer.vue'
 import WorkflowBackfillDialog from './WorkflowBackfillDialog.vue'
 import WorkflowRuntimeSyncDialog from './WorkflowRuntimeSyncDialog.vue'
@@ -528,14 +529,51 @@ const refreshAfterAction = (workflowId) => {
   loadWorkflows()
 }
 
+const previewPublishAndConfirm = async (row) => {
+  if (!row?.id) {
+    return false
+  }
+  const preview = await workflowApi.previewPublish(row.id)
+  if (!preview?.canPublish) {
+    ElMessage.error(firstPreviewErrorMessage(preview))
+    return false
+  }
+  if (!preview?.requireConfirm) {
+    return true
+  }
+  try {
+    await ElMessageBox.confirm(
+      buildPublishPreviewHtml(preview),
+      '发布变更确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认发布',
+        cancelButtonText: '取消',
+        dangerouslyUseHTMLString: true
+      }
+    )
+    return true
+  } catch (error) {
+    if (isDialogCancel(error)) {
+      return false
+    }
+    throw error
+  }
+}
+
 const handleDeploy = async (row) => {
   if (!row?.id) return
   setActionLoading(row.id, 'deploy', true)
   try {
+    const canPublish = await previewPublishAndConfirm(row)
+    if (!canPublish) {
+      return
+    }
     const record = await workflowApi.publish(row.id, {
       operation: 'deploy',
       requireApproval: false,
-      operator: 'portal-ui'
+      operator: 'portal-ui',
+      confirmDiff: true
     })
     updatePendingFlag(row.id, record?.status)
     if (record?.status === 'pending_approval') {
@@ -588,10 +626,15 @@ const handleOnline = async (row) => {
   if (!row?.id) return
   setActionLoading(row.id, 'online', true)
   try {
+    const canPublish = await previewPublishAndConfirm(row)
+    if (!canPublish) {
+      return
+    }
     const deployRecord = await workflowApi.publish(row.id, {
       operation: 'deploy',
       requireApproval: false,
-      operator: 'portal-ui'
+      operator: 'portal-ui',
+      confirmDiff: true
     })
     updatePendingFlag(row.id, deployRecord?.status)
     if (deployRecord?.status === 'pending_approval') {

@@ -21,6 +21,10 @@ export const workflowApi = {
     return request.post(`/v1/workflows/${id}/publish`, payload)
   },
 
+  previewPublish(id) {
+    return request.get(`/v1/workflows/${id}/publish/preview`)
+  },
+
   approve(id, recordId, payload) {
     return request.post(`/v1/workflows/${id}/publish/${recordId}/approve`, payload)
   },

@@ -82,15 +82,12 @@ public class WorkflowRuntimeSyncService {
 
     private static final String ENGINE_DOLPHIN = "dolphin";
     private static final String EDGE_MISMATCH_WARNING_CODE = "EDGE_MISMATCH";
-    private static final String EXPORT_FALLBACK_WARNING_CODE = "EXPORT_FALLBACK_LEGACY";
-    private static final String INGEST_MODE_LEGACY = "legacy";
-    private static final String INGEST_MODE_EXPORT_SHADOW = "export_shadow";
     private static final String INGEST_MODE_EXPORT_ONLY = "export_only";
 
     @Value("${workflow.runtime-sync.enabled:true}")
     private boolean runtimeSyncEnabled;
 
-    @Value("${workflow.runtime-sync.ingest-mode:export_shadow}")
+    @Value("${workflow.runtime-sync.ingest-mode:export_only}")
     private String runtimeSyncIngestMode;
 
     private final DolphinRuntimeDefinitionService runtimeDefinitionService;
@@ -212,20 +209,6 @@ public class WorkflowRuntimeSyncService {
                     firstIssueCode(context.getErrors()),
                     firstIssueMessage(context.getErrors()),
                     operator);
-            response.setSyncRecordId(recordId);
-            return response;
-        }
-
-        if (runtimeSyncParityService.isInconsistent(context.getParityStatus())) {
-            RuntimeSyncIssue issue = RuntimeSyncIssue.error(
-                    RuntimeSyncErrorCodes.DEFINITION_PARITY_MISMATCH,
-                    "导出定义与旧路径解析结果不一致，请先处理一致性差异后再执行同步");
-            if (context.getDefinition() != null) {
-                issue.setWorkflowCode(context.getDefinition().getWorkflowCode());
-                issue.setWorkflowName(context.getDefinition().getWorkflowName());
-            }
-            response.getErrors().add(issue);
-            Long recordId = saveFailedSyncRecord(context, issue.getCode(), issue.getMessage(), operator);
             response.setSyncRecordId(recordId);
             return response;
         }
@@ -353,71 +336,14 @@ public class WorkflowRuntimeSyncService {
             return context;
         }
 
-        RuntimeWorkflowDefinition definition = null;
-        RuntimeWorkflowDefinition shadowDefinition = null;
-        boolean primaryFromExport = false;
-        String configuredMode = context.getIngestMode();
-        if (INGEST_MODE_LEGACY.equals(configuredMode)) {
-            try {
-                definition = runtimeDefinitionService.loadRuntimeDefinition(projectCode, workflowCode);
-            } catch (Exception ex) {
-                context.getErrors().add(RuntimeSyncIssue.error(
-                        resolveDefinitionErrorCode(ex.getMessage(), strictDefinitionError),
-                        ex.getMessage()));
-                return context;
-            }
-        } else {
-            try {
-                definition = runtimeDefinitionService.loadRuntimeDefinitionFromExport(projectCode, workflowCode);
-                primaryFromExport = true;
-            } catch (Exception exportEx) {
-                if (INGEST_MODE_EXPORT_ONLY.equals(configuredMode)) {
-                    context.getErrors().add(RuntimeSyncIssue.error(
-                            resolveDefinitionErrorCode(exportEx.getMessage(), strictDefinitionError),
-                            exportEx.getMessage()));
-                    return context;
-                }
-
-                RuntimeSyncIssue warning = RuntimeSyncIssue.warning(
-                        EXPORT_FALLBACK_WARNING_CODE,
-                        "导出 JSON 解析失败，已自动回退到旧路径: " + exportEx.getMessage());
-                context.getWarnings().add(warning);
-                context.setIngestMode(INGEST_MODE_LEGACY);
-                try {
-                    definition = runtimeDefinitionService.loadRuntimeDefinition(projectCode, workflowCode);
-                } catch (Exception legacyEx) {
-                    context.getErrors().add(RuntimeSyncIssue.error(
-                            resolveDefinitionErrorCode(legacyEx.getMessage(), strictDefinitionError),
-                            legacyEx.getMessage()));
-                    return context;
-                }
-            }
-        }
-
-        if (definition != null && primaryFromExport && INGEST_MODE_EXPORT_SHADOW.equals(configuredMode)) {
-            try {
-                shadowDefinition = runtimeDefinitionService.loadRuntimeDefinition(projectCode, workflowCode);
-            } catch (Exception shadowEx) {
-                context.getWarnings().add(RuntimeSyncIssue.warning(
-                        EXPORT_FALLBACK_WARNING_CODE,
-                        "影子路径解析失败，无法执行一致性校验: " + shadowEx.getMessage()));
-            }
-
-            if (shadowDefinition != null) {
-                RuntimeSyncParitySummary paritySummary = runtimeSyncParityService.compare(definition, shadowDefinition);
-                context.setParitySummary(paritySummary);
-                context.setParityStatus(paritySummary != null
-                        ? paritySummary.getStatus()
-                        : RuntimeSyncParityService.STATUS_NOT_CHECKED);
-                if (runtimeSyncParityService.isInconsistent(context.getParityStatus())) {
-                    RuntimeSyncIssue warning = RuntimeSyncIssue.warning(
-                            RuntimeSyncErrorCodes.DEFINITION_PARITY_MISMATCH,
-                            "导出定义与旧路径解析结果不一致，预检可继续，但执行同步将被阻断");
-                    warning.setWorkflowCode(definition.getWorkflowCode());
-                    warning.setWorkflowName(definition.getWorkflowName());
-                    context.getWarnings().add(warning);
-                }
-            }
+        RuntimeWorkflowDefinition definition;
+        try {
+            definition = runtimeDefinitionService.loadRuntimeDefinitionFromExport(projectCode, workflowCode);
+        } catch (Exception ex) {
+            context.getErrors().add(RuntimeSyncIssue.error(
+                    resolveDefinitionErrorCode(ex.getMessage(), strictDefinitionError),
+                    ex.getMessage()));
+            return context;
         }
 
         if (definition == null) {
@@ -1265,15 +1191,11 @@ public class WorkflowRuntimeSyncService {
     }
 
     private String resolveIngestMode() {
-        String configured = StringUtils.hasText(runtimeSyncIngestMode)
-                ? runtimeSyncIngestMode.trim().toLowerCase(Locale.ROOT)
-                : INGEST_MODE_EXPORT_SHADOW;
-        if (INGEST_MODE_LEGACY.equals(configured)
-                || INGEST_MODE_EXPORT_SHADOW.equals(configured)
-                || INGEST_MODE_EXPORT_ONLY.equals(configured)) {
-            return configured;
+        if (!StringUtils.hasText(runtimeSyncIngestMode)) {
+            return INGEST_MODE_EXPORT_ONLY;
         }
-        return INGEST_MODE_EXPORT_SHADOW;
+        String configured = runtimeSyncIngestMode.trim().toLowerCase(Locale.ROOT);
+        return INGEST_MODE_EXPORT_ONLY.equals(configured) ? configured : INGEST_MODE_EXPORT_ONLY;
     }
 
     private RuntimeSyncRecordListItem toSyncRecordListItem(WorkflowRuntimeSyncRecord record) {
@@ -1343,7 +1265,7 @@ public class WorkflowRuntimeSyncService {
     private static class PreviewContext {
         private Long projectCode;
         private Long workflowCode;
-        private String ingestMode = INGEST_MODE_EXPORT_SHADOW;
+        private String ingestMode = INGEST_MODE_EXPORT_ONLY;
         private String parityStatus = RuntimeSyncParityService.STATUS_NOT_CHECKED;
         private RuntimeSyncParitySummary paritySummary;
         private RuntimeWorkflowDefinition definition;

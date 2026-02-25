@@ -104,7 +104,7 @@ class WorkflowRuntimeSyncServicePreviewTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(service, "runtimeSyncEnabled", true);
-        ReflectionTestUtils.setField(service, "runtimeSyncIngestMode", "legacy");
+        ReflectionTestUtils.setField(service, "runtimeSyncIngestMode", "export_only");
 
         WorkflowRuntimeDiffService.RuntimeSnapshot snapshot = new WorkflowRuntimeDiffService.RuntimeSnapshot();
         snapshot.setSnapshotHash("hash");
@@ -135,7 +135,7 @@ class WorkflowRuntimeSyncServicePreviewTest {
         shellTask.setNodeType("SHELL");
         definition.setTasks(Collections.singletonList(shellTask));
 
-        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 1001L)).thenReturn(definition);
 
         RuntimeSyncPreviewRequest request = new RuntimeSyncPreviewRequest();
         request.setProjectCode(1L);
@@ -155,7 +155,7 @@ class WorkflowRuntimeSyncServicePreviewTest {
 
         SqlTableAnalyzeResponse analyze = matchedAnalyze(11L, 22L);
         analyze.setAmbiguous(Collections.singletonList("dws.t1"));
-        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 1001L)).thenReturn(definition);
         when(sqlTableMatcherService.analyze(eq(sqlTask.getSql()), eq("SQL"))).thenReturn(analyze);
 
         RuntimeSyncPreviewRequest request = new RuntimeSyncPreviewRequest();
@@ -174,7 +174,7 @@ class WorkflowRuntimeSyncServicePreviewTest {
         RuntimeTaskDefinition sqlTask = sqlTask(1L, "task_a", "UPDATE dws.t1 SET c1 = 1", 10L);
         definition.setTasks(Collections.singletonList(sqlTask));
 
-        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 1001L)).thenReturn(definition);
         when(sqlTableMatcherService.analyze(eq(sqlTask.getSql()), eq("SQL")))
                 .thenReturn(outputOnlyAnalyze(22L));
 
@@ -197,7 +197,7 @@ class WorkflowRuntimeSyncServicePreviewTest {
         definition.setTasks(Arrays.asList(taskUpdate, taskInsert));
         definition.setExplicitEdges(Collections.singletonList(new RuntimeTaskEdge(1L, 2L)));
 
-        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 1001L)).thenReturn(definition);
         when(sqlTableMatcherService.analyze(eq(taskUpdate.getSql()), eq("SQL")))
                 .thenReturn(outputOnlyAnalyze(501L));
         when(sqlTableMatcherService.analyze(eq(taskInsert.getSql()), eq("SQL")))
@@ -224,7 +224,7 @@ class WorkflowRuntimeSyncServicePreviewTest {
         definition.setTasks(Arrays.asList(taskUpdate, taskInsert));
         definition.setExplicitEdges(Collections.emptyList());
 
-        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 1001L)).thenReturn(definition);
         when(sqlTableMatcherService.analyze(eq(taskUpdate.getSql()), eq("SQL")))
                 .thenReturn(outputOnlyAnalyze(501L));
         when(sqlTableMatcherService.analyze(eq(taskInsert.getSql()), eq("SQL")))
@@ -249,7 +249,7 @@ class WorkflowRuntimeSyncServicePreviewTest {
         // explicit edges intentionally set to opposite direction, inferred edges should include 1->2
         definition.setExplicitEdges(Collections.singletonList(new RuntimeTaskEdge(2L, 1L)));
 
-        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 1001L)).thenReturn(definition);
         when(sqlTableMatcherService.analyze(eq("SQL_A"), eq("SQL")))
                 .thenReturn(matchedAnalyze(101L, 201L));
         when(sqlTableMatcherService.analyze(eq("SQL_B"), eq("SQL")))
@@ -274,7 +274,7 @@ class WorkflowRuntimeSyncServicePreviewTest {
         definition.setTasks(Arrays.asList(taskA, taskB));
         definition.setExplicitEdges(Collections.singletonList(new RuntimeTaskEdge(2L, 1L)));
 
-        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(definition);
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 1001L)).thenReturn(definition);
         when(sqlTableMatcherService.analyze(eq("SQL_A"), eq("SQL")))
                 .thenReturn(matchedAnalyze(101L, 201L));
         when(sqlTableMatcherService.analyze(eq("SQL_B"), eq("SQL")))
@@ -292,80 +292,6 @@ class WorkflowRuntimeSyncServicePreviewTest {
         assertTrue(response.getErrors().stream()
                 .anyMatch(issue -> RuntimeSyncErrorCodes.EDGE_MISMATCH_CONFIRM_REQUIRED.equals(issue.getCode())));
         assertTrue(response.getEdgeMismatchDetail() != null);
-    }
-
-    @Test
-    void previewShouldAllowButWarnWhenParityMismatchExists() {
-        ReflectionTestUtils.setField(service, "runtimeSyncIngestMode", "export_shadow");
-
-        RuntimeWorkflowDefinition exportDefinition = baseDefinition();
-        RuntimeTaskDefinition task = sqlTask(1L, "task_a", "SELECT * FROM dwd.t1", 10L);
-        exportDefinition.setTasks(Collections.singletonList(task));
-        exportDefinition.setExplicitEdges(Collections.emptyList());
-
-        RuntimeWorkflowDefinition legacyDefinition = baseDefinition();
-        RuntimeTaskDefinition legacyTask = sqlTask(1L, "task_a_legacy", "SELECT * FROM dwd.t1", 10L);
-        legacyDefinition.setTasks(Collections.singletonList(legacyTask));
-        legacyDefinition.setExplicitEdges(Collections.emptyList());
-
-        RuntimeSyncParitySummary paritySummary = new RuntimeSyncParitySummary();
-        paritySummary.setStatus(RuntimeSyncParityService.STATUS_INCONSISTENT);
-        paritySummary.setChanged(true);
-        paritySummary.setWorkflowFieldDiffCount(1);
-
-        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 1001L)).thenReturn(exportDefinition);
-        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(legacyDefinition);
-        when(runtimeSyncParityService.compare(any(), any())).thenReturn(paritySummary);
-        when(runtimeSyncParityService.isInconsistent(eq(RuntimeSyncParityService.STATUS_INCONSISTENT))).thenReturn(true);
-        when(sqlTableMatcherService.analyze(eq(task.getSql()), eq("SQL"))).thenReturn(matchedAnalyze(11L, 22L));
-
-        RuntimeSyncPreviewRequest request = new RuntimeSyncPreviewRequest();
-        request.setProjectCode(1L);
-        request.setWorkflowCode(1001L);
-        RuntimeSyncPreviewResponse response = service.preview(request);
-
-        assertTrue(response.getCanSync());
-        assertEquals(RuntimeSyncParityService.STATUS_INCONSISTENT, response.getParityStatus());
-        assertTrue(response.getWarnings().stream()
-                .anyMatch(issue -> RuntimeSyncErrorCodes.DEFINITION_PARITY_MISMATCH.equals(issue.getCode())));
-    }
-
-    @Test
-    void syncShouldBlockWhenParityMismatchExists() {
-        ReflectionTestUtils.setField(service, "runtimeSyncIngestMode", "export_shadow");
-
-        RuntimeWorkflowDefinition exportDefinition = baseDefinition();
-        RuntimeTaskDefinition task = sqlTask(1L, "task_a", "SELECT * FROM dwd.t1", 10L);
-        exportDefinition.setTasks(Collections.singletonList(task));
-        exportDefinition.setExplicitEdges(Collections.emptyList());
-
-        RuntimeWorkflowDefinition legacyDefinition = baseDefinition();
-        RuntimeTaskDefinition legacyTask = sqlTask(1L, "task_a_legacy", "SELECT * FROM dwd.t1", 10L);
-        legacyDefinition.setTasks(Collections.singletonList(legacyTask));
-        legacyDefinition.setExplicitEdges(Collections.emptyList());
-
-        RuntimeSyncParitySummary paritySummary = new RuntimeSyncParitySummary();
-        paritySummary.setStatus(RuntimeSyncParityService.STATUS_INCONSISTENT);
-        paritySummary.setChanged(true);
-        paritySummary.setWorkflowFieldDiffCount(1);
-
-        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 1001L)).thenReturn(exportDefinition);
-        when(runtimeDefinitionService.loadRuntimeDefinition(1L, 1001L)).thenReturn(legacyDefinition);
-        when(runtimeSyncParityService.compare(any(), any())).thenReturn(paritySummary);
-        when(runtimeSyncParityService.isInconsistent(eq(RuntimeSyncParityService.STATUS_INCONSISTENT))).thenReturn(true);
-        when(sqlTableMatcherService.analyze(eq(task.getSql()), eq("SQL"))).thenReturn(matchedAnalyze(11L, 22L));
-
-        RuntimeSyncExecuteRequest request = new RuntimeSyncExecuteRequest();
-        request.setProjectCode(1L);
-        request.setWorkflowCode(1001L);
-        request.setOperator("tester");
-        request.setConfirmEdgeMismatch(true);
-
-        RuntimeSyncExecuteResponse response = service.sync(request);
-
-        assertFalse(Boolean.TRUE.equals(response.getSuccess()));
-        assertTrue(response.getErrors().stream()
-                .anyMatch(issue -> RuntimeSyncErrorCodes.DEFINITION_PARITY_MISMATCH.equals(issue.getCode())));
     }
 
     private RuntimeWorkflowDefinition baseDefinition() {

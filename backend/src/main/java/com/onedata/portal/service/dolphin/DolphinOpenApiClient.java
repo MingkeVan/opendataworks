@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -484,13 +483,13 @@ public class DolphinOpenApiClient {
      * Export runtime definition JSON by workflow/process code.
      *
      * <p>
-     * DS 3.4.x path:
-     * POST /projects/{projectCode}/workflow-definition/batch-export
+     * DS 3.2.x path:
+     * POST /projects/{projectCode}/process-definition/batch-export
      * </p>
      *
      * <p>
-     * DS 3.2.x path:
-     * POST /projects/{projectCode}/process-definition/batch-export
+     * DS 3.4.x path:
+     * POST /projects/{projectCode}/workflow-definition/batch-export
      * </p>
      *
      * <p>
@@ -501,9 +500,10 @@ public class DolphinOpenApiClient {
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
         formData.add("codes", String.valueOf(workflowCode));
 
-        List<String> paths = Arrays.asList(
-                String.format("/projects/%d/workflow-definition/batch-export", projectCode),
-                String.format("/projects/%d/process-definition/batch-export", projectCode));
+        List<String> paths = new ArrayList<>();
+        // Keep current runtime baseline first, then fallback for newer DS variants.
+        paths.add(String.format("/projects/%d/process-definition/batch-export", projectCode));
+        paths.add(String.format("/projects/%d/workflow-definition/batch-export", projectCode));
 
         RuntimeException lastError = null;
         for (String path : paths) {

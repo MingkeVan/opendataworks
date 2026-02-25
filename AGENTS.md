@@ -12,3 +12,9 @@
 
 - Always run `nvm use` successfully before frontend build/test/dev commands.
 - If frontend command fails with Node engine/runtime errors, retry only after `nvm use`.
+
+## Dolphin runtime-sync simplification rule
+
+- Prefer a single verified integration path in real environment by default.
+- If the API has confirmed version differences (for example DS 3.2.x vs 3.4.x export endpoint), keep only a minimal and explicit compatibility fallback.
+- Do not introduce deep or repeated fallback chains.

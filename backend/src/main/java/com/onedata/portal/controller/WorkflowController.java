@@ -9,6 +9,7 @@ import com.onedata.portal.dto.workflow.WorkflowVersionCompareRequest;
 import com.onedata.portal.dto.workflow.WorkflowVersionCompareResponse;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowDetailResponse;
+import com.onedata.portal.dto.workflow.WorkflowPublishPreviewResponse;
 import com.onedata.portal.dto.workflow.WorkflowPublishRequest;
 import com.onedata.portal.dto.workflow.WorkflowQueryRequest;
 import com.onedata.portal.dto.workflow.WorkflowVersionRollbackRequest;
@@ -108,6 +109,11 @@ public class WorkflowController {
                                                  @RequestBody WorkflowPublishRequest request) {
         WorkflowPublishRecord record = workflowPublishService.publish(id, request);
         return Result.success(record);
+    }
+
+    @GetMapping("/{id}/publish/preview")
+    public Result<WorkflowPublishPreviewResponse> previewPublish(@PathVariable Long id) {
+        return Result.success(workflowPublishService.previewPublish(id));
     }
 
     @PostMapping("/{id}/publish/{recordId}/approve")

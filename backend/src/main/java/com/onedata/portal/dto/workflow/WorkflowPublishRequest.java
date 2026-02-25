@@ -28,4 +28,9 @@ public class WorkflowPublishRequest {
     private Boolean approved;
 
     private String approvalComment;
+
+    /**
+     * 发布前差异确认标记（仅 deploy 生效）
+     */
+    private Boolean confirmDiff;
 }

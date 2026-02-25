@@ -23,7 +23,7 @@ public class RuntimeSyncRecordListItem {
     private String status;
 
     /**
-     * 运行态定义采集模式: legacy/export_shadow/export_only
+     * 运行态定义采集模式（当前固定为 export_only）
      */
     private String ingestMode;
 
