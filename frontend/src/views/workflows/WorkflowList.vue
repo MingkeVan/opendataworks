@@ -30,8 +30,7 @@
           <el-button @click="handleReset">重置</el-button>
         </div>
         <div class="toolbar-actions">
-          <el-button @click="openImportDialog">导入 JSON</el-button>
-          <el-button @click="openRuntimeSyncDialog">从 Dolphin 同步</el-button>
+          <el-button @click="openImportDialog">导入工作流</el-button>
           <el-button type="primary" :icon="Plus" plain @click="openCreateDrawer">
             新建工作流
           </el-button>
@@ -188,14 +187,6 @@
             >
               详情
             </el-button>
-            <el-button
-              v-if="isRuntimeSynced(row)"
-              link
-              type="warning"
-              @click="openRuntimeDiff(row)"
-            >
-              比对差异
-            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -227,16 +218,6 @@
       @submitted="handleBackfillSubmitted"
     />
 
-    <WorkflowRuntimeSyncDialog
-      v-model="runtimeSyncDialogVisible"
-      @synced="handleRuntimeSynced"
-    />
-
-    <WorkflowRuntimeDiffDrawer
-      v-model="runtimeDiffDrawerVisible"
-      :workflow="runtimeDiffTarget"
-    />
-
     <WorkflowImportDialog
       v-model="importDialogVisible"
       @imported="handleImported"
@@ -255,8 +236,6 @@ import { taskApi } from '@/api/task'
 import { buildPublishPreviewHtml, firstPreviewErrorMessage, isDialogCancel } from './publishPreviewHelper'
 import WorkflowCreateDrawer from './WorkflowCreateDrawer.vue'
 import WorkflowBackfillDialog from './WorkflowBackfillDialog.vue'
-import WorkflowRuntimeSyncDialog from './WorkflowRuntimeSyncDialog.vue'
-import WorkflowRuntimeDiffDrawer from './WorkflowRuntimeDiffDrawer.vue'
 import WorkflowImportDialog from './WorkflowImportDialog.vue'
 
 const router = useRouter()
@@ -285,9 +264,6 @@ const editingWorkflowId = ref(null)
 const actionLoading = reactive({})
 const backfillDialogVisible = ref(false)
 const backfillTarget = ref(null)
-const runtimeSyncDialogVisible = ref(false)
-const runtimeDiffDrawerVisible = ref(false)
-const runtimeDiffTarget = ref(null)
 const importDialogVisible = ref(false)
 
 const loadWorkflows = async () => {
@@ -336,14 +312,6 @@ const handleCreateSuccess = () => {
   loadWorkflows()
 }
 
-const openRuntimeSyncDialog = () => {
-  runtimeSyncDialogVisible.value = true
-}
-
-const handleRuntimeSynced = () => {
-  loadWorkflows()
-}
-
 const openImportDialog = () => {
   importDialogVisible.value = true
 }
@@ -351,16 +319,6 @@ const openImportDialog = () => {
 const handleImported = () => {
   pagination.pageNum = 1
   loadWorkflows()
-}
-
-const isRuntimeSynced = (workflow) => {
-  if (!workflow) return false
-  return workflow.syncSource === 'runtime' || !!workflow.runtimeSyncAt
-}
-
-const openRuntimeDiff = (workflow) => {
-  runtimeDiffTarget.value = workflow || null
-  runtimeDiffDrawerVisible.value = true
 }
 
 const handleUpdateSuccess = (workflowId) => {

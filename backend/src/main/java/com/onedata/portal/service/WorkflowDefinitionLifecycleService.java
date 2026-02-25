@@ -3,6 +3,7 @@ package com.onedata.portal.service;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.DolphinDatasourceOption;
 import com.onedata.portal.dto.SqlTableAnalyzeResponse;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
@@ -18,6 +19,7 @@ import com.onedata.portal.dto.workflow.runtime.RuntimeTaskDefinition;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskEdge;
 import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowDefinition;
 import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowSchedule;
+import com.onedata.portal.dto.workflow.runtime.DolphinRuntimeWorkflowOption;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.WorkflowVersion;
@@ -55,6 +57,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class WorkflowDefinitionLifecycleService {
 
+    private static final String SOURCE_TYPE_JSON = "json";
+    private static final String SOURCE_TYPE_DOLPHIN = "dolphin";
     private static final String RELATION_DECISION_DECLARED = "DECLARED";
     private static final String RELATION_DECISION_INFERRED = "INFERRED";
     private static final DateTimeFormatter[] DATETIME_FORMATS = new DateTimeFormatter[] {
@@ -73,15 +77,25 @@ public class WorkflowDefinitionLifecycleService {
     private final WorkflowVersionMapper workflowVersionMapper;
     private final ObjectMapper objectMapper;
 
+    public PageResult<DolphinRuntimeWorkflowOption> listDolphinWorkflows(Long projectCode,
+            Integer pageNum,
+            Integer pageSize,
+            String keyword) {
+        DolphinRuntimeDefinitionService.DolphinRuntimeWorkflowPage page = runtimeDefinitionService
+                .listRuntimeWorkflows(projectCode, pageNum, pageSize, keyword);
+        return PageResult.of(page.getTotal(), page.getRecords());
+    }
+
     public WorkflowImportPreviewResponse preview(WorkflowImportPreviewRequest request) {
-        ImportContext context = analyze(request != null ? request.getDefinitionJson() : null);
+        ImportContext context = analyze(buildImportSource(request));
         return toPreviewResponse(context);
     }
 
     @Transactional
     public WorkflowImportCommitResponse commit(WorkflowImportCommitRequest request) {
         String operator = normalizeOperator(request != null ? request.getOperator() : null);
-        ImportContext context = analyze(request != null ? request.getDefinitionJson() : null);
+        ImportSource source = buildImportSource(request);
+        ImportContext context = analyze(source);
         if (!context.getErrors().isEmpty()) {
             throw new IllegalArgumentException("导入预检失败: " + context.getErrors().get(0));
         }
@@ -96,22 +110,26 @@ public class WorkflowDefinitionLifecycleService {
                 : context.getInferredEdges();
 
         String normalizedJson = buildNormalizedJson(context.getDefinition(), selectedEdges);
-        ensureWorkflowConflictAbsent(context.getDefinition());
+        ensureWorkflowConflictAbsent(context.getDefinition(), context.getSourceType());
 
         TaskCreateResult taskCreateResult = createTasks(context.getDefinition().getTasks(), operator);
         WorkflowDefinitionRequest workflowRequest = new WorkflowDefinitionRequest();
-        workflowRequest.setWorkflowName(resolveWorkflowName(context.getDefinition()));
+        workflowRequest.setWorkflowName(resolveWorkflowName(context.getDefinition(), context.getRequestedWorkflowName()));
         workflowRequest.setDescription(context.getDefinition().getDescription());
         workflowRequest.setGlobalParams(context.getDefinition().getGlobalParams());
         workflowRequest.setTaskGroupName(resolveWorkflowTaskGroupName(context.getDefinition().getTasks()));
         workflowRequest.setTasks(taskCreateResult.getTaskBindings());
         workflowRequest.setOperator(operator);
-        workflowRequest.setTriggerSource("import_file");
+        workflowRequest.setTriggerSource(resolveTriggerSource(context.getSourceType()));
         workflowRequest.setProjectCode(context.getDefinition().getProjectCode());
         workflowRequest.setDefinitionJson(normalizedJson);
 
         DataWorkflow workflow = workflowService.createWorkflow(workflowRequest);
-        applyImportedWorkflowFields(workflow, context.getDefinition(), normalizedJson, operator);
+        applyImportedWorkflowFields(workflow,
+                context.getDefinition(),
+                normalizedJson,
+                operator,
+                context.getSourceType());
         dataWorkflowMapper.updateById(workflow);
 
         WorkflowImportCommitResponse response = new WorkflowImportCommitResponse();
@@ -144,7 +162,9 @@ public class WorkflowDefinitionLifecycleService {
         WorkflowImportPreviewResponse response = new WorkflowImportPreviewResponse();
         RuntimeWorkflowDefinition definition = context.getDefinition();
         response.setCanImport(context.getErrors().isEmpty());
-        response.setWorkflowName(definition != null ? resolveWorkflowName(definition) : null);
+        response.setWorkflowName(definition != null
+                ? resolveWorkflowName(definition, context.getRequestedWorkflowName())
+                : null);
         response.setTaskCount(definition != null && definition.getTasks() != null ? definition.getTasks().size() : 0);
         response.setRelationDecisionRequired(context.getRelationDecisionRequired());
         response.setSuggestedRelationDecision(context.getSuggestedRelationDecision());
@@ -155,23 +175,22 @@ public class WorkflowDefinitionLifecycleService {
         return response;
     }
 
-    private ImportContext analyze(String definitionJson) {
+    private ImportContext analyze(ImportSource source) {
         ImportContext context = new ImportContext();
-        if (!StringUtils.hasText(definitionJson)) {
-            context.getErrors().add("definitionJson 不能为空");
-            return context;
-        }
+        context.setSourceType(source.getSourceType());
+        context.setRequestedWorkflowName(source.getWorkflowName());
 
-        RuntimeWorkflowDefinition definition;
-        try {
-            definition = runtimeDefinitionService.parseRuntimeDefinitionFromJson(definitionJson);
-        } catch (Exception ex) {
-            context.getErrors().add(ex.getMessage());
+        RuntimeWorkflowDefinition definition = resolveRuntimeDefinition(source, context);
+        if (definition == null) {
             return context;
         }
         context.setDefinition(definition);
 
         validateWorkflowHeader(context);
+        validateWorkflowNameConflict(context);
+        if (!context.getErrors().isEmpty()) {
+            return context;
+        }
         normalizeAndValidateTasks(context);
         buildRelationCompare(context);
 
@@ -179,6 +198,42 @@ public class WorkflowDefinitionLifecycleService {
             context.setNormalizedJson(buildNormalizedJson(definition, context.getInferredEdges()));
         }
         return context;
+    }
+
+    private RuntimeWorkflowDefinition resolveRuntimeDefinition(ImportSource source, ImportContext context) {
+        if (SOURCE_TYPE_DOLPHIN.equals(source.getSourceType())) {
+            if (source.getWorkflowCode() == null || source.getWorkflowCode() <= 0) {
+                context.getErrors().add("workflowCode 不能为空");
+                return null;
+            }
+            try {
+                RuntimeWorkflowDefinition definition = runtimeDefinitionService
+                        .loadRuntimeDefinitionFromExport(source.getProjectCode(), source.getWorkflowCode());
+                if (StringUtils.hasText(source.getWorkflowName())) {
+                    definition.setWorkflowName(source.getWorkflowName().trim());
+                }
+                return definition;
+            } catch (Exception ex) {
+                context.getErrors().add("读取 Dolphin 导出定义失败: " + ex.getMessage());
+                return null;
+            }
+        }
+
+        if (!StringUtils.hasText(source.getDefinitionJson())) {
+            context.getErrors().add("definitionJson 不能为空");
+            return null;
+        }
+        try {
+            RuntimeWorkflowDefinition definition = runtimeDefinitionService
+                    .parseRuntimeDefinitionFromJson(source.getDefinitionJson());
+            if (StringUtils.hasText(source.getWorkflowName())) {
+                definition.setWorkflowName(source.getWorkflowName().trim());
+            }
+            return definition;
+        } catch (Exception ex) {
+            context.getErrors().add(ex.getMessage());
+            return null;
+        }
     }
 
     private void validateWorkflowHeader(ImportContext context) {
@@ -192,6 +247,24 @@ public class WorkflowDefinitionLifecycleService {
         }
         if (CollectionUtils.isEmpty(definition.getTasks())) {
             context.getErrors().add("工作流任务列表为空");
+        }
+    }
+
+    private void validateWorkflowNameConflict(ImportContext context) {
+        if (context == null || !SOURCE_TYPE_DOLPHIN.equals(context.getSourceType())) {
+            return;
+        }
+        RuntimeWorkflowDefinition definition = context.getDefinition();
+        String workflowName = resolveWorkflowName(definition, context.getRequestedWorkflowName());
+        if (!StringUtils.hasText(workflowName)) {
+            return;
+        }
+        DataWorkflow existing = dataWorkflowMapper.selectOne(
+                Wrappers.<DataWorkflow>lambdaQuery()
+                        .eq(DataWorkflow::getWorkflowName, workflowName.trim())
+                        .last("LIMIT 1"));
+        if (existing != null) {
+            context.getErrors().add("工作流名称已存在，请修改后重试: " + workflowName.trim());
         }
     }
 
@@ -629,7 +702,10 @@ public class WorkflowDefinitionLifecycleService {
         return node;
     }
 
-    private void ensureWorkflowConflictAbsent(RuntimeWorkflowDefinition definition) {
+    private void ensureWorkflowConflictAbsent(RuntimeWorkflowDefinition definition, String sourceType) {
+        if (SOURCE_TYPE_DOLPHIN.equals(sourceType)) {
+            return;
+        }
         if (definition == null || definition.getWorkflowCode() == null || definition.getWorkflowCode() <= 0) {
             return;
         }
@@ -779,7 +855,8 @@ public class WorkflowDefinitionLifecycleService {
     private void applyImportedWorkflowFields(DataWorkflow workflow,
             RuntimeWorkflowDefinition definition,
             String definitionJson,
-            String operator) {
+            String operator,
+            String sourceType) {
         if (workflow == null || definition == null) {
             return;
         }
@@ -791,7 +868,9 @@ public class WorkflowDefinitionLifecycleService {
         if (definition.getProjectCode() != null && definition.getProjectCode() > 0) {
             workflow.setProjectCode(definition.getProjectCode());
         }
-        if (definition.getWorkflowCode() != null && definition.getWorkflowCode() > 0) {
+        if (!SOURCE_TYPE_DOLPHIN.equals(sourceType)
+                && definition.getWorkflowCode() != null
+                && definition.getWorkflowCode() > 0) {
             workflow.setWorkflowCode(definition.getWorkflowCode());
             workflow.setStatus(mapWorkflowStatus(definition.getReleaseState()));
             workflow.setPublishStatus("published");
@@ -799,8 +878,10 @@ public class WorkflowDefinitionLifecycleService {
 
         RuntimeWorkflowSchedule schedule = definition.getSchedule();
         if (schedule != null) {
-            workflow.setDolphinScheduleId(schedule.getScheduleId());
-            workflow.setScheduleState(schedule.getReleaseState());
+            if (!SOURCE_TYPE_DOLPHIN.equals(sourceType)) {
+                workflow.setDolphinScheduleId(schedule.getScheduleId());
+                workflow.setScheduleState(schedule.getReleaseState());
+            }
             workflow.setScheduleCron(schedule.getCrontab());
             workflow.setScheduleTimezone(schedule.getTimezoneId());
             workflow.setScheduleStartTime(parseFlexibleDateTime(schedule.getStartTime()));
@@ -845,6 +926,13 @@ public class WorkflowDefinitionLifecycleService {
     }
 
     private String resolveWorkflowName(RuntimeWorkflowDefinition definition) {
+        return resolveWorkflowName(definition, null);
+    }
+
+    private String resolveWorkflowName(RuntimeWorkflowDefinition definition, String overrideName) {
+        if (StringUtils.hasText(overrideName)) {
+            return overrideName.trim();
+        }
         if (definition == null) {
             return null;
         }
@@ -897,12 +985,61 @@ public class WorkflowDefinitionLifecycleService {
         }
     }
 
+    private ImportSource buildImportSource(WorkflowImportPreviewRequest request) {
+        ImportSource source = new ImportSource();
+        source.setSourceType(resolveSourceType(request != null ? request.getSourceType() : null));
+        source.setDefinitionJson(request != null ? request.getDefinitionJson() : null);
+        source.setProjectCode(request != null ? request.getProjectCode() : null);
+        source.setWorkflowCode(request != null ? request.getWorkflowCode() : null);
+        source.setWorkflowName(request != null ? request.getWorkflowName() : null);
+        return source;
+    }
+
+    private ImportSource buildImportSource(WorkflowImportCommitRequest request) {
+        ImportSource source = new ImportSource();
+        source.setSourceType(resolveSourceType(request != null ? request.getSourceType() : null));
+        source.setDefinitionJson(request != null ? request.getDefinitionJson() : null);
+        source.setProjectCode(request != null ? request.getProjectCode() : null);
+        source.setWorkflowCode(request != null ? request.getWorkflowCode() : null);
+        source.setWorkflowName(request != null ? request.getWorkflowName() : null);
+        return source;
+    }
+
+    private String resolveSourceType(String sourceType) {
+        if (!StringUtils.hasText(sourceType)) {
+            return SOURCE_TYPE_JSON;
+        }
+        String normalized = sourceType.trim().toLowerCase(Locale.ROOT);
+        if (SOURCE_TYPE_DOLPHIN.equals(normalized)) {
+            return SOURCE_TYPE_DOLPHIN;
+        }
+        return SOURCE_TYPE_JSON;
+    }
+
+    private String resolveTriggerSource(String sourceType) {
+        if (SOURCE_TYPE_DOLPHIN.equals(sourceType)) {
+            return "import_dolphin";
+        }
+        return "import_file";
+    }
+
     private String normalizeOperator(String operator) {
         return StringUtils.hasText(operator) ? operator.trim() : "workflow-import";
     }
 
     @Data
+    private static class ImportSource {
+        private String sourceType = SOURCE_TYPE_JSON;
+        private String definitionJson;
+        private Long projectCode;
+        private Long workflowCode;
+        private String workflowName;
+    }
+
+    @Data
     private static class ImportContext {
+        private String sourceType = SOURCE_TYPE_JSON;
+        private String requestedWorkflowName;
         private RuntimeWorkflowDefinition definition;
         private Boolean relationDecisionRequired = false;
         private String suggestedRelationDecision = RELATION_DECISION_INFERRED;

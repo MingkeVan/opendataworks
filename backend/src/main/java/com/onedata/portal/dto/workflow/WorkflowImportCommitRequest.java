@@ -9,9 +9,29 @@ import lombok.Data;
 public class WorkflowImportCommitRequest {
 
     /**
+     * 导入来源：json / dolphin（默认 json）
+     */
+    private String sourceType;
+
+    /**
      * 工作流定义 JSON 文本（Dolphin 导出或平台同构格式）
      */
     private String definitionJson;
+
+    /**
+     * Dolphin 项目编码（sourceType=dolphin 时生效）
+     */
+    private Long projectCode;
+
+    /**
+     * Dolphin 工作流编码（sourceType=dolphin 时必填）
+     */
+    private Long workflowCode;
+
+    /**
+     * 导入后工作流名称（可选，不传时自动取定义名称）
+     */
+    private String workflowName;
 
     /**
      * 关系轨道选择：DECLARED / INFERRED（仅在预检提示差异时必填）

@@ -21,6 +21,7 @@ import com.onedata.portal.dto.workflow.WorkflowVersionRollbackRequest;
 import com.onedata.portal.dto.workflow.WorkflowVersionRollbackResponse;
 import com.onedata.portal.dto.workflow.WorkflowVersionDeleteResponse;
 import com.onedata.portal.dto.workflow.WorkflowScheduleRequest;
+import com.onedata.portal.dto.workflow.runtime.DolphinRuntimeWorkflowOption;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncRecordDetailResponse;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncRecordListItem;
 import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowDiffResponse;
@@ -107,6 +108,16 @@ public class WorkflowController {
     @PostMapping("/import/preview")
     public Result<WorkflowImportPreviewResponse> previewImport(@RequestBody WorkflowImportPreviewRequest request) {
         return Result.success(workflowDefinitionLifecycleService.preview(request));
+    }
+
+    @GetMapping("/import/dolphin")
+    public Result<PageResult<DolphinRuntimeWorkflowOption>> listDolphinImportWorkflows(
+            @RequestParam(required = false) Long projectCode,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "20") Integer pageSize,
+            @RequestParam(required = false) String keyword) {
+        return Result.success(workflowDefinitionLifecycleService.listDolphinWorkflows(
+                projectCode, pageNum, pageSize, keyword));
     }
 
     @PostMapping("/import/commit")
