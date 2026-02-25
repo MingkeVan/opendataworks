@@ -162,23 +162,6 @@
                   <el-icon class="el-icon--right"><Link /></el-icon>
                 </el-link>
                 <span v-else>{{ workflow?.workflow?.workflowCode || '-' }}</span>
-                <div class="dolphin-code-actions">
-                  <el-button
-                    link
-                    type="primary"
-                    :disabled="!workflow?.workflow?.workflowCode || !workflow?.workflow?.projectCode"
-                    @click="openRuntimeSyncDialog"
-                  >
-                    手动同步
-                  </el-button>
-                  <el-button
-                    link
-                    :disabled="!workflow?.workflow?.id"
-                    @click="openSyncRecordDrawer"
-                  >
-                    同步记录
-                  </el-button>
-                </div>
               </div>
             </el-descriptions-item>
             <!-- Editable Description Field -->
@@ -741,17 +724,6 @@
       :workflow="backfillTarget"
       @submitted="handleBackfillSubmitted"
     />
-
-    <WorkflowRuntimeSyncDialog
-      v-model="runtimeSyncDialogVisible"
-      :preset-workflow="runtimeSyncPresetWorkflow"
-      @synced="handleRuntimeSynced"
-    />
-
-    <WorkflowSyncRecordDrawer
-      v-model="syncRecordDrawerVisible"
-      :workflow-id="workflow?.workflow?.id || null"
-    />
   </div>
 </template>
 
@@ -766,8 +738,6 @@ import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import WorkflowTaskManager from './WorkflowTaskManager.vue'
 import WorkflowBackfillDialog from './WorkflowBackfillDialog.vue'
-import WorkflowRuntimeSyncDialog from './WorkflowRuntimeSyncDialog.vue'
-import WorkflowSyncRecordDrawer from './WorkflowSyncRecordDrawer.vue'
 import WorkflowVersionComparePanel from './WorkflowVersionComparePanel.vue'
 import { buildPublishPreviewHtml, firstPreviewErrorMessage, isDialogCancel } from './publishPreviewHelper'
 import QuartzCronBuilder from '@/components/QuartzCronBuilder.vue'
@@ -782,8 +752,6 @@ const pendingApprovalFlags = reactive({})
 const actionLoading = reactive({})
 const backfillDialogVisible = ref(false)
 const backfillTarget = ref(null)
-const runtimeSyncDialogVisible = ref(false)
-const syncRecordDrawerVisible = ref(false)
 const changeMode = ref('list')
 const compareLoading = ref(false)
 const versionCompareResult = ref(null)
@@ -1145,21 +1113,6 @@ const versionPublishRecordDialogTitle = computed(() => {
   return Number.isFinite(Number(versionNo))
     ? `版本 ${versionNo} 发布记录`
     : '发布记录'
-})
-
-const runtimeSyncPresetWorkflow = computed(() => {
-  const wf = workflow.value?.workflow
-  if (!wf?.workflowCode || !wf?.projectCode) {
-    return null
-  }
-  return {
-    workflowCode: wf.workflowCode,
-    projectCode: wf.projectCode,
-    workflowName: wf.workflowName,
-    localWorkflowId: wf.id,
-    synced: true,
-    lastRuntimeSyncAt: wf.runtimeSyncAt
-  }
 })
 
 // Inline edit methods
@@ -1557,25 +1510,6 @@ const formatLog = (log) => {
   } catch (error) {
     return log
   }
-}
-
-const openRuntimeSyncDialog = () => {
-  if (!workflow.value?.workflow?.workflowCode || !workflow.value?.workflow?.projectCode) {
-    ElMessage.warning('当前工作流缺少 Dolphin 编码或项目编码，无法手动同步')
-    return
-  }
-  runtimeSyncDialogVisible.value = true
-}
-
-const openSyncRecordDrawer = () => {
-  if (!workflow.value?.workflow?.id) {
-    return
-  }
-  syncRecordDrawerVisible.value = true
-}
-
-const handleRuntimeSynced = () => {
-  loadWorkflowDetail()
 }
 
 const backToPublishRecords = () => {
@@ -2271,14 +2205,6 @@ onMounted(() => {
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
-  width: 100%;
-}
-
-.dolphin-code-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
   width: 100%;
 }
 
