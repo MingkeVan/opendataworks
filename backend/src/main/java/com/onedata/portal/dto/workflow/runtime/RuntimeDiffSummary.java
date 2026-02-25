@@ -17,17 +17,17 @@ public class RuntimeDiffSummary {
 
     private Boolean changed = false;
 
-    private List<String> workflowFieldChanges = new ArrayList<>();
+    private List<RuntimeDiffFieldChange> workflowFieldChanges = new ArrayList<>();
 
-    private List<String> taskAdded = new ArrayList<>();
+    private List<RuntimeTaskChange> taskAdded = new ArrayList<>();
 
-    private List<String> taskRemoved = new ArrayList<>();
+    private List<RuntimeTaskChange> taskRemoved = new ArrayList<>();
 
-    private List<String> taskModified = new ArrayList<>();
+    private List<RuntimeTaskChange> taskModified = new ArrayList<>();
 
-    private List<String> edgeAdded = new ArrayList<>();
+    private List<RuntimeRelationChange> edgeAdded = new ArrayList<>();
 
-    private List<String> edgeRemoved = new ArrayList<>();
+    private List<RuntimeRelationChange> edgeRemoved = new ArrayList<>();
 
-    private List<String> scheduleChanges = new ArrayList<>();
+    private List<RuntimeDiffFieldChange> scheduleChanges = new ArrayList<>();
 }

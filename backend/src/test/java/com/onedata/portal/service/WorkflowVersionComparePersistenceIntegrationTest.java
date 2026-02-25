@@ -64,6 +64,53 @@ class WorkflowVersionComparePersistenceIntegrationTest {
     private WorkflowVersionMapper workflowVersionMapper;
 
     @Test
+    @DisplayName("内容未变化时保存不应新增版本")
+    void saveWithoutContentChangeShouldNotCreateNewVersion() {
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String operator = "it-version-compare";
+
+        Long tableA = createTable("it_vcmp_nc_a_" + suffix, "ods");
+        Long tableB = createTable("it_vcmp_nc_b_" + suffix, "dwd");
+        Long taskId = createSqlTask(
+                "it_vcmp_nc_t1_" + suffix,
+                "extract_nc_" + suffix,
+                "insert into it_vcmp_nc_b_" + suffix + " select * from it_vcmp_nc_a_" + suffix,
+                "doris_ds",
+                Collections.singletonList(tableA),
+                Collections.singletonList(tableB),
+                operator
+        );
+
+        DataWorkflow workflow = workflowService.createWorkflow(buildWorkflowRequest(
+                "it_workflow_nc_" + suffix,
+                "desc",
+                "[{\"prop\":\"bizdate\",\"value\":\"2026-02-01\"}]",
+                "tg-alpha",
+                operator,
+                Collections.singletonList(taskId)
+        ));
+        Long workflowId = workflow.getId();
+        Long versionIdBefore = requireCurrentVersionId(workflowId);
+
+        workflowService.updateWorkflow(workflowId, buildWorkflowRequest(
+                "it_workflow_nc_" + suffix,
+                "desc",
+                "[{\"prop\":\"bizdate\",\"value\":\"2026-02-01\"}]",
+                "tg-alpha",
+                operator,
+                Collections.singletonList(taskId)
+        ));
+
+        Long versionIdAfter = requireCurrentVersionId(workflowId);
+        assertEquals(versionIdBefore, versionIdAfter, "内容未变化时 currentVersionId 应保持不变");
+
+        List<WorkflowVersion> versions = workflowVersionMapper.selectList(
+                Wrappers.<WorkflowVersion>lambdaQuery()
+                        .eq(WorkflowVersion::getWorkflowId, workflowId));
+        assertEquals(1, versions.size(), "内容未变化时不应新增版本");
+    }
+
+    @Test
     @DisplayName("单侧多次保存后版本对比应识别核心变更")
     void compareShouldRevealCoreChangesAcrossSingleSideMultipleSaves() {
         String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);

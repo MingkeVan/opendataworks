@@ -18,16 +18,6 @@ public class RuntimeSyncPreviewResponse {
      */
     private String ingestMode;
 
-    /**
-     * 一致性状态: not_checked/consistent/inconsistent
-     */
-    private String parityStatus = "not_checked";
-
-    /**
-     * 导出路径与旧路径一致性摘要
-     */
-    private RuntimeSyncParitySummary paritySummary;
-
     private List<RuntimeSyncIssue> errors = new ArrayList<>();
 
     private List<RuntimeSyncIssue> warnings = new ArrayList<>();
@@ -37,7 +27,12 @@ public class RuntimeSyncPreviewResponse {
     private List<RuntimeTaskRenamePlan> renamePlan = new ArrayList<>();
 
     /**
-     * 显式边与血缘推断边不一致详情（需要人工确认）
+     * 声明关系与 SQL 推断关系是否不一致（不一致时要求用户选择轨道）
      */
-    private RuntimeEdgeMismatchDetail edgeMismatchDetail;
+    private Boolean relationDecisionRequired = false;
+
+    /**
+     * 声明关系与 SQL 推断关系比对详情
+     */
+    private RuntimeRelationCompareDetail relationCompareDetail;
 }

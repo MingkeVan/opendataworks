@@ -59,49 +59,71 @@
 
       <div class="section" v-if="result?.diffSummary?.workflowFieldChanges?.length">
         <div class="section-title">Workflow 字段变更</div>
-        <el-tag v-for="item in result.diffSummary.workflowFieldChanges" :key="item" class="item-tag">
-          {{ item }}
-        </el-tag>
+        <el-table :data="result.diffSummary.workflowFieldChanges" size="small" border>
+          <el-table-column prop="field" label="字段" min-width="220" />
+          <el-table-column label="变更前" min-width="220">
+            <template #default="{ row }">{{ formatFieldValue(row.before) }}</template>
+          </el-table-column>
+          <el-table-column label="变更后" min-width="220">
+            <template #default="{ row }">{{ formatFieldValue(row.after) }}</template>
+          </el-table-column>
+        </el-table>
       </div>
 
       <div class="section" v-if="result?.diffSummary?.taskAdded?.length">
         <div class="section-title">任务新增</div>
-        <el-tag v-for="item in result.diffSummary.taskAdded" :key="item" type="success" class="item-tag">
-          {{ item }}
+        <el-tag v-for="(item, index) in result.diffSummary.taskAdded" :key="`task-add-${index}`" type="success" class="item-tag">
+          {{ formatTask(item) }}
         </el-tag>
       </div>
 
       <div class="section" v-if="result?.diffSummary?.taskRemoved?.length">
         <div class="section-title">任务删除</div>
-        <el-tag v-for="item in result.diffSummary.taskRemoved" :key="item" type="danger" class="item-tag">
-          {{ item }}
+        <el-tag v-for="(item, index) in result.diffSummary.taskRemoved" :key="`task-rm-${index}`" type="danger" class="item-tag">
+          {{ formatTask(item) }}
         </el-tag>
       </div>
 
       <div class="section" v-if="result?.diffSummary?.taskModified?.length">
         <div class="section-title">任务修改</div>
-        <el-tag v-for="item in result.diffSummary.taskModified" :key="item" type="warning" class="item-tag">
-          {{ item }}
-        </el-tag>
+        <div class="task-mod-list">
+          <div class="task-mod-card" v-for="(item, index) in result.diffSummary.taskModified" :key="`task-mod-${index}`">
+            <div class="task-mod-title">{{ formatTask(item) }}</div>
+            <el-tag
+              v-for="(change, cIndex) in item.fieldChanges"
+              :key="`task-mod-change-${index}-${cIndex}`"
+              type="warning"
+              class="item-tag"
+            >
+              {{ change.field }}: {{ formatFieldValue(change.before) }} -> {{ formatFieldValue(change.after) }}
+            </el-tag>
+          </div>
+        </div>
       </div>
 
       <div class="section" v-if="result?.diffSummary?.edgeAdded?.length || result?.diffSummary?.edgeRemoved?.length">
         <div class="section-title">边变更</div>
         <div class="edge-list">
-          <el-tag v-for="item in result.diffSummary.edgeAdded" :key="`add-${item}`" type="success" class="item-tag">
-            + {{ item }}
+          <el-tag v-for="(item, index) in result.diffSummary.edgeAdded" :key="`add-${index}`" type="success" class="item-tag">
+            + {{ formatRelation(item) }}
           </el-tag>
-          <el-tag v-for="item in result.diffSummary.edgeRemoved" :key="`rm-${item}`" type="danger" class="item-tag">
-            - {{ item }}
+          <el-tag v-for="(item, index) in result.diffSummary.edgeRemoved" :key="`rm-${index}`" type="danger" class="item-tag">
+            - {{ formatRelation(item) }}
           </el-tag>
         </div>
       </div>
 
       <div class="section" v-if="result?.diffSummary?.scheduleChanges?.length">
         <div class="section-title">调度变更</div>
-        <el-tag v-for="item in result.diffSummary.scheduleChanges" :key="item" class="item-tag">
-          {{ item }}
-        </el-tag>
+        <el-table :data="result.diffSummary.scheduleChanges" size="small" border>
+          <el-table-column prop="field" label="字段" min-width="220" />
+          <el-table-column label="变更前" min-width="220">
+            <template #default="{ row }">{{ formatFieldValue(row.before) }}</template>
+          </el-table-column>
+          <el-table-column label="变更后" min-width="220">
+            <template #default="{ row }">{{ formatFieldValue(row.after) }}</template>
+          </el-table-column>
+        </el-table>
       </div>
     </div>
   </el-drawer>
@@ -182,6 +204,26 @@ const formatIssue = (issue) => {
   }
   return parts.join(' | ')
 }
+
+const formatFieldValue = (value) => {
+  return value === null || value === undefined || value === '' ? '∅' : String(value)
+}
+
+const formatTask = (task) => {
+  if (!task) return '-'
+  const code = task.taskCode !== null && task.taskCode !== undefined ? `#${task.taskCode}` : '#-'
+  const name = task.taskName || '未命名任务'
+  return `${name} (${code})`
+}
+
+const formatRelation = (edge) => {
+  if (!edge) return '-'
+  const preCode = edge.preTaskCode !== null && edge.preTaskCode !== undefined ? edge.preTaskCode : '-'
+  const postCode = edge.postTaskCode !== null && edge.postTaskCode !== undefined ? edge.postTaskCode : '-'
+  const preName = edge.entryEdge ? '入口' : (edge.preTaskName || preCode)
+  const postName = edge.postTaskName || postCode
+  return `${preName}(${preCode}) -> ${postName}(${postCode})`
+}
 </script>
 
 <style scoped>
@@ -217,5 +259,22 @@ const formatIssue = (issue) => {
 .edge-list {
   display: flex;
   flex-wrap: wrap;
+}
+
+.task-mod-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.task-mod-card {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.task-mod-title {
+  font-weight: 600;
+  margin-bottom: 8px;
 }
 </style>

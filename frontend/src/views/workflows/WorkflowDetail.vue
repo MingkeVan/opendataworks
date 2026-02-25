@@ -83,6 +83,14 @@
              <el-button
                v-if="workflow?.workflow"
                link
+               type="primary"
+               @click="handleExportJson(workflow.workflow)"
+             >
+               导出 JSON
+             </el-button>
+             <el-button
+               v-if="workflow?.workflow"
+               link
                type="danger"
                :icon="Delete"
                @click="handleDelete(workflow.workflow)"
@@ -1797,6 +1805,30 @@ const openDolphin = (workflow) => {
     return
   }
   window.open(url, '_blank')
+}
+
+const handleExportJson = async (row) => {
+  if (!row?.id) return
+  try {
+    const result = await workflowApi.exportJson(row.id)
+    const content = result?.content || ''
+    if (!content) {
+      ElMessage.warning('当前工作流没有可导出的定义内容')
+      return
+    }
+    const fileName = result?.fileName || `workflow_${row.id}.json`
+    const blob = new Blob([content], { type: 'application/json;charset=utf-8' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(link.href)
+    ElMessage.success('导出成功')
+  } catch (error) {
+    console.error('导出工作流 JSON 失败', error)
+  }
 }
 
 // Action Handlers

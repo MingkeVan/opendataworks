@@ -37,19 +37,9 @@ public class WorkflowRuntimeSyncRecord {
     private Long versionId;
 
     /**
-     * 运行态定义采集模式: legacy/export_shadow/export_only
+     * 运行态定义采集模式（当前固定 export_only）
      */
     private String ingestMode;
-
-    /**
-     * 一致性状态: not_checked/consistent/inconsistent
-     */
-    private String parityStatus;
-
-    /**
-     * 一致性详情JSON
-     */
-    private String parityDetailJson;
 
     /**
      * 原始运行态定义JSON（导出结果）

@@ -150,6 +150,35 @@ class WorkflowRuntimeDiffServiceTest {
     }
 
     @Test
+    void buildDiffShouldDetectEntryEdgeChanges() {
+        RuntimeWorkflowDefinition baselineDef = definition("wf_a");
+        baselineDef.setTasks(Arrays.asList(
+                task(1L, "task_1", "SELECT 1", 11L, 21L),
+                task(2L, "task_2", "SELECT 2", 21L, 31L)));
+
+        RuntimeWorkflowDefinition currentDef = definition("wf_a");
+        currentDef.setTasks(Arrays.asList(
+                task(1L, "task_1", "SELECT 1", 11L, 21L),
+                task(2L, "task_2", "SELECT 2", 21L, 31L)));
+
+        RuntimeDiffSummary summary = buildDiff(
+                baselineDef,
+                currentDef,
+                Collections.singletonList(new RuntimeTaskEdge(0L, 1L)),
+                Collections.singletonList(new RuntimeTaskEdge(0L, 2L)));
+
+        assertTrue(Boolean.TRUE.equals(summary.getChanged()));
+        assertTrue(summary.getEdgeRemoved().stream()
+                .anyMatch(item -> Boolean.TRUE.equals(item.getEntryEdge())
+                        && item.getPreTaskCode() == 0L
+                        && item.getPostTaskCode() == 1L));
+        assertTrue(summary.getEdgeAdded().stream()
+                .anyMatch(item -> Boolean.TRUE.equals(item.getEntryEdge())
+                        && item.getPreTaskCode() == 0L
+                        && item.getPostTaskCode() == 2L));
+    }
+
+    @Test
     void buildDiffShouldDetectTaskAdded() {
         RuntimeWorkflowDefinition baselineDef = definition("wf_a");
         baselineDef.setTasks(Collections.singletonList(task(1L, "task_1", "SELECT 1", 11L, 21L)));

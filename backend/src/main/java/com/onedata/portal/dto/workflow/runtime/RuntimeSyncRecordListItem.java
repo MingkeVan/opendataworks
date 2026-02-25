@@ -27,11 +27,6 @@ public class RuntimeSyncRecordListItem {
      */
     private String ingestMode;
 
-    /**
-     * 一致性状态: not_checked/consistent/inconsistent
-     */
-    private String parityStatus;
-
     private String snapshotHash;
 
     private RuntimeDiffSummary diffSummary;

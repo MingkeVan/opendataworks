@@ -3,7 +3,10 @@ package com.onedata.portal.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.onedata.portal.dto.workflow.runtime.RuntimeDiffFieldChange;
 import com.onedata.portal.dto.workflow.runtime.RuntimeDiffSummary;
+import com.onedata.portal.dto.workflow.runtime.RuntimeRelationChange;
+import com.onedata.portal.dto.workflow.runtime.RuntimeTaskChange;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskDefinition;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskEdge;
 import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowDefinition;
@@ -23,7 +26,6 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -38,11 +40,11 @@ public class WorkflowRuntimeDiffService {
 
     private final ObjectMapper objectMapper;
 
-    public RuntimeSnapshot buildSnapshot(RuntimeWorkflowDefinition definition, Collection<RuntimeTaskEdge> inferredEdges) {
+    public RuntimeSnapshot buildSnapshot(RuntimeWorkflowDefinition definition, Collection<RuntimeTaskEdge> edges) {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("workflow", buildWorkflowSnapshot(definition));
         root.put("tasks", buildTaskSnapshot(definition != null ? definition.getTasks() : Collections.emptyList()));
-        root.put("edges", buildEdgeSnapshot(inferredEdges));
+        root.put("edges", buildEdgeSnapshot(edges));
         root.put("schedule", buildScheduleSnapshot(definition != null ? definition.getSchedule() : null));
 
         String snapshotJson = toJson(root);
@@ -115,11 +117,11 @@ public class WorkflowRuntimeDiffService {
                 .collect(Collectors.toList());
     }
 
-    private List<Map<String, Object>> buildEdgeSnapshot(Collection<RuntimeTaskEdge> inferredEdges) {
-        if (inferredEdges == null || inferredEdges.isEmpty()) {
+    private List<Map<String, Object>> buildEdgeSnapshot(Collection<RuntimeTaskEdge> edges) {
+        if (edges == null || edges.isEmpty()) {
             return Collections.emptyList();
         }
-        return inferredEdges.stream()
+        return edges.stream()
                 .filter(Objects::nonNull)
                 .filter(edge -> edge.getUpstreamTaskCode() != null && edge.getDownstreamTaskCode() != null)
                 .sorted(Comparator.comparing(RuntimeTaskEdge::getUpstreamTaskCode)
@@ -175,19 +177,20 @@ public class WorkflowRuntimeDiffService {
 
         afterCodes.stream()
                 .filter(code -> !beforeCodes.contains(code))
-                .forEach(code -> summary.getTaskAdded().add(describeTask(afterMap.get(code), code)));
+                .forEach(code -> summary.getTaskAdded().add(toTaskChange(afterMap.get(code), code, Collections.emptyList())));
 
         beforeCodes.stream()
                 .filter(code -> !afterCodes.contains(code))
-                .forEach(code -> summary.getTaskRemoved().add(describeTask(beforeMap.get(code), code)));
+                .forEach(code -> summary.getTaskRemoved().add(toTaskChange(beforeMap.get(code), code, Collections.emptyList())));
 
         beforeCodes.stream()
                 .filter(afterCodes::contains)
                 .forEach(code -> {
                     JsonNode beforeNode = beforeMap.get(code);
                     JsonNode afterNode = afterMap.get(code);
-                    if (!Objects.equals(beforeNode, afterNode)) {
-                        summary.getTaskModified().add(describeModifiedTask(beforeNode, afterNode, code));
+                    List<RuntimeDiffFieldChange> fieldChanges = collectChangedTaskFields(beforeNode, afterNode);
+                    if (!fieldChanges.isEmpty()) {
+                        summary.getTaskModified().add(toTaskChange(afterNode != null ? afterNode : beforeNode, code, fieldChanges));
                     }
                 });
     }
@@ -204,14 +207,17 @@ public class WorkflowRuntimeDiffService {
 
         afterEdges.stream()
                 .filter(edge -> !beforeEdges.contains(edge))
-                .forEach(edge -> summary.getEdgeAdded().add(describeEdge(edge, taskLookup)));
+                .forEach(edge -> summary.getEdgeAdded().add(toRelationChange(edge, taskLookup)));
 
         beforeEdges.stream()
                 .filter(edge -> !afterEdges.contains(edge))
-                .forEach(edge -> summary.getEdgeRemoved().add(describeEdge(edge, taskLookup)));
+                .forEach(edge -> summary.getEdgeRemoved().add(toRelationChange(edge, taskLookup)));
     }
 
-    private void compareFlatFields(JsonNode before, JsonNode after, List<String> collector, String prefix) {
+    private void compareFlatFields(JsonNode before,
+            JsonNode after,
+            List<RuntimeDiffFieldChange> collector,
+            String prefix) {
         Set<String> keys = new LinkedHashSet<>();
         keys.addAll(fieldNames(before));
         keys.addAll(fieldNames(after));
@@ -222,11 +228,11 @@ public class WorkflowRuntimeDiffService {
                     JsonNode beforeValue = before != null ? before.get(key) : null;
                     JsonNode afterValue = after != null ? after.get(key) : null;
                     if (!Objects.equals(beforeValue, afterValue)) {
-                        collector.add(String.format("%s.%s: %s -> %s",
-                                prefix,
-                                key,
-                                toText(beforeValue),
-                                toText(afterValue)));
+                        RuntimeDiffFieldChange change = new RuntimeDiffFieldChange();
+                        change.setField(prefix + "." + key);
+                        change.setBefore(toText(beforeValue));
+                        change.setAfter(toText(afterValue));
+                        collector.add(change);
                     }
                 });
     }
@@ -277,36 +283,34 @@ public class WorkflowRuntimeDiffService {
         return result;
     }
 
-    private String describeTask(JsonNode task, String code) {
-        String identity = StringUtils.hasText(code) ? "taskCode=" + code : null;
-        if (task == null || task.isNull()) {
-            return StringUtils.hasText(identity) ? identity : code;
+    private RuntimeTaskChange toTaskChange(JsonNode taskNode,
+            String taskCodeText,
+            List<RuntimeDiffFieldChange> fieldChanges) {
+        RuntimeTaskChange change = new RuntimeTaskChange();
+        change.setTaskCode(parseLong(taskCodeText));
+        change.setTaskName(resolveTaskName(taskNode));
+        if (fieldChanges != null && !fieldChanges.isEmpty()) {
+            change.setFieldChanges(fieldChanges);
         }
-        String name = task.path("taskName").asText(null);
-        if (StringUtils.hasText(name)) {
-            return StringUtils.hasText(identity) ? name + " [" + identity + "]" : name;
-        }
-        return StringUtils.hasText(identity) ? identity : code;
+        return change;
     }
 
-    private String describeModifiedTask(JsonNode beforeTask, JsonNode afterTask, String code) {
-        JsonNode preferred = afterTask != null && !afterTask.isNull() ? afterTask : beforeTask;
-        String base = describeTask(preferred, code);
-        List<String> changedFields = collectChangedTaskFields(beforeTask, afterTask);
-        if (changedFields.isEmpty()) {
-            return base;
+    private String resolveTaskName(JsonNode taskNode) {
+        if (taskNode == null || taskNode.isNull()) {
+            return null;
         }
-        return base + " | 变更: " + String.join("; ", changedFields);
+        String taskName = taskNode.path("taskName").asText(null);
+        return StringUtils.hasText(taskName) ? taskName : null;
     }
 
-    private List<String> collectChangedTaskFields(JsonNode beforeTask, JsonNode afterTask) {
+    private List<RuntimeDiffFieldChange> collectChangedTaskFields(JsonNode beforeTask, JsonNode afterTask) {
         Set<String> keys = new LinkedHashSet<>();
         keys.addAll(fieldNames(beforeTask));
         keys.addAll(fieldNames(afterTask));
         if (keys.isEmpty()) {
             return Collections.emptyList();
         }
-        List<String> changed = new ArrayList<>();
+        List<RuntimeDiffFieldChange> changed = new ArrayList<>();
         List<String> ordered = new ArrayList<>(keys);
         Collections.sort(ordered);
         for (String field : ordered) {
@@ -315,76 +319,57 @@ public class WorkflowRuntimeDiffService {
             if (Objects.equals(beforeValue, afterValue)) {
                 continue;
             }
-            changed.add(formatTaskFieldDiff(field, beforeValue, afterValue));
+            RuntimeDiffFieldChange change = new RuntimeDiffFieldChange();
+            change.setField("task." + field);
+            change.setBefore(toText(beforeValue));
+            change.setAfter(toText(afterValue));
+            changed.add(change);
         }
         return changed;
     }
 
-    private String formatTaskFieldDiff(String field, JsonNode beforeValue, JsonNode afterValue) {
-        String beforeText = summarizeText(toText(beforeValue));
-        String afterText = summarizeText(toText(afterValue));
-        if (shouldOnlyShowFieldName(field, beforeText, afterText)) {
-            return field;
+    private RuntimeRelationChange toRelationChange(String edgeKey, Map<String, JsonNode> taskLookup) {
+        RuntimeRelationChange change = new RuntimeRelationChange();
+        if (!StringUtils.hasText(edgeKey)) {
+            return change;
         }
-        return field + ": " + beforeText + " -> " + afterText;
-    }
-
-    private boolean shouldOnlyShowFieldName(String field, String beforeText, String afterText) {
-        String lowerField = field != null ? field.toLowerCase(Locale.ROOT) : "";
-        if (lowerField.contains("sql") || lowerField.contains("json")) {
-            return true;
-        }
-        return isLongInlineText(beforeText) || isLongInlineText(afterText);
-    }
-
-    private boolean isLongInlineText(String value) {
-        if (!StringUtils.hasText(value)) {
-            return false;
-        }
-        return value.length() > 48 || value.contains("\n") || value.contains("\r");
-    }
-
-    private String summarizeText(String value) {
-        if (!StringUtils.hasText(value)) {
-            return "null";
-        }
-        String compact = value.replace('\n', ' ').replace('\r', ' ').trim();
-        if (compact.length() <= 48) {
-            return compact;
-        }
-        return compact.substring(0, 45) + "...";
-    }
-
-    private String describeEdge(String edge, Map<String, JsonNode> taskLookup) {
-        if (!StringUtils.hasText(edge)) {
-            return edge;
-        }
-        String[] parts = edge.split("->", 2);
+        String[] parts = edgeKey.split("->", 2);
         if (parts.length != 2) {
-            return edge;
+            return change;
         }
-        String upstreamCode = parts[0].trim();
-        String downstreamCode = parts[1].trim();
-        JsonNode upstreamTask = taskLookup != null ? taskLookup.get(upstreamCode) : null;
-        JsonNode downstreamTask = taskLookup != null ? taskLookup.get(downstreamCode) : null;
-
-        String upstream = describeTaskBrief(upstreamTask, upstreamCode);
-        String downstream = describeTaskBrief(downstreamTask, downstreamCode);
-        if (Objects.equals(upstream, upstreamCode) && Objects.equals(downstream, downstreamCode)) {
-            return edge;
-        }
-        return upstream + " -> " + downstream + " [" + edge + "]";
+        Long preCode = parseLong(parts[0].trim());
+        Long postCode = parseLong(parts[1].trim());
+        change.setPreTaskCode(preCode);
+        change.setPostTaskCode(postCode);
+        change.setEntryEdge(preCode != null && preCode == 0L);
+        change.setPreTaskName(resolveRelationTaskName(preCode, taskLookup));
+        change.setPostTaskName(resolveRelationTaskName(postCode, taskLookup));
+        return change;
     }
 
-    private String describeTaskBrief(JsonNode task, String code) {
-        if (task == null || task.isNull()) {
-            return code;
+    private String resolveRelationTaskName(Long taskCode, Map<String, JsonNode> taskLookup) {
+        if (taskCode == null) {
+            return null;
         }
-        String name = task.path("taskName").asText(null);
-        if (!StringUtils.hasText(name)) {
-            return code;
+        if (taskCode == 0L) {
+            return "入口";
         }
-        return StringUtils.hasText(code) ? name + "(" + code + ")" : name;
+        if (taskLookup == null) {
+            return null;
+        }
+        JsonNode node = taskLookup.get(String.valueOf(taskCode));
+        return resolveTaskName(node);
+    }
+
+    private Long parseLong(String text) {
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(text.trim());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private boolean hasChanges(RuntimeDiffSummary summary) {
@@ -441,7 +426,7 @@ public class WorkflowRuntimeDiffService {
 
     private String toText(JsonNode node) {
         if (node == null || node.isNull() || node.isMissingNode()) {
-            return "null";
+            return null;
         }
         if (node.isValueNode()) {
             return node.asText();

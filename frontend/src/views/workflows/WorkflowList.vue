@@ -30,6 +30,7 @@
           <el-button @click="handleReset">重置</el-button>
         </div>
         <div class="toolbar-actions">
+          <el-button @click="openImportDialog">导入 JSON</el-button>
           <el-button @click="openRuntimeSyncDialog">从 Dolphin 同步</el-button>
           <el-button type="primary" :icon="Plus" plain @click="openCreateDrawer">
             新建工作流
@@ -235,6 +236,11 @@
       v-model="runtimeDiffDrawerVisible"
       :workflow="runtimeDiffTarget"
     />
+
+    <WorkflowImportDialog
+      v-model="importDialogVisible"
+      @imported="handleImported"
+    />
   </div>
 </template>
 
@@ -251,6 +257,7 @@ import WorkflowCreateDrawer from './WorkflowCreateDrawer.vue'
 import WorkflowBackfillDialog from './WorkflowBackfillDialog.vue'
 import WorkflowRuntimeSyncDialog from './WorkflowRuntimeSyncDialog.vue'
 import WorkflowRuntimeDiffDrawer from './WorkflowRuntimeDiffDrawer.vue'
+import WorkflowImportDialog from './WorkflowImportDialog.vue'
 
 const router = useRouter()
 const loading = ref(false)
@@ -281,6 +288,7 @@ const backfillTarget = ref(null)
 const runtimeSyncDialogVisible = ref(false)
 const runtimeDiffDrawerVisible = ref(false)
 const runtimeDiffTarget = ref(null)
+const importDialogVisible = ref(false)
 
 const loadWorkflows = async () => {
   loading.value = true
@@ -333,6 +341,15 @@ const openRuntimeSyncDialog = () => {
 }
 
 const handleRuntimeSynced = () => {
+  loadWorkflows()
+}
+
+const openImportDialog = () => {
+  importDialogVisible.value = true
+}
+
+const handleImported = () => {
+  pagination.pageNum = 1
   loadWorkflows()
 }
 

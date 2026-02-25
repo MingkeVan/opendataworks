@@ -17,6 +17,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
@@ -194,22 +195,73 @@ public class DolphinRuntimeDefinitionService {
             explicitEdges = parseTaskEdges(definition);
         }
 
-        // 导出格式异常时，最小化兜底到现有查询接口，保证可解析性
-        JsonNode tasksNode = openApiClient.getProcessDefinitionTasks(resolvedProjectCode, resolvedWorkflowCode);
-        if (tasks.isEmpty()) {
-            tasks = parseTaskDefinitionsFromNode(tasksNode);
-        }
-        if (explicitEdges.isEmpty()) {
-            explicitEdges = parseTaskEdgesFromNode(tasksNode);
-        }
-        if (tasks.isEmpty()) {
-            JsonNode taskDefinitionList = openApiClient.queryTaskDefinitionList(resolvedProjectCode, resolvedWorkflowCode);
-            tasks = parseTaskDefinitionsFromNode(taskDefinitionList);
-        }
-
         result.setTasks(tasks);
         result.setExplicitEdges(explicitEdges);
         result.setRawDefinitionJson(toJson(exported));
+        return result;
+    }
+
+    /**
+     * 解析离线 JSON（Dolphin 导出文件或平台同构文档）为运行态定义模型。
+     */
+    public RuntimeWorkflowDefinition parseRuntimeDefinitionFromJson(String definitionJson) {
+        if (!StringUtils.hasText(definitionJson)) {
+            throw new IllegalArgumentException("definitionJson 不能为空");
+        }
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(definitionJson);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("definitionJson 不是合法 JSON");
+        }
+        if (root == null || root.isNull() || root.isMissingNode()) {
+            throw new IllegalArgumentException("definitionJson 为空对象");
+        }
+
+        JsonNode definition = readNode(root, "workflowDefinition", "processDefinition", "workflow");
+        if (definition == null || definition.isNull() || definition.isMissingNode()) {
+            definition = unwrapDefinition(root);
+        }
+        if (definition == null || definition.isNull() || definition.isMissingNode()) {
+            throw new IllegalArgumentException("definitionJson 缺少 processDefinition/workflowDefinition");
+        }
+
+        RuntimeWorkflowDefinition result = new RuntimeWorkflowDefinition();
+        result.setProjectCode(readLong(definition, "projectCode"));
+        result.setWorkflowCode(readLong(definition, "code", "workflowCode", "processDefinitionCode"));
+        result.setWorkflowName(readText(definition, "name", "workflowName"));
+        result.setDescription(readText(definition, "description", "desc"));
+        result.setReleaseState(readText(definition, "releaseState", "publishStatus", "scheduleReleaseState"));
+        result.setGlobalParams(normalizeJsonField(readNode(definition, "globalParams")));
+
+        RuntimeWorkflowSchedule schedule = parseScheduleNode(readNode(root, "schedule"));
+        if (schedule == null) {
+            schedule = parseScheduleNode(readNode(definition, "schedule"));
+        }
+        if (schedule != null && !StringUtils.hasText(schedule.getReleaseState())) {
+            schedule.setReleaseState(readText(definition, "scheduleReleaseState", "releaseState"));
+        }
+        result.setSchedule(schedule);
+
+        List<RuntimeTaskDefinition> tasks = parseTaskDefinitionsFromNode(
+                firstPresentNode(root, "taskDefinitionList", "tasks", "taskDefinitionJson"));
+        if (tasks.isEmpty()) {
+            tasks = parseTaskDefinitions(definition);
+        }
+        List<RuntimeTaskEdge> edges = parseTaskEdgesFromNode(
+                firstPresentNode(root,
+                        "workflowTaskRelationList",
+                        "processTaskRelationList",
+                        "taskRelationList",
+                        "edges",
+                        "taskRelationJson"));
+        if (edges.isEmpty()) {
+            edges = parseTaskEdges(definition);
+        }
+
+        result.setTasks(tasks);
+        result.setExplicitEdges(edges);
+        result.setRawDefinitionJson(toJson(root));
         return result;
     }
 
@@ -347,11 +399,20 @@ public class DolphinRuntimeDefinitionService {
             if (taskParamsNode != null && !taskParamsNode.isNull()) {
                 task.setSql(readText(taskParamsNode, "sql", "rawScript"));
                 task.setDatasourceId(readLong(taskParamsNode, "datasource", "datasourceId"));
+                task.setDatasourceName(readText(taskParamsNode, "datasourceName"));
                 task.setDatasourceType(readText(taskParamsNode, "type", "datasourceType"));
             }
             if (!StringUtils.hasText(task.getSql())) {
                 task.setSql(readText(item, "sql", "rawScript"));
             }
+            if (!StringUtils.hasText(task.getDatasourceName())) {
+                task.setDatasourceName(readText(item, "datasourceName"));
+            }
+            if (!StringUtils.hasText(task.getDatasourceType())) {
+                task.setDatasourceType(readText(item, "datasourceType"));
+            }
+            task.setInputTableIds(readLongList(item, "inputTableIds"));
+            task.setOutputTableIds(readLongList(item, "outputTableIds"));
             tasks.add(task);
         }
         return tasks;
@@ -393,7 +454,8 @@ public class DolphinRuntimeDefinitionService {
             if (postTaskCode == null || postTaskCode <= 0) {
                 continue;
             }
-            if (preTaskCode == null || preTaskCode <= 0) {
+            // keep entry edges (preTaskCode=0) for full relation comparison.
+            if (preTaskCode == null || preTaskCode < 0) {
                 continue;
             }
             edges.add(new RuntimeTaskEdge(preTaskCode, postTaskCode));
@@ -513,6 +575,38 @@ public class DolphinRuntimeDefinitionService {
             return null;
         }
         return value.intValue();
+    }
+
+    private List<Long> readLongList(JsonNode node, String... fieldNames) {
+        JsonNode target = fieldNames == null || fieldNames.length == 0 ? node : readNode(node, fieldNames);
+        JsonNode normalized = normalizeNode(target);
+        if (normalized == null || !normalized.isArray()) {
+            return Collections.emptyList();
+        }
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        for (JsonNode item : normalized) {
+            if (item == null || item.isNull() || item.isMissingNode()) {
+                continue;
+            }
+            Long value;
+            if (item.isIntegralNumber()) {
+                value = item.asLong();
+            } else if (item.isTextual()) {
+                String text = item.asText();
+                if (!StringUtils.hasText(text)) {
+                    continue;
+                }
+                try {
+                    value = Long.parseLong(text.trim());
+                } catch (NumberFormatException ignored) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+            ids.add(value);
+        }
+        return new ArrayList<>(ids);
     }
 
     private long resolveProjectCode(Long projectCode) {

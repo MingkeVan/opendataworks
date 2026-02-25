@@ -323,7 +323,11 @@ class WorkflowPublishServiceTest {
         com.onedata.portal.dto.workflow.runtime.RuntimeDiffSummary diff =
                 new com.onedata.portal.dto.workflow.runtime.RuntimeDiffSummary();
         diff.setChanged(true);
-        diff.setTaskAdded(Collections.singletonList("task_a [taskCode=10001]"));
+        com.onedata.portal.dto.workflow.runtime.RuntimeTaskChange taskChange =
+                new com.onedata.portal.dto.workflow.runtime.RuntimeTaskChange();
+        taskChange.setTaskCode(10001L);
+        taskChange.setTaskName("task_a");
+        diff.setTaskAdded(Collections.singletonList(taskChange));
         return diff;
     }
 

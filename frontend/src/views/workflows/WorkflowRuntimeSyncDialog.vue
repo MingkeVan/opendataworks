@@ -139,86 +139,60 @@
 
         <div
           class="section"
-          v-if="previewResult.paritySummary && parityChecked"
-          :ref="(el) => setSectionRef('parity', el)"
-          :class="{ 'section-highlight': activeSectionKey === 'parity' }"
+          v-if="relationCompareDetail"
+          :ref="(el) => setSectionRef('relationCompare', el)"
+          :class="{ 'section-highlight': activeSectionKey === 'relationCompare' }"
         >
-          <div class="section-title">导出定义一致性详情</div>
+          <div class="section-title">关系双轨比对（声明关系 vs SQL 推断关系）</div>
           <div class="diff-grid">
-            <span>状态: {{ parityText(previewResult.parityStatus) }}</span>
-            <span>结果: {{ previewResult.paritySummary?.changed ? '存在差异' : '一致' }}</span>
-            <span>主路 Hash: {{ shortHash(previewResult.paritySummary?.primaryHash) }}</span>
-            <span>影子 Hash: {{ shortHash(previewResult.paritySummary?.shadowHash) }}</span>
-            <span>workflow 字段差异: {{ previewResult.paritySummary?.workflowFieldDiffCount || 0 }}</span>
-            <span>任务新增差异: {{ previewResult.paritySummary?.taskAddedDiffCount || 0 }}</span>
-            <span>任务删除差异: {{ previewResult.paritySummary?.taskRemovedDiffCount || 0 }}</span>
-            <span>任务修改差异: {{ previewResult.paritySummary?.taskModifiedDiffCount || 0 }}</span>
-            <span>边新增差异: {{ previewResult.paritySummary?.edgeAddedDiffCount || 0 }}</span>
-            <span>边删除差异: {{ previewResult.paritySummary?.edgeRemovedDiffCount || 0 }}</span>
-            <span>调度差异: {{ previewResult.paritySummary?.scheduleDiffCount || 0 }}</span>
+            <span>声明关系: {{ relationCompareDetail.declaredRelations?.length || 0 }}</span>
+            <span>推断关系: {{ relationCompareDetail.inferredRelations?.length || 0 }}</span>
+            <span>仅声明: {{ relationCompareDetail.onlyInDeclared?.length || 0 }}</span>
+            <span>仅推断: {{ relationCompareDetail.onlyInInferred?.length || 0 }}</span>
           </div>
-          <div class="parity-samples" v-if="previewResult.paritySummary?.sampleMismatches?.length">
-            <div class="detail-tip">不一致样例（前 {{ previewResult.paritySummary.sampleMismatches.length }} 条）</div>
-            <div class="tag-wrap">
-              <el-tag
-                v-for="(sample, index) in previewResult.paritySummary.sampleMismatches"
-                :key="`parity-sample-${index}`"
-                type="warning"
-                class="diff-tag"
-              >
-                {{ sample }}
-              </el-tag>
-            </div>
-          </div>
-        </div>
 
-        <div
-          class="section edge-confirm-section"
-          v-if="edgeMismatchRequired"
-          :ref="(el) => setSectionRef('edgeMismatch', el)"
-          :class="{ 'section-highlight': activeSectionKey === 'edgeMismatch' }"
-        >
-          <div class="section-title">边差异确认</div>
-          <el-alert
-            type="warning"
-            :closable="false"
-            title="检测到显式边与血缘推断边不一致，请先查看差异详情并确认，或取消同步"
-          />
           <div class="edge-diff-grid">
             <div class="edge-card">
-              <div class="edge-card-title">仅在 Dolphin 显式边中</div>
-              <div class="edge-card-items" v-if="edgeMismatchDetail.onlyInExplicit?.length">
+              <div class="edge-card-title">仅在声明关系中</div>
+              <div class="edge-card-items" v-if="relationCompareDetail.onlyInDeclared?.length">
                 <el-tag
-                  v-for="edge in edgeMismatchDetail.onlyInExplicit"
-                  :key="`only-explicit-${edge}`"
+                  v-for="(edge, index) in relationCompareDetail.onlyInDeclared"
+                  :key="`declared-only-${index}`"
                   type="danger"
                   class="edge-tag"
                 >
-                  {{ edge }}
+                  {{ formatRelation(edge) }}
                 </el-tag>
               </div>
               <span class="edge-empty" v-else>无</span>
             </div>
+
             <div class="edge-card">
-              <div class="edge-card-title">仅在血缘推断边中</div>
-              <div class="edge-card-items" v-if="edgeMismatchDetail.onlyInInferred?.length">
+              <div class="edge-card-title">仅在推断关系中</div>
+              <div class="edge-card-items" v-if="relationCompareDetail.onlyInInferred?.length">
                 <el-tag
-                  v-for="edge in edgeMismatchDetail.onlyInInferred"
-                  :key="`only-inferred-${edge}`"
+                  v-for="(edge, index) in relationCompareDetail.onlyInInferred"
+                  :key="`inferred-only-${index}`"
                   type="success"
                   class="edge-tag"
                 >
-                  {{ edge }}
+                  {{ formatRelation(edge) }}
                 </el-tag>
               </div>
               <span class="edge-empty" v-else>无</span>
             </div>
           </div>
-          <div class="edge-confirm-actions">
-            <el-checkbox v-model="edgeMismatchConfirmed">
-              我已查看并确认边差异，按血缘推断边继续同步
-            </el-checkbox>
-            <el-button size="small" @click="cancelEdgeMismatchSync">取消本次同步</el-button>
+
+          <div class="relation-decision" v-if="relationDecisionRequired">
+            <el-alert
+              type="warning"
+              :closable="false"
+              title="检测到声明关系与 SQL 推断关系不一致，请先选择本次同步使用的关系轨道"
+            />
+            <el-radio-group v-model="relationDecision" class="relation-decision-group">
+              <el-radio label="INFERRED">按 SQL 推断关系落盘（推荐）</el-radio>
+              <el-radio label="DECLARED">按 Dolphin 声明关系落盘</el-radio>
+            </el-radio-group>
           </div>
         </div>
 
@@ -296,15 +270,15 @@
           :class="{ 'section-highlight': activeSectionKey === 'workflowFieldChanges' }"
         >
           <div class="section-title">Workflow 字段变更详情</div>
-          <div class="tag-wrap">
-            <el-tag
-              v-for="item in previewResult.diffSummary.workflowFieldChanges"
-              :key="`wf-${item}`"
-              class="diff-tag"
-            >
-              {{ item }}
-            </el-tag>
-          </div>
+          <el-table :data="previewResult.diffSummary.workflowFieldChanges" size="small" border>
+            <el-table-column prop="field" label="字段" min-width="220" />
+            <el-table-column label="变更前" min-width="260">
+              <template #default="{ row }">{{ formatFieldValue(row.before) }}</template>
+            </el-table-column>
+            <el-table-column label="变更后" min-width="260">
+              <template #default="{ row }">{{ formatFieldValue(row.after) }}</template>
+            </el-table-column>
+          </el-table>
         </div>
 
         <div
@@ -316,12 +290,12 @@
           <div class="section-title">任务新增详情</div>
           <div class="tag-wrap">
             <el-tag
-              v-for="item in previewResult.diffSummary.taskAdded"
-              :key="`task-add-${item}`"
+              v-for="(item, index) in previewResult.diffSummary.taskAdded"
+              :key="`task-add-${index}`"
               type="success"
               class="diff-tag"
             >
-              {{ item }}
+              {{ formatTask(item) }}
             </el-tag>
           </div>
         </div>
@@ -335,12 +309,12 @@
           <div class="section-title">任务删除详情</div>
           <div class="tag-wrap">
             <el-tag
-              v-for="item in previewResult.diffSummary.taskRemoved"
-              :key="`task-rm-${item}`"
+              v-for="(item, index) in previewResult.diffSummary.taskRemoved"
+              :key="`task-rm-${index}`"
               type="danger"
               class="diff-tag"
             >
-              {{ item }}
+              {{ formatTask(item) }}
             </el-tag>
           </div>
         </div>
@@ -352,15 +326,20 @@
           :class="{ 'section-highlight': activeSectionKey === 'taskModified' }"
         >
           <div class="section-title">任务修改详情</div>
-          <div class="tag-wrap">
-            <el-tag
-              v-for="item in previewResult.diffSummary.taskModified"
-              :key="`task-mod-${item}`"
-              type="warning"
-              class="diff-tag"
-            >
-              {{ item }}
-            </el-tag>
+          <div class="task-mod-list">
+            <div class="task-mod-card" v-for="(item, index) in previewResult.diffSummary.taskModified" :key="`task-mod-${index}`">
+              <div class="task-mod-title">{{ formatTask(item) }}</div>
+              <div class="tag-wrap" v-if="item.fieldChanges?.length">
+                <el-tag
+                  v-for="(change, cIndex) in item.fieldChanges"
+                  :key="`task-mod-change-${index}-${cIndex}`"
+                  type="warning"
+                  class="diff-tag"
+                >
+                  {{ change.field }}: {{ formatFieldValue(change.before) }} -> {{ formatFieldValue(change.after) }}
+                </el-tag>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -373,20 +352,20 @@
           <div class="section-title">边变更详情</div>
           <div class="tag-wrap">
             <el-tag
-              v-for="item in previewResult.diffSummary.edgeAdded"
-              :key="`edge-add-${item}`"
+              v-for="(item, index) in previewResult.diffSummary.edgeAdded"
+              :key="`edge-add-${index}`"
               type="success"
               class="diff-tag"
             >
-              + {{ item }}
+              + {{ formatRelation(item) }}
             </el-tag>
             <el-tag
-              v-for="item in previewResult.diffSummary.edgeRemoved"
-              :key="`edge-rm-${item}`"
+              v-for="(item, index) in previewResult.diffSummary.edgeRemoved"
+              :key="`edge-rm-${index}`"
               type="danger"
               class="diff-tag"
             >
-              - {{ item }}
+              - {{ formatRelation(item) }}
             </el-tag>
           </div>
         </div>
@@ -398,15 +377,15 @@
           :class="{ 'section-highlight': activeSectionKey === 'scheduleChanges' }"
         >
           <div class="section-title">调度变更详情</div>
-          <div class="tag-wrap">
-            <el-tag
-              v-for="item in previewResult.diffSummary.scheduleChanges"
-              :key="`sch-${item}`"
-              class="diff-tag"
-            >
-              {{ item }}
-            </el-tag>
-          </div>
+          <el-table :data="previewResult.diffSummary.scheduleChanges" size="small" border>
+            <el-table-column prop="field" label="字段" min-width="220" />
+            <el-table-column label="变更前" min-width="260">
+              <template #default="{ row }">{{ formatFieldValue(row.before) }}</template>
+            </el-table-column>
+            <el-table-column label="变更后" min-width="260">
+              <template #default="{ row }">{{ formatFieldValue(row.after) }}</template>
+            </el-table-column>
+          </el-table>
         </div>
       </div>
     </div>
@@ -423,8 +402,8 @@ import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import { workflowApi } from '@/api/workflow'
 
-const EDGE_MISMATCH_CODE = 'EDGE_MISMATCH'
-const PARITY_MISMATCH_CODE = 'DEFINITION_PARITY_MISMATCH'
+const RELATION_MISMATCH_CODE = 'RELATION_MISMATCH'
+const RELATION_DECISION_REQUIRED_CODE = 'RELATION_DECISION_REQUIRED'
 
 const props = defineProps({
   modelValue: {
@@ -450,7 +429,7 @@ const syncing = ref(false)
 const runtimeWorkflows = ref([])
 const selectedWorkflow = ref(null)
 const previewResult = ref(null)
-const edgeMismatchConfirmed = ref(false)
+const relationDecision = ref('')
 const activeSectionKey = ref('')
 const sectionRefs = reactive({})
 
@@ -469,12 +448,8 @@ const isPresetMode = computed(() => {
   return Boolean(props.presetWorkflow?.workflowCode && props.presetWorkflow?.projectCode)
 })
 
-const edgeMismatchDetail = computed(() => previewResult.value?.edgeMismatchDetail || null)
-const edgeMismatchRequired = computed(() => !!edgeMismatchDetail.value)
-const parityChecked = computed(() => {
-  const status = String(previewResult.value?.parityStatus || '').toLowerCase()
-  return status === 'consistent' || status === 'inconsistent'
-})
+const relationDecisionRequired = computed(() => !!previewResult.value?.relationDecisionRequired)
+const relationCompareDetail = computed(() => previewResult.value?.relationCompareDetail || null)
 
 const DIFF_TARGET_MAP = {
   workflowFieldChanges: 'workflowFieldChanges',
@@ -490,7 +465,7 @@ const canSubmitSync = computed(() => {
   if (!selectedWorkflow.value || !previewResult.value || !previewResult.value.canSync) {
     return false
   }
-  if (edgeMismatchRequired.value && !edgeMismatchConfirmed.value) {
+  if (relationDecisionRequired.value && !relationDecision.value) {
     return false
   }
   return true
@@ -507,7 +482,7 @@ watch(
     } else {
       selectedWorkflow.value = null
       previewResult.value = null
-      edgeMismatchConfirmed.value = false
+      relationDecision.value = ''
     }
   }
 )
@@ -565,7 +540,7 @@ const applyPresetWorkflow = () => {
   selectedWorkflow.value = row
   pagination.total = 1
   previewResult.value = null
-  edgeMismatchConfirmed.value = false
+  relationDecision.value = ''
 }
 
 const handleSearch = () => {
@@ -591,7 +566,7 @@ const handleCurrentChange = (row) => {
   }
   selectedWorkflow.value = row || null
   previewResult.value = null
-  edgeMismatchConfirmed.value = false
+  relationDecision.value = ''
 }
 
 const buildSyncPayload = () => {
@@ -600,7 +575,7 @@ const buildSyncPayload = () => {
     projectCode: selectedWorkflow.value.projectCode,
     workflowCode: selectedWorkflow.value.workflowCode,
     operator: 'portal-ui',
-    confirmEdgeMismatch: edgeMismatchRequired.value ? !!edgeMismatchConfirmed.value : undefined
+    relationDecision: relationDecisionRequired.value ? relationDecision.value || undefined : undefined
   }
 }
 
@@ -611,14 +586,12 @@ const handlePreview = async () => {
     return
   }
   previewLoading.value = true
-  edgeMismatchConfirmed.value = false
+  relationDecision.value = ''
   try {
     previewResult.value = await workflowApi.previewRuntimeSync(payload)
     if (previewResult.value?.canSync) {
-      if (hasEdgeMismatchWarning(previewResult.value)) {
-        ElMessage.warning('检测到边差异，请人工确认后再同步')
-      } else if (hasParityMismatchWarning(previewResult.value)) {
-        ElMessage.warning('预检通过，但导出定义与旧路径解析存在不一致，请先核对一致性详情')
+      if (previewResult.value?.relationDecisionRequired) {
+        ElMessage.warning('检测到关系差异，请先选择关系轨道后再同步')
       } else {
         ElMessage.success('预检通过')
       }
@@ -643,10 +616,12 @@ const handleSync = async () => {
     ElMessage.warning('请先执行预检并通过')
     return
   }
-  if (edgeMismatchRequired.value && !edgeMismatchConfirmed.value) {
-    ElMessage.warning('请先确认边差异，或取消本次同步')
+  if (relationDecisionRequired.value && !relationDecision.value) {
+    ElMessage.warning('请先选择关系轨道')
+    scrollToSection('relationCompare')
     return
   }
+
   syncing.value = true
   try {
     const result = await workflowApi.syncRuntime(payload)
@@ -660,7 +635,8 @@ const handleSync = async () => {
         errors: result.errors || [],
         warnings: result.warnings || [],
         diffSummary: result.diffSummary || previewResult.value?.diffSummary,
-        edgeMismatchDetail: result.edgeMismatchDetail || previewResult.value?.edgeMismatchDetail
+        relationDecisionRequired: result.relationDecisionRequired ?? previewResult.value?.relationDecisionRequired,
+        relationCompareDetail: result.relationCompareDetail || previewResult.value?.relationCompareDetail
       }
       ElMessage.error(result.errors?.[0]?.message || '同步失败')
     }
@@ -670,14 +646,6 @@ const handleSync = async () => {
   } finally {
     syncing.value = false
   }
-}
-
-const hasEdgeMismatchWarning = (result) => {
-  return (result?.warnings || []).some((issue) => issue?.code === EDGE_MISMATCH_CODE)
-}
-
-const hasParityMismatchWarning = (result) => {
-  return (result?.warnings || []).some((issue) => issue?.code === PARITY_MISMATCH_CODE)
 }
 
 const setSectionRef = (key, el) => {
@@ -691,13 +659,13 @@ const setSectionRef = (key, el) => {
 
 const resolveIssueTarget = (issue) => {
   if (!issue?.code) return ''
-  if (issue.code === PARITY_MISMATCH_CODE) {
-    return 'parity'
+  if (issue.code === RELATION_MISMATCH_CODE || issue.code === RELATION_DECISION_REQUIRED_CODE) {
+    return 'relationCompare'
   }
-  if (issue.code === EDGE_MISMATCH_CODE) {
-    return 'edgeMismatch'
+  if (previewResult.value?.diffSummary) {
+    return 'diffSummary'
   }
-  return ''
+  return 'relationCompare'
 }
 
 const hasDiffItems = (field) => {
@@ -734,11 +702,6 @@ const scrollToSection = async (key) => {
   }, 1800)
 }
 
-const cancelEdgeMismatchSync = () => {
-  edgeMismatchConfirmed.value = false
-  visible.value = false
-}
-
 const formatIssue = (issue) => {
   if (!issue) return '-'
   const parts = []
@@ -761,18 +724,24 @@ const formatDateTime = (value) => {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'
 }
 
-const shortHash = (value) => {
-  if (!value) return '-'
-  return String(value).slice(0, 12)
+const formatFieldValue = (value) => {
+  return value === null || value === undefined || value === '' ? '∅' : String(value)
 }
 
-const parityText = (status) => {
-  const map = {
-    consistent: '一致',
-    inconsistent: '不一致',
-    not_checked: '未校验'
-  }
-  return map[status] || status || '未校验'
+const formatTask = (task) => {
+  if (!task) return '-'
+  const code = task.taskCode !== null && task.taskCode !== undefined ? `#${task.taskCode}` : '#-'
+  const name = task.taskName || '未命名任务'
+  return `${name} (${code})`
+}
+
+const formatRelation = (edge) => {
+  if (!edge) return '-'
+  const preCode = edge.preTaskCode !== null && edge.preTaskCode !== undefined ? edge.preTaskCode : '-'
+  const postCode = edge.postTaskCode !== null && edge.postTaskCode !== undefined ? edge.postTaskCode : '-'
+  const preName = edge.entryEdge ? '入口' : (edge.preTaskName || preCode)
+  const postName = edge.postTaskName || postCode
+  return `${preName}(${preCode}) -> ${postName}(${postCode})`
 }
 </script>
 
@@ -896,20 +865,6 @@ const parityText = (status) => {
   text-decoration: none;
 }
 
-.parity-samples {
-  margin-top: 8px;
-}
-
-.detail-tip {
-  margin-bottom: 6px;
-  font-size: 12px;
-  color: #909399;
-}
-
-.edge-confirm-section :deep(.el-alert) {
-  margin-bottom: 10px;
-}
-
 .edge-diff-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -943,11 +898,32 @@ const parityText = (status) => {
   font-size: 12px;
 }
 
-.edge-confirm-actions {
+.relation-decision {
+  margin-top: 10px;
+}
+
+.relation-decision-group {
   margin-top: 10px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-mod-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.task-mod-card {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.task-mod-title {
+  font-weight: 600;
+  margin-bottom: 8px;
 }
 
 @media (max-width: 900px) {
