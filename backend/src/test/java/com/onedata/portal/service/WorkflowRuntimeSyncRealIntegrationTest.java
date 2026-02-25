@@ -1985,8 +1985,8 @@ class WorkflowRuntimeSyncRealIntegrationTest {
                         .last("LIMIT 1"));
         assertNotNull(version, "应存在对应的版本记录, versionNo=" + versionNo);
         assertTrue(StringUtils.hasText(version.getStructureSnapshot()), "版本结构快照不能为空");
-        assertTrue(version.getSnapshotSchemaVersion() == null || version.getSnapshotSchemaVersion() >= 2,
-                "新版本快照应为 canonical 结构");
+        assertEquals(Integer.valueOf(3), version.getSnapshotSchemaVersion(),
+                "新版本快照应为 V3 definition 结构");
         assertNotNull(version.getCreatedAt(), "版本创建时间不能为空");
         return version;
     }
@@ -1997,13 +1997,16 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         }
         try {
             JsonNode root = objectMapper.readTree(structureSnapshot);
-            JsonNode tasksNode = root.path("tasks");
+            JsonNode tasksNode = root.path("taskDefinitionList");
             if (!tasksNode.isArray()) {
                 return Collections.emptySet();
             }
             Set<Long> taskIds = new LinkedHashSet<>();
             for (JsonNode taskNode : tasksNode) {
-                long taskId = taskNode.path("taskId").asLong(0L);
+                long taskId = taskNode.path("xPlatformTaskMeta").path("taskId").asLong(0L);
+                if (taskId <= 0L) {
+                    taskId = taskNode.path("taskId").asLong(0L);
+                }
                 if (taskId > 0) {
                     taskIds.add(taskId);
                 }

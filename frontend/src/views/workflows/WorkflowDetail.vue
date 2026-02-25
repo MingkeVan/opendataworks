@@ -545,6 +545,9 @@
                     <span class="version-label" :class="{ 'is-current': row.isCurrent }">
                       {{ row.versionLabel }}
                     </span>
+                    <el-tag size="small" :type="row.schemaTagType" class="version-schema-tag">
+                      {{ row.schemaLabel }}
+                    </el-tag>
                   </template>
                 </el-table-column>
                 <el-table-column prop="createdAt" label="日期" width="180">
@@ -573,15 +576,22 @@
                 </el-table-column>
                 <el-table-column label="行动" width="200" fixed="right" align="left">
                   <template #default="{ row }">
-                    <el-button
-                      link
-                      type="primary"
-                      :disabled="row.isCurrent"
-                      :loading="rollbackLoadingVersionId === Number(row.id)"
-                      @click="rollbackToVersion(row.id)"
+                    <el-tooltip
+                      :disabled="!getRollbackDisabledReason(row)"
+                      :content="getRollbackDisabledReason(row)"
                     >
-                      恢复
-                    </el-button>
+                      <span>
+                        <el-button
+                          link
+                          type="primary"
+                          :disabled="Boolean(getRollbackDisabledReason(row))"
+                          :loading="rollbackLoadingVersionId === Number(row.id)"
+                          @click="rollbackToVersion(row.id)"
+                        >
+                          恢复
+                        </el-button>
+                      </span>
+                    </el-tooltip>
                     <el-tooltip
                       :disabled="!getVersionDeleteDisabledReason(row)"
                       :content="getVersionDeleteDisabledReason(row)"
@@ -1097,6 +1107,9 @@ const versionHistoryRows = computed(() => {
   const currentVersionId = Number(workflow.value?.workflow?.currentVersionId)
   return versionListDesc.value.map((version) => {
     const versionId = Number(version?.id)
+    const schemaVersion = Number(version?.snapshotSchemaVersion)
+    const normalizedSchemaVersion = Number.isFinite(schemaVersion) ? schemaVersion : 1
+    const isV3 = normalizedSchemaVersion === 3
     const latestRecord = Number.isFinite(versionId)
       ? latestPublishRecordByVersionId.value[versionId]
       : null
@@ -1110,7 +1123,11 @@ const versionHistoryRows = computed(() => {
       statusText,
       latestPublishRecord: latestRecord || null,
       versionLabel: isCurrent ? `当前（版本 ${version.versionNo}）` : `版本 ${version.versionNo}`,
-      comment: version?.changeSummary || '-'
+      comment: version?.changeSummary || '-',
+      snapshotSchemaVersion: normalizedSchemaVersion,
+      isV3,
+      schemaLabel: `V${normalizedSchemaVersion}`,
+      schemaTagType: isV3 ? 'success' : 'warning'
     }
   })
 })
@@ -1566,6 +1583,9 @@ const backToPublishRecords = () => {
 }
 
 const isVersionSelectable = (row) => {
+  if (!row?.isV3) {
+    return false
+  }
   const versionId = Number(row?.id)
   if (!Number.isFinite(versionId)) {
     return false
@@ -1635,6 +1655,10 @@ const compareSelectedVersions = async () => {
     ElMessage.warning('请选择两个版本进行比较')
     return
   }
+  if (selectedHistoryVersions.value.some((item) => !item?.isV3)) {
+    ElMessage.warning('仅支持 V3，请先保存生成 V3 基线')
+    return
+  }
   const sorted = [...selectedHistoryVersions.value].sort((left, right) => {
     const leftNo = Number(left?.versionNo || 0)
     const rightNo = Number(right?.versionNo || 0)
@@ -1696,6 +1720,11 @@ const rollbackToVersion = async (versionId) => {
     return
   }
   const version = versionById.value[normalizedVersionId]
+  const rollbackDisabledReason = getRollbackDisabledReason(version)
+  if (rollbackDisabledReason) {
+    ElMessage.warning(rollbackDisabledReason)
+    return
+  }
   const label = version ? `版本 ${version.versionNo}` : `#${versionId}`
   try {
     await ElMessageBox.confirm(
@@ -1725,6 +1754,23 @@ const rollbackToVersion = async (versionId) => {
   } finally {
     rollbackLoadingVersionId.value = null
   }
+}
+
+const getRollbackDisabledReason = (row) => {
+  if (!row) {
+    return '无效版本'
+  }
+  const schemaVersion = Number(row?.snapshotSchemaVersion)
+  const isV3 = row?.isV3 === true || (Number.isFinite(schemaVersion) ? schemaVersion === 3 : false)
+  if (!isV3) {
+    return '仅支持 V3，请先保存生成 V3 基线'
+  }
+  const rowVersionId = Number(row?.id)
+  const currentVersionId = Number(workflow.value?.workflow?.currentVersionId)
+  if (row?.isCurrent || (Number.isFinite(rowVersionId) && rowVersionId === currentVersionId)) {
+    return '当前版本无需恢复'
+  }
+  return ''
 }
 
 const getVersionDeleteDisabledReason = (row) => {
@@ -2256,6 +2302,10 @@ onMounted(() => {
 .version-label.is-current {
   color: #303133;
   font-weight: 600;
+}
+
+.version-schema-tag {
+  margin-left: 8px;
 }
 
 .basic-info-section {

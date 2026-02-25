@@ -71,7 +71,7 @@ public class WorkflowService {
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
     };
-    private static final int SNAPSHOT_SCHEMA_VERSION_CANONICAL = 2;
+    private static final int SNAPSHOT_SCHEMA_VERSION_DEFINITION = 3;
 
     private final DataWorkflowMapper dataWorkflowMapper;
     private final WorkflowTaskRelationMapper workflowTaskRelationMapper;
@@ -338,9 +338,8 @@ public class WorkflowService {
         workflow.setDefinitionJson(resolveDefinitionJson(workflow, request, taskBindings, topology));
         dataWorkflowMapper.updateById(workflow);
 
-        Map<String, Object> snapshot = buildCanonicalSnapshot(workflow, request);
-        String snapshotJson = toJson(snapshot);
-        WorkflowVersion version = snapshotWorkflow(workflow, request, snapshotJson);
+        String versionDefinitionJson = toJson(buildPlatformDefinitionDocument(workflow, taskBindings, topology));
+        WorkflowVersion version = snapshotWorkflow(workflow, request, versionDefinitionJson);
         workflow.setCurrentVersionId(version.getId());
         dataWorkflowMapper.updateById(workflow);
 
@@ -474,10 +473,9 @@ public class WorkflowService {
         workflow.setDefinitionJson(resolveDefinitionJson(workflow, request, taskBindings, topology));
         dataWorkflowMapper.updateById(workflow);
 
-        Map<String, Object> snapshot = buildCanonicalSnapshot(workflow, request);
-        String snapshotJson = toJson(snapshot);
-        if (shouldCreateNewVersion(workflow, snapshotJson)) {
-            WorkflowVersion version = snapshotWorkflow(workflow, request, snapshotJson);
+        String versionDefinitionJson = toJson(buildPlatformDefinitionDocument(workflow, taskBindings, topology));
+        if (shouldCreateNewVersion(workflow, versionDefinitionJson)) {
+            WorkflowVersion version = snapshotWorkflow(workflow, request, versionDefinitionJson);
             workflow.setCurrentVersionId(version.getId());
             dataWorkflowMapper.updateById(workflow);
             updateRelationVersion(workflowId, version.getId());
@@ -493,11 +491,6 @@ public class WorkflowService {
                         .eq(WorkflowTaskRelation::getWorkflowId, workflowId));
     }
 
-    private WorkflowVersion snapshotWorkflow(DataWorkflow workflow, WorkflowDefinitionRequest request) {
-        Map<String, Object> snapshot = buildCanonicalSnapshot(workflow, request);
-        return snapshotWorkflow(workflow, request, toJson(snapshot));
-    }
-
     private WorkflowVersion snapshotWorkflow(DataWorkflow workflow,
             WorkflowDefinitionRequest request,
             String snapshotJson) {
@@ -509,7 +502,7 @@ public class WorkflowService {
                 StringUtils.hasText(request.getDescription()) ? request.getDescription() : changeSummary,
                 request.getTriggerSource(),
                 request.getOperator(),
-                SNAPSHOT_SCHEMA_VERSION_CANONICAL,
+                SNAPSHOT_SCHEMA_VERSION_DEFINITION,
                 null);
     }
 
@@ -522,6 +515,9 @@ public class WorkflowService {
         }
         WorkflowVersion currentVersion = workflowVersionMapper.selectById(workflow.getCurrentVersionId());
         if (currentVersion == null || !StringUtils.hasText(currentVersion.getStructureSnapshot())) {
+            return true;
+        }
+        if (!Objects.equals(currentVersion.getSnapshotSchemaVersion(), SNAPSHOT_SCHEMA_VERSION_DEFINITION)) {
             return true;
         }
         String currentHash = snapshotContentHash(currentVersion.getStructureSnapshot());
@@ -601,73 +597,37 @@ public class WorkflowService {
         }
     }
 
-    private Map<String, Object> buildCanonicalSnapshot(DataWorkflow workflow, WorkflowDefinitionRequest request) {
-        Map<String, Object> root = new LinkedHashMap<>();
-        root.put("schemaVersion", SNAPSHOT_SCHEMA_VERSION_CANONICAL);
-        root.put("workflow", buildWorkflowSnapshotNode(workflow));
-        List<Map<String, Object>> taskNodes = buildTaskSnapshotNodes(request != null ? request.getTasks() : null);
-        root.put("tasks", taskNodes);
-        root.put("edges", inferTaskEdges(taskNodes));
-        root.put("schedule", buildScheduleSnapshotNode(workflow));
-
-        Map<String, Object> meta = new LinkedHashMap<>();
-        meta.put("triggerSource", request != null ? request.getTriggerSource() : null);
-        meta.put("operator", request != null ? request.getOperator() : null);
-        meta.put("snapshotAt", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        root.put("meta", meta);
-        return root;
-    }
-
-    private Map<String, Object> buildWorkflowSnapshotNode(DataWorkflow workflow) {
-        Map<String, Object> node = new LinkedHashMap<>();
-        if (workflow == null) {
-            return node;
-        }
-        node.put("workflowId", workflow.getId());
-        node.put("workflowCode", workflow.getWorkflowCode());
-        node.put("projectCode", workflow.getProjectCode());
-        node.put("workflowName", workflow.getWorkflowName());
-        node.put("description", workflow.getDescription());
-        node.put("definitionJson", defaultJson(workflow.getDefinitionJson()));
-        node.put("globalParams", workflow.getGlobalParams());
-        node.put("taskGroupName", workflow.getTaskGroupName());
-        node.put("status", workflow.getStatus());
-        node.put("publishStatus", workflow.getPublishStatus());
-        node.put("syncSource", workflow.getSyncSource());
-        return node;
-    }
-
-    private Map<String, Object> buildScheduleSnapshotNode(DataWorkflow workflow) {
-        Map<String, Object> schedule = new LinkedHashMap<>();
-        if (workflow == null) {
-            return schedule;
-        }
-        schedule.put("dolphinScheduleId", workflow.getDolphinScheduleId());
-        schedule.put("scheduleState", workflow.getScheduleState());
-        schedule.put("scheduleCron", workflow.getScheduleCron());
-        schedule.put("scheduleTimezone", workflow.getScheduleTimezone());
-        schedule.put("scheduleStartTime", toDateTimeText(workflow.getScheduleStartTime()));
-        schedule.put("scheduleEndTime", toDateTimeText(workflow.getScheduleEndTime()));
-        schedule.put("scheduleFailureStrategy", workflow.getScheduleFailureStrategy());
-        schedule.put("scheduleWarningType", workflow.getScheduleWarningType());
-        schedule.put("scheduleWarningGroupId", workflow.getScheduleWarningGroupId());
-        schedule.put("scheduleProcessInstancePriority", workflow.getScheduleProcessInstancePriority());
-        schedule.put("scheduleWorkerGroup", workflow.getScheduleWorkerGroup());
-        schedule.put("scheduleTenantCode", workflow.getScheduleTenantCode());
-        schedule.put("scheduleEnvironmentCode", workflow.getScheduleEnvironmentCode());
-        schedule.put("scheduleAutoOnline", Boolean.TRUE.equals(workflow.getScheduleAutoOnline()));
-        return schedule;
-    }
-
     private String resolveDefinitionJson(DataWorkflow workflow,
             WorkflowDefinitionRequest request,
             List<WorkflowTaskBinding> taskBindings,
             WorkflowTopologyResult topology) {
         if (request != null && StringUtils.hasText(request.getDefinitionJson())) {
-            return normalizeJsonText(request.getDefinitionJson());
+            String normalized = normalizeJsonText(request.getDefinitionJson());
+            if (isMeaningfulDefinitionJson(normalized)) {
+                return normalized;
+            }
         }
         Map<String, Object> definition = buildPlatformDefinitionDocument(workflow, taskBindings, topology);
         return toJson(definition);
+    }
+
+    private boolean isMeaningfulDefinitionJson(String definitionJson) {
+        if (!StringUtils.hasText(definitionJson)) {
+            return false;
+        }
+        String trimmed = definitionJson.trim();
+        if (!StringUtils.hasText(trimmed) || "{}".equals(trimmed)) {
+            return false;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(trimmed);
+            if (node == null || node.isNull() || node.isMissingNode()) {
+                return false;
+            }
+            return !(node.isObject() && node.size() == 0);
+        } catch (Exception ex) {
+            return true;
+        }
     }
 
     private String normalizeJsonText(String jsonText) {
@@ -687,12 +647,13 @@ public class WorkflowService {
             List<WorkflowTaskBinding> bindings,
             WorkflowTopologyResult topology) {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("schemaVersion", 1);
+        root.put("schemaVersion", SNAPSHOT_SCHEMA_VERSION_DEFINITION);
         root.put("processDefinition", buildProcessDefinitionNode(workflow));
         List<Map<String, Object>> taskNodes = buildTaskSnapshotNodes(bindings);
         root.put("taskDefinitionList", buildTaskDefinitionNodes(taskNodes));
         root.put("processTaskRelationList", buildProcessTaskRelationNodes(taskNodes, topology));
         root.put("schedule", buildScheduleDefinitionNode(workflow));
+        root.put("xPlatformWorkflowMeta", buildPlatformWorkflowMetaNode(workflow));
         return root;
     }
 
@@ -709,7 +670,21 @@ public class WorkflowService {
         node.put("globalParams", workflow.getGlobalParams());
         node.put("taskGroupName", workflow.getTaskGroupName());
         node.put("releaseState", workflow.getStatus());
+        node.put("publishStatus", workflow.getPublishStatus());
         return node;
+    }
+
+    private Map<String, Object> buildPlatformWorkflowMetaNode(DataWorkflow workflow) {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        if (workflow == null) {
+            return meta;
+        }
+        meta.put("workflowId", workflow.getId());
+        meta.put("workflowCode", workflow.getWorkflowCode());
+        meta.put("projectCode", workflow.getProjectCode());
+        meta.put("workflowName", workflow.getWorkflowName());
+        meta.put("publishStatus", workflow.getPublishStatus());
+        return meta;
     }
 
     private List<Map<String, Object>> buildTaskDefinitionNodes(List<Map<String, Object>> taskNodes) {
@@ -753,6 +728,17 @@ public class WorkflowService {
 
             item.put("inputTableIds", taskNode.get("inputTableIds"));
             item.put("outputTableIds", taskNode.get("outputTableIds"));
+            Map<String, Object> platformTaskMeta = new LinkedHashMap<>();
+            platformTaskMeta.put("taskId", taskNode.get("taskId"));
+            platformTaskMeta.put("platformTaskCode", taskNode.get("taskCode"));
+            platformTaskMeta.put("entry", taskNode.get("entry"));
+            platformTaskMeta.put("exit", taskNode.get("exit"));
+            platformTaskMeta.put("nodeAttrs", taskNode.get("nodeAttrs"));
+            platformTaskMeta.put("engine", taskNode.get("engine"));
+            platformTaskMeta.put("platformTaskType", taskNode.get("taskType"));
+            platformTaskMeta.put("dolphinTaskCode", taskNode.get("dolphinTaskCode"));
+            platformTaskMeta.put("dolphinTaskVersion", taskNode.get("dolphinTaskVersion"));
+            item.put("xPlatformTaskMeta", platformTaskMeta);
             definitions.add(item);
         }
         return definitions;
@@ -865,6 +851,7 @@ public class WorkflowService {
         schedule.put("workerGroup", workflow.getScheduleWorkerGroup());
         schedule.put("tenantCode", workflow.getScheduleTenantCode());
         schedule.put("environmentCode", workflow.getScheduleEnvironmentCode());
+        schedule.put("scheduleAutoOnline", Boolean.TRUE.equals(workflow.getScheduleAutoOnline()));
         return schedule;
     }
 

@@ -16,6 +16,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class WorkflowVersionService {
 
+    private static final int SNAPSHOT_SCHEMA_VERSION_DEFINITION = 3;
+
     private final WorkflowVersionMapper workflowVersionMapper;
 
     @Transactional
@@ -24,7 +26,13 @@ public class WorkflowVersionService {
                                          String changeSummary,
                                          String triggerSource,
                                          String operator) {
-        return createVersion(workflowId, snapshot, changeSummary, triggerSource, operator, 1, null);
+        return createVersion(workflowId,
+                snapshot,
+                changeSummary,
+                triggerSource,
+                operator,
+                SNAPSHOT_SCHEMA_VERSION_DEFINITION,
+                null);
     }
 
     @Transactional
