@@ -23,14 +23,9 @@ public class RuntimeSyncRecordListItem {
     private String status;
 
     /**
-     * 运行态定义采集模式: legacy/export_shadow/export_only
+     * 运行态定义采集模式（当前固定为 export_only）
      */
     private String ingestMode;
-
-    /**
-     * 一致性状态: not_checked/consistent/inconsistent
-     */
-    private String parityStatus;
 
     private String snapshotHash;
 

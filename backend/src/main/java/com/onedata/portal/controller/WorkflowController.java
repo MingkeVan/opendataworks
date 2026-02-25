@@ -5,10 +5,16 @@ import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
 import com.onedata.portal.dto.workflow.WorkflowApprovalRequest;
 import com.onedata.portal.dto.workflow.WorkflowBackfillRequest;
+import com.onedata.portal.dto.workflow.WorkflowExportJsonResponse;
+import com.onedata.portal.dto.workflow.WorkflowImportCommitRequest;
+import com.onedata.portal.dto.workflow.WorkflowImportCommitResponse;
+import com.onedata.portal.dto.workflow.WorkflowImportPreviewRequest;
+import com.onedata.portal.dto.workflow.WorkflowImportPreviewResponse;
 import com.onedata.portal.dto.workflow.WorkflowVersionCompareRequest;
 import com.onedata.portal.dto.workflow.WorkflowVersionCompareResponse;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowDetailResponse;
+import com.onedata.portal.dto.workflow.WorkflowPublishPreviewResponse;
 import com.onedata.portal.dto.workflow.WorkflowPublishRequest;
 import com.onedata.portal.dto.workflow.WorkflowQueryRequest;
 import com.onedata.portal.dto.workflow.WorkflowVersionRollbackRequest;
@@ -21,6 +27,7 @@ import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowDiffResponse;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.WorkflowPublishRecord;
 import com.onedata.portal.service.WorkflowPublishService;
+import com.onedata.portal.service.WorkflowDefinitionLifecycleService;
 import com.onedata.portal.service.WorkflowRuntimeSyncService;
 import com.onedata.portal.service.WorkflowScheduleService;
 import com.onedata.portal.service.WorkflowService;
@@ -41,6 +48,7 @@ public class WorkflowController {
     private final WorkflowScheduleService workflowScheduleService;
     private final WorkflowRuntimeSyncService workflowRuntimeSyncService;
     private final WorkflowVersionOperationService workflowVersionOperationService;
+    private final WorkflowDefinitionLifecycleService workflowDefinitionLifecycleService;
 
     @GetMapping
     public Result<PageResult<DataWorkflow>> list(WorkflowQueryRequest request) {
@@ -96,6 +104,16 @@ public class WorkflowController {
         return Result.success(workflow);
     }
 
+    @PostMapping("/import/preview")
+    public Result<WorkflowImportPreviewResponse> previewImport(@RequestBody WorkflowImportPreviewRequest request) {
+        return Result.success(workflowDefinitionLifecycleService.preview(request));
+    }
+
+    @PostMapping("/import/commit")
+    public Result<WorkflowImportCommitResponse> commitImport(@RequestBody WorkflowImportCommitRequest request) {
+        return Result.success(workflowDefinitionLifecycleService.commit(request));
+    }
+
     @PutMapping("/{id}")
     public Result<DataWorkflow> update(@PathVariable Long id,
                                        @RequestBody WorkflowDefinitionRequest request) {
@@ -103,11 +121,21 @@ public class WorkflowController {
         return Result.success(workflow);
     }
 
+    @GetMapping("/{id}/export-json")
+    public Result<WorkflowExportJsonResponse> exportJson(@PathVariable Long id) {
+        return Result.success(workflowDefinitionLifecycleService.exportJson(id));
+    }
+
     @PostMapping("/{id}/publish")
     public Result<WorkflowPublishRecord> publish(@PathVariable Long id,
                                                  @RequestBody WorkflowPublishRequest request) {
         WorkflowPublishRecord record = workflowPublishService.publish(id, request);
         return Result.success(record);
+    }
+
+    @GetMapping("/{id}/publish/preview")
+    public Result<WorkflowPublishPreviewResponse> previewPublish(@PathVariable Long id) {
+        return Result.success(workflowPublishService.previewPublish(id));
     }
 
     @PostMapping("/{id}/publish/{recordId}/approve")

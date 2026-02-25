@@ -180,4 +180,33 @@ class DolphinExportDefinitionParserTest {
         assertEquals(3101L, edge.getUpstreamTaskCode());
         assertEquals(3102L, edge.getDownstreamTaskCode());
     }
+
+    @Test
+    void shouldKeepEntryEdgeWhenParsingExportRelations() {
+        ObjectNode exported = objectMapper.createObjectNode();
+        ObjectNode workflowDefinition = exported.putObject("workflowDefinition");
+        workflowDefinition.put("code", 1006L);
+        workflowDefinition.put("name", "wf_entry_edge");
+
+        ArrayNode taskDefinitions = exported.putArray("taskDefinitionList");
+        ObjectNode task = taskDefinitions.addObject();
+        task.put("code", 3201L);
+        task.put("name", "task_head");
+        task.put("taskType", "SQL");
+        task.put("taskParams", "{\"sql\":\"UPDATE ods.t1 SET c1=1\",\"datasource\":10,\"type\":\"MYSQL\"}");
+
+        ArrayNode relations = exported.putArray("workflowTaskRelationList");
+        ObjectNode entryRelation = relations.addObject();
+        entryRelation.put("preTaskCode", 0L);
+        entryRelation.put("postTaskCode", 3201L);
+
+        when(openApiClient.exportDefinitionByCode(1L, 1006L)).thenReturn(exported);
+
+        RuntimeWorkflowDefinition definition = service.loadRuntimeDefinitionFromExport(1L, 1006L);
+
+        assertEquals(1, definition.getExplicitEdges().size());
+        RuntimeTaskEdge edge = definition.getExplicitEdges().get(0);
+        assertEquals(0L, edge.getUpstreamTaskCode());
+        assertEquals(3201L, edge.getDownstreamTaskCode());
+    }
 }

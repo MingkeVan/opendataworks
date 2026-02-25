@@ -12,3 +12,10 @@
 
 - Always run `nvm use` successfully before frontend build/test/dev commands.
 - If frontend command fails with Node engine/runtime errors, retry only after `nvm use`.
+
+## General simplification rule
+
+- Prefer one verified primary path by default.
+- Only add compatibility branches when real version/environment differences are confirmed.
+- Keep fallback minimal, explicit, and single-layer.
+- Avoid repeated/cascading fallback chains and duplicate guard branches.

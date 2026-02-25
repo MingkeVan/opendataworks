@@ -9,7 +9,13 @@ import com.onedata.portal.dto.dolphin.DolphinProject;
 import com.onedata.portal.dto.dolphin.DolphinSchedule;
 import com.onedata.portal.dto.dolphin.DolphinTaskGroup;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
+import com.onedata.portal.dto.workflow.WorkflowExportJsonResponse;
+import com.onedata.portal.dto.workflow.WorkflowImportCommitRequest;
+import com.onedata.portal.dto.workflow.WorkflowImportCommitResponse;
+import com.onedata.portal.dto.workflow.WorkflowImportPreviewRequest;
+import com.onedata.portal.dto.workflow.WorkflowImportPreviewResponse;
 import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
+import com.onedata.portal.dto.workflow.WorkflowPublishPreviewResponse;
 import com.onedata.portal.dto.workflow.WorkflowPublishRequest;
 import com.onedata.portal.dto.workflow.WorkflowTaskBinding;
 import com.onedata.portal.dto.workflow.runtime.RuntimeDiffSummary;
@@ -42,6 +48,7 @@ import com.onedata.portal.mapper.WorkflowRuntimeSyncRecordMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
 import com.onedata.portal.service.dolphin.DolphinOpenApiClient;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -99,7 +106,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("integration")
 @TestPropertySource(properties = {
         "workflow.runtime-sync.enabled=true",
-        "workflow.runtime-sync.ingest-mode=legacy",
+        "workflow.runtime-sync.ingest-mode=export_only",
         "spring.task.scheduling.enabled=false"
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -133,6 +140,9 @@ class WorkflowRuntimeSyncRealIntegrationTest {
 
     @Autowired
     private WorkflowPublishService workflowPublishService;
+
+    @Autowired
+    private WorkflowDefinitionLifecycleService workflowDefinitionLifecycleService;
 
     @Autowired
     private DataTaskService dataTaskService;
@@ -235,6 +245,114 @@ class WorkflowRuntimeSyncRealIntegrationTest {
             }
         }
         createdPhysicalTables.clear();
+    }
+
+    @Test
+    @DisplayName("导入预检 + 提交 + 导出：基于 Dolphin 导出 JSON 的生命周期回环")
+    void importPreviewCommitAndExportShouldWorkWithRealDolphinExport() throws Exception {
+        bootstrapOrSkip();
+        cleanupHistoricalITData();
+
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String dbName = "opendataworks";
+        String srcTable = IT_PREFIX + "imp_src_" + suffix;
+        String dwdTable = IT_PREFIX + "imp_dwd_" + suffix;
+        String dwsTable = IT_PREFIX + "imp_dws_" + suffix;
+
+        Long srcTableId = createMetadataTable(dbName, srcTable, "ODS");
+        Long dwdTableId = createMetadataTable(dbName, dwdTable, "DWD");
+        Long dwsTableId = createMetadataTable(dbName, dwsTable, "DWS");
+
+        DataTask taskExtract = createSqlTask(
+                IT_PREFIX + "imp_task_extract_" + suffix,
+                IT_PREFIX + "imp_task_extract_" + suffix,
+                String.format("INSERT INTO %s.%s SELECT user_id, user_name FROM %s.%s", dbName, dwdTable, dbName, srcTable),
+                Collections.singletonList(srcTableId),
+                Collections.singletonList(dwdTableId));
+        DataTask taskLoad = createSqlTask(
+                IT_PREFIX + "imp_task_load_" + suffix,
+                IT_PREFIX + "imp_task_load_" + suffix,
+                String.format("INSERT INTO %s.%s SELECT user_id, COUNT(1) AS total FROM %s.%s GROUP BY user_id",
+                        dbName, dwsTable, dbName, dwdTable),
+                Collections.singletonList(dwdTableId),
+                Collections.singletonList(dwsTableId));
+
+        String sourceWorkflowName = IT_PREFIX + "wf_import_source_" + suffix;
+        DataWorkflow sourceWorkflow = createWorkflow(sourceWorkflowName,
+                Arrays.asList(taskExtract.getId(), taskLoad.getId()),
+                effectiveProjectCode);
+        createdWorkflowIds.add(sourceWorkflow.getId());
+
+        WorkflowPublishPreviewResponse sourcePreview = workflowPublishService.previewPublish(sourceWorkflow.getId());
+        assertTrue(sourcePreview != null && Boolean.TRUE.equals(sourcePreview.getCanPublish()),
+                "源工作流发布预检应通过");
+        assertTrue(Boolean.TRUE.equals(sourcePreview.getRequireConfirm()),
+                "首次发布应要求确认差异");
+
+        WorkflowPublishRequest deployRequest = new WorkflowPublishRequest();
+        deployRequest.setOperation("deploy");
+        deployRequest.setRequireApproval(false);
+        deployRequest.setOperator("it-runtime-sync");
+        deployRequest.setConfirmDiff(true);
+        WorkflowPublishRecord deployRecord = workflowPublishService.publish(sourceWorkflow.getId(), deployRequest);
+        assertEquals("success", deployRecord.getStatus(), "源工作流发布失败");
+
+        DataWorkflow publishedWorkflow = dataWorkflowMapper.selectById(sourceWorkflow.getId());
+        assertNotNull(publishedWorkflow);
+        Long runtimeWorkflowCode = publishedWorkflow.getWorkflowCode();
+        assertTrue(runtimeWorkflowCode != null && runtimeWorkflowCode > 0, "发布后应写入 Dolphin workflowCode");
+        createdRuntimeWorkflowCodes.add(runtimeWorkflowCode);
+
+        JsonNode exported = dolphinOpenApiClient.exportDefinitionByCode(effectiveProjectCode, runtimeWorkflowCode);
+        assertNotNull(exported, "Dolphin 导出 JSON 不能为空");
+
+        JsonNode processNode = exported.path("processDefinition");
+        if (processNode == null || processNode.isMissingNode() || processNode.isNull()) {
+            processNode = exported.path("workflowDefinition");
+        }
+        assertTrue(processNode != null && processNode.isObject(), "导出 JSON 缺少 processDefinition/workflowDefinition");
+        ObjectNode processObject = (ObjectNode) processNode;
+        processObject.put("name", IT_PREFIX + "wf_import_target_" + suffix);
+        processObject.remove("code");
+        processObject.remove("workflowCode");
+        processObject.remove("projectCode");
+
+        String importJson = objectMapper.writeValueAsString(exported);
+        WorkflowImportPreviewRequest previewRequest = new WorkflowImportPreviewRequest();
+        previewRequest.setDefinitionJson(importJson);
+        previewRequest.setOperator("it-runtime-sync");
+        WorkflowImportPreviewResponse preview = workflowDefinitionLifecycleService.preview(previewRequest);
+        assertTrue(Boolean.TRUE.equals(preview.getCanImport()), "导入预检应通过, errors=" + preview.getErrors());
+
+        WorkflowImportCommitRequest commitRequest = new WorkflowImportCommitRequest();
+        commitRequest.setDefinitionJson(importJson);
+        commitRequest.setOperator("it-runtime-sync");
+        if (Boolean.TRUE.equals(preview.getRelationDecisionRequired())) {
+            commitRequest.setRelationDecision(preview.getSuggestedRelationDecision());
+        }
+        WorkflowImportCommitResponse commitResponse = workflowDefinitionLifecycleService.commit(commitRequest);
+        assertNotNull(commitResponse.getWorkflowId(), "导入后应生成新工作流");
+        assertEquals(2, commitResponse.getCreatedTaskCount(), "应导入两条 SQL 任务");
+        createdWorkflowIds.add(commitResponse.getWorkflowId());
+
+        DataWorkflow importedWorkflow = dataWorkflowMapper.selectById(commitResponse.getWorkflowId());
+        assertNotNull(importedWorkflow, "导入工作流应落库");
+        assertTrue(StringUtils.hasText(importedWorkflow.getDefinitionJson()), "导入后应保存 definitionJson");
+
+        WorkflowExportJsonResponse exportResponse = workflowDefinitionLifecycleService.exportJson(commitResponse.getWorkflowId());
+        assertTrue(StringUtils.hasText(exportResponse.getContent()), "导出 JSON 内容不能为空");
+
+        JsonNode exportedBack = objectMapper.readTree(exportResponse.getContent());
+        assertTrue(exportedBack.path("taskDefinitionList").isArray(), "导出 JSON 缺少 taskDefinitionList");
+        assertEquals(2, exportedBack.path("taskDefinitionList").size(), "导出任务数应与导入一致");
+        assertTrue(exportedBack.path("processTaskRelationList").isArray(), "导出 JSON 缺少 processTaskRelationList");
+
+        WorkflowImportPreviewRequest roundTripPreviewRequest = new WorkflowImportPreviewRequest();
+        roundTripPreviewRequest.setDefinitionJson(exportResponse.getContent());
+        roundTripPreviewRequest.setOperator("it-runtime-sync");
+        WorkflowImportPreviewResponse roundTripPreview = workflowDefinitionLifecycleService.preview(roundTripPreviewRequest);
+        assertTrue(Boolean.TRUE.equals(roundTripPreview.getCanImport()),
+                "导出结果再次预检应通过, errors=" + roundTripPreview.getErrors());
     }
 
     @Test
@@ -358,6 +476,7 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         deployRequest.setOperation("deploy");
         deployRequest.setOperator("it-runtime-sync");
         deployRequest.setRequireApproval(false);
+        deployRequest.setConfirmDiff(true);
         WorkflowPublishRecord deployRecord = workflowPublishService.publish(workflow.getId(), deployRequest);
 
         assertEquals("success", deployRecord.getStatus());
@@ -370,6 +489,7 @@ class WorkflowRuntimeSyncRealIntegrationTest {
 
         JsonNode runtimeDef = dolphinOpenApiClient.getProcessDefinition(effectiveProjectCode, runtimeWorkflowCode);
         assertNotNull(runtimeDef, "Dolphin 运行态工作流定义必须存在");
+        assertExportDefinitionAvailable(runtimeWorkflowCode, "首次发布后");
 
         // 3) 反向预检（运行态 -> 设计态）
         RuntimeSyncPreviewRequest previewRequest = new RuntimeSyncPreviewRequest();
@@ -389,8 +509,8 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         syncRequest.setProjectCode(effectiveProjectCode);
         syncRequest.setWorkflowCode(runtimeWorkflowCode);
         syncRequest.setOperator("it-runtime-sync");
-        if (preview.getEdgeMismatchDetail() != null) {
-            syncRequest.setConfirmEdgeMismatch(true);
+        if (Boolean.TRUE.equals(preview.getRelationDecisionRequired())) {
+            syncRequest.setRelationDecision("INFERRED");
         }
         RuntimeSyncExecuteResponse syncResponse = workflowRuntimeSyncService.sync(syncRequest);
 
@@ -466,6 +586,18 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         assertTrue(diffAfter.getDiffSummary().getWorkflowFieldChanges().stream()
                 .anyMatch(item -> item.contains("workflow.workflowName")),
                 "应识别 workflow 名称变更");
+
+        // workflow 字段变更同步后应收敛为一致
+        RuntimeSyncExecuteResponse resync = previewAndSync(runtimeWorkflowCode, "it-runtime-sync");
+        assertNotNull(resync.getWorkflowId());
+        RuntimeWorkflowDiffResponse diffAfterResync = workflowRuntimeSyncService.runtimeDiff(resync.getWorkflowId());
+        assertTrue(diffAfterResync.getErrors().isEmpty(), "workflow 字段回同步后 diff 不应报错");
+        assertFalse(Boolean.TRUE.equals(diffAfterResync.getDiffSummary().getChanged()),
+                "workflow 字段回同步后应与运行态一致");
+        DataWorkflow resyncedWorkflow = dataWorkflowMapper.selectById(resync.getWorkflowId());
+        assertNotNull(resyncedWorkflow);
+        assertEquals(renamedRuntimeName, resyncedWorkflow.getWorkflowName(),
+                "workflow 名称应以运行态最新值为准");
     }
 
     @Test
@@ -589,6 +721,7 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         deployRequest.setOperation("deploy");
         deployRequest.setOperator("it-runtime-sync");
         deployRequest.setRequireApproval(false);
+        deployRequest.setConfirmDiff(true);
         WorkflowPublishRecord deployRecord = workflowPublishService.publish(workflow.getId(), deployRequest);
         assertEquals("success", deployRecord.getStatus(), "首次发布应成功");
 
@@ -597,6 +730,7 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         Long runtimeWorkflowCode = deployedWorkflow.getWorkflowCode();
         assertNotNull(runtimeWorkflowCode);
         createdRuntimeWorkflowCodes.add(runtimeWorkflowCode);
+        assertExportDefinitionAvailable(runtimeWorkflowCode, "演进前");
 
         RuntimeSyncExecuteResponse firstSync = previewAndSync(runtimeWorkflowCode, "it-runtime-sync");
         Long syncedWorkflowId = firstSync.getWorkflowId();
@@ -619,7 +753,7 @@ class WorkflowRuntimeSyncRealIntegrationTest {
                 new BigDecimal("325.00"),
                 "it-runtime-sync");
 
-        RuntimeWorkflowDefinition beforeEvolutionDefinition = dolphinRuntimeDefinitionService.loadRuntimeDefinition(
+        RuntimeWorkflowDefinition beforeEvolutionDefinition = dolphinRuntimeDefinitionService.loadRuntimeDefinitionFromExport(
                 effectiveProjectCode,
                 runtimeWorkflowCode);
         Map<String, RuntimeTaskDefinition> beforeEvolutionTaskByName = beforeEvolutionDefinition.getTasks().stream()
@@ -659,6 +793,7 @@ class WorkflowRuntimeSyncRealIntegrationTest {
                 evolvedScheduleStart,
                 evolvedScheduleEnd,
                 evolvedTaskGroupId);
+        assertExportDefinitionAvailable(runtimeWorkflowCode, "演进后");
 
         RuntimeSyncExecuteResponse secondSync = previewAndSync(runtimeWorkflowCode, "it-runtime-sync");
         assertEquals(syncedWorkflowId, secondSync.getWorkflowId(), "二次同步应更新同一工作流");
@@ -767,14 +902,14 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         String edgeTask1ToTask5 = syncedTask1.getDolphinTaskCode() + "->" + syncedTask5.getDolphinTaskCode();
         String edgeTask5ToTask6 = syncedTask5.getDolphinTaskCode() + "->" + removedTask6.getDolphinTaskCode();
         String edgeTask5ToTask7 = syncedTask5.getDolphinTaskCode() + "->" + syncedTask7.getDolphinTaskCode();
-        assertTrue(secondRecordDiff.getEdgeRemoved().contains(edgeTask1ToTask4),
-                "同步记录应包含任务4减少依赖导致的边删除");
-        assertTrue(secondRecordDiff.getEdgeAdded().contains(edgeTask1ToTask5),
-                "同步记录应包含任务5新增依赖导致的边新增");
-        assertTrue(secondRecordDiff.getEdgeRemoved().contains(edgeTask5ToTask6),
-                "同步记录应包含任务6删除导致的边删除");
-        assertTrue(secondRecordDiff.getEdgeAdded().contains(edgeTask5ToTask7),
-                "同步记录应包含任务7新增导致的边新增");
+        assertTrue(containsRawEdge(secondRecordDiff.getEdgeRemoved(), edgeTask1ToTask4),
+                "同步记录应包含任务4减少依赖导致的边删除，edgeRemoved=" + secondRecordDiff.getEdgeRemoved());
+        assertTrue(containsRawEdge(secondRecordDiff.getEdgeAdded(), edgeTask1ToTask5),
+                "同步记录应包含任务5新增依赖导致的边新增，edgeAdded=" + secondRecordDiff.getEdgeAdded());
+        assertTrue(containsRawEdge(secondRecordDiff.getEdgeRemoved(), edgeTask5ToTask6),
+                "同步记录应包含任务6删除导致的边删除，edgeRemoved=" + secondRecordDiff.getEdgeRemoved());
+        assertTrue(containsRawEdge(secondRecordDiff.getEdgeAdded(), edgeTask5ToTask7),
+                "同步记录应包含任务7新增导致的边新增，edgeAdded=" + secondRecordDiff.getEdgeAdded());
 
         String task4Sql = syncedTask4.getTaskSql() != null ? syncedTask4.getTaskSql().toLowerCase() : "";
         String task5Sql = syncedTask5.getTaskSql() != null ? syncedTask5.getTaskSql().toLowerCase() : "";
@@ -935,6 +1070,7 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         deployRequest.setOperation("deploy");
         deployRequest.setOperator("it-runtime-sync");
         deployRequest.setRequireApproval(false);
+        deployRequest.setConfirmDiff(true);
         WorkflowPublishRecord deployRecord = workflowPublishService.publish(workflow.getId(), deployRequest);
         assertEquals("success", deployRecord.getStatus(), "发布应成功");
 
@@ -944,7 +1080,7 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         assertNotNull(runtimeWorkflowCode, "发布后应生成 runtime workflowCode");
         createdRuntimeWorkflowCodes.add(runtimeWorkflowCode);
 
-        RuntimeWorkflowDefinition runtimeDefinition = dolphinRuntimeDefinitionService.loadRuntimeDefinition(
+        RuntimeWorkflowDefinition runtimeDefinition = dolphinRuntimeDefinitionService.loadRuntimeDefinitionFromExport(
                 effectiveProjectCode,
                 runtimeWorkflowCode);
         assertNotNull(runtimeDefinition, "运行态定义必须可读取");
@@ -963,23 +1099,14 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         previewRequest.setOperator("it-runtime-sync");
         RuntimeSyncPreviewResponse preview = workflowRuntimeSyncService.preview(previewRequest);
 
-        if (runtimeDefinition.getExplicitEdges() == null || runtimeDefinition.getExplicitEdges().isEmpty()) {
-            assertFalse(Boolean.TRUE.equals(preview.getCanSync()),
-                    "严格模式下，Dolphin 未返回显式边时预检必须失败");
-            assertTrue(preview.getErrors().stream()
-                            .anyMatch(issue -> RuntimeSyncErrorCodes.DOLPHIN_EXPLICIT_EDGE_MISSING.equals(issue.getCode())),
-                    "应返回 DOLPHIN_EXPLICIT_EDGE_MISSING, actualErrors=" + safeJson(preview.getErrors()));
-            return;
-        }
-
         assertTrue(Boolean.TRUE.equals(preview.getCanSync()),
                 "UPDATE 首节点场景预检应通过, errors=" + safeJson(preview.getErrors())
                         + ", warnings=" + safeJson(preview.getWarnings()));
         assertTrue(preview.getErrors().isEmpty(), "预检不应返回错误, errors=" + safeJson(preview.getErrors()));
         assertTrue(preview.getWarnings().stream()
-                        .noneMatch(issue -> "EDGE_MISMATCH".equals(issue.getCode())),
+                        .noneMatch(issue -> RuntimeSyncErrorCodes.RELATION_MISMATCH.equals(issue.getCode())),
                 "平台存储血缘边与 Dolphin SQL 推断边应一致, warnings=" + safeJson(preview.getWarnings()));
-        assertTrue(preview.getEdgeMismatchDetail() == null, "边一致时不应返回 edgeMismatchDetail");
+        assertFalse(Boolean.TRUE.equals(preview.getRelationDecisionRequired()), "边一致时不应要求关系选轨");
     }
 
     @Test
@@ -1004,6 +1131,209 @@ class WorkflowRuntimeSyncRealIntegrationTest {
                 "应返回 UNSUPPORTED_NODE_TYPE, actualErrors=" + safeJson(preview.getErrors()));
     }
 
+    @Test
+    @DisplayName("声明关系与SQL推断冲突时需人工选轨，选轨后同步应收敛")
+    void relationMismatchShouldRequireDecisionAndConvergeAfterManualSelection() {
+        bootstrapOrSkip();
+        cleanupHistoricalITData();
+
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String dbName = "opendataworks";
+        String srcTable = IT_PREFIX + "src_relation_" + suffix;
+        String dwdTable = IT_PREFIX + "dwd_relation_" + suffix;
+        String dwsTable = IT_PREFIX + "dws_relation_" + suffix;
+
+        String srcFullName = dbName + "." + srcTable;
+        String dwdFullName = dbName + "." + dwdTable;
+        String dwsFullName = dbName + "." + dwsTable;
+        executeJdbc("DROP TABLE IF EXISTS " + srcFullName);
+        executeJdbc("DROP TABLE IF EXISTS " + dwdFullName);
+        executeJdbc("DROP TABLE IF EXISTS " + dwsFullName);
+        if (!createdPhysicalTables.contains(srcFullName)) {
+            createdPhysicalTables.add(srcFullName);
+        }
+        if (!createdPhysicalTables.contains(dwdFullName)) {
+            createdPhysicalTables.add(dwdFullName);
+        }
+        if (!createdPhysicalTables.contains(dwsFullName)) {
+            createdPhysicalTables.add(dwsFullName);
+        }
+
+        executeJdbc(String.format("CREATE TABLE %s.%s (user_id BIGINT, user_name VARCHAR(128))", dbName, srcTable));
+        executeJdbc(String.format("CREATE TABLE %s.%s (user_id BIGINT, user_name VARCHAR(128))", dbName, dwdTable));
+        executeJdbc(String.format("CREATE TABLE %s.%s (user_id BIGINT, user_name VARCHAR(128))", dbName, dwsTable));
+        executeJdbc(String.format("INSERT INTO %s.%s (user_id, user_name) VALUES (1,'u1'),(2,'u2')", dbName, srcTable));
+
+        Long srcTableId = createMetadataTable(dbName, srcTable, "ODS");
+        Long dwdTableId = createMetadataTable(dbName, dwdTable, "DWD");
+        Long dwsTableId = createMetadataTable(dbName, dwsTable, "DWS");
+
+        String taskExtractName = IT_PREFIX + "task_extract_" + suffix;
+        String taskLoadName = IT_PREFIX + "task_load_" + suffix;
+
+        DataTask taskExtract = createSqlTask(
+                taskExtractName,
+                taskExtractName,
+                String.format("INSERT INTO %s.%s SELECT user_id, user_name FROM %s.%s",
+                        dbName, dwdTable, dbName, srcTable),
+                Collections.singletonList(srcTableId),
+                Collections.singletonList(dwdTableId));
+
+        DataTask taskLoad = createSqlTask(
+                taskLoadName,
+                taskLoadName,
+                String.format("INSERT INTO %s.%s SELECT user_id, user_name FROM %s.%s",
+                        dbName, dwsTable, dbName, dwdTable),
+                Collections.singletonList(dwdTableId),
+                Collections.singletonList(dwsTableId));
+
+        DataWorkflow workflow = createWorkflow(
+                IT_PREFIX + "wf_relation_mismatch_" + suffix,
+                Arrays.asList(taskExtract.getId(), taskLoad.getId()),
+                effectiveProjectCode);
+        createdWorkflowIds.add(workflow.getId());
+
+        WorkflowPublishRequest deployRequest = new WorkflowPublishRequest();
+        deployRequest.setOperation("deploy");
+        deployRequest.setOperator("it-runtime-sync");
+        deployRequest.setRequireApproval(false);
+        deployRequest.setConfirmDiff(true);
+        WorkflowPublishRecord deployRecord = workflowPublishService.publish(workflow.getId(), deployRequest);
+        assertEquals("success", deployRecord.getStatus(), "发布应成功");
+
+        DataWorkflow deployedWorkflow = dataWorkflowMapper.selectById(workflow.getId());
+        assertNotNull(deployedWorkflow);
+        Long runtimeWorkflowCode = deployedWorkflow.getWorkflowCode();
+        assertNotNull(runtimeWorkflowCode, "发布后应生成 runtime workflowCode");
+        createdRuntimeWorkflowCodes.add(runtimeWorkflowCode);
+        assertExportDefinitionAvailable(runtimeWorkflowCode, "关系冲突演进前");
+
+        RuntimeWorkflowDefinition runtimeDefinition = dolphinRuntimeDefinitionService.loadRuntimeDefinitionFromExport(
+                effectiveProjectCode,
+                runtimeWorkflowCode);
+        assertNotNull(runtimeDefinition, "运行态定义不能为空");
+        Map<String, RuntimeTaskDefinition> runtimeTaskByName = runtimeDefinition.getTasks().stream()
+                .filter(Objects::nonNull)
+                .filter(task -> StringUtils.hasText(task.getTaskName()))
+                .collect(Collectors.toMap(RuntimeTaskDefinition::getTaskName, item -> item, (a, b) -> a));
+        RuntimeTaskDefinition runtimeExtractTask = requireRuntimeTask(runtimeTaskByName, taskExtractName);
+        RuntimeTaskDefinition runtimeLoadTask = requireRuntimeTask(runtimeTaskByName, taskLoadName);
+
+        Map<Long, Integer> taskVersionByCode = runtimeDefinition.getTasks().stream()
+                .filter(Objects::nonNull)
+                .filter(task -> task.getTaskCode() != null)
+                .collect(Collectors.toMap(
+                        RuntimeTaskDefinition::getTaskCode,
+                        task -> task.getTaskVersion() != null ? task.getTaskVersion() : 1,
+                        (a, b) -> a,
+                        LinkedHashMap::new));
+
+        List<Map<String, Object>> taskDefinitions = runtimeDefinition.getTasks().stream()
+                .filter(Objects::nonNull)
+                .map(task -> buildRuntimeSqlTaskDefinition(
+                        task,
+                        task.getSql(),
+                        StringUtils.hasText(task.getDatasourceType()) ? task.getDatasourceType() : "MYSQL"))
+                .collect(Collectors.toList());
+
+        List<DolphinSchedulerService.TaskRelationPayload> mismatchedRelations = new ArrayList<>();
+        mismatchedRelations.add(buildRelation(0L, 0, runtimeExtractTask.getTaskCode(), taskVersionByCode));
+        mismatchedRelations.add(buildRelation(0L, 0, runtimeLoadTask.getTaskCode(), taskVersionByCode));
+
+        List<DolphinSchedulerService.TaskLocationPayload> locations = new ArrayList<>();
+        List<Long> orderedCodes = runtimeDefinition.getTasks().stream()
+                .filter(Objects::nonNull)
+                .map(RuntimeTaskDefinition::getTaskCode)
+                .filter(Objects::nonNull)
+                .sorted()
+                .collect(Collectors.toList());
+        for (int i = 0; i < orderedCodes.size(); i++) {
+            locations.add(dolphinSchedulerService.buildLocation(orderedCodes.get(i), i, 0));
+        }
+
+        String globalParams = StringUtils.hasText(runtimeDefinition.getGlobalParams())
+                ? runtimeDefinition.getGlobalParams() : "[]";
+        try {
+            dolphinSchedulerService.setWorkflowReleaseState(runtimeWorkflowCode, "OFFLINE");
+            sleepQuietly(1000L);
+        } catch (Exception ignored) {
+        }
+        long updatedCode = dolphinSchedulerService.syncWorkflow(
+                runtimeWorkflowCode,
+                runtimeDefinition.getWorkflowName(),
+                taskDefinitions,
+                mismatchedRelations,
+                locations,
+                globalParams);
+        assertEquals(runtimeWorkflowCode.longValue(), updatedCode, "关系冲突演进应命中同一 workflowCode");
+        assertExportDefinitionAvailable(runtimeWorkflowCode, "关系冲突演进后");
+
+        RuntimeSyncPreviewRequest previewRequest = new RuntimeSyncPreviewRequest();
+        previewRequest.setProjectCode(effectiveProjectCode);
+        previewRequest.setWorkflowCode(runtimeWorkflowCode);
+        previewRequest.setOperator("it-runtime-sync");
+        RuntimeSyncPreviewResponse preview = workflowRuntimeSyncService.preview(previewRequest);
+
+        assertTrue(Boolean.TRUE.equals(preview.getCanSync()),
+                "关系冲突场景预检应可继续, errors=" + safeJson(preview.getErrors())
+                        + ", warnings=" + safeJson(preview.getWarnings()));
+        assertTrue(preview.getErrors().isEmpty(), "关系冲突场景预检不应返回错误");
+        assertTrue(Boolean.TRUE.equals(preview.getRelationDecisionRequired()), "关系冲突时应要求用户选轨");
+        assertTrue(preview.getWarnings().stream()
+                        .anyMatch(issue -> RuntimeSyncErrorCodes.RELATION_MISMATCH.equals(issue.getCode())),
+                "关系冲突时应返回 RELATION_MISMATCH 告警");
+        assertNotNull(preview.getRelationCompareDetail(), "关系冲突时应返回关系比对详情");
+        assertTrue(preview.getRelationCompareDetail().getOnlyInDeclared().stream()
+                        .anyMatch(item -> item.getPreTaskCode() != null
+                                && item.getPreTaskCode() == 0L
+                                && Objects.equals(item.getPostTaskCode(), runtimeLoadTask.getTaskCode())),
+                "应识别仅在声明关系中的入口边 0->load");
+        assertTrue(preview.getRelationCompareDetail().getOnlyInInferred().stream()
+                        .anyMatch(item -> Objects.equals(item.getPreTaskCode(), runtimeExtractTask.getTaskCode())
+                                && Objects.equals(item.getPostTaskCode(), runtimeLoadTask.getTaskCode())),
+                "应识别仅在 SQL 推断关系中的 extract->load");
+
+        RuntimeSyncExecuteRequest syncWithoutDecision = new RuntimeSyncExecuteRequest();
+        syncWithoutDecision.setProjectCode(effectiveProjectCode);
+        syncWithoutDecision.setWorkflowCode(runtimeWorkflowCode);
+        syncWithoutDecision.setOperator("it-runtime-sync");
+        RuntimeSyncExecuteResponse rejected = workflowRuntimeSyncService.sync(syncWithoutDecision);
+        assertFalse(Boolean.TRUE.equals(rejected.getSuccess()), "未选轨执行应失败");
+        assertTrue(Boolean.TRUE.equals(rejected.getRelationDecisionRequired()), "未选轨失败时应提示需要选轨");
+        assertTrue(rejected.getErrors().stream()
+                        .anyMatch(issue -> RuntimeSyncErrorCodes.RELATION_DECISION_REQUIRED.equals(issue.getCode())),
+                "未选轨失败应返回 RELATION_DECISION_REQUIRED");
+        assertNotNull(rejected.getSyncRecordId(), "未选轨失败应落失败记录");
+
+        RuntimeSyncExecuteRequest syncWithDecision = new RuntimeSyncExecuteRequest();
+        syncWithDecision.setProjectCode(effectiveProjectCode);
+        syncWithDecision.setWorkflowCode(runtimeWorkflowCode);
+        syncWithDecision.setOperator("it-runtime-sync");
+        syncWithDecision.setRelationDecision("INFERRED");
+        RuntimeSyncExecuteResponse accepted = workflowRuntimeSyncService.sync(syncWithDecision);
+        assertTrue(Boolean.TRUE.equals(accepted.getSuccess()),
+                "人工选轨后同步应成功, errors=" + safeJson(accepted.getErrors())
+                        + ", warnings=" + safeJson(accepted.getWarnings()));
+        assertTrue(accepted.getErrors().isEmpty(), "人工选轨成功后不应返回错误");
+        assertNotNull(accepted.getWorkflowId(), "人工选轨成功后应返回 workflowId");
+        assertNotNull(accepted.getSyncRecordId(), "人工选轨成功后应返回同步记录");
+
+        RuntimeWorkflowDiffResponse diffAfterSync = workflowRuntimeSyncService.runtimeDiff(accepted.getWorkflowId());
+        assertTrue(diffAfterSync.getErrors().isEmpty(), "人工选轨同步后 diff 不应报错");
+        assertFalse(Boolean.TRUE.equals(diffAfterSync.getDiffSummary().getChanged()),
+                "人工选轨同步后应与运行态一致");
+
+        List<WorkflowRuntimeSyncRecord> syncRecords = workflowRuntimeSyncRecordMapper.selectList(
+                Wrappers.<WorkflowRuntimeSyncRecord>lambdaQuery()
+                        .eq(WorkflowRuntimeSyncRecord::getWorkflowId, accepted.getWorkflowId())
+                        .orderByAsc(WorkflowRuntimeSyncRecord::getId));
+        assertTrue(syncRecords.stream()
+                .anyMatch(item -> "failed".equals(item.getStatus())
+                        && RuntimeSyncErrorCodes.RELATION_DECISION_REQUIRED.equals(item.getErrorCode())));
+        assertTrue(syncRecords.stream()
+                .anyMatch(item -> "success".equals(item.getStatus())));
+    }
+
     private RuntimeSyncExecuteResponse previewAndSync(Long workflowCode, String operator) {
         RuntimeSyncPreviewRequest previewRequest = new RuntimeSyncPreviewRequest();
         previewRequest.setProjectCode(effectiveProjectCode);
@@ -1021,8 +1351,8 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         syncRequest.setProjectCode(effectiveProjectCode);
         syncRequest.setWorkflowCode(workflowCode);
         syncRequest.setOperator(operator);
-        if (preview.getEdgeMismatchDetail() != null) {
-            syncRequest.setConfirmEdgeMismatch(true);
+        if (Boolean.TRUE.equals(preview.getRelationDecisionRequired())) {
+            syncRequest.setRelationDecision("INFERRED");
         }
 
         RuntimeSyncExecuteResponse sync = workflowRuntimeSyncService.sync(syncRequest);
@@ -1188,7 +1518,7 @@ class WorkflowRuntimeSyncRealIntegrationTest {
             LocalDateTime evolvedScheduleStart,
             LocalDateTime evolvedScheduleEnd,
             Integer evolvedTaskGroupId) {
-        RuntimeWorkflowDefinition definition = dolphinRuntimeDefinitionService.loadRuntimeDefinition(
+        RuntimeWorkflowDefinition definition = dolphinRuntimeDefinitionService.loadRuntimeDefinitionFromExport(
                 effectiveProjectCode,
                 runtimeWorkflowCode);
         assertNotNull(definition, "运行态工作流定义不能为空");
@@ -1524,6 +1854,26 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         }
     }
 
+    private boolean containsRawEdge(List<com.onedata.portal.dto.workflow.runtime.RuntimeRelationChange> edgeDisplayItems,
+            String rawEdge) {
+        if (!StringUtils.hasText(rawEdge) || edgeDisplayItems == null || edgeDisplayItems.isEmpty()) {
+            return false;
+        }
+        return edgeDisplayItems.stream()
+                .filter(Objects::nonNull)
+                .anyMatch(item -> rawEdge.equals(item.getPreTaskCode() + "->" + item.getPostTaskCode()));
+    }
+
+    private void assertExportDefinitionAvailable(Long workflowCode, String stage) {
+        RuntimeWorkflowDefinition exportDefinition = dolphinRuntimeDefinitionService.loadRuntimeDefinitionFromExport(
+                effectiveProjectCode,
+                workflowCode);
+        assertNotNull(exportDefinition, stage + "导出路径定义不能为空");
+        assertEquals(workflowCode, exportDefinition.getWorkflowCode(), stage + "导出定义 workflowCode 不一致");
+        assertTrue(exportDefinition.getTasks() != null && !exportDefinition.getTasks().isEmpty(),
+                stage + "导出定义任务不能为空");
+    }
+
     private JsonNode parseJsonOrNull(String json) {
         if (!StringUtils.hasText(json)) {
             return null;
@@ -1635,8 +1985,8 @@ class WorkflowRuntimeSyncRealIntegrationTest {
                         .last("LIMIT 1"));
         assertNotNull(version, "应存在对应的版本记录, versionNo=" + versionNo);
         assertTrue(StringUtils.hasText(version.getStructureSnapshot()), "版本结构快照不能为空");
-        assertTrue(version.getSnapshotSchemaVersion() == null || version.getSnapshotSchemaVersion() >= 2,
-                "新版本快照应为 canonical 结构");
+        assertEquals(Integer.valueOf(3), version.getSnapshotSchemaVersion(),
+                "新版本快照应为 V3 definition 结构");
         assertNotNull(version.getCreatedAt(), "版本创建时间不能为空");
         return version;
     }
@@ -1647,13 +1997,16 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         }
         try {
             JsonNode root = objectMapper.readTree(structureSnapshot);
-            JsonNode tasksNode = root.path("tasks");
+            JsonNode tasksNode = root.path("taskDefinitionList");
             if (!tasksNode.isArray()) {
                 return Collections.emptySet();
             }
             Set<Long> taskIds = new LinkedHashSet<>();
             for (JsonNode taskNode : tasksNode) {
-                long taskId = taskNode.path("taskId").asLong(0L);
+                long taskId = taskNode.path("xPlatformTaskMeta").path("taskId").asLong(0L);
+                if (taskId <= 0L) {
+                    taskId = taskNode.path("taskId").asLong(0L);
+                }
                 if (taskId > 0) {
                     taskIds.add(taskId);
                 }

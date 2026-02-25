@@ -10,12 +10,12 @@ import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowTaskBinding;
 import com.onedata.portal.dto.workflow.runtime.DolphinRuntimeWorkflowOption;
 import com.onedata.portal.dto.workflow.runtime.RuntimeDiffSummary;
-import com.onedata.portal.dto.workflow.runtime.RuntimeEdgeMismatchDetail;
+import com.onedata.portal.dto.workflow.runtime.RuntimeRelationChange;
+import com.onedata.portal.dto.workflow.runtime.RuntimeRelationCompareDetail;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncErrorCodes;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncExecuteRequest;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncExecuteResponse;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncIssue;
-import com.onedata.portal.dto.workflow.runtime.RuntimeSyncParitySummary;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncRecordDetailResponse;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncRecordListItem;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncPreviewRequest;
@@ -81,21 +81,18 @@ public class WorkflowRuntimeSyncService {
     };
 
     private static final String ENGINE_DOLPHIN = "dolphin";
-    private static final String EDGE_MISMATCH_WARNING_CODE = "EDGE_MISMATCH";
-    private static final String EXPORT_FALLBACK_WARNING_CODE = "EXPORT_FALLBACK_LEGACY";
-    private static final String INGEST_MODE_LEGACY = "legacy";
-    private static final String INGEST_MODE_EXPORT_SHADOW = "export_shadow";
     private static final String INGEST_MODE_EXPORT_ONLY = "export_only";
+    private static final String RELATION_DECISION_DECLARED = "DECLARED";
+    private static final String RELATION_DECISION_INFERRED = "INFERRED";
 
     @Value("${workflow.runtime-sync.enabled:true}")
     private boolean runtimeSyncEnabled;
 
-    @Value("${workflow.runtime-sync.ingest-mode:export_shadow}")
+    @Value("${workflow.runtime-sync.ingest-mode:export_only}")
     private String runtimeSyncIngestMode;
 
     private final DolphinRuntimeDefinitionService runtimeDefinitionService;
     private final WorkflowRuntimeDiffService runtimeDiffService;
-    private final RuntimeSyncParityService runtimeSyncParityService;
     private final SqlTableMatcherService sqlTableMatcherService;
     private final DolphinSchedulerService dolphinSchedulerService;
     private final DataTaskMapper dataTaskMapper;
@@ -168,7 +165,6 @@ public class WorkflowRuntimeSyncService {
         if (!runtimeSyncEnabled) {
             RuntimeSyncPreviewResponse disabled = new RuntimeSyncPreviewResponse();
             disabled.setIngestMode(resolveIngestMode());
-            disabled.setParityStatus(RuntimeSyncParityService.STATUS_NOT_CHECKED);
             disabled.getErrors().add(RuntimeSyncIssue.error(
                     RuntimeSyncErrorCodes.RUNTIME_SYNC_DISABLED, "运行态同步功能未开启"));
             return disabled;
@@ -176,14 +172,13 @@ public class WorkflowRuntimeSyncService {
         PreviewContext context = buildPreviewContext(request.getProjectCode(), request.getWorkflowCode(), false);
         RuntimeSyncPreviewResponse response = new RuntimeSyncPreviewResponse();
         response.setIngestMode(context.getIngestMode());
-        response.setParityStatus(context.getParityStatus());
-        response.setParitySummary(context.getParitySummary());
         response.setCanSync(context.getErrors().isEmpty());
         response.setErrors(context.getErrors());
         response.setWarnings(context.getWarnings());
         response.setDiffSummary(context.getDiffSummary());
         response.setRenamePlan(context.getRenamePlan());
-        response.setEdgeMismatchDetail(context.getEdgeMismatchDetail());
+        response.setRelationDecisionRequired(context.getRelationDecisionRequired());
+        response.setRelationCompareDetail(context.getRelationCompareDetail());
         return response;
     }
 
@@ -191,7 +186,6 @@ public class WorkflowRuntimeSyncService {
         RuntimeSyncExecuteResponse response = new RuntimeSyncExecuteResponse();
         if (!runtimeSyncEnabled) {
             response.setIngestMode(resolveIngestMode());
-            response.setParityStatus(RuntimeSyncParityService.STATUS_NOT_CHECKED);
             response.getErrors().add(RuntimeSyncIssue.error(
                     RuntimeSyncErrorCodes.RUNTIME_SYNC_DISABLED, "运行态同步功能未开启"));
             return response;
@@ -200,12 +194,11 @@ public class WorkflowRuntimeSyncService {
         String operator = resolveOperator(request.getOperator());
         PreviewContext context = buildPreviewContext(request.getProjectCode(), request.getWorkflowCode(), true);
         response.setIngestMode(context.getIngestMode());
-        response.setParityStatus(context.getParityStatus());
-        response.setParitySummary(context.getParitySummary());
         response.setWarnings(context.getWarnings());
         response.setErrors(context.getErrors());
         response.setDiffSummary(context.getDiffSummary());
-        response.setEdgeMismatchDetail(context.getEdgeMismatchDetail());
+        response.setRelationDecisionRequired(context.getRelationDecisionRequired());
+        response.setRelationCompareDetail(context.getRelationCompareDetail());
 
         if (!context.getErrors().isEmpty()) {
             Long recordId = saveFailedSyncRecord(context,
@@ -216,24 +209,11 @@ public class WorkflowRuntimeSyncService {
             return response;
         }
 
-        if (runtimeSyncParityService.isInconsistent(context.getParityStatus())) {
+        if (Boolean.TRUE.equals(context.getRelationDecisionRequired())
+                && !isValidRelationDecision(request.getRelationDecision())) {
             RuntimeSyncIssue issue = RuntimeSyncIssue.error(
-                    RuntimeSyncErrorCodes.DEFINITION_PARITY_MISMATCH,
-                    "导出定义与旧路径解析结果不一致，请先处理一致性差异后再执行同步");
-            if (context.getDefinition() != null) {
-                issue.setWorkflowCode(context.getDefinition().getWorkflowCode());
-                issue.setWorkflowName(context.getDefinition().getWorkflowName());
-            }
-            response.getErrors().add(issue);
-            Long recordId = saveFailedSyncRecord(context, issue.getCode(), issue.getMessage(), operator);
-            response.setSyncRecordId(recordId);
-            return response;
-        }
-
-        if (context.getEdgeMismatchDetail() != null && !Boolean.TRUE.equals(request.getConfirmEdgeMismatch())) {
-            RuntimeSyncIssue issue = RuntimeSyncIssue.error(
-                    RuntimeSyncErrorCodes.EDGE_MISMATCH_CONFIRM_REQUIRED,
-                    "检测到边关系不一致，请先人工确认差异详情后再执行同步");
+                    RuntimeSyncErrorCodes.RELATION_DECISION_REQUIRED,
+                    "检测到声明关系与 SQL 推断关系不一致，请先选择关系轨道后再执行同步");
             issue.setWorkflowCode(context.getDefinition().getWorkflowCode());
             issue.setWorkflowName(context.getDefinition().getWorkflowName());
             response.getErrors().add(issue);
@@ -241,6 +221,9 @@ public class WorkflowRuntimeSyncService {
             response.setSyncRecordId(recordId);
             return response;
         }
+        applyRelationDecision(context, request.getRelationDecision());
+        buildPreviewArtifacts(context);
+        response.setDiffSummary(context.getDiffSummary());
 
         try {
             SyncTransactionResult txResult = transactionTemplate.execute(status -> doSyncInTransaction(context, operator));
@@ -324,10 +307,7 @@ public class WorkflowRuntimeSyncService {
         response.setVersionId(record.getVersionId());
         response.setStatus(record.getStatus());
         response.setIngestMode(record.getIngestMode());
-        response.setParityStatus(record.getParityStatus());
-        response.setParityDetailJson(record.getParityDetailJson());
         response.setRawDefinitionJson(record.getRawDefinitionJson());
-        response.setParitySummary(runtimeSyncParityService.parse(record.getParityDetailJson()));
         response.setSnapshotHash(record.getSnapshotHash());
         response.setSnapshotJson(record.getSnapshotJson());
         response.setDiffSummary(parseDiffSummary(record.getDiffJson()));
@@ -343,9 +323,6 @@ public class WorkflowRuntimeSyncService {
         context.setProjectCode(projectCode);
         context.setWorkflowCode(workflowCode);
         context.setIngestMode(resolveIngestMode());
-        RuntimeSyncParitySummary defaultParitySummary = new RuntimeSyncParitySummary();
-        context.setParitySummary(defaultParitySummary);
-        context.setParityStatus(defaultParitySummary.getStatus());
 
         if (workflowCode == null || workflowCode <= 0) {
             context.getErrors().add(RuntimeSyncIssue.error(
@@ -353,71 +330,14 @@ public class WorkflowRuntimeSyncService {
             return context;
         }
 
-        RuntimeWorkflowDefinition definition = null;
-        RuntimeWorkflowDefinition shadowDefinition = null;
-        boolean primaryFromExport = false;
-        String configuredMode = context.getIngestMode();
-        if (INGEST_MODE_LEGACY.equals(configuredMode)) {
-            try {
-                definition = runtimeDefinitionService.loadRuntimeDefinition(projectCode, workflowCode);
-            } catch (Exception ex) {
-                context.getErrors().add(RuntimeSyncIssue.error(
-                        resolveDefinitionErrorCode(ex.getMessage(), strictDefinitionError),
-                        ex.getMessage()));
-                return context;
-            }
-        } else {
-            try {
-                definition = runtimeDefinitionService.loadRuntimeDefinitionFromExport(projectCode, workflowCode);
-                primaryFromExport = true;
-            } catch (Exception exportEx) {
-                if (INGEST_MODE_EXPORT_ONLY.equals(configuredMode)) {
-                    context.getErrors().add(RuntimeSyncIssue.error(
-                            resolveDefinitionErrorCode(exportEx.getMessage(), strictDefinitionError),
-                            exportEx.getMessage()));
-                    return context;
-                }
-
-                RuntimeSyncIssue warning = RuntimeSyncIssue.warning(
-                        EXPORT_FALLBACK_WARNING_CODE,
-                        "导出 JSON 解析失败，已自动回退到旧路径: " + exportEx.getMessage());
-                context.getWarnings().add(warning);
-                context.setIngestMode(INGEST_MODE_LEGACY);
-                try {
-                    definition = runtimeDefinitionService.loadRuntimeDefinition(projectCode, workflowCode);
-                } catch (Exception legacyEx) {
-                    context.getErrors().add(RuntimeSyncIssue.error(
-                            resolveDefinitionErrorCode(legacyEx.getMessage(), strictDefinitionError),
-                            legacyEx.getMessage()));
-                    return context;
-                }
-            }
-        }
-
-        if (definition != null && primaryFromExport && INGEST_MODE_EXPORT_SHADOW.equals(configuredMode)) {
-            try {
-                shadowDefinition = runtimeDefinitionService.loadRuntimeDefinition(projectCode, workflowCode);
-            } catch (Exception shadowEx) {
-                context.getWarnings().add(RuntimeSyncIssue.warning(
-                        EXPORT_FALLBACK_WARNING_CODE,
-                        "影子路径解析失败，无法执行一致性校验: " + shadowEx.getMessage()));
-            }
-
-            if (shadowDefinition != null) {
-                RuntimeSyncParitySummary paritySummary = runtimeSyncParityService.compare(definition, shadowDefinition);
-                context.setParitySummary(paritySummary);
-                context.setParityStatus(paritySummary != null
-                        ? paritySummary.getStatus()
-                        : RuntimeSyncParityService.STATUS_NOT_CHECKED);
-                if (runtimeSyncParityService.isInconsistent(context.getParityStatus())) {
-                    RuntimeSyncIssue warning = RuntimeSyncIssue.warning(
-                            RuntimeSyncErrorCodes.DEFINITION_PARITY_MISMATCH,
-                            "导出定义与旧路径解析结果不一致，预检可继续，但执行同步将被阻断");
-                    warning.setWorkflowCode(definition.getWorkflowCode());
-                    warning.setWorkflowName(definition.getWorkflowName());
-                    context.getWarnings().add(warning);
-                }
-            }
+        RuntimeWorkflowDefinition definition;
+        try {
+            definition = runtimeDefinitionService.loadRuntimeDefinitionFromExport(projectCode, workflowCode);
+        } catch (Exception ex) {
+            context.getErrors().add(RuntimeSyncIssue.error(
+                    resolveDefinitionErrorCode(ex.getMessage(), strictDefinitionError),
+                    ex.getMessage()));
+            return context;
         }
 
         if (definition == null) {
@@ -452,7 +372,7 @@ public class WorkflowRuntimeSyncService {
         validateTaskCodeMapping(context);
         validateWorkflowBindingConflict(context);
         buildRenamePlan(context);
-        buildEdgeWarnings(context);
+        buildRelationCompare(context);
         buildPreviewArtifacts(context);
         return context;
     }
@@ -678,41 +598,54 @@ public class WorkflowRuntimeSyncService {
         }
     }
 
-    private void buildEdgeWarnings(PreviewContext context) {
-        Map<String, String> taskNameByCode = buildTaskNameByCode(context.getDefinition().getTasks());
-        Set<String> explicitEdges = toEdgeSet(context.getDefinition().getExplicitEdges());
-        List<RuntimeTaskEdge> inferredEdgesList = inferEdgesFromLineage(context.getDefinition().getTasks());
-        Set<String> inferredEdges = toEdgeSet(inferredEdgesList);
-        context.setInferredEdges(inferredEdgesList);
-        if (explicitEdges.isEmpty() && !inferredEdges.isEmpty()) {
-            RuntimeSyncIssue issue = RuntimeSyncIssue.error(
-                    RuntimeSyncErrorCodes.DOLPHIN_EXPLICIT_EDGE_MISSING,
-                    "Dolphin 未返回显式边，严格模式下无法完成边一致性比对");
-            issue.setWorkflowCode(context.getDefinition().getWorkflowCode());
-            issue.setWorkflowName(context.getDefinition().getWorkflowName());
-            context.getErrors().add(issue);
-            context.setEdgeMismatchDetail(null);
-            return;
-        }
-        if (!Objects.equals(explicitEdges, inferredEdges)) {
-            RuntimeEdgeMismatchDetail detail = new RuntimeEdgeMismatchDetail();
-            detail.setExplicitEdges(sortEdgeStrings(explicitEdges, taskNameByCode));
-            detail.setInferredEdges(sortEdgeStrings(inferredEdges, taskNameByCode));
-            detail.setOnlyInExplicit(sortEdgeStrings(diffSet(explicitEdges, inferredEdges), taskNameByCode));
-            detail.setOnlyInInferred(sortEdgeStrings(diffSet(inferredEdges, explicitEdges), taskNameByCode));
-            context.setEdgeMismatchDetail(detail);
+    private void buildRelationCompare(PreviewContext context) {
+        List<RuntimeTaskEdge> declaredEdges = normalizeEdges(context.getDefinition().getExplicitEdges());
+        List<RuntimeTaskEdge> inferredEdges = inferEdgesFromLineage(context.getDefinition().getTasks());
+        context.setDeclaredEdges(declaredEdges);
+        context.setInferredEdges(inferredEdges);
+        context.setSelectedEdges(inferredEdges);
 
+        Set<String> declaredSet = toEdgeSet(declaredEdges);
+        Set<String> inferredSet = toEdgeSet(inferredEdges);
+        Map<Long, String> taskNameByCode = buildTaskNameByCode(context.getDefinition().getTasks());
+
+        RuntimeRelationCompareDetail detail = new RuntimeRelationCompareDetail();
+        detail.setDeclaredRelations(toRelationChanges(declaredSet, taskNameByCode));
+        detail.setInferredRelations(toRelationChanges(inferredSet, taskNameByCode));
+        detail.setOnlyInDeclared(toRelationChanges(diffSet(declaredSet, inferredSet), taskNameByCode));
+        detail.setOnlyInInferred(toRelationChanges(diffSet(inferredSet, declaredSet), taskNameByCode));
+        context.setRelationCompareDetail(detail);
+
+        boolean mismatch = !Objects.equals(declaredSet, inferredSet);
+        context.setRelationDecisionRequired(mismatch);
+        if (mismatch) {
             RuntimeSyncIssue warning = RuntimeSyncIssue.warning(
-                    EDGE_MISMATCH_WARNING_CODE,
-                    String.format("显式边与血缘推断边不一致（explicit=%d, inferred=%d），需人工确认后方可同步",
-                            explicitEdges.size(),
-                            inferredEdges.size()));
+                    RuntimeSyncErrorCodes.RELATION_MISMATCH,
+                    String.format("声明关系与 SQL 推断关系不一致（declared=%d, inferred=%d），需人工选择轨道后方可同步",
+                            declaredSet.size(),
+                            inferredSet.size()));
             warning.setWorkflowCode(context.getDefinition().getWorkflowCode());
             warning.setWorkflowName(context.getDefinition().getWorkflowName());
             context.getWarnings().add(warning);
-        } else {
-            context.setEdgeMismatchDetail(null);
         }
+    }
+
+    private List<RuntimeTaskEdge> normalizeEdges(List<RuntimeTaskEdge> edges) {
+        if (CollectionUtils.isEmpty(edges)) {
+            return Collections.emptyList();
+        }
+        Map<String, RuntimeTaskEdge> dedup = new LinkedHashMap<>();
+        for (RuntimeTaskEdge edge : edges) {
+            if (edge == null || edge.getUpstreamTaskCode() == null || edge.getDownstreamTaskCode() == null) {
+                continue;
+            }
+            String key = edge.getUpstreamTaskCode() + "->" + edge.getDownstreamTaskCode();
+            dedup.putIfAbsent(key, new RuntimeTaskEdge(edge.getUpstreamTaskCode(), edge.getDownstreamTaskCode()));
+        }
+        return dedup.values().stream()
+                .sorted(Comparator.comparing(RuntimeTaskEdge::getUpstreamTaskCode)
+                        .thenComparing(RuntimeTaskEdge::getDownstreamTaskCode))
+                .collect(Collectors.toList());
     }
 
     private Set<String> diffSet(Set<String> left, Set<String> right) {
@@ -726,70 +659,90 @@ public class WorkflowRuntimeSyncService {
         return result;
     }
 
-    private Map<String, String> buildTaskNameByCode(List<RuntimeTaskDefinition> tasks) {
+    private Map<Long, String> buildTaskNameByCode(List<RuntimeTaskDefinition> tasks) {
         if (CollectionUtils.isEmpty(tasks)) {
             return Collections.emptyMap();
         }
-        Map<String, String> taskNameByCode = new LinkedHashMap<>();
+        Map<Long, String> taskNameByCode = new LinkedHashMap<>();
         for (RuntimeTaskDefinition task : tasks) {
             if (task == null || task.getTaskCode() == null) {
                 continue;
             }
-            String code = String.valueOf(task.getTaskCode());
-            if (!StringUtils.hasText(code)) {
+            if (!StringUtils.hasText(task.getTaskName())) {
                 continue;
             }
-            String name = StringUtils.hasText(task.getTaskName())
-                    ? task.getTaskName().trim()
-                    : null;
-            taskNameByCode.putIfAbsent(code, name);
+            taskNameByCode.putIfAbsent(task.getTaskCode(), task.getTaskName().trim());
         }
         return taskNameByCode;
     }
 
-    private List<String> sortEdgeStrings(Set<String> edges, Map<String, String> taskNameByCode) {
+    private List<RuntimeRelationChange> toRelationChanges(Set<String> edges, Map<Long, String> taskNameByCode) {
         if (CollectionUtils.isEmpty(edges)) {
             return Collections.emptyList();
         }
-        return edges.stream()
-                .filter(StringUtils::hasText)
-                .map(edge -> formatEdgeWithTaskName(edge, taskNameByCode))
-                .sorted()
-                .collect(Collectors.toList());
+        List<RuntimeRelationChange> result = new ArrayList<>();
+        for (String edge : edges) {
+            RuntimeRelationChange change = toRelationChange(edge, taskNameByCode);
+            if (change != null) {
+                result.add(change);
+            }
+        }
+        result.sort(Comparator.comparing(RuntimeRelationChange::getPreTaskCode, Comparator.nullsLast(Long::compareTo))
+                .thenComparing(RuntimeRelationChange::getPostTaskCode, Comparator.nullsLast(Long::compareTo)));
+        return result;
     }
 
-    private String formatEdgeWithTaskName(String edge, Map<String, String> taskNameByCode) {
+    private RuntimeRelationChange toRelationChange(String edge, Map<Long, String> taskNameByCode) {
         if (!StringUtils.hasText(edge)) {
-            return edge;
+            return null;
         }
         String[] parts = edge.split("->", 2);
         if (parts.length != 2) {
-            return edge;
+            return null;
         }
-        String upstreamCode = parts[0].trim();
-        String downstreamCode = parts[1].trim();
-        String upstream = resolveTaskDisplayName(upstreamCode, taskNameByCode);
-        String downstream = resolveTaskDisplayName(downstreamCode, taskNameByCode);
-        if (Objects.equals(upstream, upstreamCode) && Objects.equals(downstream, downstreamCode)) {
-            return edge;
+        Long preTaskCode = parseLong(parts[0].trim());
+        Long postTaskCode = parseLong(parts[1].trim());
+        if (preTaskCode == null || postTaskCode == null) {
+            return null;
         }
-        return upstream + " -> " + downstream + " [" + edge + "]";
+        RuntimeRelationChange change = new RuntimeRelationChange();
+        change.setPreTaskCode(preTaskCode);
+        change.setPostTaskCode(postTaskCode);
+        change.setEntryEdge(preTaskCode == 0L);
+        change.setPreTaskName(preTaskCode == 0L ? "入口" : taskNameByCode.get(preTaskCode));
+        change.setPostTaskName(taskNameByCode.get(postTaskCode));
+        return change;
     }
 
-    private String resolveTaskDisplayName(String taskCode, Map<String, String> taskNameByCode) {
-        if (!StringUtils.hasText(taskCode)) {
-            return taskCode;
+    private boolean isValidRelationDecision(String relationDecision) {
+        if (!StringUtils.hasText(relationDecision)) {
+            return false;
         }
-        String taskName = taskNameByCode != null ? taskNameByCode.get(taskCode) : null;
-        if (!StringUtils.hasText(taskName)) {
-            return taskCode;
+        String normalized = relationDecision.trim().toUpperCase(Locale.ROOT);
+        return RELATION_DECISION_DECLARED.equals(normalized) || RELATION_DECISION_INFERRED.equals(normalized);
+    }
+
+    private void applyRelationDecision(PreviewContext context, String relationDecision) {
+        if (context == null) {
+            return;
         }
-        return taskName + "(" + taskCode + ")";
+        if (!Boolean.TRUE.equals(context.getRelationDecisionRequired())) {
+            context.setSelectedEdges(context.getInferredEdges());
+            return;
+        }
+        String normalized = StringUtils.hasText(relationDecision)
+                ? relationDecision.trim().toUpperCase(Locale.ROOT)
+                : "";
+        if (RELATION_DECISION_DECLARED.equals(normalized)) {
+            context.setSelectedEdges(context.getDeclaredEdges());
+            return;
+        }
+        context.setSelectedEdges(context.getInferredEdges());
     }
 
     private void buildPreviewArtifacts(PreviewContext context) {
         WorkflowRuntimeDiffService.RuntimeSnapshot snapshot =
-                runtimeDiffService.buildSnapshot(context.getDefinition(), context.getInferredEdges());
+                runtimeDiffService.buildSnapshot(context.getDefinition(), context.getSelectedEdges());
         context.setSnapshot(snapshot);
 
         WorkflowRuntimeSyncRecord baselineRecord = findLatestSyncRecord(context.getLocalWorkflow(),
@@ -859,8 +812,6 @@ public class WorkflowRuntimeSyncService {
         syncRecord.setDiffJson(toJson(context.getDiffSummary()));
         syncRecord.setVersionId(workflow.getCurrentVersionId());
         syncRecord.setIngestMode(context.getIngestMode());
-        syncRecord.setParityStatus(context.getParityStatus());
-        syncRecord.setParityDetailJson(runtimeSyncParityService.toJson(context.getParitySummary()));
         syncRecord.setRawDefinitionJson(context.getDefinition() != null ? context.getDefinition().getRawDefinitionJson() : null);
         syncRecord.setStatus("success");
         syncRecord.setOperator(operator);
@@ -991,8 +942,6 @@ public class WorkflowRuntimeSyncService {
             record.setDiffJson(toJson(context.getDiffSummary()));
         }
         record.setIngestMode(context != null ? context.getIngestMode() : resolveIngestMode());
-        record.setParityStatus(context != null ? context.getParityStatus() : RuntimeSyncParityService.STATUS_NOT_CHECKED);
-        record.setParityDetailJson(runtimeSyncParityService.toJson(context != null ? context.getParitySummary() : null));
         record.setRawDefinitionJson(context != null && context.getDefinition() != null
                 ? context.getDefinition().getRawDefinitionJson()
                 : null);
@@ -1062,13 +1011,20 @@ public class WorkflowRuntimeSyncService {
                 .collect(Collectors.toList());
 
         List<RuntimeTaskEdge> edges = new ArrayList<>();
+        Set<Long> taskCodes = sorted.stream()
+                .map(RuntimeTaskDefinition::getTaskCode)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         for (RuntimeTaskDefinition downstream : sorted) {
+            if (downstream.getTaskCode() == null) {
+                continue;
+            }
             Set<Long> downstreamReads = new LinkedHashSet<>(downstream.getInputTableIds());
             if (downstreamReads.isEmpty()) {
                 continue;
             }
             for (RuntimeTaskDefinition upstream : sorted) {
-                if (Objects.equals(upstream.getTaskCode(), downstream.getTaskCode())) {
+                if (upstream.getTaskCode() == null || Objects.equals(upstream.getTaskCode(), downstream.getTaskCode())) {
                     continue;
                 }
                 Set<Long> upstreamWrites = new LinkedHashSet<>(upstream.getOutputTableIds());
@@ -1082,7 +1038,24 @@ public class WorkflowRuntimeSyncService {
                 }
             }
         }
-        return edges.stream()
+        List<RuntimeTaskEdge> internalEdges = edges.stream()
+                .distinct()
+                .sorted(Comparator.comparing(RuntimeTaskEdge::getUpstreamTaskCode)
+                        .thenComparing(RuntimeTaskEdge::getDownstreamTaskCode))
+                .collect(Collectors.toList());
+
+        Set<Long> tasksWithIncoming = internalEdges.stream()
+                .map(RuntimeTaskEdge::getDownstreamTaskCode)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        for (Long taskCode : taskCodes) {
+            if (taskCode == null || tasksWithIncoming.contains(taskCode)) {
+                continue;
+            }
+            internalEdges.add(new RuntimeTaskEdge(0L, taskCode));
+        }
+
+        return internalEdges.stream()
                 .distinct()
                 .sorted(Comparator.comparing(RuntimeTaskEdge::getUpstreamTaskCode)
                         .thenComparing(RuntimeTaskEdge::getDownstreamTaskCode))
@@ -1265,15 +1238,11 @@ public class WorkflowRuntimeSyncService {
     }
 
     private String resolveIngestMode() {
-        String configured = StringUtils.hasText(runtimeSyncIngestMode)
-                ? runtimeSyncIngestMode.trim().toLowerCase(Locale.ROOT)
-                : INGEST_MODE_EXPORT_SHADOW;
-        if (INGEST_MODE_LEGACY.equals(configured)
-                || INGEST_MODE_EXPORT_SHADOW.equals(configured)
-                || INGEST_MODE_EXPORT_ONLY.equals(configured)) {
-            return configured;
+        if (!StringUtils.hasText(runtimeSyncIngestMode)) {
+            return INGEST_MODE_EXPORT_ONLY;
         }
-        return INGEST_MODE_EXPORT_SHADOW;
+        String configured = runtimeSyncIngestMode.trim().toLowerCase(Locale.ROOT);
+        return INGEST_MODE_EXPORT_ONLY.equals(configured) ? configured : INGEST_MODE_EXPORT_ONLY;
     }
 
     private RuntimeSyncRecordListItem toSyncRecordListItem(WorkflowRuntimeSyncRecord record) {
@@ -1285,7 +1254,6 @@ public class WorkflowRuntimeSyncService {
         item.setVersionId(record.getVersionId());
         item.setStatus(record.getStatus());
         item.setIngestMode(record.getIngestMode());
-        item.setParityStatus(record.getParityStatus());
         item.setSnapshotHash(record.getSnapshotHash());
         item.setDiffSummary(parseDiffSummary(record.getDiffJson()));
         item.setErrorCode(record.getErrorCode());
@@ -1333,6 +1301,17 @@ public class WorkflowRuntimeSyncService {
         }
     }
 
+    private Long parseLong(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
     private void ensureRuntimeSyncEnabled() {
         if (!runtimeSyncEnabled) {
             throw new IllegalStateException("运行态同步功能未开启");
@@ -1343,9 +1322,7 @@ public class WorkflowRuntimeSyncService {
     private static class PreviewContext {
         private Long projectCode;
         private Long workflowCode;
-        private String ingestMode = INGEST_MODE_EXPORT_SHADOW;
-        private String parityStatus = RuntimeSyncParityService.STATUS_NOT_CHECKED;
-        private RuntimeSyncParitySummary paritySummary;
+        private String ingestMode = INGEST_MODE_EXPORT_ONLY;
         private RuntimeWorkflowDefinition definition;
         private DataWorkflow localWorkflow;
         private WorkflowRuntimeDiffService.RuntimeSnapshot snapshot;
@@ -1353,12 +1330,15 @@ public class WorkflowRuntimeSyncService {
         private List<RuntimeSyncIssue> errors = new ArrayList<>();
         private List<RuntimeSyncIssue> warnings = new ArrayList<>();
         private List<RuntimeTaskRenamePlan> renamePlan = new ArrayList<>();
+        private Boolean relationDecisionRequired = false;
+        private RuntimeRelationCompareDetail relationCompareDetail;
         private Map<Long, DolphinDatasourceOption> datasourceById = new HashMap<>();
         private Map<Long, DataTask> existingTaskByRuntimeCode = new LinkedHashMap<>();
         private Map<Long, WorkflowTaskRelation> existingTaskRelationByTaskId = new LinkedHashMap<>();
         private Map<Long, String> resolvedTaskNameByCode = new LinkedHashMap<>();
+        private List<RuntimeTaskEdge> declaredEdges = new ArrayList<>();
         private List<RuntimeTaskEdge> inferredEdges = new ArrayList<>();
-        private RuntimeEdgeMismatchDetail edgeMismatchDetail;
+        private List<RuntimeTaskEdge> selectedEdges = new ArrayList<>();
     }
 
     @Data

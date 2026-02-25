@@ -5,6 +5,7 @@ import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowTaskBinding;
 import com.onedata.portal.dto.workflow.WorkflowVersionCompareRequest;
 import com.onedata.portal.dto.workflow.WorkflowVersionCompareResponse;
+import com.onedata.portal.dto.workflow.WorkflowVersionRollbackRequest;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
@@ -62,6 +63,156 @@ class WorkflowVersionComparePersistenceIntegrationTest {
 
     @Autowired
     private WorkflowVersionMapper workflowVersionMapper;
+
+    @Test
+    @DisplayName("内容未变化时保存不应新增版本")
+    void saveWithoutContentChangeShouldNotCreateNewVersion() {
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String operator = "it-version-compare";
+
+        Long tableA = createTable("it_vcmp_nc_a_" + suffix, "ods");
+        Long tableB = createTable("it_vcmp_nc_b_" + suffix, "dwd");
+        Long taskId = createSqlTask(
+                "it_vcmp_nc_t1_" + suffix,
+                "extract_nc_" + suffix,
+                "insert into it_vcmp_nc_b_" + suffix + " select * from it_vcmp_nc_a_" + suffix,
+                "doris_ds",
+                Collections.singletonList(tableA),
+                Collections.singletonList(tableB),
+                operator
+        );
+
+        DataWorkflow workflow = workflowService.createWorkflow(buildWorkflowRequest(
+                "it_workflow_nc_" + suffix,
+                "desc",
+                "[{\"prop\":\"bizdate\",\"value\":\"2026-02-01\"}]",
+                "tg-alpha",
+                operator,
+                Collections.singletonList(taskId)
+        ));
+        Long workflowId = workflow.getId();
+        Long versionIdBefore = requireCurrentVersionId(workflowId);
+
+        workflowService.updateWorkflow(workflowId, buildWorkflowRequest(
+                "it_workflow_nc_" + suffix,
+                "desc",
+                "[{\"prop\":\"bizdate\",\"value\":\"2026-02-01\"}]",
+                "tg-alpha",
+                operator,
+                Collections.singletonList(taskId)
+        ));
+
+        Long versionIdAfter = requireCurrentVersionId(workflowId);
+        assertEquals(versionIdBefore, versionIdAfter, "内容未变化时 currentVersionId 应保持不变");
+
+        List<WorkflowVersion> versions = workflowVersionMapper.selectList(
+                Wrappers.<WorkflowVersion>lambdaQuery()
+                        .eq(WorkflowVersion::getWorkflowId, workflowId));
+        assertEquals(1, versions.size(), "内容未变化时不应新增版本");
+    }
+
+    @Test
+    @DisplayName("当前版本非V3时保存应强制生成V3基线版本")
+    void saveShouldForceCreateV3BaselineWhenCurrentVersionIsLegacy() {
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String operator = "it-version-compare";
+
+        Long tableA = createTable("it_vcmp_base_a_" + suffix, "ods");
+        Long tableB = createTable("it_vcmp_base_b_" + suffix, "dwd");
+        Long taskId = createSqlTask(
+                "it_vcmp_base_t1_" + suffix,
+                "extract_base_" + suffix,
+                "insert into it_vcmp_base_b_" + suffix + " select * from it_vcmp_base_a_" + suffix,
+                "doris_ds",
+                Collections.singletonList(tableA),
+                Collections.singletonList(tableB),
+                operator
+        );
+
+        String workflowName = "it_workflow_base_" + suffix;
+        DataWorkflow workflow = workflowService.createWorkflow(buildWorkflowRequest(
+                workflowName,
+                "desc-base",
+                "[{\"prop\":\"bizdate\",\"value\":\"2026-02-01\"}]",
+                "tg-alpha",
+                operator,
+                Collections.singletonList(taskId)
+        ));
+        Long workflowId = workflow.getId();
+        Long versionIdBefore = requireCurrentVersionId(workflowId);
+        WorkflowVersion beforeVersion = workflowVersionMapper.selectById(versionIdBefore);
+        assertNotNull(beforeVersion);
+        assertEquals(Integer.valueOf(3), beforeVersion.getSnapshotSchemaVersion(), "新建版本默认应为V3");
+
+        beforeVersion.setSnapshotSchemaVersion(2);
+        beforeVersion.setStructureSnapshot("{\"schemaVersion\":2,\"workflow\":{\"workflowName\":\"legacy\"},\"tasks\":[],\"edges\":[],\"schedule\":{}}");
+        workflowVersionMapper.updateById(beforeVersion);
+
+        workflowService.updateWorkflow(workflowId, buildWorkflowRequest(
+                workflowName,
+                "desc-base",
+                "[{\"prop\":\"bizdate\",\"value\":\"2026-02-01\"}]",
+                "tg-alpha",
+                operator,
+                Collections.singletonList(taskId)
+        ));
+
+        Long versionIdAfter = requireCurrentVersionId(workflowId);
+        assertTrue(!versionIdBefore.equals(versionIdAfter), "当前版本非V3时应强制创建新版本");
+        WorkflowVersion afterVersion = workflowVersionMapper.selectById(versionIdAfter);
+        assertNotNull(afterVersion);
+        assertEquals(Integer.valueOf(3), afterVersion.getSnapshotSchemaVersion(), "强制生成的基线版本应为V3");
+    }
+
+    @Test
+    @DisplayName("回滚V3版本不应覆盖 workflow.syncSource")
+    void rollbackShouldNotOverwriteSyncSource() {
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String operator = "it-version-compare";
+
+        Long tableA = createTable("it_vcmp_sync_a_" + suffix, "ods");
+        Long tableB = createTable("it_vcmp_sync_b_" + suffix, "dwd");
+        Long taskId = createSqlTask(
+                "it_vcmp_sync_t1_" + suffix,
+                "extract_sync_" + suffix,
+                "insert into it_vcmp_sync_b_" + suffix + " select * from it_vcmp_sync_a_" + suffix,
+                "doris_ds",
+                Collections.singletonList(tableA),
+                Collections.singletonList(tableB),
+                operator
+        );
+
+        String workflowName = "it_workflow_sync_" + suffix;
+        DataWorkflow workflow = workflowService.createWorkflow(buildWorkflowRequest(
+                workflowName,
+                "desc-v1",
+                "[{\"prop\":\"bizdate\",\"value\":\"2026-02-01\"}]",
+                "tg-alpha",
+                operator,
+                Collections.singletonList(taskId)
+        ));
+        Long workflowId = workflow.getId();
+        Long v1 = requireCurrentVersionId(workflowId);
+
+        Long v2 = saveWorkflow(workflowId, workflowName, "desc-v2",
+                "[{\"prop\":\"bizdate\",\"value\":\"2026-02-01\"}]",
+                "tg-alpha", operator, Collections.singletonList(taskId));
+        assertTrue(!v1.equals(v2), "内容变化后应创建新版本");
+
+        dataWorkflowMapper.update(
+                null,
+                Wrappers.<DataWorkflow>lambdaUpdate()
+                        .eq(DataWorkflow::getId, workflowId)
+                        .set(DataWorkflow::getSyncSource, "runtime"));
+
+        WorkflowVersionRollbackRequest rollbackRequest = new WorkflowVersionRollbackRequest();
+        rollbackRequest.setOperator(operator);
+        workflowVersionOperationService.rollback(workflowId, v1, rollbackRequest);
+
+        DataWorkflow latest = dataWorkflowMapper.selectById(workflowId);
+        assertNotNull(latest);
+        assertEquals("runtime", latest.getSyncSource(), "回滚不应覆盖 syncSource");
+    }
 
     @Test
     @DisplayName("单侧多次保存后版本对比应识别核心变更")

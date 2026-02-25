@@ -16,12 +16,12 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -501,11 +501,12 @@ public class DolphinOpenApiClient {
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
         formData.add("codes", String.valueOf(workflowCode));
 
-        List<String> paths = Arrays.asList(
-                String.format("/projects/%d/workflow-definition/batch-export", projectCode),
-                String.format("/projects/%d/process-definition/batch-export", projectCode));
+        List<String> paths = new ArrayList<>();
+        // Prefer DS 3.4+ endpoint, fallback to DS 3.2.x endpoint for compatibility.
+        paths.add(String.format("/projects/%d/workflow-definition/batch-export", projectCode));
+        paths.add(String.format("/projects/%d/process-definition/batch-export", projectCode));
 
-        RuntimeException lastError = null;
+        List<String> attemptErrors = new ArrayList<>();
         for (String path : paths) {
             try {
                 byte[] payload = postFormRaw(path, formData);
@@ -513,16 +514,17 @@ public class DolphinOpenApiClient {
                 if (exported != null && !exported.isNull() && !exported.isMissingNode()) {
                     return exported;
                 }
+                attemptErrors.add(path + " [empty payload]");
             } catch (Exception ex) {
-                lastError = new RuntimeException("Failed export via " + path + ": " + ex.getMessage(), ex);
                 log.debug("Failed to export definition from {}", path, ex);
+                attemptErrors.add(formatExportAttemptError(path, ex));
             }
         }
 
-        if (lastError != null) {
-            throw lastError;
-        }
-        throw new RuntimeException("Failed to export workflow definition: empty response");
+        String detail = attemptErrors.isEmpty()
+                ? "no attempt detail"
+                : String.join("; ", attemptErrors);
+        throw new RuntimeException("Failed to export workflow definition: " + detail);
     }
 
     /**
@@ -1036,5 +1038,38 @@ public class DolphinOpenApiClient {
         } catch (IOException ex) {
             throw new RuntimeException("Invalid export payload json", ex);
         }
+    }
+
+    private String formatExportAttemptError(String path, Exception ex) {
+        Throwable root = ex;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+
+        if (root instanceof WebClientResponseException) {
+            WebClientResponseException webEx = (WebClientResponseException) root;
+            String body = sanitizeErrorMessage(webEx.getResponseBodyAsString());
+            if (!StringUtils.hasText(body)) {
+                body = sanitizeErrorMessage(webEx.getStatusText());
+            }
+            return String.format("%s [status=%d, message=%s]", path, webEx.getRawStatusCode(), body);
+        }
+
+        String message = sanitizeErrorMessage(root.getMessage());
+        if (!StringUtils.hasText(message)) {
+            message = sanitizeErrorMessage(ex.getMessage());
+        }
+        return path + " [message=" + message + "]";
+    }
+
+    private String sanitizeErrorMessage(String message) {
+        if (!StringUtils.hasText(message)) {
+            return "unknown";
+        }
+        String normalized = message.replace('\n', ' ').replace('\r', ' ').trim();
+        if (normalized.length() <= 240) {
+            return normalized;
+        }
+        return normalized.substring(0, 237) + "...";
     }
 }

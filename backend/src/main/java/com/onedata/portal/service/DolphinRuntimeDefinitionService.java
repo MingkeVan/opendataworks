@@ -17,6 +17,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
@@ -106,6 +107,30 @@ public class DolphinRuntimeDefinitionService {
             JsonNode taskDefinitionList = openApiClient.queryTaskDefinitionList(resolvedProjectCode, workflowCode);
             tasks = parseTaskDefinitionsFromNode(taskDefinitionList);
         }
+        if (tasks.isEmpty() || explicitEdges.isEmpty()) {
+            try {
+                JsonNode exported = openApiClient.exportDefinitionByCode(resolvedProjectCode, workflowCode);
+                JsonNode exportedDefinition = readNode(exported, "workflowDefinition", "processDefinition");
+                if (exportedDefinition == null || exportedDefinition.isNull() || exportedDefinition.isMissingNode()) {
+                    exportedDefinition = unwrapDefinition(exported);
+                }
+                if (tasks.isEmpty()) {
+                    tasks = parseTaskDefinitionsFromNode(readNode(exported, "taskDefinitionList"));
+                    if (tasks.isEmpty()) {
+                        tasks = parseTaskDefinitions(exportedDefinition);
+                    }
+                }
+                if (explicitEdges.isEmpty()) {
+                    explicitEdges = parseTaskEdgesFromNode(
+                            readNode(exported, "workflowTaskRelationList", "processTaskRelationList"));
+                    if (explicitEdges.isEmpty()) {
+                        explicitEdges = parseTaskEdges(exportedDefinition);
+                    }
+                }
+            } catch (Exception ignored) {
+                // 旧路径兼容分支，导出兜底失败时保留已有解析结果
+            }
+        }
 
         result.setTasks(tasks);
         result.setExplicitEdges(explicitEdges);
@@ -151,6 +176,11 @@ public class DolphinRuntimeDefinitionService {
         RuntimeWorkflowSchedule schedule = parseScheduleNode(readNode(exported, "schedule"));
         if (schedule == null || schedule.getScheduleId() == null || schedule.getScheduleId() <= 0) {
             schedule = extractSchedule(definition, resolvedWorkflowCode);
+        } else {
+            schedule = mergeRuntimeSchedule(schedule, resolvedWorkflowCode);
+            if (!StringUtils.hasText(schedule.getReleaseState())) {
+                schedule.setReleaseState(readText(definition, "scheduleReleaseState", "releaseState"));
+            }
         }
         result.setSchedule(schedule);
 
@@ -165,53 +195,136 @@ public class DolphinRuntimeDefinitionService {
             explicitEdges = parseTaskEdges(definition);
         }
 
-        // 导出格式异常时，最小化兜底到现有查询接口，保证可解析性
-        JsonNode tasksNode = openApiClient.getProcessDefinitionTasks(resolvedProjectCode, resolvedWorkflowCode);
-        if (tasks.isEmpty()) {
-            tasks = parseTaskDefinitionsFromNode(tasksNode);
-        }
-        if (explicitEdges.isEmpty()) {
-            explicitEdges = parseTaskEdgesFromNode(tasksNode);
-        }
-        if (tasks.isEmpty()) {
-            JsonNode taskDefinitionList = openApiClient.queryTaskDefinitionList(resolvedProjectCode, resolvedWorkflowCode);
-            tasks = parseTaskDefinitionsFromNode(taskDefinitionList);
-        }
-
         result.setTasks(tasks);
         result.setExplicitEdges(explicitEdges);
         result.setRawDefinitionJson(toJson(exported));
         return result;
     }
 
+    /**
+     * 解析离线 JSON（Dolphin 导出文件或平台同构文档）为运行态定义模型。
+     */
+    public RuntimeWorkflowDefinition parseRuntimeDefinitionFromJson(String definitionJson) {
+        if (!StringUtils.hasText(definitionJson)) {
+            throw new IllegalArgumentException("definitionJson 不能为空");
+        }
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(definitionJson);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("definitionJson 不是合法 JSON");
+        }
+        if (root == null || root.isNull() || root.isMissingNode()) {
+            throw new IllegalArgumentException("definitionJson 为空对象");
+        }
+
+        JsonNode definition = readNode(root, "workflowDefinition", "processDefinition", "workflow");
+        if (definition == null || definition.isNull() || definition.isMissingNode()) {
+            definition = unwrapDefinition(root);
+        }
+        if (definition == null || definition.isNull() || definition.isMissingNode()) {
+            throw new IllegalArgumentException("definitionJson 缺少 processDefinition/workflowDefinition");
+        }
+
+        RuntimeWorkflowDefinition result = new RuntimeWorkflowDefinition();
+        result.setProjectCode(readLong(definition, "projectCode"));
+        result.setWorkflowCode(readLong(definition, "code", "workflowCode", "processDefinitionCode"));
+        result.setWorkflowName(readText(definition, "name", "workflowName"));
+        result.setDescription(readText(definition, "description", "desc"));
+        result.setReleaseState(readText(definition, "releaseState", "publishStatus", "scheduleReleaseState"));
+        result.setGlobalParams(normalizeJsonField(readNode(definition, "globalParams")));
+
+        RuntimeWorkflowSchedule schedule = parseScheduleNode(readNode(root, "schedule"));
+        if (schedule == null) {
+            schedule = parseScheduleNode(readNode(definition, "schedule"));
+        }
+        if (schedule != null && !StringUtils.hasText(schedule.getReleaseState())) {
+            schedule.setReleaseState(readText(definition, "scheduleReleaseState", "releaseState"));
+        }
+        result.setSchedule(schedule);
+
+        List<RuntimeTaskDefinition> tasks = parseTaskDefinitionsFromNode(
+                firstPresentNode(root, "taskDefinitionList", "tasks", "taskDefinitionJson"));
+        if (tasks.isEmpty()) {
+            tasks = parseTaskDefinitions(definition);
+        }
+        List<RuntimeTaskEdge> edges = parseTaskEdgesFromNode(
+                firstPresentNode(root,
+                        "workflowTaskRelationList",
+                        "processTaskRelationList",
+                        "taskRelationList",
+                        "edges",
+                        "taskRelationJson"));
+        if (edges.isEmpty()) {
+            edges = parseTaskEdges(definition);
+        }
+
+        result.setTasks(tasks);
+        result.setExplicitEdges(edges);
+        result.setRawDefinitionJson(toJson(root));
+        return result;
+    }
+
     private RuntimeWorkflowSchedule extractSchedule(JsonNode definition, Long workflowCode) {
         JsonNode scheduleNode = readNode(definition, "schedule");
         RuntimeWorkflowSchedule schedule = parseScheduleNode(scheduleNode);
-
-        if (schedule == null || schedule.getScheduleId() == null || schedule.getScheduleId() <= 0) {
-            DolphinSchedule dsSchedule = dolphinSchedulerService.getWorkflowSchedule(workflowCode);
-            if (dsSchedule != null) {
-                schedule = new RuntimeWorkflowSchedule();
-                schedule.setScheduleId(dsSchedule.getId());
-                schedule.setReleaseState(dsSchedule.getReleaseState());
-                schedule.setCrontab(dsSchedule.getCrontab());
-                schedule.setTimezoneId(dsSchedule.getTimezoneId());
-                schedule.setStartTime(dsSchedule.getStartTime());
-                schedule.setEndTime(dsSchedule.getEndTime());
-                schedule.setFailureStrategy(dsSchedule.getFailureStrategy());
-                schedule.setWarningType(dsSchedule.getWarningType());
-                schedule.setWarningGroupId(dsSchedule.getWarningGroupId());
-                schedule.setProcessInstancePriority(dsSchedule.getProcessInstancePriority());
-                schedule.setWorkerGroup(dsSchedule.getWorkerGroup());
-                schedule.setTenantCode(dsSchedule.getTenantCode());
-                schedule.setEnvironmentCode(dsSchedule.getEnvironmentCode());
-            }
-        }
+        schedule = mergeRuntimeSchedule(schedule, workflowCode);
 
         if (schedule != null && !StringUtils.hasText(schedule.getReleaseState())) {
             schedule.setReleaseState(readText(definition, "scheduleReleaseState", "releaseState"));
         }
         return schedule;
+    }
+
+    private RuntimeWorkflowSchedule mergeRuntimeSchedule(RuntimeWorkflowSchedule current, Long workflowCode) {
+        if (workflowCode == null || workflowCode <= 0) {
+            return current;
+        }
+        DolphinSchedule runtimeSchedule = dolphinSchedulerService.getWorkflowSchedule(workflowCode);
+        if (runtimeSchedule == null) {
+            return current;
+        }
+        RuntimeWorkflowSchedule merged = current != null ? current : new RuntimeWorkflowSchedule();
+        if (merged.getScheduleId() == null || merged.getScheduleId() <= 0) {
+            merged.setScheduleId(runtimeSchedule.getId());
+        }
+        if (StringUtils.hasText(runtimeSchedule.getReleaseState())) {
+            merged.setReleaseState(runtimeSchedule.getReleaseState());
+        }
+        if (!StringUtils.hasText(merged.getCrontab())) {
+            merged.setCrontab(runtimeSchedule.getCrontab());
+        }
+        if (!StringUtils.hasText(merged.getTimezoneId())) {
+            merged.setTimezoneId(runtimeSchedule.getTimezoneId());
+        }
+        if (!StringUtils.hasText(merged.getStartTime())) {
+            merged.setStartTime(runtimeSchedule.getStartTime());
+        }
+        if (!StringUtils.hasText(merged.getEndTime())) {
+            merged.setEndTime(runtimeSchedule.getEndTime());
+        }
+        if (!StringUtils.hasText(merged.getFailureStrategy())) {
+            merged.setFailureStrategy(runtimeSchedule.getFailureStrategy());
+        }
+        if (!StringUtils.hasText(merged.getWarningType())) {
+            merged.setWarningType(runtimeSchedule.getWarningType());
+        }
+        if (merged.getWarningGroupId() == null) {
+            merged.setWarningGroupId(runtimeSchedule.getWarningGroupId());
+        }
+        if (!StringUtils.hasText(merged.getProcessInstancePriority())) {
+            merged.setProcessInstancePriority(runtimeSchedule.getProcessInstancePriority());
+        }
+        if (!StringUtils.hasText(merged.getWorkerGroup())) {
+            merged.setWorkerGroup(runtimeSchedule.getWorkerGroup());
+        }
+        if (!StringUtils.hasText(merged.getTenantCode())) {
+            merged.setTenantCode(runtimeSchedule.getTenantCode());
+        }
+        if (merged.getEnvironmentCode() == null) {
+            merged.setEnvironmentCode(runtimeSchedule.getEnvironmentCode());
+        }
+        return merged;
     }
 
     private RuntimeWorkflowSchedule parseScheduleNode(JsonNode scheduleNode) {
@@ -286,11 +399,20 @@ public class DolphinRuntimeDefinitionService {
             if (taskParamsNode != null && !taskParamsNode.isNull()) {
                 task.setSql(readText(taskParamsNode, "sql", "rawScript"));
                 task.setDatasourceId(readLong(taskParamsNode, "datasource", "datasourceId"));
+                task.setDatasourceName(readText(taskParamsNode, "datasourceName"));
                 task.setDatasourceType(readText(taskParamsNode, "type", "datasourceType"));
             }
             if (!StringUtils.hasText(task.getSql())) {
                 task.setSql(readText(item, "sql", "rawScript"));
             }
+            if (!StringUtils.hasText(task.getDatasourceName())) {
+                task.setDatasourceName(readText(item, "datasourceName"));
+            }
+            if (!StringUtils.hasText(task.getDatasourceType())) {
+                task.setDatasourceType(readText(item, "datasourceType"));
+            }
+            task.setInputTableIds(readLongList(item, "inputTableIds"));
+            task.setOutputTableIds(readLongList(item, "outputTableIds"));
             tasks.add(task);
         }
         return tasks;
@@ -332,7 +454,8 @@ public class DolphinRuntimeDefinitionService {
             if (postTaskCode == null || postTaskCode <= 0) {
                 continue;
             }
-            if (preTaskCode == null || preTaskCode <= 0) {
+            // keep entry edges (preTaskCode=0) for full relation comparison.
+            if (preTaskCode == null || preTaskCode < 0) {
                 continue;
             }
             edges.add(new RuntimeTaskEdge(preTaskCode, postTaskCode));
@@ -452,6 +575,38 @@ public class DolphinRuntimeDefinitionService {
             return null;
         }
         return value.intValue();
+    }
+
+    private List<Long> readLongList(JsonNode node, String... fieldNames) {
+        JsonNode target = fieldNames == null || fieldNames.length == 0 ? node : readNode(node, fieldNames);
+        JsonNode normalized = normalizeNode(target);
+        if (normalized == null || !normalized.isArray()) {
+            return Collections.emptyList();
+        }
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        for (JsonNode item : normalized) {
+            if (item == null || item.isNull() || item.isMissingNode()) {
+                continue;
+            }
+            Long value;
+            if (item.isIntegralNumber()) {
+                value = item.asLong();
+            } else if (item.isTextual()) {
+                String text = item.asText();
+                if (!StringUtils.hasText(text)) {
+                    continue;
+                }
+                try {
+                    value = Long.parseLong(text.trim());
+                } catch (NumberFormatException ignored) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+            ids.add(value);
+        }
+        return new ArrayList<>(ids);
     }
 
     private long resolveProjectCode(Long projectCode) {

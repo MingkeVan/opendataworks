@@ -14,19 +14,9 @@ public class RuntimeSyncExecuteResponse {
     private Boolean success = false;
 
     /**
-     * 运行态定义采集模式: legacy/export_shadow/export_only
+     * 运行态定义采集模式（当前固定为 export_only）
      */
     private String ingestMode;
-
-    /**
-     * 一致性状态: not_checked/consistent/inconsistent
-     */
-    private String parityStatus = "not_checked";
-
-    /**
-     * 导出路径与旧路径一致性摘要
-     */
-    private RuntimeSyncParitySummary paritySummary;
 
     private Long workflowId;
 
@@ -41,7 +31,12 @@ public class RuntimeSyncExecuteResponse {
     private RuntimeDiffSummary diffSummary;
 
     /**
-     * 显式边与血缘推断边不一致详情（需要人工确认）
+     * 声明关系与 SQL 推断关系是否不一致（不一致时要求用户选择轨道）
      */
-    private RuntimeEdgeMismatchDetail edgeMismatchDetail;
+    private Boolean relationDecisionRequired = false;
+
+    /**
+     * 声明关系与 SQL 推断关系比对详情
+     */
+    private RuntimeRelationCompareDetail relationCompareDetail;
 }

@@ -22,13 +22,6 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="一致性结果" width="130">
-          <template #default="{ row }">
-            <el-tag size="small" :type="parityTagType(row.parityStatus)">
-              {{ parityText(row.parityStatus) }}
-            </el-tag>
-          </template>
-        </el-table-column>
         <el-table-column prop="versionId" label="版本ID" width="110" />
         <el-table-column label="差异" width="130">
           <template #default="{ row }">
@@ -65,41 +58,10 @@
           <el-descriptions-item label="状态">{{ detail.status || '-' }}</el-descriptions-item>
           <el-descriptions-item label="版本ID">{{ detail.versionId || '-' }}</el-descriptions-item>
           <el-descriptions-item label="采集模式">{{ ingestModeText(detail.ingestMode) }}</el-descriptions-item>
-          <el-descriptions-item label="一致性结果">{{ parityText(detail.parityStatus) }}</el-descriptions-item>
-          <el-descriptions-item label="错误码">{{ detail.errorCode || '-' }}</el-descriptions-item>
           <el-descriptions-item label="操作人">{{ detail.operator || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="错误码">{{ detail.errorCode || '-' }}</el-descriptions-item>
           <el-descriptions-item label="错误信息" :span="2">{{ detail.errorMessage || '-' }}</el-descriptions-item>
         </el-descriptions>
-
-        <div class="detail-section" v-if="detail.paritySummary || detail.parityDetailJson">
-          <div class="detail-subtitle">一致性摘要</div>
-          <div class="diff-grid">
-            <span>状态: {{ parityText(detail.parityStatus) }}</span>
-            <span>结果: {{ detail.paritySummary?.changed ? '存在差异' : '一致' }}</span>
-            <span>主路 Hash: {{ shortHash(detail.paritySummary?.primaryHash) }}</span>
-            <span>影子 Hash: {{ shortHash(detail.paritySummary?.shadowHash) }}</span>
-            <span>workflow 字段差异: {{ detail.paritySummary?.workflowFieldDiffCount || 0 }}</span>
-            <span>任务新增差异: {{ detail.paritySummary?.taskAddedDiffCount || 0 }}</span>
-            <span>任务删除差异: {{ detail.paritySummary?.taskRemovedDiffCount || 0 }}</span>
-            <span>任务修改差异: {{ detail.paritySummary?.taskModifiedDiffCount || 0 }}</span>
-            <span>边新增差异: {{ detail.paritySummary?.edgeAddedDiffCount || 0 }}</span>
-            <span>边删除差异: {{ detail.paritySummary?.edgeRemovedDiffCount || 0 }}</span>
-            <span>调度差异: {{ detail.paritySummary?.scheduleDiffCount || 0 }}</span>
-          </div>
-          <div class="parity-samples" v-if="detail.paritySummary?.sampleMismatches?.length">
-            <div class="detail-subtitle">差异示例</div>
-            <div class="tag-wrap">
-              <el-tag
-                v-for="(sample, index) in detail.paritySummary.sampleMismatches"
-                :key="`sample-${index}`"
-                type="warning"
-                class="sample-tag"
-              >
-                {{ sample }}
-              </el-tag>
-            </div>
-          </div>
-        </div>
 
         <div class="detail-section" v-if="detail.diffSummary">
           <div class="detail-subtitle">差异摘要</div>
@@ -116,27 +78,27 @@
 
         <div class="detail-section" v-if="detail.diffSummary?.workflowFieldChanges?.length">
           <div class="detail-subtitle">Workflow 字段变更详情</div>
-          <div class="tag-wrap">
-            <el-tag
-              v-for="item in detail.diffSummary.workflowFieldChanges"
-              :key="`wf-${item}`"
-              class="item-tag"
-            >
-              {{ item }}
-            </el-tag>
-          </div>
+          <el-table :data="detail.diffSummary.workflowFieldChanges" size="small" border>
+            <el-table-column prop="field" label="字段" min-width="220" />
+            <el-table-column label="变更前" min-width="220">
+              <template #default="{ row }">{{ formatFieldValue(row.before) }}</template>
+            </el-table-column>
+            <el-table-column label="变更后" min-width="220">
+              <template #default="{ row }">{{ formatFieldValue(row.after) }}</template>
+            </el-table-column>
+          </el-table>
         </div>
 
         <div class="detail-section" v-if="detail.diffSummary?.taskAdded?.length">
           <div class="detail-subtitle">任务新增详情</div>
           <div class="tag-wrap">
             <el-tag
-              v-for="item in detail.diffSummary.taskAdded"
-              :key="`task-add-${item}`"
+              v-for="(item, index) in detail.diffSummary.taskAdded"
+              :key="`task-add-${index}`"
               type="success"
               class="item-tag"
             >
-              {{ item }}
+              {{ formatTask(item) }}
             </el-tag>
           </div>
         </div>
@@ -145,27 +107,32 @@
           <div class="detail-subtitle">任务删除详情</div>
           <div class="tag-wrap">
             <el-tag
-              v-for="item in detail.diffSummary.taskRemoved"
-              :key="`task-rm-${item}`"
+              v-for="(item, index) in detail.diffSummary.taskRemoved"
+              :key="`task-rm-${index}`"
               type="danger"
               class="item-tag"
             >
-              {{ item }}
+              {{ formatTask(item) }}
             </el-tag>
           </div>
         </div>
 
         <div class="detail-section" v-if="detail.diffSummary?.taskModified?.length">
           <div class="detail-subtitle">任务修改详情</div>
-          <div class="tag-wrap">
-            <el-tag
-              v-for="item in detail.diffSummary.taskModified"
-              :key="`task-mod-${item}`"
-              type="warning"
-              class="item-tag"
-            >
-              {{ item }}
-            </el-tag>
+          <div class="task-mod-list">
+            <div class="task-mod-card" v-for="(item, index) in detail.diffSummary.taskModified" :key="`task-mod-${index}`">
+              <div class="task-mod-title">{{ formatTask(item) }}</div>
+              <div class="tag-wrap" v-if="item.fieldChanges?.length">
+                <el-tag
+                  v-for="(change, cIndex) in item.fieldChanges"
+                  :key="`task-mod-change-${index}-${cIndex}`"
+                  type="warning"
+                  class="item-tag"
+                >
+                  {{ change.field }}: {{ formatFieldValue(change.before) }} -> {{ formatFieldValue(change.after) }}
+                </el-tag>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -173,40 +140,35 @@
           <div class="detail-subtitle">边变更详情</div>
           <div class="tag-wrap">
             <el-tag
-              v-for="item in detail.diffSummary.edgeAdded"
-              :key="`edge-add-${item}`"
+              v-for="(item, index) in detail.diffSummary.edgeAdded"
+              :key="`edge-add-${index}`"
               type="success"
               class="item-tag"
             >
-              + {{ item }}
+              + {{ formatRelation(item) }}
             </el-tag>
             <el-tag
-              v-for="item in detail.diffSummary.edgeRemoved"
-              :key="`edge-rm-${item}`"
+              v-for="(item, index) in detail.diffSummary.edgeRemoved"
+              :key="`edge-rm-${index}`"
               type="danger"
               class="item-tag"
             >
-              - {{ item }}
+              - {{ formatRelation(item) }}
             </el-tag>
           </div>
         </div>
 
         <div class="detail-section" v-if="detail.diffSummary?.scheduleChanges?.length">
           <div class="detail-subtitle">调度变更详情</div>
-          <div class="tag-wrap">
-            <el-tag
-              v-for="item in detail.diffSummary.scheduleChanges"
-              :key="`sch-${item}`"
-              class="item-tag"
-            >
-              {{ item }}
-            </el-tag>
-          </div>
-        </div>
-
-        <div class="detail-section" v-if="detail.parityDetailJson">
-          <div class="detail-subtitle">一致性详情 JSON</div>
-          <pre class="json-block">{{ formatJson(detail.parityDetailJson) }}</pre>
+          <el-table :data="detail.diffSummary.scheduleChanges" size="small" border>
+            <el-table-column prop="field" label="字段" min-width="220" />
+            <el-table-column label="变更前" min-width="220">
+              <template #default="{ row }">{{ formatFieldValue(row.before) }}</template>
+            </el-table-column>
+            <el-table-column label="变更后" min-width="220">
+              <template #default="{ row }">{{ formatFieldValue(row.after) }}</template>
+            </el-table-column>
+          </el-table>
         </div>
 
         <div class="detail-section" v-if="detail.rawDefinitionJson">
@@ -342,29 +304,24 @@ const ingestModeTagType = (mode) => {
   return map[mode] || 'info'
 }
 
-const parityText = (status) => {
-  const map = {
-    consistent: '一致',
-    inconsistent: '不一致',
-    not_checked: '未校验'
-  }
-  return map[status] || status || '未校验'
+const formatFieldValue = (value) => {
+  return value === null || value === undefined || value === '' ? '∅' : String(value)
 }
 
-const parityTagType = (status) => {
-  const map = {
-    consistent: 'success',
-    inconsistent: 'danger',
-    not_checked: 'info'
-  }
-  return map[status] || 'info'
+const formatTask = (task) => {
+  if (!task) return '-'
+  const code = task.taskCode !== null && task.taskCode !== undefined ? `#${task.taskCode}` : '#-'
+  const name = task.taskName || '未命名任务'
+  return `${name} (${code})`
 }
 
-const shortHash = (value) => {
-  if (!value) {
-    return '-'
-  }
-  return String(value).slice(0, 12)
+const formatRelation = (edge) => {
+  if (!edge) return '-'
+  const preCode = edge.preTaskCode !== null && edge.preTaskCode !== undefined ? edge.preTaskCode : '-'
+  const postCode = edge.postTaskCode !== null && edge.postTaskCode !== undefined ? edge.postTaskCode : '-'
+  const preName = edge.entryEdge ? '入口' : (edge.preTaskName || preCode)
+  const postName = edge.postTaskName || postCode
+  return `${preName}(${preCode}) -> ${postName}(${postCode})`
 }
 
 const formatJson = (value) => {
@@ -427,26 +384,35 @@ const formatJson = (value) => {
   flex-wrap: wrap;
 }
 
-.sample-tag {
-  margin: 0 8px 8px 0;
-  max-width: 100%;
-}
-
 .item-tag {
   margin: 0 8px 8px 0;
   max-width: 100%;
 }
 
-.json-block {
-  margin: 0;
+.task-mod-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.task-mod-card {
   border: 1px solid #ebeef5;
   border-radius: 6px;
-  background: #fafafa;
   padding: 10px;
-  max-height: 260px;
+}
+
+.task-mod-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.json-block {
+  background: #0f172a;
+  color: #e5e7eb;
+  border-radius: 6px;
+  padding: 10px;
   overflow: auto;
   font-size: 12px;
   line-height: 1.5;
-  color: #303133;
 }
 </style>

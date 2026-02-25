@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import com.onedata.portal.dto.dolphin.DolphinSchedule;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
@@ -40,6 +42,9 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Collections;
@@ -50,6 +55,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
@@ -65,7 +71,7 @@ public class WorkflowService {
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
     };
-    private static final int SNAPSHOT_SCHEMA_VERSION_CANONICAL = 2;
+    private static final int SNAPSHOT_SCHEMA_VERSION_DEFINITION = 3;
 
     private final DataWorkflowMapper dataWorkflowMapper;
     private final WorkflowTaskRelationMapper workflowTaskRelationMapper;
@@ -124,6 +130,46 @@ public class WorkflowService {
                 .publishRecords(publishRecords)
                 .recentInstances(recentInstances)
                 .build();
+    }
+
+    @Transactional
+    public String buildDefinitionJsonForExport(Long workflowId) {
+        DataWorkflow workflow = dataWorkflowMapper.selectById(workflowId);
+        if (workflow == null) {
+            throw new IllegalArgumentException("Workflow not found: " + workflowId);
+        }
+        if (StringUtils.hasText(workflow.getDefinitionJson())) {
+            return workflow.getDefinitionJson();
+        }
+
+        List<WorkflowTaskRelation> relations = workflowTaskRelationMapper.selectList(
+                Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                        .eq(WorkflowTaskRelation::getWorkflowId, workflowId)
+                        .orderByAsc(WorkflowTaskRelation::getId));
+        List<WorkflowTaskBinding> bindings = new ArrayList<>();
+        for (WorkflowTaskRelation relation : relations) {
+            if (relation == null || relation.getTaskId() == null) {
+                continue;
+            }
+            WorkflowTaskBinding binding = new WorkflowTaskBinding();
+            binding.setTaskId(relation.getTaskId());
+            binding.setEntry(relation.getIsEntry());
+            binding.setExit(relation.getIsExit());
+            if (StringUtils.hasText(relation.getNodeAttrs())) {
+                try {
+                    binding.setNodeAttrs(objectMapper.readValue(relation.getNodeAttrs(), Map.class));
+                } catch (Exception ignored) {
+                    // ignore malformed nodeAttrs for export
+                }
+            }
+            bindings.add(binding);
+        }
+
+        WorkflowTopologyResult topology = workflowTopologyService.buildTopology(collectTaskIds(bindings));
+        String definitionJson = toJson(buildPlatformDefinitionDocument(workflow, bindings, topology));
+        workflow.setDefinitionJson(definitionJson);
+        dataWorkflowMapper.updateById(workflow);
+        return definitionJson;
     }
 
     private List<WorkflowInstanceCache> resolveRecentInstances(DataWorkflow workflow, int limit) {
@@ -289,7 +335,11 @@ public class WorkflowService {
 
         persistTaskRelations(workflow.getId(), taskBindings, null, topology);
 
-        WorkflowVersion version = snapshotWorkflow(workflow, request);
+        workflow.setDefinitionJson(resolveDefinitionJson(workflow, request, taskBindings, topology));
+        dataWorkflowMapper.updateById(workflow);
+
+        String versionDefinitionJson = toJson(buildPlatformDefinitionDocument(workflow, taskBindings, topology));
+        WorkflowVersion version = snapshotWorkflow(workflow, request, versionDefinitionJson);
         workflow.setCurrentVersionId(version.getId());
         dataWorkflowMapper.updateById(workflow);
 
@@ -408,7 +458,6 @@ public class WorkflowService {
         WorkflowTopologyResult topology = workflowTopologyService.buildTopology(taskIdsInOrder);
         workflow.setWorkflowName(request.getWorkflowName());
         workflow.setDescription(request.getDescription());
-        workflow.setDefinitionJson(defaultJson(request.getDefinitionJson()));
         workflow.setEntryTaskIds(toJson(orderTaskIds(topology.getEntryTaskIds(), taskIdsInOrder)));
         workflow.setExitTaskIds(toJson(orderTaskIds(topology.getExitTaskIds(), taskIdsInOrder)));
         workflow.setGlobalParams(request.getGlobalParams());
@@ -418,14 +467,19 @@ public class WorkflowService {
         if (workflow.getProjectCode() == null || workflow.getProjectCode() == 0) {
             workflow.setProjectCode(resolveProjectCode(request.getProjectCode()));
         }
-        dataWorkflowMapper.updateById(workflow);
 
         persistTaskRelations(workflowId, taskBindings, workflow.getCurrentVersionId(), topology);
 
-        WorkflowVersion version = snapshotWorkflow(workflow, request);
-        workflow.setCurrentVersionId(version.getId());
+        workflow.setDefinitionJson(resolveDefinitionJson(workflow, request, taskBindings, topology));
         dataWorkflowMapper.updateById(workflow);
-        updateRelationVersion(workflowId, version.getId());
+
+        String versionDefinitionJson = toJson(buildPlatformDefinitionDocument(workflow, taskBindings, topology));
+        if (shouldCreateNewVersion(workflow, versionDefinitionJson)) {
+            WorkflowVersion version = snapshotWorkflow(workflow, request, versionDefinitionJson);
+            workflow.setCurrentVersionId(version.getId());
+            dataWorkflowMapper.updateById(workflow);
+            updateRelationVersion(workflowId, version.getId());
+        }
         return workflow;
     }
 
@@ -437,9 +491,9 @@ public class WorkflowService {
                         .eq(WorkflowTaskRelation::getWorkflowId, workflowId));
     }
 
-    private WorkflowVersion snapshotWorkflow(DataWorkflow workflow, WorkflowDefinitionRequest request) {
-        Map<String, Object> snapshot = buildCanonicalSnapshot(workflow, request);
-        String snapshotJson = toJson(snapshot);
+    private WorkflowVersion snapshotWorkflow(DataWorkflow workflow,
+            WorkflowDefinitionRequest request,
+            String snapshotJson) {
         boolean isInitial = workflow.getCurrentVersionId() == null;
         String changeSummary = isInitial ? "initial workflow definition" : "updated workflow definition";
         return workflowVersionService.createVersion(
@@ -448,65 +502,356 @@ public class WorkflowService {
                 StringUtils.hasText(request.getDescription()) ? request.getDescription() : changeSummary,
                 request.getTriggerSource(),
                 request.getOperator(),
-                SNAPSHOT_SCHEMA_VERSION_CANONICAL,
+                SNAPSHOT_SCHEMA_VERSION_DEFINITION,
                 null);
     }
 
-    private Map<String, Object> buildCanonicalSnapshot(DataWorkflow workflow, WorkflowDefinitionRequest request) {
-        Map<String, Object> root = new LinkedHashMap<>();
-        root.put("schemaVersion", SNAPSHOT_SCHEMA_VERSION_CANONICAL);
-        root.put("workflow", buildWorkflowSnapshotNode(workflow));
-        List<Map<String, Object>> taskNodes = buildTaskSnapshotNodes(request != null ? request.getTasks() : null);
-        root.put("tasks", taskNodes);
-        root.put("edges", inferTaskEdges(taskNodes));
-        root.put("schedule", buildScheduleSnapshotNode(workflow));
+    private boolean shouldCreateNewVersion(DataWorkflow workflow, String incomingSnapshotJson) {
+        if (workflow == null) {
+            return true;
+        }
+        if (workflow.getCurrentVersionId() == null) {
+            return true;
+        }
+        WorkflowVersion currentVersion = workflowVersionMapper.selectById(workflow.getCurrentVersionId());
+        if (currentVersion == null || !StringUtils.hasText(currentVersion.getStructureSnapshot())) {
+            return true;
+        }
+        if (!Objects.equals(currentVersion.getSnapshotSchemaVersion(), SNAPSHOT_SCHEMA_VERSION_DEFINITION)) {
+            return true;
+        }
+        String currentHash = snapshotContentHash(currentVersion.getStructureSnapshot());
+        String incomingHash = snapshotContentHash(incomingSnapshotJson);
+        if (!StringUtils.hasText(currentHash) || !StringUtils.hasText(incomingHash)) {
+            return true;
+        }
+        return !Objects.equals(currentHash, incomingHash);
+    }
 
-        Map<String, Object> meta = new LinkedHashMap<>();
-        meta.put("triggerSource", request != null ? request.getTriggerSource() : null);
-        meta.put("operator", request != null ? request.getOperator() : null);
-        meta.put("snapshotAt", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        root.put("meta", meta);
+    private String snapshotContentHash(String snapshotJson) {
+        if (!StringUtils.hasText(snapshotJson)) {
+            return null;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(snapshotJson);
+            if (node != null && node.isObject()) {
+                ((ObjectNode) node).remove("meta");
+            }
+            String normalized = node != null ? canonicalizeJson(node) : snapshotJson.trim();
+            return sha256(normalized);
+        } catch (Exception ignored) {
+            return sha256(snapshotJson.trim());
+        }
+    }
+
+    private String canonicalizeJson(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return "null";
+        }
+        if (node.isObject()) {
+            StringBuilder sb = new StringBuilder();
+            sb.append('{');
+            boolean first = true;
+            TreeSet<String> fieldNames = new TreeSet<>();
+            node.fieldNames().forEachRemaining(fieldNames::add);
+            for (String fieldName : fieldNames) {
+                if (!first) {
+                    sb.append(',');
+                }
+                first = false;
+                sb.append('"').append(fieldName).append('"').append(':');
+                sb.append(canonicalizeJson(node.get(fieldName)));
+            }
+            sb.append('}');
+            return sb.toString();
+        }
+        if (node.isArray()) {
+            StringBuilder sb = new StringBuilder();
+            sb.append('[');
+            for (int i = 0; i < node.size(); i++) {
+                if (i > 0) {
+                    sb.append(',');
+                }
+                sb.append(canonicalizeJson(node.get(i)));
+            }
+            sb.append(']');
+            return sb.toString();
+        }
+        return node.toString();
+    }
+
+    private String sha256(String text) {
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("无法生成 hash", e);
+        }
+    }
+
+    private String resolveDefinitionJson(DataWorkflow workflow,
+            WorkflowDefinitionRequest request,
+            List<WorkflowTaskBinding> taskBindings,
+            WorkflowTopologyResult topology) {
+        if (request != null && StringUtils.hasText(request.getDefinitionJson())) {
+            String normalized = normalizeJsonText(request.getDefinitionJson());
+            if (isMeaningfulDefinitionJson(normalized)) {
+                return normalized;
+            }
+        }
+        Map<String, Object> definition = buildPlatformDefinitionDocument(workflow, taskBindings, topology);
+        return toJson(definition);
+    }
+
+    private boolean isMeaningfulDefinitionJson(String definitionJson) {
+        if (!StringUtils.hasText(definitionJson)) {
+            return false;
+        }
+        String trimmed = definitionJson.trim();
+        if (!StringUtils.hasText(trimmed) || "{}".equals(trimmed)) {
+            return false;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(trimmed);
+            if (node == null || node.isNull() || node.isMissingNode()) {
+                return false;
+            }
+            return !(node.isObject() && node.size() == 0);
+        } catch (Exception ex) {
+            return true;
+        }
+    }
+
+    private String normalizeJsonText(String jsonText) {
+        if (!StringUtils.hasText(jsonText)) {
+            return "{}";
+        }
+        String trimmed = jsonText.trim();
+        try {
+            JsonNode node = objectMapper.readTree(trimmed);
+            return objectMapper.writeValueAsString(node);
+        } catch (Exception ignored) {
+            return trimmed;
+        }
+    }
+
+    private Map<String, Object> buildPlatformDefinitionDocument(DataWorkflow workflow,
+            List<WorkflowTaskBinding> bindings,
+            WorkflowTopologyResult topology) {
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("schemaVersion", SNAPSHOT_SCHEMA_VERSION_DEFINITION);
+        root.put("processDefinition", buildProcessDefinitionNode(workflow));
+        List<Map<String, Object>> taskNodes = buildTaskSnapshotNodes(bindings);
+        root.put("taskDefinitionList", buildTaskDefinitionNodes(taskNodes));
+        root.put("processTaskRelationList", buildProcessTaskRelationNodes(taskNodes, topology));
+        root.put("schedule", buildScheduleDefinitionNode(workflow));
+        root.put("xPlatformWorkflowMeta", buildPlatformWorkflowMetaNode(workflow));
         return root;
     }
 
-    private Map<String, Object> buildWorkflowSnapshotNode(DataWorkflow workflow) {
+    private Map<String, Object> buildProcessDefinitionNode(DataWorkflow workflow) {
         Map<String, Object> node = new LinkedHashMap<>();
         if (workflow == null) {
             return node;
         }
-        node.put("workflowId", workflow.getId());
+        node.put("code", workflow.getWorkflowCode());
         node.put("workflowCode", workflow.getWorkflowCode());
         node.put("projectCode", workflow.getProjectCode());
-        node.put("workflowName", workflow.getWorkflowName());
+        node.put("name", workflow.getWorkflowName());
         node.put("description", workflow.getDescription());
-        node.put("definitionJson", defaultJson(workflow.getDefinitionJson()));
         node.put("globalParams", workflow.getGlobalParams());
         node.put("taskGroupName", workflow.getTaskGroupName());
-        node.put("status", workflow.getStatus());
+        node.put("releaseState", workflow.getStatus());
         node.put("publishStatus", workflow.getPublishStatus());
-        node.put("syncSource", workflow.getSyncSource());
         return node;
     }
 
-    private Map<String, Object> buildScheduleSnapshotNode(DataWorkflow workflow) {
+    private Map<String, Object> buildPlatformWorkflowMetaNode(DataWorkflow workflow) {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        if (workflow == null) {
+            return meta;
+        }
+        meta.put("workflowId", workflow.getId());
+        meta.put("workflowCode", workflow.getWorkflowCode());
+        meta.put("projectCode", workflow.getProjectCode());
+        meta.put("workflowName", workflow.getWorkflowName());
+        meta.put("publishStatus", workflow.getPublishStatus());
+        return meta;
+    }
+
+    private List<Map<String, Object>> buildTaskDefinitionNodes(List<Map<String, Object>> taskNodes) {
+        if (CollectionUtils.isEmpty(taskNodes)) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> definitions = new ArrayList<>();
+        for (Map<String, Object> taskNode : taskNodes) {
+            if (taskNode == null) {
+                continue;
+            }
+            Long runtimeTaskCode = asLong(taskNode.get("dolphinTaskCode"));
+            if (runtimeTaskCode == null || runtimeTaskCode <= 0) {
+                runtimeTaskCode = asLong(taskNode.get("taskId"));
+            }
+            if (runtimeTaskCode == null || runtimeTaskCode <= 0) {
+                continue;
+            }
+
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("code", runtimeTaskCode);
+            item.put("taskCode", runtimeTaskCode);
+            item.put("name", taskNode.get("taskName"));
+            item.put("taskName", taskNode.get("taskName"));
+            item.put("description", taskNode.get("taskDesc"));
+            item.put("taskType", taskNode.get("dolphinNodeType"));
+            item.put("nodeType", taskNode.get("dolphinNodeType"));
+            item.put("version", taskNode.get("dolphinTaskVersion") != null ? taskNode.get("dolphinTaskVersion") : 1);
+            item.put("timeout", taskNode.get("timeoutSeconds"));
+            item.put("failRetryTimes", taskNode.get("retryTimes"));
+            item.put("failRetryInterval", taskNode.get("retryInterval"));
+            item.put("taskPriority", taskNode.get("priority"));
+            item.put("taskGroupName", taskNode.get("taskGroupName"));
+
+            Map<String, Object> taskParams = new LinkedHashMap<>();
+            taskParams.put("sql", taskNode.get("taskSql"));
+            taskParams.put("rawScript", taskNode.get("taskSql"));
+            taskParams.put("datasourceName", taskNode.get("datasourceName"));
+            taskParams.put("type", taskNode.get("datasourceType"));
+            item.put("taskParams", taskParams);
+
+            item.put("inputTableIds", taskNode.get("inputTableIds"));
+            item.put("outputTableIds", taskNode.get("outputTableIds"));
+            Map<String, Object> platformTaskMeta = new LinkedHashMap<>();
+            platformTaskMeta.put("taskId", taskNode.get("taskId"));
+            platformTaskMeta.put("platformTaskCode", taskNode.get("taskCode"));
+            platformTaskMeta.put("entry", taskNode.get("entry"));
+            platformTaskMeta.put("exit", taskNode.get("exit"));
+            platformTaskMeta.put("nodeAttrs", taskNode.get("nodeAttrs"));
+            platformTaskMeta.put("engine", taskNode.get("engine"));
+            platformTaskMeta.put("platformTaskType", taskNode.get("taskType"));
+            platformTaskMeta.put("dolphinTaskCode", taskNode.get("dolphinTaskCode"));
+            platformTaskMeta.put("dolphinTaskVersion", taskNode.get("dolphinTaskVersion"));
+            item.put("xPlatformTaskMeta", platformTaskMeta);
+            definitions.add(item);
+        }
+        return definitions;
+    }
+
+    private List<Map<String, Object>> buildProcessTaskRelationNodes(List<Map<String, Object>> taskNodes,
+            WorkflowTopologyResult topology) {
+        if (CollectionUtils.isEmpty(taskNodes)) {
+            return Collections.emptyList();
+        }
+        Map<Long, Long> runtimeTaskCodeByTaskId = new LinkedHashMap<>();
+        List<Long> allTaskCodes = new ArrayList<>();
+        for (Map<String, Object> taskNode : taskNodes) {
+            if (taskNode == null) {
+                continue;
+            }
+            Long taskId = asLong(taskNode.get("taskId"));
+            Long runtimeTaskCode = asLong(taskNode.get("dolphinTaskCode"));
+            if (runtimeTaskCode == null || runtimeTaskCode <= 0) {
+                runtimeTaskCode = taskId;
+            }
+            if (taskId != null && runtimeTaskCode != null && runtimeTaskCode > 0) {
+                runtimeTaskCodeByTaskId.put(taskId, runtimeTaskCode);
+                allTaskCodes.add(runtimeTaskCode);
+            }
+        }
+        if (runtimeTaskCodeByTaskId.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Set<String> edgeSet = new LinkedHashSet<>();
+        List<Map<String, Object>> relations = new ArrayList<>();
+        List<Map<String, Object>> inferredEdges = inferTaskEdges(taskNodes);
+        for (Map<String, Object> edge : inferredEdges) {
+            Long upstreamTaskId = asLong(edge.get("upstreamTaskId"));
+            Long downstreamTaskId = asLong(edge.get("downstreamTaskId"));
+            Long preTaskCode = runtimeTaskCodeByTaskId.get(upstreamTaskId);
+            Long postTaskCode = runtimeTaskCodeByTaskId.get(downstreamTaskId);
+            if (preTaskCode == null || postTaskCode == null || postTaskCode <= 0) {
+                continue;
+            }
+            addRelationNode(relations, edgeSet, preTaskCode, postTaskCode);
+        }
+
+        Set<Long> entryCodes = new LinkedHashSet<>();
+        if (topology != null && !CollectionUtils.isEmpty(topology.getEntryTaskIds())) {
+            for (Long entryTaskId : topology.getEntryTaskIds()) {
+                Long entryCode = runtimeTaskCodeByTaskId.get(entryTaskId);
+                if (entryCode != null && entryCode > 0) {
+                    entryCodes.add(entryCode);
+                }
+            }
+        }
+        if (entryCodes.isEmpty()) {
+            Set<Long> downstreamWithUpstream = relations.stream()
+                    .map(item -> asLong(item.get("postTaskCode")))
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+            for (Long taskCode : allTaskCodes) {
+                if (!downstreamWithUpstream.contains(taskCode)) {
+                    entryCodes.add(taskCode);
+                }
+            }
+        }
+        for (Long entryCode : entryCodes) {
+            addRelationNode(relations, edgeSet, 0L, entryCode);
+        }
+        relations.sort(Comparator
+                .comparing((Map<String, Object> item) -> asLong(item.get("preTaskCode")), Comparator.nullsLast(Long::compareTo))
+                .thenComparing(item -> asLong(item.get("postTaskCode")), Comparator.nullsLast(Long::compareTo)));
+        return relations;
+    }
+
+    private void addRelationNode(List<Map<String, Object>> relations,
+            Set<String> edgeSet,
+            Long preTaskCode,
+            Long postTaskCode) {
+        if (postTaskCode == null || postTaskCode <= 0) {
+            return;
+        }
+        Long normalizedPre = preTaskCode == null ? 0L : preTaskCode;
+        if (normalizedPre < 0) {
+            return;
+        }
+        String key = normalizedPre + "->" + postTaskCode;
+        if (!edgeSet.add(key)) {
+            return;
+        }
+        Map<String, Object> relation = new LinkedHashMap<>();
+        relation.put("preTaskCode", normalizedPre);
+        relation.put("postTaskCode", postTaskCode);
+        relations.add(relation);
+    }
+
+    private Map<String, Object> buildScheduleDefinitionNode(DataWorkflow workflow) {
         Map<String, Object> schedule = new LinkedHashMap<>();
         if (workflow == null) {
             return schedule;
         }
-        schedule.put("dolphinScheduleId", workflow.getDolphinScheduleId());
-        schedule.put("scheduleState", workflow.getScheduleState());
-        schedule.put("scheduleCron", workflow.getScheduleCron());
-        schedule.put("scheduleTimezone", workflow.getScheduleTimezone());
-        schedule.put("scheduleStartTime", toDateTimeText(workflow.getScheduleStartTime()));
-        schedule.put("scheduleEndTime", toDateTimeText(workflow.getScheduleEndTime()));
-        schedule.put("scheduleFailureStrategy", workflow.getScheduleFailureStrategy());
-        schedule.put("scheduleWarningType", workflow.getScheduleWarningType());
-        schedule.put("scheduleWarningGroupId", workflow.getScheduleWarningGroupId());
-        schedule.put("scheduleProcessInstancePriority", workflow.getScheduleProcessInstancePriority());
-        schedule.put("scheduleWorkerGroup", workflow.getScheduleWorkerGroup());
-        schedule.put("scheduleTenantCode", workflow.getScheduleTenantCode());
-        schedule.put("scheduleEnvironmentCode", workflow.getScheduleEnvironmentCode());
-        schedule.put("scheduleAutoOnline", workflow.getScheduleAutoOnline());
+        schedule.put("id", workflow.getDolphinScheduleId());
+        schedule.put("releaseState", workflow.getScheduleState());
+        schedule.put("crontab", workflow.getScheduleCron());
+        schedule.put("timezoneId", workflow.getScheduleTimezone());
+        schedule.put("startTime", toDateTimeText(workflow.getScheduleStartTime()));
+        schedule.put("endTime", toDateTimeText(workflow.getScheduleEndTime()));
+        schedule.put("failureStrategy", workflow.getScheduleFailureStrategy());
+        schedule.put("warningType", workflow.getScheduleWarningType());
+        schedule.put("warningGroupId", workflow.getScheduleWarningGroupId());
+        schedule.put("processInstancePriority", workflow.getScheduleProcessInstancePriority());
+        schedule.put("workerGroup", workflow.getScheduleWorkerGroup());
+        schedule.put("tenantCode", workflow.getScheduleTenantCode());
+        schedule.put("environmentCode", workflow.getScheduleEnvironmentCode());
+        schedule.put("scheduleAutoOnline", Boolean.TRUE.equals(workflow.getScheduleAutoOnline()));
         return schedule;
     }
 

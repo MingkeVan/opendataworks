@@ -13,12 +13,28 @@ export const workflowApi = {
     return request.post('/v1/workflows', data)
   },
 
+  previewImportDefinition(data) {
+    return request.post('/v1/workflows/import/preview', data)
+  },
+
+  commitImportDefinition(data) {
+    return request.post('/v1/workflows/import/commit', data)
+  },
+
   update(id, data) {
     return request.put(`/v1/workflows/${id}`, data)
   },
 
+  exportJson(id) {
+    return request.get(`/v1/workflows/${id}/export-json`)
+  },
+
   publish(id, payload) {
     return request.post(`/v1/workflows/${id}/publish`, payload)
+  },
+
+  previewPublish(id) {
+    return request.get(`/v1/workflows/${id}/publish/preview`)
   },
 
   approve(id, recordId, payload) {

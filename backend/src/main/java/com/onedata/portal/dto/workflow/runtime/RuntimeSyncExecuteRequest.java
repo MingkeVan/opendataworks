@@ -15,7 +15,8 @@ public class RuntimeSyncExecuteRequest {
     private String operator;
 
     /**
-     * 显式边与血缘推断边不一致时，是否已人工确认差异并允许继续同步
+     * 声明关系与 SQL 推断关系不一致时，人工选择落盘轨道:
+     * DECLARED / INFERRED
      */
-    private Boolean confirmEdgeMismatch;
+    private String relationDecision;
 }

@@ -3,7 +3,6 @@ package com.onedata.portal.service;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowTaskBinding;
 import com.onedata.portal.dto.workflow.WorkflowVersionCompareRequest;
@@ -58,6 +57,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class WorkflowVersionOperationService {
 
+    private static final int SNAPSHOT_SCHEMA_VERSION_DEFINITION = 3;
+
     private final WorkflowVersionMapper workflowVersionMapper;
     private final DataWorkflowMapper dataWorkflowMapper;
     private final DataTaskMapper dataTaskMapper;
@@ -87,9 +88,13 @@ public class WorkflowVersionOperationService {
 
         WorkflowVersion rightVersion = requireVersion(workflowId, rightVersionId);
         WorkflowVersion leftVersion = leftVersionId == null ? null : requireVersion(workflowId, leftVersionId);
+        requireV3Version(rightVersion, WorkflowVersionErrorCodes.VERSION_COMPARE_ONLY_V3, "版本比对");
+        if (leftVersion != null) {
+            requireV3Version(leftVersion, WorkflowVersionErrorCodes.VERSION_COMPARE_ONLY_V3, "版本比对");
+        }
 
-        SnapshotNormalized left = leftVersion == null ? SnapshotNormalized.empty() : normalizeSnapshot(leftVersion);
-        SnapshotNormalized right = normalizeSnapshot(rightVersion);
+        SnapshotNormalized left = leftVersion == null ? SnapshotNormalized.empty() : normalizeSnapshotForCompare(leftVersion);
+        SnapshotNormalized right = normalizeSnapshotForCompare(rightVersion);
 
         WorkflowVersionCompareResponse response = new WorkflowVersionCompareResponse();
         response.setLeftVersionId(leftVersion != null ? leftVersion.getId() : null);
@@ -131,11 +136,8 @@ public class WorkflowVersionOperationService {
         }
 
         WorkflowVersion targetVersion = requireVersion(workflowId, targetVersionId);
-        SnapshotNormalized target = normalizeSnapshot(targetVersion);
-        if (!target.isRollbackSupported()) {
-            throw badRequest(WorkflowVersionErrorCodes.VERSION_SNAPSHOT_UNSUPPORTED,
-                    "旧版本快照结构不支持完整回退，请选择较新的版本");
-        }
+        requireV3Version(targetVersion, WorkflowVersionErrorCodes.VERSION_ROLLBACK_ONLY_V3, "版本回滚");
+        SnapshotNormalized target = normalizeSnapshotForRollback(targetVersion);
 
         String operator = resolveOperator(request != null ? request.getOperator() : null);
         restoreWorkflowRuntimeFields(workflowId, target.getWorkflow(), target.getSchedule(), operator);
@@ -254,8 +256,12 @@ public class WorkflowVersionOperationService {
             DataTask payload = new DataTask();
             payload.setId(taskId);
             payload.setTaskName(readText(taskSnapshot.getNode(), "taskName", existing.getTaskName()));
-            payload.setTaskCode(readText(taskSnapshot.getNode(), "taskCode", existing.getTaskCode()));
-            payload.setTaskType(readText(taskSnapshot.getNode(), "taskType", existing.getTaskType()));
+            payload.setTaskCode(readText(taskSnapshot.getNode(), "platformTaskCode", existing.getTaskCode()));
+            String rollbackTaskType = readText(taskSnapshot.getNode(), "taskType", existing.getTaskType());
+            if (!"batch".equalsIgnoreCase(rollbackTaskType) && !"stream".equalsIgnoreCase(rollbackTaskType)) {
+                rollbackTaskType = existing.getTaskType();
+            }
+            payload.setTaskType(rollbackTaskType);
             payload.setEngine(readText(taskSnapshot.getNode(), "engine", existing.getEngine()));
             payload.setDolphinNodeType(readText(taskSnapshot.getNode(), "dolphinNodeType", existing.getDolphinNodeType()));
             payload.setTaskSql(readText(taskSnapshot.getNode(), "taskSql", existing.getTaskSql()));
@@ -298,7 +304,6 @@ public class WorkflowVersionOperationService {
                         .eq(DataWorkflow::getId, workflowId)
                         .set(DataWorkflow::getStatus, readText(workflowNode, "status", null))
                         .set(DataWorkflow::getPublishStatus, readText(workflowNode, "publishStatus", null))
-                        .set(DataWorkflow::getSyncSource, readText(workflowNode, "syncSource", null))
                         .set(DataWorkflow::getDolphinScheduleId, readLong(scheduleNode, "dolphinScheduleId", null))
                         .set(DataWorkflow::getScheduleState, readText(scheduleNode, "scheduleState", null))
                         .set(DataWorkflow::getScheduleCron, readText(scheduleNode, "scheduleCron", null))
@@ -528,55 +533,275 @@ public class WorkflowVersionOperationService {
         return version;
     }
 
-    private SnapshotNormalized normalizeSnapshot(WorkflowVersion version) {
+    private SnapshotNormalized normalizeSnapshotForCompare(WorkflowVersion version) {
         if (version == null) {
             return SnapshotNormalized.empty();
         }
-        String json = version.getStructureSnapshot();
-        if (!StringUtils.hasText(json)) {
-            throw badRequest(WorkflowVersionErrorCodes.VERSION_SNAPSHOT_UNSUPPORTED,
-                    "版本快照为空: versionId=" + version.getId());
-        }
+        return normalizeSnapshotFromDefinitionJson(version, false);
+    }
 
-        JsonNode node;
+    private SnapshotNormalized normalizeSnapshotForRollback(WorkflowVersion version) {
+        if (version == null) {
+            return SnapshotNormalized.empty();
+        }
+        return normalizeSnapshotFromDefinitionJson(version, true);
+    }
+
+    private SnapshotNormalized normalizeSnapshotFromDefinitionJson(WorkflowVersion version, boolean requireTaskId) {
+        if (version == null || !StringUtils.hasText(version.getStructureSnapshot())) {
+            throw badRequest(WorkflowVersionErrorCodes.VERSION_SNAPSHOT_UNSUPPORTED,
+                    "版本定义为空: versionId=" + (version != null ? version.getId() : null));
+        }
+        JsonNode rootNode;
         try {
-            node = objectMapper.readTree(json);
+            rootNode = objectMapper.readTree(version.getStructureSnapshot());
         } catch (Exception ex) {
             throw badRequest(WorkflowVersionErrorCodes.VERSION_SNAPSHOT_UNSUPPORTED,
-                    "版本快照格式不合法: versionId=" + version.getId());
+                    "版本定义解析失败: versionId=" + (version != null ? version.getId() : null));
         }
+
+        JsonNode processNode = firstPresentNode(rootNode, "processDefinition", "workflowDefinition", "workflow");
+        if (processNode == null) {
+            throw badRequest(WorkflowVersionErrorCodes.VERSION_SNAPSHOT_UNSUPPORTED,
+                    "版本定义缺少 processDefinition: versionId=" + version.getId());
+        }
+        JsonNode platformWorkflowMeta = firstPresentNode(rootNode, "xPlatformWorkflowMeta");
+
+        Map<String, Object> workflowNode = new LinkedHashMap<>();
+        workflowNode.put("workflowCode", firstLong(processNode, "workflowCode", "code", "processDefinitionCode"));
+        workflowNode.put("projectCode", firstLong(processNode, "projectCode"));
+        workflowNode.put("workflowName", firstText(processNode, "workflowName", "name"));
+        workflowNode.put("description", firstText(processNode, "description", "desc"));
+        workflowNode.put("globalParams", normalizeJsonTextValue(processNode.get("globalParams")));
+        workflowNode.put("taskGroupName", firstText(processNode, "taskGroupName"));
+        workflowNode.put("status", firstText(processNode, "releaseState", "status"));
+        workflowNode.put("publishStatus", firstNonBlank(
+                firstText(platformWorkflowMeta, "publishStatus"),
+                firstText(processNode, "publishStatus")));
+
+        Map<String, Object> scheduleNode = new LinkedHashMap<>();
+        JsonNode schedule = firstPresentNode(rootNode, "schedule");
+        if (schedule == null) {
+            schedule = firstPresentNode(processNode, "schedule");
+        }
+        if (schedule != null) {
+            scheduleNode.put("dolphinScheduleId", firstLong(schedule, "id", "scheduleId", "dolphinScheduleId"));
+            scheduleNode.put("scheduleState", firstText(schedule, "scheduleState", "releaseState"));
+            scheduleNode.put("scheduleCron", firstText(schedule, "scheduleCron", "crontab", "cron"));
+            scheduleNode.put("scheduleTimezone", firstText(schedule, "scheduleTimezone", "timezoneId", "timezone"));
+            scheduleNode.put("scheduleStartTime", firstText(schedule, "scheduleStartTime", "startTime"));
+            scheduleNode.put("scheduleEndTime", firstText(schedule, "scheduleEndTime", "endTime"));
+            scheduleNode.put("scheduleFailureStrategy", firstText(schedule, "scheduleFailureStrategy", "failureStrategy"));
+            scheduleNode.put("scheduleWarningType", firstText(schedule, "scheduleWarningType", "warningType"));
+            scheduleNode.put("scheduleWarningGroupId", firstLong(schedule, "scheduleWarningGroupId", "warningGroupId"));
+            scheduleNode.put("scheduleProcessInstancePriority",
+                    firstText(schedule, "scheduleProcessInstancePriority", "processInstancePriority"));
+            scheduleNode.put("scheduleWorkerGroup", firstText(schedule, "scheduleWorkerGroup", "workerGroup"));
+            scheduleNode.put("scheduleTenantCode", firstText(schedule, "scheduleTenantCode", "tenantCode"));
+            scheduleNode.put("scheduleEnvironmentCode", firstLong(schedule, "scheduleEnvironmentCode", "environmentCode"));
+            Boolean scheduleAutoOnline = readBoolean(schedule, "scheduleAutoOnline", null);
+            if (scheduleAutoOnline == null) {
+                scheduleAutoOnline = readBoolean(schedule, "autoOnline", null);
+            }
+            scheduleNode.put("scheduleAutoOnline", scheduleAutoOnline);
+        }
+
+        List<Map<String, Object>> taskNodes = new ArrayList<>();
+        JsonNode taskList = firstPresentNode(rootNode, "taskDefinitionList", "tasks", "taskDefinitionJson");
+        if (taskList != null && taskList.isArray()) {
+            for (JsonNode task : taskList) {
+                if (task == null || task.isNull()) {
+                    continue;
+                }
+                Long runtimeTaskCode = firstLong(task, "taskCode", "code");
+                JsonNode platformTaskMeta = firstPresentNode(task, "xPlatformTaskMeta", "platformTaskMeta");
+                Long platformTaskId = firstLong(platformTaskMeta, "taskId", "id");
+                if (requireTaskId && platformTaskId == null) {
+                    throw badRequest(WorkflowVersionErrorCodes.VERSION_ROLLBACK_TASK_ID_REQUIRED,
+                            "版本定义缺少 xPlatformTaskMeta.taskId: versionId=" + version.getId()
+                                    + ", taskCode=" + runtimeTaskCode);
+                }
+                Long normalizedTaskId = platformTaskId != null ? platformTaskId : runtimeTaskCode;
+                if (normalizedTaskId == null) {
+                    continue;
+                }
+
+                JsonNode taskParams = normalizeNode(task.get("taskParams"));
+                Map<String, Object> taskNode = new LinkedHashMap<>();
+                taskNode.put("taskId", normalizedTaskId);
+                taskNode.put("taskCode", runtimeTaskCode);
+                taskNode.put("platformTaskCode", firstText(platformTaskMeta, "platformTaskCode"));
+                taskNode.put("taskName", firstText(task, "taskName", "name"));
+                taskNode.put("taskType", firstNonBlank(
+                        firstText(platformTaskMeta, "platformTaskType"),
+                        firstText(task, "taskType")));
+                taskNode.put("dolphinNodeType", firstText(task, "nodeType", "taskType"));
+                taskNode.put("engine", firstText(platformTaskMeta, "engine"));
+                taskNode.put("taskSql", firstNonBlank(
+                        firstText(task, "taskSql", "sql", "rawScript"),
+                        firstText(taskParams, "sql", "rawScript")));
+                taskNode.put("taskDesc", firstText(task, "description", "taskDesc"));
+                taskNode.put("datasourceName", firstNonBlank(
+                        firstText(task, "datasourceName"),
+                        firstText(taskParams, "datasourceName")));
+                taskNode.put("datasourceType", firstNonBlank(
+                        firstText(task, "datasourceType"),
+                        firstText(taskParams, "type")));
+                taskNode.put("taskGroupName", firstText(task, "taskGroupName"));
+                taskNode.put("retryTimes", firstLong(task, "retryTimes", "failRetryTimes"));
+                taskNode.put("retryInterval", firstLong(task, "retryInterval", "failRetryInterval"));
+                taskNode.put("timeoutSeconds", firstLong(task, "timeoutSeconds", "timeout"));
+                taskNode.put("priority", firstLong(task, "priority", "taskPriority"));
+                taskNode.put("dolphinTaskCode", firstLong(platformTaskMeta, "dolphinTaskCode", "taskCode", "code"));
+                taskNode.put("dolphinTaskVersion", firstLong(platformTaskMeta, "dolphinTaskVersion", "version"));
+                taskNode.put("entry", readBoolean(platformTaskMeta, "entry", null));
+                taskNode.put("exit", readBoolean(platformTaskMeta, "exit", null));
+                JsonNode nodeAttrs = platformTaskMeta != null ? platformTaskMeta.get("nodeAttrs") : null;
+                if (nodeAttrs != null && !nodeAttrs.isNull()) {
+                    taskNode.put("nodeAttrs", nodeAttrs);
+                }
+                taskNode.put("inputTableIds", normalizeLongList(toLongList(firstPresentNode(task, "inputTableIds"))));
+                taskNode.put("outputTableIds", normalizeLongList(toLongList(firstPresentNode(task, "outputTableIds"))));
+                taskNodes.add(taskNode);
+            }
+        }
+
+        List<Map<String, Object>> edgeNodes = new ArrayList<>();
+        JsonNode relations = firstPresentNode(rootNode,
+                "processTaskRelationList",
+                "workflowTaskRelationList",
+                "taskRelationList",
+                "edges",
+                "taskRelationJson");
+        if (relations != null && relations.isArray()) {
+            for (JsonNode relation : relations) {
+                if (relation == null || relation.isNull()) {
+                    continue;
+                }
+                Long upstream = firstLong(relation, "upstreamTaskCode", "upstreamTaskId", "preTaskCode");
+                Long downstream = firstLong(relation, "downstreamTaskCode", "downstreamTaskId", "postTaskCode");
+                if (upstream == null || downstream == null) {
+                    continue;
+                }
+                Map<String, Object> edge = new LinkedHashMap<>();
+                edge.put("upstreamTaskCode", upstream);
+                edge.put("downstreamTaskCode", downstream);
+                edgeNodes.add(edge);
+            }
+        }
+
+        Map<String, Object> compareRoot = new LinkedHashMap<>();
+        compareRoot.put("workflow", workflowNode);
+        compareRoot.put("tasks", taskNodes);
+        compareRoot.put("edges", edgeNodes);
+        compareRoot.put("schedule", scheduleNode);
+        JsonNode compareRootNode = objectMapper.valueToTree(compareRoot);
 
         SnapshotNormalized normalized = new SnapshotNormalized();
-        normalized.setRoot(node);
-
-        int schemaVersion = node.path("schemaVersion").asInt(1);
-        normalized.setSchemaVersion(schemaVersion);
-        if (schemaVersion >= 2 && node.has("workflow") && node.has("tasks")) {
-            normalized.setRollbackSupported(true);
-            normalized.setWorkflow(node.path("workflow"));
-            normalized.setSchedule(node.path("schedule"));
-            normalized.setTasks(toTaskMap(node.path("tasks")));
-            normalized.setTaskSnapshots(toTaskSnapshotList(node.path("tasks")));
-            normalized.setEdges(toEdgeSet(node.path("edges")));
-            return normalized;
-        }
-
-        // legacy v1 snapshot fallback (compare only)
-        ObjectNode workflow = objectMapper.createObjectNode();
-        copyIfExists(node, workflow, "workflowId");
-        copyIfExists(node, workflow, "workflowName");
-        copyIfExists(node, workflow, "definitionJson");
-        copyIfExists(node, workflow, "taskGroupName");
-        copyIfExists(node, workflow, "updatedBy");
-        normalized.setWorkflow(workflow);
-        normalized.setSchedule(objectMapper.createObjectNode());
-
-        JsonNode tasksNode = node.path("tasks");
-        normalized.setTasks(toTaskMap(tasksNode));
-        normalized.setTaskSnapshots(toTaskSnapshotList(tasksNode));
-        normalized.setEdges(Collections.emptySet());
-        normalized.setRollbackSupported(false);
+        normalized.setSchemaVersion(SNAPSHOT_SCHEMA_VERSION_DEFINITION);
+        normalized.setRoot(compareRootNode);
+        normalized.setWorkflow(compareRootNode.path("workflow"));
+        normalized.setSchedule(compareRootNode.path("schedule"));
+        normalized.setTasks(toTaskMap(compareRootNode.path("tasks")));
+        normalized.setTaskSnapshots(toTaskSnapshotList(compareRootNode.path("tasks")));
+        normalized.setEdges(toEdgeSet(compareRootNode.path("edges")));
+        normalized.setRollbackSupported(requireTaskId);
         return normalized;
+    }
+
+    private void requireV3Version(WorkflowVersion version, String errorCode, String operationName) {
+        if (version == null) {
+            throw badRequest(WorkflowVersionErrorCodes.VERSION_NOT_FOUND, "版本不存在");
+        }
+        Integer schemaVersion = version.getSnapshotSchemaVersion();
+        if (!Objects.equals(schemaVersion, SNAPSHOT_SCHEMA_VERSION_DEFINITION)) {
+            throw badRequest(errorCode,
+                    operationName + "仅支持 V3 definition 版本: versionId=" + version.getId()
+                            + ", snapshotSchemaVersion=" + schemaVersion + "。请先保存生成 V3 基线版本");
+        }
+    }
+
+    private JsonNode firstPresentNode(JsonNode root, String... fields) {
+        if (root == null || fields == null || fields.length == 0) {
+            return null;
+        }
+        for (String field : fields) {
+            if (!StringUtils.hasText(field)) {
+                continue;
+            }
+            JsonNode node = root.path(field);
+            if (node != null && !node.isMissingNode() && !node.isNull()) {
+                return node;
+            }
+        }
+        return null;
+    }
+
+    private JsonNode normalizeNode(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return null;
+        }
+        if (!node.isTextual()) {
+            return node;
+        }
+        String text = node.asText();
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(text);
+        } catch (Exception ex) {
+            return node;
+        }
+    }
+
+    private String firstNonBlank(String... candidates) {
+        if (candidates == null || candidates.length == 0) {
+            return null;
+        }
+        for (String candidate : candidates) {
+            if (StringUtils.hasText(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private String normalizeJsonTextValue(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return null;
+        }
+        if (node.isTextual()) {
+            String text = node.asText();
+            if (!StringUtils.hasText(text)) {
+                return null;
+            }
+            String trimmed = text.trim();
+            if (!StringUtils.hasText(trimmed)) {
+                return null;
+            }
+            try {
+                return objectMapper.writeValueAsString(objectMapper.readTree(trimmed));
+            } catch (Exception ex) {
+                return trimmed;
+            }
+        }
+        try {
+            return objectMapper.writeValueAsString(node);
+        } catch (Exception ex) {
+            return node.toString();
+        }
+    }
+
+    private List<Long> normalizeLongList(List<Long> values) {
+        if (CollectionUtils.isEmpty(values)) {
+            return Collections.emptyList();
+        }
+        return values.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     private List<TaskSnapshot> toTaskSnapshotList(JsonNode tasksNode) {
@@ -808,13 +1033,6 @@ public class WorkflowVersionOperationService {
             return;
         }
         lookup.putIfAbsent(alias, taskNode);
-    }
-
-    private void copyIfExists(JsonNode source, ObjectNode target, String field) {
-        if (source == null || target == null || !source.has(field)) {
-            return;
-        }
-        target.set(field, source.get(field));
     }
 
     private String firstText(JsonNode node, String... fields) {

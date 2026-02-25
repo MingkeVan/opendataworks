@@ -83,6 +83,14 @@
              <el-button
                v-if="workflow?.workflow"
                link
+               type="primary"
+               @click="handleExportJson(workflow.workflow)"
+             >
+               导出 JSON
+             </el-button>
+             <el-button
+               v-if="workflow?.workflow"
+               link
                type="danger"
                :icon="Delete"
                @click="handleDelete(workflow.workflow)"
@@ -537,6 +545,9 @@
                     <span class="version-label" :class="{ 'is-current': row.isCurrent }">
                       {{ row.versionLabel }}
                     </span>
+                    <el-tag size="small" :type="row.schemaTagType" class="version-schema-tag">
+                      {{ row.schemaLabel }}
+                    </el-tag>
                   </template>
                 </el-table-column>
                 <el-table-column prop="createdAt" label="日期" width="180">
@@ -565,15 +576,22 @@
                 </el-table-column>
                 <el-table-column label="行动" width="200" fixed="right" align="left">
                   <template #default="{ row }">
-                    <el-button
-                      link
-                      type="primary"
-                      :disabled="row.isCurrent"
-                      :loading="rollbackLoadingVersionId === Number(row.id)"
-                      @click="rollbackToVersion(row.id)"
+                    <el-tooltip
+                      :disabled="!getRollbackDisabledReason(row)"
+                      :content="getRollbackDisabledReason(row)"
                     >
-                      恢复
-                    </el-button>
+                      <span>
+                        <el-button
+                          link
+                          type="primary"
+                          :disabled="Boolean(getRollbackDisabledReason(row))"
+                          :loading="rollbackLoadingVersionId === Number(row.id)"
+                          @click="rollbackToVersion(row.id)"
+                        >
+                          恢复
+                        </el-button>
+                      </span>
+                    </el-tooltip>
                     <el-tooltip
                       :disabled="!getVersionDeleteDisabledReason(row)"
                       :content="getVersionDeleteDisabledReason(row)"
@@ -751,6 +769,7 @@ import WorkflowBackfillDialog from './WorkflowBackfillDialog.vue'
 import WorkflowRuntimeSyncDialog from './WorkflowRuntimeSyncDialog.vue'
 import WorkflowSyncRecordDrawer from './WorkflowSyncRecordDrawer.vue'
 import WorkflowVersionComparePanel from './WorkflowVersionComparePanel.vue'
+import { buildPublishPreviewHtml, firstPreviewErrorMessage, isDialogCancel } from './publishPreviewHelper'
 import QuartzCronBuilder from '@/components/QuartzCronBuilder.vue'
 
 const route = useRoute()
@@ -1088,6 +1107,9 @@ const versionHistoryRows = computed(() => {
   const currentVersionId = Number(workflow.value?.workflow?.currentVersionId)
   return versionListDesc.value.map((version) => {
     const versionId = Number(version?.id)
+    const schemaVersion = Number(version?.snapshotSchemaVersion)
+    const normalizedSchemaVersion = Number.isFinite(schemaVersion) ? schemaVersion : 1
+    const isV3 = normalizedSchemaVersion === 3
     const latestRecord = Number.isFinite(versionId)
       ? latestPublishRecordByVersionId.value[versionId]
       : null
@@ -1101,7 +1123,11 @@ const versionHistoryRows = computed(() => {
       statusText,
       latestPublishRecord: latestRecord || null,
       versionLabel: isCurrent ? `当前（版本 ${version.versionNo}）` : `版本 ${version.versionNo}`,
-      comment: version?.changeSummary || '-'
+      comment: version?.changeSummary || '-',
+      snapshotSchemaVersion: normalizedSchemaVersion,
+      isV3,
+      schemaLabel: `V${normalizedSchemaVersion}`,
+      schemaTagType: isV3 ? 'success' : 'warning'
     }
   })
 })
@@ -1557,6 +1583,9 @@ const backToPublishRecords = () => {
 }
 
 const isVersionSelectable = (row) => {
+  if (!row?.isV3) {
+    return false
+  }
   const versionId = Number(row?.id)
   if (!Number.isFinite(versionId)) {
     return false
@@ -1626,6 +1655,10 @@ const compareSelectedVersions = async () => {
     ElMessage.warning('请选择两个版本进行比较')
     return
   }
+  if (selectedHistoryVersions.value.some((item) => !item?.isV3)) {
+    ElMessage.warning('仅支持 V3，请先保存生成 V3 基线')
+    return
+  }
   const sorted = [...selectedHistoryVersions.value].sort((left, right) => {
     const leftNo = Number(left?.versionNo || 0)
     const rightNo = Number(right?.versionNo || 0)
@@ -1687,6 +1720,11 @@ const rollbackToVersion = async (versionId) => {
     return
   }
   const version = versionById.value[normalizedVersionId]
+  const rollbackDisabledReason = getRollbackDisabledReason(version)
+  if (rollbackDisabledReason) {
+    ElMessage.warning(rollbackDisabledReason)
+    return
+  }
   const label = version ? `版本 ${version.versionNo}` : `#${versionId}`
   try {
     await ElMessageBox.confirm(
@@ -1716,6 +1754,23 @@ const rollbackToVersion = async (versionId) => {
   } finally {
     rollbackLoadingVersionId.value = null
   }
+}
+
+const getRollbackDisabledReason = (row) => {
+  if (!row) {
+    return '无效版本'
+  }
+  const schemaVersion = Number(row?.snapshotSchemaVersion)
+  const isV3 = row?.isV3 === true || (Number.isFinite(schemaVersion) ? schemaVersion === 3 : false)
+  if (!isV3) {
+    return '仅支持 V3，请先保存生成 V3 基线'
+  }
+  const rowVersionId = Number(row?.id)
+  const currentVersionId = Number(workflow.value?.workflow?.currentVersionId)
+  if (row?.isCurrent || (Number.isFinite(rowVersionId) && rowVersionId === currentVersionId)) {
+    return '当前版本无需恢复'
+  }
+  return ''
 }
 
 const getVersionDeleteDisabledReason = (row) => {
@@ -1798,9 +1853,65 @@ const openDolphin = (workflow) => {
   window.open(url, '_blank')
 }
 
+const handleExportJson = async (row) => {
+  if (!row?.id) return
+  try {
+    const result = await workflowApi.exportJson(row.id)
+    const content = result?.content || ''
+    if (!content) {
+      ElMessage.warning('当前工作流没有可导出的定义内容')
+      return
+    }
+    const fileName = result?.fileName || `workflow_${row.id}.json`
+    const blob = new Blob([content], { type: 'application/json;charset=utf-8' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(link.href)
+    ElMessage.success('导出成功')
+  } catch (error) {
+    console.error('导出工作流 JSON 失败', error)
+  }
+}
+
 // Action Handlers
 const getErrorMessage = (error) => {
   return error?.response?.data?.message || error?.message || '操作失败，请稍后重试'
+}
+
+const previewPublishAndConfirm = async (row) => {
+  if (!row?.id) {
+    return false
+  }
+  const preview = await workflowApi.previewPublish(row.id)
+  if (!preview?.canPublish) {
+    ElMessage.error(firstPreviewErrorMessage(preview))
+    return false
+  }
+  if (!preview?.requireConfirm) {
+    return true
+  }
+  try {
+    await ElMessageBox.confirm(
+      buildPublishPreviewHtml(preview),
+      '发布变更确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认发布',
+        cancelButtonText: '取消',
+        dangerouslyUseHTMLString: true
+      }
+    )
+    return true
+  } catch (error) {
+    if (isDialogCancel(error)) {
+      return false
+    }
+    throw error
+  }
 }
 
 const setActionLoading = (workflowId, action, value) => {
@@ -1868,10 +1979,15 @@ const handleDeploy = async (row) => {
   if (!row?.id) return
   setActionLoading(row.id, 'deploy', true)
   try {
+    const canPublish = await previewPublishAndConfirm(row)
+    if (!canPublish) {
+      return
+    }
     const record = await workflowApi.publish(row.id, {
       operation: 'deploy',
       requireApproval: false,
-      operator: 'portal-ui'
+      operator: 'portal-ui',
+      confirmDiff: true
     })
     updatePendingFlag(row.id, record?.status)
     if (record?.status === 'pending_approval') {
@@ -1924,10 +2040,15 @@ const handleOnline = async (row) => {
   if (!row?.id) return
   setActionLoading(row.id, 'online', true)
   try {
+    const canPublish = await previewPublishAndConfirm(row)
+    if (!canPublish) {
+      return
+    }
     const deployRecord = await workflowApi.publish(row.id, {
       operation: 'deploy',
       requireApproval: false,
-      operator: 'portal-ui'
+      operator: 'portal-ui',
+      confirmDiff: true
     })
     updatePendingFlag(row.id, deployRecord?.status)
     if (deployRecord?.status === 'pending_approval') {
@@ -2181,6 +2302,10 @@ onMounted(() => {
 .version-label.is-current {
   color: #303133;
   font-weight: 600;
+}
+
+.version-schema-tag {
+  margin-left: 8px;
 }
 
 .basic-info-section {

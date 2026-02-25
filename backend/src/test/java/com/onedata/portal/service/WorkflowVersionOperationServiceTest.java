@@ -140,13 +140,32 @@ class WorkflowVersionOperationServiceTest {
     }
 
     @Test
+    void compareShouldFailWhenVersionIsNotV3() {
+        String legacyWithoutDefinition = "{\"schemaVersion\":2,\"workflow\":{\"workflowName\":\"wf\"},"
+                + "\"tasks\":[{\"taskId\":1,\"taskName\":\"t1\"}],\"edges\":[],\"schedule\":{}}";
+        WorkflowVersion v1 = versionWithSchema(31L, 11L, 1, legacyWithoutDefinition, 2);
+        WorkflowVersion v2 = versionWithSchema(32L, 11L, 2, legacyWithoutDefinition, 2);
+        when(workflowVersionMapper.selectById(31L)).thenReturn(v1);
+        when(workflowVersionMapper.selectById(32L)).thenReturn(v2);
+
+        WorkflowVersionCompareRequest request = new WorkflowVersionCompareRequest();
+        request.setLeftVersionId(31L);
+        request.setRightVersionId(32L);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> service.compare(11L, request));
+        assertTrue(ex.getMessage().contains(WorkflowVersionErrorCodes.VERSION_COMPARE_ONLY_V3));
+        assertTrue(ex.getMessage().contains("snapshotSchemaVersion=2"));
+    }
+
+    @Test
     void rollbackShouldFailForLegacySnapshot() {
         DataWorkflow workflow = new DataWorkflow();
         workflow.setId(11L);
         workflow.setWorkflowName("wf");
 
-        WorkflowVersion legacyVersion = version(1L, 11L, 1,
-                "{\"workflowId\":11,\"workflowName\":\"wf\",\"tasks\":[{\"taskId\":1}]}");
+        WorkflowVersion legacyVersion = versionWithSchema(1L, 11L, 1,
+                "{\"workflowId\":11,\"workflowName\":\"wf\",\"tasks\":[{\"taskId\":1}]}", 1);
 
         when(dataWorkflowMapper.selectById(11L)).thenReturn(workflow);
         when(workflowVersionMapper.selectById(1L)).thenReturn(legacyVersion);
@@ -156,7 +175,58 @@ class WorkflowVersionOperationServiceTest {
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> service.rollback(11L, 1L, request));
-        assertTrue(ex.getMessage().contains(WorkflowVersionErrorCodes.VERSION_SNAPSHOT_UNSUPPORTED));
+        assertTrue(ex.getMessage().contains(WorkflowVersionErrorCodes.VERSION_ROLLBACK_ONLY_V3));
+    }
+
+    @Test
+    void rollbackShouldFailWhenV3DefinitionMissingTaskId() {
+        DataWorkflow workflow = new DataWorkflow();
+        workflow.setId(11L);
+        workflow.setWorkflowName("wf");
+        workflow.setProjectCode(9527L);
+        workflow.setDescription("desc");
+        workflow.setGlobalParams("[]");
+        workflow.setTaskGroupName("tg");
+
+        Map<String, Object> definition = new LinkedHashMap<>();
+        definition.put("schemaVersion", 3);
+        Map<String, Object> process = new LinkedHashMap<>();
+        process.put("name", "wf");
+        process.put("taskGroupName", "tg");
+        process.put("releaseState", "draft");
+        definition.put("processDefinition", process);
+        Map<String, Object> task = new LinkedHashMap<>();
+        task.put("code", 101L);
+        task.put("taskCode", 101L);
+        task.put("name", "task_a");
+        task.put("taskName", "task_a");
+        task.put("taskType", "SQL");
+        task.put("nodeType", "SQL");
+        task.put("taskParams", Collections.singletonMap("sql", "select 1"));
+        task.put("inputTableIds", Collections.emptyList());
+        task.put("outputTableIds", Collections.emptyList());
+        // 故意缺少 xPlatformTaskMeta.taskId
+        definition.put("taskDefinitionList", Collections.singletonList(task));
+        definition.put("processTaskRelationList", Collections.singletonList(definitionRelationNode(0L, 101L)));
+        definition.put("schedule", Collections.emptyMap());
+
+        String definitionJson;
+        try {
+            definitionJson = objectMapper.writeValueAsString(definition);
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
+        WorkflowVersion target = versionWithSchema(88L, 11L, 8, definitionJson, 3);
+
+        when(dataWorkflowMapper.selectById(11L)).thenReturn(workflow);
+        when(workflowVersionMapper.selectById(88L)).thenReturn(target);
+
+        WorkflowVersionRollbackRequest request = new WorkflowVersionRollbackRequest();
+        request.setOperator("tester");
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> service.rollback(11L, 88L, request));
+        assertTrue(ex.getMessage().contains(WorkflowVersionErrorCodes.VERSION_ROLLBACK_TASK_ID_REQUIRED));
     }
 
     @Test
@@ -550,12 +620,60 @@ class WorkflowVersionOperationServiceTest {
                 "schedule.scheduleEndTime", "调度结束时间新增应被识别");
     }
 
+    @Test
+    void compareShouldUseV3DefinitionDocument() {
+        final long workflowId = 33L;
+
+        String definitionV1 = platformDefinitionJson(
+                "wf_def",
+                "tg-alpha",
+                "select id,name from ods.user",
+                "0 0 1 * * ?",
+                Collections.singletonList(definitionRelationNode(1L, 2L))
+        );
+        String definitionV2 = platformDefinitionJson(
+                "wf_def",
+                "tg-beta",
+                "select id,name from ods.user where dt='${bizdate}'",
+                "0 30 1 * * ?",
+                Collections.singletonList(definitionRelationNode(2L, 1L))
+        );
+
+        WorkflowVersion v1 = version(301L, workflowId, 1, definitionV1);
+        WorkflowVersion v2 = version(302L, workflowId, 2, definitionV2);
+
+        when(workflowVersionMapper.selectById(301L)).thenReturn(v1);
+        when(workflowVersionMapper.selectById(302L)).thenReturn(v2);
+
+        WorkflowVersionCompareResponse response = compare(workflowId, 301L, 302L);
+        assertTrue(Boolean.TRUE.equals(response.getChanged()));
+        assertListContains(response.getModified().getTasks(), "extract_user_def",
+                "应基于 definitionJson 识别任务 SQL 变更，而不是旧快照 tasks");
+        assertListContains(response.getAdded().getEdges(), "2->1",
+                "应基于 definitionJson 识别新增关系边");
+        assertListContains(response.getRemoved().getEdges(), "1->2",
+                "应基于 definitionJson 识别删除关系边");
+        assertListContains(response.getModified().getWorkflowFields(), "workflow.taskGroupName",
+                "应基于 definitionJson 识别 workflow 字段变更");
+        assertListContains(response.getModified().getSchedules(), "schedule.scheduleCron",
+                "应基于 V3 definition 识别调度字段变更");
+    }
+
     private WorkflowVersion version(Long id, Long workflowId, Integer versionNo, String snapshot) {
+        return versionWithSchema(id, workflowId, versionNo, snapshot, 3);
+    }
+
+    private WorkflowVersion versionWithSchema(Long id,
+                                              Long workflowId,
+                                              Integer versionNo,
+                                              String snapshot,
+                                              Integer schemaVersion) {
         WorkflowVersion version = new WorkflowVersion();
         version.setId(id);
         version.setWorkflowId(workflowId);
         version.setVersionNo(versionNo);
         version.setStructureSnapshot(snapshot);
+        version.setSnapshotSchemaVersion(schemaVersion);
         return version;
     }
 
@@ -619,16 +737,124 @@ class WorkflowVersionOperationServiceTest {
                                      List<Map<String, Object>> tasks,
                                      List<Map<String, Object>> edges,
                                      Map<String, Object> schedule) {
+        return buildDefinitionJsonFromCanonical(workflow, tasks, edges, schedule);
+    }
+
+    private String buildDefinitionJsonFromCanonical(Map<String, Object> workflow,
+                                                    List<Map<String, Object>> tasks,
+                                                    List<Map<String, Object>> edges,
+                                                    Map<String, Object> schedule) {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("schemaVersion", 2);
-        root.put("workflow", workflow);
-        root.put("tasks", tasks);
-        root.put("edges", edges);
-        root.put("schedule", schedule == null ? new LinkedHashMap<>() : schedule);
+        root.put("schemaVersion", 3);
+
+        Map<String, Object> process = new LinkedHashMap<>();
+        process.put("name", workflow != null ? workflow.get("workflowName") : null);
+        process.put("description", workflow != null ? workflow.get("description") : null);
+        process.put("globalParams", workflow != null ? workflow.get("globalParams") : null);
+        process.put("taskGroupName", workflow != null ? workflow.get("taskGroupName") : null);
+        process.put("releaseState", workflow != null ? workflow.get("status") : null);
+        root.put("processDefinition", process);
+
+        List<Map<String, Object>> taskDefinitionList = new ArrayList<>();
+        if (tasks != null) {
+            for (Map<String, Object> task : tasks) {
+                if (task == null) {
+                    continue;
+                }
+                Long taskCode = toLong(task.get("taskId"));
+                if (taskCode == null) {
+                    continue;
+                }
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("code", taskCode);
+                item.put("taskCode", taskCode);
+                item.put("name", task.get("taskName"));
+                item.put("taskName", task.get("taskName"));
+                item.put("taskType", "SQL");
+                item.put("nodeType", "SQL");
+                item.put("inputTableIds", task.get("inputTableIds"));
+                item.put("outputTableIds", task.get("outputTableIds"));
+
+                Map<String, Object> taskParams = new LinkedHashMap<>();
+                taskParams.put("sql", task.get("taskSql"));
+                taskParams.put("rawScript", task.get("taskSql"));
+                taskParams.put("datasourceName", task.get("datasourceName"));
+                taskParams.put("type", "MYSQL");
+                item.put("taskParams", taskParams);
+                Map<String, Object> taskMeta = new LinkedHashMap<>();
+                taskMeta.put("taskId", task.get("taskId"));
+                taskMeta.put("platformTaskCode", task.get("taskCode"));
+                taskMeta.put("entry", task.get("entry"));
+                taskMeta.put("exit", task.get("exit"));
+                taskMeta.put("nodeAttrs", task.get("nodeAttrs"));
+                taskMeta.put("engine", "dolphin");
+                taskMeta.put("platformTaskType", "batch");
+                taskMeta.put("dolphinTaskCode", taskCode);
+                taskMeta.put("dolphinTaskVersion", 1);
+                item.put("xPlatformTaskMeta", taskMeta);
+                taskDefinitionList.add(item);
+            }
+        }
+        root.put("taskDefinitionList", taskDefinitionList);
+
+        List<Map<String, Object>> relationList = new ArrayList<>();
+        if (edges != null) {
+            for (Map<String, Object> edge : edges) {
+                if (edge == null) {
+                    continue;
+                }
+                Long pre = toLong(edge.get("upstreamTaskId"));
+                Long post = toLong(edge.get("downstreamTaskId"));
+                if (pre == null || post == null) {
+                    continue;
+                }
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("preTaskCode", pre);
+                item.put("postTaskCode", post);
+                relationList.add(item);
+            }
+        }
+        root.put("processTaskRelationList", relationList);
+
+        Map<String, Object> scheduleNode = new LinkedHashMap<>();
+        if (schedule != null) {
+            scheduleNode.put("crontab", schedule.get("scheduleCron"));
+            scheduleNode.put("timezoneId", schedule.get("scheduleTimezone"));
+            scheduleNode.put("startTime", schedule.get("scheduleStartTime"));
+            scheduleNode.put("endTime", schedule.get("scheduleEndTime"));
+            scheduleNode.put("failureStrategy", schedule.get("scheduleFailureStrategy"));
+            scheduleNode.put("warningType", schedule.get("scheduleWarningType"));
+            scheduleNode.put("warningGroupId", schedule.get("scheduleWarningGroupId"));
+            scheduleNode.put("processInstancePriority", schedule.get("scheduleProcessInstancePriority"));
+            scheduleNode.put("workerGroup", schedule.get("scheduleWorkerGroup"));
+            scheduleNode.put("tenantCode", schedule.get("scheduleTenantCode"));
+            scheduleNode.put("environmentCode", schedule.get("scheduleEnvironmentCode"));
+            scheduleNode.put("autoOnline", schedule.get("scheduleAutoOnline"));
+        }
+        root.put("schedule", scheduleNode);
+
+        Map<String, Object> workflowMeta = new LinkedHashMap<>();
+        workflowMeta.put("publishStatus", workflow != null ? workflow.get("publishStatus") : null);
+        root.put("xPlatformWorkflowMeta", workflowMeta);
+
         try {
             return objectMapper.writeValueAsString(root);
         } catch (Exception ex) {
-            throw new IllegalStateException("构建测试快照失败", ex);
+            throw new IllegalStateException("构建 canonical definitionJson 失败", ex);
+        }
+    }
+
+    private Long toLong(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (Exception ex) {
+            return null;
         }
     }
 
@@ -641,6 +867,12 @@ class WorkflowVersionOperationServiceTest {
         workflow.put("description", description);
         workflow.put("globalParams", globalParams);
         workflow.put("taskGroupName", taskGroupName);
+        return workflow;
+    }
+
+    private Map<String, Object> workflowNodeWithDefinition(String workflowName, String definitionJson) {
+        Map<String, Object> workflow = workflowNode(workflowName, null, null, null);
+        workflow.put("definitionJson", definitionJson);
         return workflow;
     }
 
@@ -670,5 +902,99 @@ class WorkflowVersionOperationServiceTest {
         schedule.put("scheduleEnvironmentCode", scheduleEnvironmentCode);
         schedule.put("scheduleAutoOnline", scheduleAutoOnline);
         return schedule;
+    }
+
+    private String platformDefinitionJson(String workflowName,
+                                          String taskGroupName,
+                                          String extractSql,
+                                          String scheduleCron,
+                                          List<Map<String, Object>> relations) {
+        Map<String, Object> root = new LinkedHashMap<>();
+
+        Map<String, Object> process = new LinkedHashMap<>();
+        process.put("name", workflowName);
+        process.put("description", "definition-source");
+        process.put("globalParams", "[]");
+        process.put("taskGroupName", taskGroupName);
+        process.put("releaseState", "offline");
+        root.put("processDefinition", process);
+
+        List<Map<String, Object>> tasks = new ArrayList<>();
+        tasks.add(definitionTaskNode(
+                1L,
+                "extract_user_def",
+                extractSql,
+                "ods_ds",
+                Collections.singletonList(10L),
+                Collections.singletonList(20L)
+        ));
+        tasks.add(definitionTaskNode(
+                2L,
+                "load_user_def",
+                "insert into dwd.user select * from tmp.user",
+                "dwd_ds",
+                Collections.singletonList(20L),
+                Collections.singletonList(30L)
+        ));
+        root.put("taskDefinitionList", tasks);
+        root.put("processTaskRelationList", relations);
+
+        Map<String, Object> schedule = new LinkedHashMap<>();
+        schedule.put("crontab", scheduleCron);
+        schedule.put("timezoneId", "Asia/Shanghai");
+        schedule.put("startTime", "2026-01-01 00:00:00");
+        schedule.put("endTime", "2026-12-31 23:59:59");
+        schedule.put("failureStrategy", "CONTINUE");
+        schedule.put("warningType", "NONE");
+        schedule.put("warningGroupId", 101L);
+        schedule.put("processInstancePriority", "MEDIUM");
+        schedule.put("workerGroup", "default");
+        schedule.put("tenantCode", "default");
+        schedule.put("environmentCode", 1L);
+        schedule.put("autoOnline", true);
+        root.put("schedule", schedule);
+
+        try {
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception ex) {
+            throw new IllegalStateException("构建 definitionJson 失败", ex);
+        }
+    }
+
+    private Map<String, Object> definitionTaskNode(Long code,
+                                                   String name,
+                                                   String sql,
+                                                   String datasourceName,
+                                                   List<Long> inputTableIds,
+                                                   List<Long> outputTableIds) {
+        Map<String, Object> task = new LinkedHashMap<>();
+        task.put("code", code);
+        task.put("taskCode", code);
+        task.put("name", name);
+        task.put("taskName", name);
+        task.put("taskType", "SQL");
+        task.put("nodeType", "SQL");
+        task.put("taskGroupName", "tg-sql");
+        task.put("taskPriority", 5);
+        task.put("failRetryTimes", 1);
+        task.put("failRetryInterval", 1);
+        task.put("timeout", 300);
+        task.put("inputTableIds", new ArrayList<>(inputTableIds));
+        task.put("outputTableIds", new ArrayList<>(outputTableIds));
+
+        Map<String, Object> taskParams = new LinkedHashMap<>();
+        taskParams.put("sql", sql);
+        taskParams.put("rawScript", sql);
+        taskParams.put("datasourceName", datasourceName);
+        taskParams.put("type", "MYSQL");
+        task.put("taskParams", taskParams);
+        return task;
+    }
+
+    private Map<String, Object> definitionRelationNode(Long preTaskCode, Long postTaskCode) {
+        Map<String, Object> relation = new LinkedHashMap<>();
+        relation.put("preTaskCode", preTaskCode);
+        relation.put("postTaskCode", postTaskCode);
+        return relation;
     }
 }
