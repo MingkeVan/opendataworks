@@ -206,6 +206,20 @@ jobs:
             echo '```'
           } > latest_release_body.md
 
+      - name: Reset latest release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${RELEASE_TAG}" --repo "${REPO}" >/dev/null 2>&1; then
+            gh release delete "${RELEASE_TAG}" --repo "${REPO}" --cleanup-tag --yes
+          fi
+
+          # Ensure stale tag is removed even if no release exists.
+          gh api -X DELETE "repos/${REPO}/git/refs/tags/${RELEASE_TAG}" >/dev/null 2>&1 || true
+
       - name: Create or update latest release
         uses: softprops/action-gh-release@v1
         with:
