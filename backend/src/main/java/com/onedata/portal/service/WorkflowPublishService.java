@@ -311,6 +311,7 @@ public class WorkflowPublishService {
                 .collect(Collectors.toMap(DataTask::getId, item -> item, (left, right) -> left));
         Map<Long, List<Long>> inputTableIdsByTask = loadTaskTableRelationMap(taskIds, "read");
         Map<Long, List<Long>> outputTableIdsByTask = loadTaskTableRelationMap(taskIds, "write");
+        Map<Long, DefinitionTaskMetadata> metadataByCode = loadDefinitionTaskMetadata(workflow.getDefinitionJson());
 
         List<RuntimeTaskDefinition> tasks = new ArrayList<>();
         for (WorkflowTaskRelation relation : relations) {
@@ -322,7 +323,8 @@ public class WorkflowPublishService {
                 continue;
             }
             RuntimeTaskDefinition runtimeTask = new RuntimeTaskDefinition();
-            runtimeTask.setTaskCode(resolveTaskCodeForDiff(task));
+            Long runtimeTaskCode = resolveTaskCodeForDiff(task);
+            runtimeTask.setTaskCode(runtimeTaskCode);
             runtimeTask.setTaskVersion(task.getDolphinTaskVersion());
             runtimeTask.setTaskName(task.getTaskName());
             runtimeTask.setDescription(task.getTaskDesc());
@@ -333,6 +335,10 @@ public class WorkflowPublishService {
             runtimeTask.setTaskGroupName(StringUtils.hasText(task.getTaskGroupName())
                     ? task.getTaskGroupName()
                     : workflow.getTaskGroupName());
+            DefinitionTaskMetadata taskMetadata = runtimeTaskCode != null ? metadataByCode.get(runtimeTaskCode) : null;
+            if (taskMetadata != null) {
+                runtimeTask.setTaskGroupId(taskMetadata.getTaskGroupId());
+            }
             runtimeTask.setRetryTimes(task.getRetryTimes());
             runtimeTask.setRetryInterval(task.getRetryInterval());
             runtimeTask.setTimeoutSeconds(task.getTimeoutSeconds());

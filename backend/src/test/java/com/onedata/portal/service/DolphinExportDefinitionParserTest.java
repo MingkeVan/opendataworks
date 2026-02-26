@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskDefinition;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskEdge;
 import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowDefinition;
@@ -13,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -118,6 +121,34 @@ class DolphinExportDefinitionParserTest {
         assertEquals("task_sql_32", taskDefinition.getTaskName());
         assertEquals("select * from ods.t1", taskDefinition.getSql());
         assertEquals(1, definition.getExplicitEdges().size());
+    }
+
+    @Test
+    void shouldResolveTaskGroupNameFromCatalogWhenTaskGroupIdOnly() {
+        ObjectNode exported = objectMapper.createObjectNode();
+        ObjectNode workflowDefinition = exported.putObject("workflowDefinition");
+        workflowDefinition.put("code", 1007L);
+        workflowDefinition.put("name", "wf_task_group_enrich");
+
+        ArrayNode taskDefinitions = exported.putArray("taskDefinitionList");
+        ObjectNode task = taskDefinitions.addObject();
+        task.put("code", 3301L);
+        task.put("name", "task_group_only_id");
+        task.put("taskType", "SQL");
+        task.put("taskGroupId", 71);
+        task.put("taskParams", "{\"sql\":\"select 1\",\"datasource\":10,\"type\":\"MYSQL\"}");
+
+        DolphinTaskGroupOption option = new DolphinTaskGroupOption();
+        option.setId(71);
+        option.setName("tg_alpha");
+
+        when(openApiClient.exportDefinitionByCode(1L, 1007L)).thenReturn(exported);
+        when(dolphinSchedulerService.listTaskGroups(null)).thenReturn(Collections.singletonList(option));
+
+        RuntimeWorkflowDefinition definition = service.loadRuntimeDefinitionFromExport(1L, 1007L);
+
+        assertEquals(1, definition.getTasks().size());
+        assertEquals("tg_alpha", definition.getTasks().get(0).getTaskGroupName());
     }
 
     @Test
