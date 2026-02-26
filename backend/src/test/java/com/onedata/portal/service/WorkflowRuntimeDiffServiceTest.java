@@ -114,6 +114,30 @@ class WorkflowRuntimeDiffServiceTest {
     }
 
     @Test
+    void buildDiffShouldDetectTaskGroupNameChangesWhenTaskGroupIdMatches() {
+        RuntimeWorkflowDefinition baselineDef = definition("wf_a");
+        RuntimeTaskDefinition baselineTask = task(1L, "task_1", "SELECT 1", 11L, 21L);
+        baselineTask.setTaskGroupId(77);
+        baselineTask.setTaskGroupName("tg_alpha");
+        baselineDef.setTasks(Collections.singletonList(baselineTask));
+
+        RuntimeWorkflowDefinition currentDef = definition("wf_a");
+        RuntimeTaskDefinition currentTask = task(1L, "task_1", "SELECT 1", 11L, 21L);
+        currentTask.setTaskGroupId(77);
+        currentTask.setTaskGroupName("tg_beta");
+        currentDef.setTasks(Collections.singletonList(currentTask));
+
+        RuntimeDiffSummary summary = buildDiff(baselineDef, currentDef,
+                Collections.<RuntimeTaskEdge>emptyList(),
+                Collections.<RuntimeTaskEdge>emptyList());
+
+        assertTrue(Boolean.TRUE.equals(summary.getChanged()));
+        assertTrue(summary.getTaskModified().stream()
+                .anyMatch(item -> item.contains("task.taskGroupName")),
+                "taskGroupId 一致时仍应比对 taskGroupName");
+    }
+
+    @Test
     void buildDiffShouldDetectTaskRelationChanges() {
         RuntimeWorkflowDefinition baselineDef = definition("wf_a");
         baselineDef.setTasks(Arrays.asList(
