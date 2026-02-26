@@ -68,7 +68,6 @@
               type="primary"
               size="small"
               :loading="saving"
-              :disabled="newlyAddedTasks.length === 0"
               @click="saveWorkflow"
             >
               保存工作流
@@ -191,8 +190,6 @@ const handleRemoveTask = (taskId) => {
 }
 
 const saveWorkflow = async () => {
-  if (newlyAddedTasks.value.length === 0) return
-  
   saving.value = true
   try {
     // Get current workflow details
@@ -203,10 +200,20 @@ const saveWorkflow = async () => {
       return
     }
 
-    // Combine existing task IDs with newly added
-    const existingTaskIds = props.workflowTaskIds || []
+    // Combine existing task IDs with newly added.
+    // Keep save-click available even without local changes to trigger backend normalization/json rebuild.
+    const relationTaskIds = Array.isArray(detail?.taskRelations)
+      ? detail.taskRelations
+          .map((relation) => Number(relation?.taskId))
+          .filter((id) => Number.isFinite(id))
+      : []
+    const existingTaskIds = relationTaskIds.length
+      ? relationTaskIds
+      : (props.workflowTaskIds || [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id))
     const newTaskIds = newlyAddedTasks.value.map(t => t.id)
-    const allTaskIds = [...existingTaskIds, ...newTaskIds]
+    const allTaskIds = Array.from(new Set([...existingTaskIds, ...newTaskIds]))
 
     await workflowApi.update(props.workflowId, {
       workflowName: wf.workflowName,

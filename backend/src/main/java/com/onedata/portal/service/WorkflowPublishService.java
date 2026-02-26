@@ -2,15 +2,26 @@ package com.onedata.portal.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.onedata.portal.dto.DolphinDatasourceOption;
+import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.workflow.WorkflowApprovalRequest;
 import com.onedata.portal.dto.workflow.WorkflowPublishPreviewResponse;
+import com.onedata.portal.dto.workflow.WorkflowPublishRepairIssue;
+import com.onedata.portal.dto.workflow.WorkflowPublishRepairRequest;
+import com.onedata.portal.dto.workflow.WorkflowPublishRepairResponse;
 import com.onedata.portal.dto.workflow.WorkflowPublishRequest;
 import com.onedata.portal.dto.dolphin.DolphinSchedule;
 import com.onedata.portal.dto.workflow.runtime.RuntimeDiffSummary;
+import com.onedata.portal.dto.workflow.runtime.RuntimeDiffFieldChange;
 import com.onedata.portal.dto.workflow.runtime.RuntimeSyncIssue;
+import com.onedata.portal.dto.workflow.runtime.RuntimeTaskChange;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskDefinition;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskEdge;
+import com.onedata.portal.dto.workflow.runtime.RuntimeRelationChange;
 import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowDefinition;
 import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowSchedule;
 import com.onedata.portal.entity.DataTask;
@@ -34,6 +45,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Collections;
@@ -57,7 +69,26 @@ public class WorkflowPublishService {
     private static final String PUBLISH_PREVIEW_FAILED = "PUBLISH_PREVIEW_FAILED";
     private static final String PUBLISH_RUNTIME_WORKFLOW_NOT_FOUND = "PUBLISH_RUNTIME_WORKFLOW_NOT_FOUND";
     private static final String PUBLISH_FIRST_DEPLOY = "PUBLISH_FIRST_DEPLOY";
+    private static final String PUBLISH_METADATA_REPAIR_RECOMMENDED = "PUBLISH_METADATA_REPAIR_RECOMMENDED";
     private static final DateTimeFormatter SCHEDULE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter[] SCHEDULE_INPUT_FORMATTERS = new DateTimeFormatter[] {
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"),
+            DateTimeFormatter.ISO_LOCAL_DATE_TIME
+    };
+    private static final Set<String> PUBLISH_NOISE_TASK_FIELDS = Collections.unmodifiableSet(
+            new LinkedHashSet<>(java.util.Arrays.asList(
+                    "task.datasourceId",
+                    "task.datasourceName",
+                    "task.inputTableIds",
+                    "task.outputTableIds",
+                    "task.taskGroupId",
+                    "task.taskPriority",
+                    "task.taskVersion")));
+    private static final Set<String> PUBLISH_NOISE_SCHEDULE_FIELDS = Collections.unmodifiableSet(
+            new LinkedHashSet<>(java.util.Arrays.asList(
+                    "schedule.scheduleId",
+                    "schedule.releaseState")));
 
     private final WorkflowPublishRecordMapper publishRecordMapper;
     private final WorkflowVersionMapper workflowVersionMapper;
@@ -69,6 +100,7 @@ public class WorkflowPublishService {
     private final WorkflowRuntimeDiffService runtimeDiffService;
     private final WorkflowDeployService workflowDeployService;
     private final DolphinSchedulerService dolphinSchedulerService;
+    private final WorkflowService workflowService;
     private final ObjectMapper objectMapper;
 
     public WorkflowPublishPreviewResponse previewPublish(Long workflowId) {
@@ -77,6 +109,40 @@ public class WorkflowPublishService {
             throw new IllegalArgumentException("Workflow not found: " + workflowId);
         }
         return buildPublishPreview(workflow);
+    }
+
+    @Transactional
+    public WorkflowPublishRepairResponse repairPublishMetadata(Long workflowId, WorkflowPublishRepairRequest request) {
+        DataWorkflow workflow = dataWorkflowMapper.selectById(workflowId);
+        if (workflow == null) {
+            throw new IllegalArgumentException("Workflow not found: " + workflowId);
+        }
+
+        String operator = request != null && StringUtils.hasText(request.getOperator())
+                ? request.getOperator().trim()
+                : "system";
+        RuntimeWorkflowDefinition runtimeDefinition = null;
+        if (workflow.getWorkflowCode() != null && workflow.getWorkflowCode() > 0) {
+            runtimeDefinition = runtimeDefinitionService.loadRuntimeDefinitionFromExport(
+                    workflow.getProjectCode(),
+                    workflow.getWorkflowCode());
+        }
+
+        WorkflowPublishRepairResponse response = new WorkflowPublishRepairResponse();
+        response.setWorkflowId(workflowId);
+        response.setWorkflowCode(workflow.getWorkflowCode());
+
+        boolean workflowChanged = repairWorkflowMetadataFromRuntime(workflow, runtimeDefinition, operator, response);
+        int updatedTaskCount = repairTaskMetadataFromRuntime(workflow, runtimeDefinition, operator);
+        boolean definitionChanged = runtimeDefinition != null
+                ? repairDefinitionMetadataFromRuntime(workflow, runtimeDefinition, operator, response)
+                : repairDefinitionMetadataFromCatalog(workflow, operator, response);
+        workflowService.normalizeAndPersistMetadata(workflowId, operator);
+        DataWorkflow repairedWorkflow = dataWorkflowMapper.selectById(workflowId);
+        ensureBlockingRepairIssuesResolved(repairedWorkflow);
+        response.setUpdatedTaskCount(updatedTaskCount);
+        response.setRepaired(workflowChanged || updatedTaskCount > 0 || definitionChanged);
+        return response;
     }
 
     @Transactional
@@ -184,17 +250,26 @@ public class WorkflowPublishService {
             }
         }
 
+        List<RuntimeTaskEdge> platformEdges = normalizePublishEdges(inferEdgesFromLineage(platformDefinition.getTasks()));
         WorkflowRuntimeDiffService.RuntimeSnapshot platformSnapshot = runtimeDiffService.buildSnapshot(
                 platformDefinition,
-                inferEdgesFromLineage(platformDefinition.getTasks()));
+                platformEdges);
         String baselineSnapshotJson = null;
         if (runtimeDefinition != null) {
+            List<RuntimeTaskEdge> runtimeEdges = CollectionUtils.isEmpty(runtimeDefinition.getExplicitEdges())
+                    ? inferEdgesFromLineage(runtimeDefinition.getTasks())
+                    : runtimeDefinition.getExplicitEdges();
+            runtimeEdges = normalizePublishEdges(runtimeEdges);
             WorkflowRuntimeDiffService.RuntimeSnapshot runtimeSnapshot = runtimeDiffService.buildSnapshot(
                     runtimeDefinition,
-                    inferEdgesFromLineage(runtimeDefinition.getTasks()));
+                    runtimeEdges);
             baselineSnapshotJson = runtimeSnapshot.getSnapshotJson();
         }
-        RuntimeDiffSummary diffSummary = runtimeDiffService.buildDiff(baselineSnapshotJson, platformSnapshot);
+        RuntimeDiffSummary rawDiffSummary = runtimeDiffService.buildDiff(baselineSnapshotJson, platformSnapshot);
+        List<WorkflowPublishRepairIssue> repairIssues = new ArrayList<>(buildRepairIssues(rawDiffSummary));
+        repairIssues.addAll(buildPublishMetadataRepairIssues(workflow, platformDefinition));
+        response.setRepairIssues(repairIssues);
+        RuntimeDiffSummary diffSummary = normalizePublishDiffSummary(rawDiffSummary);
         response.setDiffSummary(diffSummary);
         response.setRequireConfirm(diffSummary != null && Boolean.TRUE.equals(diffSummary.getChanged()));
         response.setCanPublish(response.getErrors().isEmpty());
@@ -355,6 +430,33 @@ public class WorkflowPublishService {
                 .collect(Collectors.toList());
     }
 
+    private List<RuntimeTaskEdge> normalizePublishEdges(List<RuntimeTaskEdge> edges) {
+        if (CollectionUtils.isEmpty(edges)) {
+            return Collections.emptyList();
+        }
+        Map<String, RuntimeTaskEdge> dedup = new LinkedHashMap<>();
+        for (RuntimeTaskEdge edge : edges) {
+            if (edge == null || edge.getDownstreamTaskCode() == null) {
+                continue;
+            }
+            Long pre = edge.getUpstreamTaskCode() == null ? 0L : edge.getUpstreamTaskCode();
+            Long post = edge.getDownstreamTaskCode();
+            if (post <= 0 || pre < 0) {
+                continue;
+            }
+            // Dolphin 运行态会自动补 0->task 的入口边，发布预检只比较真实任务依赖边。
+            if (pre == 0L) {
+                continue;
+            }
+            String key = pre + "->" + post;
+            dedup.putIfAbsent(key, new RuntimeTaskEdge(pre, post));
+        }
+        return dedup.values().stream()
+                .sorted(Comparator.comparing(RuntimeTaskEdge::getUpstreamTaskCode)
+                        .thenComparing(RuntimeTaskEdge::getDownstreamTaskCode))
+                .collect(Collectors.toList());
+    }
+
     private Long resolveTaskCodeForDiff(DataTask task) {
         if (task == null) {
             return null;
@@ -372,10 +474,7 @@ public class WorkflowPublishService {
         if (StringUtils.hasText(task.getDolphinNodeType())) {
             return task.getDolphinNodeType();
         }
-        if (StringUtils.hasText(task.getTaskType())) {
-            return task.getTaskType();
-        }
-        return "SQL";
+        return null;
     }
 
     private String mapWorkflowReleaseState(String status) {
@@ -393,6 +492,837 @@ public class WorkflowPublishService {
 
     private String toDateTimeText(LocalDateTime value) {
         return value != null ? value.format(SCHEDULE_TIME_FORMATTER) : null;
+    }
+
+    private List<WorkflowPublishRepairIssue> buildRepairIssues(RuntimeDiffSummary summary) {
+        if (summary == null) {
+            return Collections.emptyList();
+        }
+        List<WorkflowPublishRepairIssue> result = new ArrayList<>();
+        Set<String> dedupe = new LinkedHashSet<>();
+
+        if (!CollectionUtils.isEmpty(summary.getTaskModified())) {
+            for (RuntimeTaskChange taskChange : summary.getTaskModified()) {
+                if (taskChange == null || CollectionUtils.isEmpty(taskChange.getFieldChanges())) {
+                    continue;
+                }
+                for (RuntimeDiffFieldChange fieldChange : taskChange.getFieldChanges()) {
+                    if (!isMeaningfulPublishTaskFieldChange(fieldChange)) {
+                        continue;
+                    }
+                    WorkflowPublishRepairIssue issue = new WorkflowPublishRepairIssue();
+                    issue.setCode(PUBLISH_METADATA_REPAIR_RECOMMENDED);
+                    issue.setSeverity("WARNING");
+                    issue.setRepairable(true);
+                    issue.setField(fieldChange != null ? fieldChange.getField() : null);
+                    issue.setTaskCode(taskChange.getTaskCode());
+                    issue.setTaskName(taskChange.getTaskName());
+                    issue.setBefore(fieldChange != null ? fieldChange.getBefore() : null);
+                    issue.setAfter(fieldChange != null ? fieldChange.getAfter() : null);
+                    issue.setMessage(String.format("任务[%s(%s)] 字段 %s 与运行态不一致，建议先修复元数据",
+                            taskChange.getTaskName() == null ? "-" : taskChange.getTaskName(),
+                            taskChange.getTaskCode() == null ? "-" : String.valueOf(taskChange.getTaskCode()),
+                            fieldChange == null ? "-" : fieldChange.getField()));
+                    addRepairIssue(result, dedupe, issue);
+                }
+            }
+        }
+
+        if (!CollectionUtils.isEmpty(summary.getScheduleChanges())) {
+            for (RuntimeDiffFieldChange fieldChange : summary.getScheduleChanges()) {
+                if (!isMeaningfulPublishScheduleFieldChange(fieldChange)) {
+                    continue;
+                }
+                WorkflowPublishRepairIssue issue = new WorkflowPublishRepairIssue();
+                issue.setCode(PUBLISH_METADATA_REPAIR_RECOMMENDED);
+                issue.setSeverity("WARNING");
+                issue.setRepairable(true);
+                issue.setField(fieldChange != null ? fieldChange.getField() : null);
+                issue.setBefore(fieldChange != null ? fieldChange.getBefore() : null);
+                issue.setAfter(fieldChange != null ? fieldChange.getAfter() : null);
+                issue.setMessage(String.format("调度字段 %s 与运行态不一致，建议先修复元数据",
+                        fieldChange == null ? "-" : fieldChange.getField()));
+                addRepairIssue(result, dedupe, issue);
+            }
+        }
+        return result;
+    }
+
+    private void addRepairIssue(List<WorkflowPublishRepairIssue> collector,
+            Set<String> dedupe,
+            WorkflowPublishRepairIssue issue) {
+        if (issue == null) {
+            return;
+        }
+        String key = String.format("%s|%s|%s|%s|%s",
+                normalizeDiffValue(issue.getField()),
+                issue.getTaskCode(),
+                normalizeDiffValue(issue.getBefore()),
+                normalizeDiffValue(issue.getAfter()),
+                normalizeDiffValue(issue.getMessage()));
+        if (dedupe.add(key)) {
+            collector.add(issue);
+        }
+    }
+
+    private RuntimeDiffSummary normalizePublishDiffSummary(RuntimeDiffSummary summary) {
+        if (summary == null) {
+            return null;
+        }
+
+        if (!CollectionUtils.isEmpty(summary.getTaskModified())) {
+            List<RuntimeTaskChange> retained = new ArrayList<>();
+            for (RuntimeTaskChange taskChange : summary.getTaskModified()) {
+                if (taskChange == null) {
+                    continue;
+                }
+                if (CollectionUtils.isEmpty(taskChange.getFieldChanges())) {
+                    retained.add(taskChange);
+                    continue;
+                }
+                List<RuntimeDiffFieldChange> filteredFieldChanges = taskChange.getFieldChanges().stream()
+                        .filter(this::isMeaningfulPublishTaskFieldChange)
+                        .collect(Collectors.toList());
+                if (!filteredFieldChanges.isEmpty()) {
+                    taskChange.setFieldChanges(filteredFieldChanges);
+                    retained.add(taskChange);
+                }
+            }
+            summary.setTaskModified(retained);
+        }
+
+        if (!CollectionUtils.isEmpty(summary.getEdgeAdded())) {
+            List<RuntimeRelationChange> filtered = summary.getEdgeAdded().stream()
+                    .filter(this::isMeaningfulPublishEdgeChange)
+                    .collect(Collectors.toList());
+            summary.setEdgeAdded(filtered);
+        }
+
+        if (!CollectionUtils.isEmpty(summary.getEdgeRemoved())) {
+            List<RuntimeRelationChange> filtered = summary.getEdgeRemoved().stream()
+                    .filter(this::isMeaningfulPublishEdgeChange)
+                    .collect(Collectors.toList());
+            summary.setEdgeRemoved(filtered);
+        }
+
+        if (!CollectionUtils.isEmpty(summary.getScheduleChanges())) {
+            List<RuntimeDiffFieldChange> filteredScheduleChanges = summary.getScheduleChanges().stream()
+                    .filter(this::isMeaningfulPublishScheduleFieldChange)
+                    .collect(Collectors.toList());
+            summary.setScheduleChanges(filteredScheduleChanges);
+        }
+
+        summary.setChanged(hasMeaningfulDiffChanges(summary));
+        return summary;
+    }
+
+    private boolean isMeaningfulPublishTaskFieldChange(RuntimeDiffFieldChange change) {
+        if (change == null || !StringUtils.hasText(change.getField())) {
+            return false;
+        }
+        return !PUBLISH_NOISE_TASK_FIELDS.contains(change.getField().trim())
+                && hasActualValueChanged(change);
+    }
+
+    private boolean isMeaningfulPublishScheduleFieldChange(RuntimeDiffFieldChange change) {
+        if (change == null || !StringUtils.hasText(change.getField())) {
+            return false;
+        }
+        String field = change.getField().trim();
+        return !PUBLISH_NOISE_SCHEDULE_FIELDS.contains(field)
+                && hasActualValueChanged(change);
+    }
+
+    private boolean isMeaningfulPublishEdgeChange(RuntimeRelationChange change) {
+        if (change == null) {
+            return false;
+        }
+        Long preTaskCode = change.getPreTaskCode();
+        Long postTaskCode = change.getPostTaskCode();
+        return preTaskCode != null
+                && preTaskCode >= 0
+                && postTaskCode != null
+                && postTaskCode > 0;
+    }
+
+    private boolean hasActualValueChanged(RuntimeDiffFieldChange change) {
+        if (change == null) {
+            return false;
+        }
+        return !Objects.equals(
+                normalizeDiffValue(change.getBefore()),
+                normalizeDiffValue(change.getAfter()));
+    }
+
+    private boolean hasMeaningfulDiffChanges(RuntimeDiffSummary summary) {
+        if (summary == null) {
+            return false;
+        }
+        return !CollectionUtils.isEmpty(summary.getWorkflowFieldChanges())
+                || !CollectionUtils.isEmpty(summary.getTaskAdded())
+                || !CollectionUtils.isEmpty(summary.getTaskRemoved())
+                || !CollectionUtils.isEmpty(summary.getTaskModified())
+                || !CollectionUtils.isEmpty(summary.getEdgeAdded())
+                || !CollectionUtils.isEmpty(summary.getEdgeRemoved())
+                || !CollectionUtils.isEmpty(summary.getScheduleChanges());
+    }
+
+    private String normalizeDiffValue(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private List<WorkflowPublishRepairIssue> buildPublishMetadataRepairIssues(DataWorkflow workflow,
+            RuntimeWorkflowDefinition platformDefinition) {
+        if (workflow == null || platformDefinition == null || CollectionUtils.isEmpty(platformDefinition.getTasks())) {
+            return Collections.emptyList();
+        }
+        Map<Long, DefinitionTaskMetadata> metadataByCode = loadDefinitionTaskMetadata(workflow.getDefinitionJson());
+        if (metadataByCode.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<WorkflowPublishRepairIssue> result = new ArrayList<>();
+        Set<String> dedupe = new LinkedHashSet<>();
+        for (RuntimeTaskDefinition task : platformDefinition.getTasks()) {
+            if (task == null || task.getTaskCode() == null || task.getTaskCode() <= 0) {
+                continue;
+            }
+            DefinitionTaskMetadata metadata = metadataByCode.get(task.getTaskCode());
+            if ("SQL".equalsIgnoreCase(task.getNodeType())) {
+                Long datasourceId = metadata != null ? metadata.getDatasourceId() : null;
+                if (datasourceId == null || datasourceId <= 0) {
+                    WorkflowPublishRepairIssue issue = new WorkflowPublishRepairIssue();
+                    issue.setCode(PUBLISH_METADATA_REPAIR_RECOMMENDED);
+                    issue.setSeverity("WARNING");
+                    issue.setRepairable(true);
+                    issue.setField("task.datasourceId");
+                    issue.setTaskCode(task.getTaskCode());
+                    issue.setTaskName(task.getTaskName());
+                    issue.setMessage(String.format(
+                            "任务[%s(%s)] 缺少 datasourceId 元数据，建议先修复元数据再发布",
+                            task.getTaskName() == null ? "-" : task.getTaskName(),
+                            task.getTaskCode()));
+                    addRepairIssue(result, dedupe, issue);
+                }
+            }
+            String taskGroupName = normalizeDiffValue(task.getTaskGroupName());
+            Integer taskGroupId = metadata != null ? metadata.getTaskGroupId() : null;
+            if (StringUtils.hasText(taskGroupName) && (taskGroupId == null || taskGroupId <= 0)) {
+                WorkflowPublishRepairIssue issue = new WorkflowPublishRepairIssue();
+                issue.setCode(PUBLISH_METADATA_REPAIR_RECOMMENDED);
+                issue.setSeverity("WARNING");
+                issue.setRepairable(true);
+                issue.setField("task.taskGroupId");
+                issue.setTaskCode(task.getTaskCode());
+                issue.setTaskName(task.getTaskName());
+                issue.setMessage(String.format(
+                        "任务[%s(%s)] 缺少 taskGroupId 元数据(任务组=%s)，建议先修复元数据再发布",
+                        task.getTaskName() == null ? "-" : task.getTaskName(),
+                        task.getTaskCode(),
+                        taskGroupName));
+                addRepairIssue(result, dedupe, issue);
+            }
+        }
+        return result;
+    }
+
+    private Map<Long, DefinitionTaskMetadata> loadDefinitionTaskMetadata(String definitionJson) {
+        if (!StringUtils.hasText(definitionJson)) {
+            return Collections.emptyMap();
+        }
+        try {
+            JsonNode rootNode = objectMapper.readTree(definitionJson);
+            JsonNode taskListNode = rootNode != null ? rootNode.get("taskDefinitionList") : null;
+            if (!(taskListNode instanceof ArrayNode)) {
+                return Collections.emptyMap();
+            }
+            Map<Long, DefinitionTaskMetadata> result = new LinkedHashMap<>();
+            for (JsonNode taskNode : (ArrayNode) taskListNode) {
+                Long taskCode = readLong(taskNode, "taskCode", "code");
+                if (taskCode == null || taskCode <= 0) {
+                    taskCode = readLong(taskNode != null ? taskNode.get("xPlatformTaskMeta") : null, "dolphinTaskCode");
+                }
+                if (taskCode == null || taskCode <= 0) {
+                    continue;
+                }
+                JsonNode taskParams = taskNode != null ? taskNode.get("taskParams") : null;
+                DefinitionTaskMetadata metadata = new DefinitionTaskMetadata();
+                metadata.setDatasourceId(readLong(taskParams, "datasourceId", "datasource"));
+                metadata.setTaskGroupId(readInt(taskNode, "taskGroupId"));
+                result.put(taskCode, metadata);
+            }
+            return result;
+        } catch (Exception ex) {
+            return Collections.emptyMap();
+        }
+    }
+
+    private boolean repairWorkflowMetadataFromRuntime(DataWorkflow workflow,
+            RuntimeWorkflowDefinition runtimeDefinition,
+            String operator,
+            WorkflowPublishRepairResponse response) {
+        if (workflow == null || runtimeDefinition == null) {
+            return false;
+        }
+        boolean changed = false;
+        List<String> changedFields = response != null ? response.getUpdatedWorkflowFields() : new ArrayList<>();
+
+        if (runtimeDefinition.getProjectCode() != null
+                && !Objects.equals(workflow.getProjectCode(), runtimeDefinition.getProjectCode())) {
+            workflow.setProjectCode(runtimeDefinition.getProjectCode());
+            changed = true;
+            changedFields.add("workflow.projectCode");
+        }
+        if (runtimeDefinition.getWorkflowCode() != null
+                && !Objects.equals(workflow.getWorkflowCode(), runtimeDefinition.getWorkflowCode())) {
+            workflow.setWorkflowCode(runtimeDefinition.getWorkflowCode());
+            changed = true;
+            changedFields.add("workflow.workflowCode");
+        }
+
+        RuntimeWorkflowSchedule schedule = runtimeDefinition.getSchedule();
+        if (schedule != null) {
+            changed |= updateWorkflowScheduleField(workflow.getDolphinScheduleId(), schedule.getScheduleId(),
+                    workflow::setDolphinScheduleId, changedFields, "schedule.scheduleId");
+            changed |= updateWorkflowScheduleField(workflow.getScheduleState(), schedule.getReleaseState(),
+                    workflow::setScheduleState, changedFields, "schedule.releaseState");
+            changed |= updateWorkflowScheduleField(workflow.getScheduleCron(), schedule.getCrontab(),
+                    workflow::setScheduleCron, changedFields, "schedule.crontab");
+            changed |= updateWorkflowScheduleField(workflow.getScheduleTimezone(), schedule.getTimezoneId(),
+                    workflow::setScheduleTimezone, changedFields, "schedule.timezoneId");
+            changed |= updateWorkflowScheduleField(workflow.getScheduleFailureStrategy(), schedule.getFailureStrategy(),
+                    workflow::setScheduleFailureStrategy, changedFields, "schedule.failureStrategy");
+            changed |= updateWorkflowScheduleField(workflow.getScheduleWarningType(), schedule.getWarningType(),
+                    workflow::setScheduleWarningType, changedFields, "schedule.warningType");
+            changed |= updateWorkflowScheduleField(workflow.getScheduleWarningGroupId(), schedule.getWarningGroupId(),
+                    workflow::setScheduleWarningGroupId, changedFields, "schedule.warningGroupId");
+            changed |= updateWorkflowScheduleField(workflow.getScheduleProcessInstancePriority(),
+                    schedule.getProcessInstancePriority(),
+                    workflow::setScheduleProcessInstancePriority, changedFields, "schedule.processInstancePriority");
+            changed |= updateWorkflowScheduleField(workflow.getScheduleWorkerGroup(), schedule.getWorkerGroup(),
+                    workflow::setScheduleWorkerGroup, changedFields, "schedule.workerGroup");
+            changed |= updateWorkflowScheduleField(workflow.getScheduleTenantCode(), schedule.getTenantCode(),
+                    workflow::setScheduleTenantCode, changedFields, "schedule.tenantCode");
+            changed |= updateWorkflowScheduleField(workflow.getScheduleEnvironmentCode(), schedule.getEnvironmentCode(),
+                    workflow::setScheduleEnvironmentCode, changedFields, "schedule.environmentCode");
+
+            LocalDateTime runtimeStart = parseScheduleDateTime(schedule.getStartTime());
+            LocalDateTime runtimeEnd = parseScheduleDateTime(schedule.getEndTime());
+            changed |= updateWorkflowScheduleField(workflow.getScheduleStartTime(), runtimeStart,
+                    workflow::setScheduleStartTime, changedFields, "schedule.startTime");
+            changed |= updateWorkflowScheduleField(workflow.getScheduleEndTime(), runtimeEnd,
+                    workflow::setScheduleEndTime, changedFields, "schedule.endTime");
+        }
+
+        if (changed) {
+            workflow.setUpdatedBy(operator);
+            dataWorkflowMapper.updateById(workflow);
+        }
+        return changed;
+    }
+
+    private int repairTaskMetadataFromRuntime(DataWorkflow workflow,
+            RuntimeWorkflowDefinition runtimeDefinition,
+            String operator) {
+        if (workflow == null || runtimeDefinition == null || CollectionUtils.isEmpty(runtimeDefinition.getTasks())) {
+            return 0;
+        }
+        List<WorkflowTaskRelation> relations = workflowTaskRelationMapper.selectList(
+                Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                        .eq(WorkflowTaskRelation::getWorkflowId, workflow.getId()));
+        if (CollectionUtils.isEmpty(relations)) {
+            return 0;
+        }
+        List<Long> taskIds = relations.stream()
+                .map(WorkflowTaskRelation::getTaskId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(taskIds)) {
+            return 0;
+        }
+        Map<Long, DataTask> taskByRuntimeCode = dataTaskMapper.selectBatchIds(taskIds).stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(
+                        this::resolveTaskCodeForDiff,
+                        task -> task,
+                        (left, right) -> left,
+                        LinkedHashMap::new));
+
+        int updated = 0;
+        for (RuntimeTaskDefinition runtimeTask : runtimeDefinition.getTasks()) {
+            if (runtimeTask == null || runtimeTask.getTaskCode() == null) {
+                continue;
+            }
+            DataTask localTask = taskByRuntimeCode.get(runtimeTask.getTaskCode());
+            if (localTask == null) {
+                continue;
+            }
+            boolean changed = false;
+            if (runtimeTask.getTaskVersion() != null
+                    && !Objects.equals(localTask.getDolphinTaskVersion(), runtimeTask.getTaskVersion())) {
+                localTask.setDolphinTaskVersion(runtimeTask.getTaskVersion());
+                changed = true;
+            }
+            if (StringUtils.hasText(runtimeTask.getDatasourceName())
+                    && !Objects.equals(normalizeDiffValue(localTask.getDatasourceName()),
+                            normalizeDiffValue(runtimeTask.getDatasourceName()))) {
+                localTask.setDatasourceName(runtimeTask.getDatasourceName().trim());
+                changed = true;
+            }
+            if (StringUtils.hasText(runtimeTask.getDatasourceType())
+                    && !Objects.equals(normalizeDiffValue(localTask.getDatasourceType()),
+                            normalizeDiffValue(runtimeTask.getDatasourceType()))) {
+                localTask.setDatasourceType(runtimeTask.getDatasourceType().trim());
+                changed = true;
+            }
+            if (StringUtils.hasText(runtimeTask.getTaskGroupName())
+                    && !Objects.equals(normalizeDiffValue(localTask.getTaskGroupName()),
+                            normalizeDiffValue(runtimeTask.getTaskGroupName()))) {
+                localTask.setTaskGroupName(runtimeTask.getTaskGroupName().trim());
+                changed = true;
+            }
+            if (!changed) {
+                continue;
+            }
+            dataTaskMapper.updateById(localTask);
+            updated++;
+        }
+        return updated;
+    }
+
+    private boolean repairDefinitionMetadataFromRuntime(DataWorkflow workflow,
+            RuntimeWorkflowDefinition runtimeDefinition,
+            String operator,
+            WorkflowPublishRepairResponse response) {
+        if (workflow == null || runtimeDefinition == null || !StringUtils.hasText(workflow.getDefinitionJson())) {
+            return false;
+        }
+        if (CollectionUtils.isEmpty(runtimeDefinition.getTasks())) {
+            return false;
+        }
+        Map<Long, RuntimeTaskDefinition> runtimeTaskByCode = runtimeDefinition.getTasks().stream()
+                .filter(Objects::nonNull)
+                .filter(task -> task.getTaskCode() != null && task.getTaskCode() > 0)
+                .collect(Collectors.toMap(RuntimeTaskDefinition::getTaskCode, task -> task, (left, right) -> left));
+        if (runtimeTaskByCode.isEmpty()) {
+            return false;
+        }
+
+        try {
+            JsonNode rootNode = objectMapper.readTree(workflow.getDefinitionJson());
+            if (!(rootNode instanceof ObjectNode)) {
+                return false;
+            }
+            ObjectNode rootObject = (ObjectNode) rootNode;
+            JsonNode taskListNode = rootObject.get("taskDefinitionList");
+            if (!(taskListNode instanceof ArrayNode)) {
+                return false;
+            }
+
+            boolean changed = false;
+            for (JsonNode taskNode : (ArrayNode) taskListNode) {
+                if (!(taskNode instanceof ObjectNode)) {
+                    continue;
+                }
+                ObjectNode taskObject = (ObjectNode) taskNode;
+                Long taskCode = readLong(taskObject, "taskCode", "code");
+                if (taskCode == null || taskCode <= 0) {
+                    taskCode = readLong(taskObject.get("xPlatformTaskMeta"), "dolphinTaskCode");
+                }
+                if (taskCode == null || taskCode <= 0) {
+                    continue;
+                }
+                RuntimeTaskDefinition runtimeTask = runtimeTaskByCode.get(taskCode);
+                if (runtimeTask == null) {
+                    continue;
+                }
+
+                ObjectNode taskParams = ensureObject(taskObject, "taskParams");
+                changed |= putLong(taskParams, "datasourceId", runtimeTask.getDatasourceId());
+                changed |= putLong(taskParams, "datasource", runtimeTask.getDatasourceId());
+                changed |= putText(taskParams, "datasourceName", runtimeTask.getDatasourceName());
+                changed |= putText(taskParams, "datasourceType", runtimeTask.getDatasourceType());
+                changed |= putText(taskParams, "type", runtimeTask.getDatasourceType());
+
+                changed |= putInt(taskObject, "taskGroupId", runtimeTask.getTaskGroupId());
+                changed |= putText(taskObject, "taskPriority", runtimeTask.getTaskPriority());
+                changed |= putInt(taskObject, "version", runtimeTask.getTaskVersion());
+                changed |= putLongArray(taskObject, "inputTableIds", runtimeTask.getInputTableIds());
+                changed |= putLongArray(taskObject, "outputTableIds", runtimeTask.getOutputTableIds());
+            }
+
+            if (!changed) {
+                return false;
+            }
+            workflow.setDefinitionJson(objectMapper.writeValueAsString(rootObject));
+            workflow.setUpdatedBy(operator);
+            dataWorkflowMapper.updateById(workflow);
+            if (response != null && !response.getUpdatedWorkflowFields().contains("definition.taskDefinitionList")) {
+                response.getUpdatedWorkflowFields().add("definition.taskDefinitionList");
+            }
+            return true;
+        } catch (Exception ex) {
+            throw new IllegalStateException(String.format(
+                    "修复 definition 元数据失败(来源=runtime, workflowId=%s): %s",
+                    workflow.getId(),
+                    ex.getMessage()), ex);
+        }
+    }
+
+    private boolean repairDefinitionMetadataFromCatalog(DataWorkflow workflow,
+            String operator,
+            WorkflowPublishRepairResponse response) {
+        if (workflow == null || !StringUtils.hasText(workflow.getDefinitionJson())) {
+            return false;
+        }
+        JsonNode rootNode;
+        try {
+            rootNode = objectMapper.readTree(workflow.getDefinitionJson());
+        } catch (Exception ex) {
+            throw new IllegalStateException(String.format(
+                    "修复 definition 元数据失败(来源=catalog, workflowId=%s): definitionJson 解析失败: %s",
+                    workflow.getId(),
+                    ex.getMessage()), ex);
+        }
+        if (!(rootNode instanceof ObjectNode)) {
+            return false;
+        }
+        ObjectNode rootObject = (ObjectNode) rootNode;
+        JsonNode taskListNode = rootObject.get("taskDefinitionList");
+        if (!(taskListNode instanceof ArrayNode)) {
+            return false;
+        }
+        boolean needDatasourceResolve = false;
+        boolean needTaskGroupResolve = false;
+        for (JsonNode taskNode : (ArrayNode) taskListNode) {
+            if (!(taskNode instanceof ObjectNode)) {
+                continue;
+            }
+            ObjectNode taskObject = (ObjectNode) taskNode;
+            ObjectNode taskParams = ensureObject(taskObject, "taskParams");
+            Long datasourceId = readLong(taskParams, "datasourceId", "datasource");
+            String datasourceName = readText(taskParams, "datasourceName");
+            if ((datasourceId == null || datasourceId <= 0) && StringUtils.hasText(datasourceName)) {
+                needDatasourceResolve = true;
+            }
+            Integer taskGroupId = readInt(taskObject, "taskGroupId");
+            String taskGroupName = readText(taskObject, "taskGroupName");
+            if ((taskGroupId == null || taskGroupId <= 0) && StringUtils.hasText(taskGroupName)) {
+                needTaskGroupResolve = true;
+            }
+        }
+
+        Map<String, DolphinDatasourceOption> datasourceByName;
+        try {
+            datasourceByName = dolphinSchedulerService.listDatasources(null, null)
+                    .stream()
+                    .filter(Objects::nonNull)
+                    .filter(item -> StringUtils.hasText(item.getName()) && item.getId() != null && item.getId() > 0)
+                    .collect(Collectors.toMap(item -> item.getName().trim(), item -> item, (left, right) -> left));
+        } catch (Exception ex) {
+            throw new IllegalStateException(String.format(
+                    "修复 definition 元数据失败(来源=catalog, workflowId=%s): 无法读取 Dolphin 数据源目录: %s",
+                    workflow.getId(),
+                    ex.getMessage()), ex);
+        }
+
+        Map<String, DolphinTaskGroupOption> taskGroupByName;
+        try {
+            taskGroupByName = dolphinSchedulerService.listTaskGroups(null)
+                    .stream()
+                    .filter(Objects::nonNull)
+                    .filter(item -> StringUtils.hasText(item.getName()) && item.getId() != null && item.getId() > 0)
+                    .collect(Collectors.toMap(item -> item.getName().trim(), item -> item, (left, right) -> left));
+        } catch (Exception ex) {
+            throw new IllegalStateException(String.format(
+                    "修复 definition 元数据失败(来源=catalog, workflowId=%s): 无法读取 Dolphin 任务组目录: %s",
+                    workflow.getId(),
+                    ex.getMessage()), ex);
+        }
+        if (needDatasourceResolve && datasourceByName.isEmpty()) {
+            throw new IllegalStateException(String.format(
+                    "修复 definition 元数据失败(来源=catalog, workflowId=%s): Dolphin 数据源目录为空，无法按名称补齐 datasourceId",
+                    workflow.getId()));
+        }
+        if (needTaskGroupResolve && taskGroupByName.isEmpty()) {
+            throw new IllegalStateException(String.format(
+                    "修复 definition 元数据失败(来源=catalog, workflowId=%s): Dolphin 任务组目录为空，无法按名称补齐 taskGroupId",
+                    workflow.getId()));
+        }
+
+        boolean changed = false;
+        for (JsonNode taskNode : (ArrayNode) taskListNode) {
+            if (!(taskNode instanceof ObjectNode)) {
+                continue;
+            }
+            ObjectNode taskObject = (ObjectNode) taskNode;
+            ObjectNode taskParams = ensureObject(taskObject, "taskParams");
+            Long datasourceId = readLong(taskParams, "datasourceId", "datasource");
+            String datasourceName = readText(taskParams, "datasourceName");
+            if ((datasourceId == null || datasourceId <= 0) && StringUtils.hasText(datasourceName)) {
+                DolphinDatasourceOption datasourceOption = datasourceByName.get(datasourceName.trim());
+                if (datasourceOption != null && datasourceOption.getId() != null && datasourceOption.getId() > 0) {
+                    changed |= putLong(taskParams, "datasourceId", datasourceOption.getId());
+                    changed |= putLong(taskParams, "datasource", datasourceOption.getId());
+                    changed |= putText(taskParams, "datasourceType", datasourceOption.getType());
+                    changed |= putText(taskParams, "type", datasourceOption.getType());
+                }
+            }
+            Integer taskGroupId = readInt(taskObject, "taskGroupId");
+            String taskGroupName = readText(taskObject, "taskGroupName");
+            if ((taskGroupId == null || taskGroupId <= 0) && StringUtils.hasText(taskGroupName)) {
+                DolphinTaskGroupOption groupOption = taskGroupByName.get(taskGroupName.trim());
+                if (groupOption != null && groupOption.getId() != null && groupOption.getId() > 0) {
+                    changed |= putInt(taskObject, "taskGroupId", groupOption.getId());
+                }
+            }
+        }
+
+        if (!changed) {
+            return false;
+        }
+        try {
+            workflow.setDefinitionJson(objectMapper.writeValueAsString(rootObject));
+        } catch (Exception ex) {
+            throw new IllegalStateException(String.format(
+                    "修复 definition 元数据失败(来源=catalog, workflowId=%s): definitionJson 序列化失败: %s",
+                    workflow.getId(),
+                    ex.getMessage()), ex);
+        }
+        workflow.setUpdatedBy(operator);
+        dataWorkflowMapper.updateById(workflow);
+        if (response != null && !response.getUpdatedWorkflowFields().contains("definition.taskDefinitionList")) {
+            response.getUpdatedWorkflowFields().add("definition.taskDefinitionList");
+        }
+        return true;
+    }
+
+    private void ensureBlockingRepairIssuesResolved(DataWorkflow workflow) {
+        if (workflow == null) {
+            return;
+        }
+        List<WorkflowPublishRepairIssue> unresolvedIssues = buildPublishMetadataRepairIssues(
+                workflow,
+                buildPlatformDefinition(workflow)).stream()
+                .filter(this::isBlockingRepairIssue)
+                .collect(Collectors.toList());
+        if (unresolvedIssues.isEmpty()) {
+            return;
+        }
+        String details = unresolvedIssues.stream()
+                .map(item -> StringUtils.hasText(item.getMessage()) ? item.getMessage() : item.getField())
+                .filter(StringUtils::hasText)
+                .limit(3)
+                .collect(Collectors.joining("；"));
+        String summary = details.isEmpty()
+                ? "请检查任务 datasourceId/taskGroupId"
+                : details;
+        throw new IllegalStateException("元数据修复未完成，仍存在必填 ID 字段缺失: " + summary);
+    }
+
+    private boolean isBlockingRepairIssue(WorkflowPublishRepairIssue issue) {
+        if (issue == null || !StringUtils.hasText(issue.getField())) {
+            return false;
+        }
+        String field = issue.getField().trim();
+        return "task.datasourceId".equals(field) || "task.taskGroupId".equals(field);
+    }
+
+    private ObjectNode ensureObject(ObjectNode root, String field) {
+        if (root == null || !StringUtils.hasText(field)) {
+            return objectMapper.createObjectNode();
+        }
+        JsonNode node = root.get(field);
+        if (node instanceof ObjectNode) {
+            return (ObjectNode) node;
+        }
+        ObjectNode created = objectMapper.createObjectNode();
+        root.set(field, created);
+        return created;
+    }
+
+    private boolean putLong(ObjectNode node, String field, Long value) {
+        if (node == null || !StringUtils.hasText(field) || value == null || value <= 0) {
+            return false;
+        }
+        Long current = readLong(node, field);
+        if (Objects.equals(current, value)) {
+            return false;
+        }
+        node.put(field, value);
+        return true;
+    }
+
+    private boolean putInt(ObjectNode node, String field, Integer value) {
+        if (node == null || !StringUtils.hasText(field) || value == null || value <= 0) {
+            return false;
+        }
+        Integer current = readInt(node, field);
+        if (Objects.equals(current, value)) {
+            return false;
+        }
+        node.put(field, value);
+        return true;
+    }
+
+    private boolean putText(ObjectNode node, String field, String value) {
+        if (node == null || !StringUtils.hasText(field) || !StringUtils.hasText(value)) {
+            return false;
+        }
+        String normalized = value.trim();
+        String current = readText(node, field);
+        if (Objects.equals(normalizeDiffValue(current), normalizeDiffValue(normalized))) {
+            return false;
+        }
+        node.put(field, normalized);
+        return true;
+    }
+
+    private boolean putLongArray(ObjectNode node, String field, List<Long> values) {
+        if (node == null || !StringUtils.hasText(field) || CollectionUtils.isEmpty(values)) {
+            return false;
+        }
+        List<Long> normalized = values.stream()
+                .filter(Objects::nonNull)
+                .filter(item -> item > 0)
+                .collect(Collectors.toList());
+        if (normalized.isEmpty()) {
+            return false;
+        }
+        JsonNode currentNode = node.get(field);
+        List<Long> current = new ArrayList<>();
+        if (currentNode != null && currentNode.isArray()) {
+            for (JsonNode item : currentNode) {
+                if (item == null || item.isNull()) {
+                    continue;
+                }
+                if (item.isNumber()) {
+                    current.add(item.asLong());
+                } else if (item.isTextual()) {
+                    try {
+                        current.add(Long.parseLong(item.asText().trim()));
+                    } catch (NumberFormatException ignored) {
+                        // ignore invalid value
+                    }
+                }
+            }
+        }
+        if (Objects.equals(current, normalized)) {
+            return false;
+        }
+        ArrayNode arrayNode = objectMapper.createArrayNode();
+        normalized.forEach(arrayNode::add);
+        node.set(field, arrayNode);
+        return true;
+    }
+
+    private Long readLong(JsonNode node, String... fields) {
+        if (node == null || node.isNull() || fields == null) {
+            return null;
+        }
+        for (String field : fields) {
+            if (!StringUtils.hasText(field)) {
+                continue;
+            }
+            JsonNode value = node.get(field);
+            if (value == null || value.isNull()) {
+                continue;
+            }
+            if (value.isNumber()) {
+                return value.asLong();
+            }
+            if (value.isTextual()) {
+                String text = value.asText();
+                if (!StringUtils.hasText(text)) {
+                    continue;
+                }
+                try {
+                    return Long.parseLong(text.trim());
+                } catch (NumberFormatException ignored) {
+                    // skip invalid value
+                }
+            }
+        }
+        return null;
+    }
+
+    private Integer readInt(JsonNode node, String... fields) {
+        Long value = readLong(node, fields);
+        return value == null ? null : value.intValue();
+    }
+
+    private String readText(JsonNode node, String... fields) {
+        if (node == null || node.isNull() || fields == null) {
+            return null;
+        }
+        for (String field : fields) {
+            if (!StringUtils.hasText(field)) {
+                continue;
+            }
+            JsonNode value = node.get(field);
+            if (value == null || value.isNull()) {
+                continue;
+            }
+            String text = value.isTextual() ? value.asText() : value.toString();
+            if (StringUtils.hasText(text)) {
+                return text.trim();
+            }
+        }
+        return null;
+    }
+
+    private static class DefinitionTaskMetadata {
+        private Long datasourceId;
+        private Integer taskGroupId;
+
+        public Long getDatasourceId() {
+            return datasourceId;
+        }
+
+        public void setDatasourceId(Long datasourceId) {
+            this.datasourceId = datasourceId;
+        }
+
+        public Integer getTaskGroupId() {
+            return taskGroupId;
+        }
+
+        public void setTaskGroupId(Integer taskGroupId) {
+            this.taskGroupId = taskGroupId;
+        }
+    }
+
+    private LocalDateTime parseScheduleDateTime(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String trimmed = value.trim();
+        for (DateTimeFormatter formatter : SCHEDULE_INPUT_FORMATTERS) {
+            try {
+                return LocalDateTime.parse(trimmed, formatter);
+            } catch (DateTimeParseException ignored) {
+                // try next formatter
+            }
+        }
+        return null;
+    }
+
+    private <T> boolean updateWorkflowScheduleField(T currentValue,
+            T nextValue,
+            java.util.function.Consumer<T> setter,
+            List<String> changedFields,
+            String fieldName) {
+        if (Objects.equals(currentValue, nextValue)) {
+            return false;
+        }
+        setter.accept(nextValue);
+        if (changedFields != null && StringUtils.hasText(fieldName)) {
+            changedFields.add(fieldName);
+        }
+        return true;
     }
 
     private boolean isRuntimeWorkflowMissing(String message) {

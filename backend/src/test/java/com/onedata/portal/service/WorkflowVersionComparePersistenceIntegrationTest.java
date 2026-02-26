@@ -398,8 +398,14 @@ class WorkflowVersionComparePersistenceIntegrationTest {
                 renamedTask1, "任务输入输出修改应被识别");
 
         WorkflowVersionCompareResponse modifyRelation = compare(workflowId, v7, v8);
-        assertListContains(modifyRelation.getAdded().getEdges(), task2Id + "->" + task1Id, "任务关系新增边应被识别");
-        assertListContains(modifyRelation.getRemoved().getEdges(), task1Id + "->" + task2Id, "任务关系删除边应被识别");
+        assertTrue(modifyRelation.getAdded().getEdges().stream()
+                        .anyMatch(item -> item.contains("load_user_" + suffix)
+                                && item.contains("-> " + renamedTask1 + "(")),
+                "任务关系新增边应被识别: " + modifyRelation.getAdded().getEdges());
+        assertTrue(modifyRelation.getRemoved().getEdges().stream()
+                        .anyMatch(item -> item.contains(renamedTask1)
+                                && item.contains("-> " + "load_user_" + suffix + "(")),
+                "任务关系删除边应被识别: " + modifyRelation.getRemoved().getEdges());
 
         WorkflowVersionCompareResponse modifyWorkflowAndSchedule = compare(workflowId, v9, v10);
         assertListContains(modifyWorkflowAndSchedule.getModified().getWorkflowFields(),

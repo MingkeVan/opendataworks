@@ -15,6 +15,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Arrays;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -117,5 +118,49 @@ class DataTaskServiceWorkflowMetadataTest {
         verify(workflowTaskRelationMapper, never()).updateById(any());
         verify(workflowService).refreshTaskRelations(10L);
     }
-}
 
+    @Test
+    void createShouldIgnoreNullRowsWhenAllocatingNextTaskCode() {
+        DataTask input = new DataTask();
+        input.setTaskName("task-create-null-row");
+        input.setTaskCode("task-create-null-row-code");
+        input.setEngine("dolphin");
+        input.setDolphinNodeType("SQL");
+        input.setDatasourceName("ds_main");
+        input.setDatasourceType("MYSQL");
+        input.setTaskSql("insert into dwd.t1 select * from ods.t1");
+        input.setOwner("tester");
+
+        when(dataTaskMapper.selectCount(any())).thenReturn(0L);
+        when(dataTaskMapper.selectOne(any())).thenReturn(null);
+        when(dataTaskMapper.insert(any())).thenAnswer(invocation -> {
+            DataTask task = invocation.getArgument(0);
+            task.setId(101L);
+            return 1;
+        });
+
+        DataTask persisted = new DataTask();
+        persisted.setId(101L);
+        persisted.setTaskName("task-create-null-row");
+        persisted.setTaskCode("task-create-null-row-code");
+        persisted.setEngine("dolphin");
+        persisted.setDolphinNodeType("SQL");
+        persisted.setDatasourceName("ds_main");
+        persisted.setDatasourceType("MYSQL");
+        persisted.setTaskSql("insert into dwd.t1 select * from ods.t1");
+        persisted.setOwner("tester");
+        when(dataTaskMapper.selectById(101L)).thenReturn(persisted);
+
+        DataTask codeRecord = new DataTask();
+        codeRecord.setDolphinTaskCode(1001L);
+        when(dataTaskMapper.selectList(any())).thenReturn(Arrays.asList(null, codeRecord));
+        when(dolphinSchedulerService.nextTaskCode()).thenReturn(2002L);
+
+        DataTask result = dataTaskService.create(input, Collections.singletonList(11L), Collections.singletonList(12L));
+
+        assertNotNull(result);
+        assertEquals(101L, result.getId());
+        verify(dolphinSchedulerService).alignSequenceWithExistingTasks(Collections.singletonList(1001L));
+        verify(dolphinSchedulerService).nextTaskCode();
+    }
+}

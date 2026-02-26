@@ -131,6 +131,7 @@ public class WorkflowDefinitionLifecycleService {
                 operator,
                 context.getSourceType());
         dataWorkflowMapper.updateById(workflow);
+        workflowService.normalizeAndPersistMetadata(workflow.getId(), operator);
 
         WorkflowImportCommitResponse response = new WorkflowImportCommitResponse();
         response.setWorkflowId(workflow.getId());
@@ -755,19 +756,21 @@ public class WorkflowDefinitionLifecycleService {
             task.setTaskCode(resolveUniqueTaskCode(resolvedTaskName, runtimeTask.getTaskCode(), reservedTaskCodes));
             task.setTaskType("batch");
             task.setEngine("dolphin");
-            task.setDolphinNodeType("SQL");
+            task.setDolphinNodeType(StringUtils.hasText(runtimeTask.getNodeType())
+                    ? runtimeTask.getNodeType().trim()
+                    : null);
             task.setDatasourceName(runtimeTask.getDatasourceName());
             task.setDatasourceType(runtimeTask.getDatasourceType());
             task.setTaskGroupName(runtimeTask.getTaskGroupName());
             task.setTaskSql(runtimeTask.getSql());
             task.setTaskDesc(runtimeTask.getDescription());
             task.setPriority(priorityToNumber(runtimeTask.getTaskPriority()));
-            task.setTimeoutSeconds(runtimeTask.getTimeoutSeconds() != null ? runtimeTask.getTimeoutSeconds() : 300);
-            task.setRetryTimes(runtimeTask.getRetryTimes() != null ? runtimeTask.getRetryTimes() : 1);
-            task.setRetryInterval(runtimeTask.getRetryInterval() != null ? runtimeTask.getRetryInterval() : 1);
+            task.setTimeoutSeconds(runtimeTask.getTimeoutSeconds());
+            task.setRetryTimes(runtimeTask.getRetryTimes());
+            task.setRetryInterval(runtimeTask.getRetryInterval());
             task.setOwner(operator);
             task.setDolphinTaskCode(runtimeTask.getTaskCode());
-            task.setDolphinTaskVersion(runtimeTask.getTaskVersion() != null ? runtimeTask.getTaskVersion() : 1);
+            task.setDolphinTaskVersion(runtimeTask.getTaskVersion());
 
             DataTask persisted = dataTaskService.create(task, runtimeTask.getInputTableIds(), runtimeTask.getOutputTableIds());
             WorkflowTaskBinding binding = new WorkflowTaskBinding();
@@ -819,7 +822,7 @@ public class WorkflowDefinitionLifecycleService {
 
     private Integer priorityToNumber(String taskPriority) {
         if (!StringUtils.hasText(taskPriority)) {
-            return 5;
+            return null;
         }
         String normalized = taskPriority.trim().toUpperCase(Locale.ROOT);
         switch (normalized) {

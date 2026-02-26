@@ -41,6 +41,10 @@ export const workflowApi = {
     return request.get(`/v1/workflows/${id}/publish/preview`)
   },
 
+  repairPublishMetadata(id, payload = {}) {
+    return request.post(`/v1/workflows/${id}/publish/repair-metadata`, payload)
+  },
+
   approve(id, recordId, payload) {
     return request.post(`/v1/workflows/${id}/publish/${recordId}/approve`, payload)
   },
@@ -65,22 +69,6 @@ export const workflowApi = {
     return request.post(`/v1/workflows/${id}/schedule/offline`)
   },
 
-  listRuntimeDolphin(params = {}) {
-    return request.get('/v1/workflows/runtime/dolphin', { params })
-  },
-
-  previewRuntimeSync(data) {
-    return request.post('/v1/workflows/runtime/dolphin/preview', data)
-  },
-
-  syncRuntime(data) {
-    return request.post('/v1/workflows/runtime/dolphin/sync', data)
-  },
-
-  runtimeDiff(id) {
-    return request.get(`/v1/workflows/${id}/runtime-diff`)
-  },
-
   compareVersions(id, payload) {
     return request.post(`/v1/workflows/${id}/versions/compare`, payload)
   },
@@ -91,14 +79,6 @@ export const workflowApi = {
 
   deleteVersion(id, versionId) {
     return request.delete(`/v1/workflows/${id}/versions/${versionId}`)
-  },
-
-  listRuntimeSyncRecords(id, params = {}) {
-    return request.get(`/v1/workflows/${id}/runtime-sync-records`, { params })
-  },
-
-  getRuntimeSyncRecordDetail(id, recordId) {
-    return request.get(`/v1/workflows/${id}/runtime-sync-records/${recordId}`)
   },
 
   delete(id) {

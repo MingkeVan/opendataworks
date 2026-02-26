@@ -739,7 +739,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import WorkflowTaskManager from './WorkflowTaskManager.vue'
 import WorkflowBackfillDialog from './WorkflowBackfillDialog.vue'
 import WorkflowVersionComparePanel from './WorkflowVersionComparePanel.vue'
-import { buildPublishPreviewHtml, firstPreviewErrorMessage, isDialogCancel } from './publishPreviewHelper'
+import {
+  buildPublishPreviewHtml,
+  buildPublishRepairHtml,
+  firstPreviewErrorMessage,
+  isDialogCancel
+} from './publishPreviewHelper'
 import QuartzCronBuilder from '@/components/QuartzCronBuilder.vue'
 
 const route = useRoute()
@@ -1820,10 +1825,64 @@ const previewPublishAndConfirm = async (row) => {
   if (!row?.id) {
     return false
   }
-  const preview = await workflowApi.previewPublish(row.id)
+  let preview = await workflowApi.previewPublish(row.id)
   if (!preview?.canPublish) {
     ElMessage.error(firstPreviewErrorMessage(preview))
     return false
+  }
+  const repairIssues = Array.isArray(preview?.repairIssues)
+    ? preview.repairIssues.filter(issue => issue?.repairable !== false)
+    : []
+  if (repairIssues.length) {
+    try {
+      await ElMessageBox.confirm(
+        buildPublishRepairHtml(preview),
+        '检测到可修复元数据问题',
+        {
+          type: 'warning',
+          customClass: 'workflow-publish-message-box',
+          confirmButtonText: '修复元数据并重试',
+          cancelButtonText: '继续发布',
+          distinguishCancelAndClose: true,
+          dangerouslyUseHTMLString: true
+        }
+      )
+      const repaired = await workflowApi.repairPublishMetadata(row.id, {
+        operator: 'portal-ui'
+      })
+      const changedTaskCount = repaired?.updatedTaskCount ?? 0
+      const changedWorkflowCount = Array.isArray(repaired?.updatedWorkflowFields)
+        ? repaired.updatedWorkflowFields.length
+        : 0
+      ElMessage.success(`元数据修复完成：工作流字段 ${changedWorkflowCount} 项，任务 ${changedTaskCount} 个`)
+      preview = await workflowApi.previewPublish(row.id)
+      if (!preview?.canPublish) {
+        ElMessage.error(firstPreviewErrorMessage(preview))
+        return false
+      }
+      const unresolvedRepairIssues = Array.isArray(preview?.repairIssues)
+        ? preview.repairIssues.filter(issue => issue?.repairable !== false)
+        : []
+      if (unresolvedRepairIssues.length) {
+        const unresolvedFields = unresolvedRepairIssues
+          .map(issue => issue?.field)
+          .filter(Boolean)
+          .slice(0, 3)
+        const fieldTip = unresolvedFields.length
+          ? `（${unresolvedFields.join(', ')}${unresolvedRepairIssues.length > 3 ? ' 等' : ''}）`
+          : ''
+        ElMessage.error(`元数据修复未完成，仍有 ${unresolvedRepairIssues.length} 项问题${fieldTip}，请先补全并保存后重试发布`)
+        return false
+      }
+    } catch (error) {
+      if (error === 'cancel') {
+        // Continue publish without repair
+      } else if (error === 'close') {
+        return false
+      } else {
+        throw error
+      }
+    }
   }
   if (!preview?.requireConfirm) {
     return true
@@ -1834,6 +1893,7 @@ const previewPublishAndConfirm = async (row) => {
       '发布变更确认',
       {
         type: 'warning',
+        customClass: 'workflow-publish-message-box',
         confirmButtonText: '确认发布',
         cancelButtonText: '取消',
         dangerouslyUseHTMLString: true
@@ -2320,5 +2380,13 @@ onMounted(() => {
 
 .cron-input-ref :deep(.el-input__inner) {
   cursor: pointer;
+}
+
+</style>
+
+<style>
+.workflow-publish-message-box {
+  width: min(1080px, 92vw) !important;
+  max-width: 92vw !important;
 }
 </style>

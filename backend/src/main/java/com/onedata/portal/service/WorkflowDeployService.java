@@ -2,9 +2,7 @@ package com.onedata.portal.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
-import com.onedata.portal.dto.DolphinDatasourceOption;
-import com.onedata.portal.dto.DolphinTaskGroupOption;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.TableTaskRelation;
@@ -75,7 +73,7 @@ public class WorkflowDeployService {
             }
         }
 
-        ensureTaskCodes(tasks);
+        validateTaskCodes(tasks);
 
         List<TableTaskRelation> tableRelations = tableTaskRelationMapper.selectList(
                 Wrappers.<TableTaskRelation>lambdaQuery()
@@ -105,24 +103,7 @@ public class WorkflowDeployService {
         TopologicalSortResult sortResult = topologicalSortWithLevels(allTasks, readTables, writeTables);
         List<DataTask> orderedTasks = sortResult.getSortedTasks();
         Map<Long, Integer> taskLevels = sortResult.getTaskLevels();
-
-        dolphinSchedulerService.alignSequenceWithExistingTasks(
-                orderedTasks.stream()
-                        .map(DataTask::getDolphinTaskCode)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList()));
-
-        // Fetch datasources once
-        List<DolphinDatasourceOption> allDatasources = dolphinSchedulerService.listDatasources(null, null);
-        Map<String, DolphinDatasourceOption> datasourceMap = allDatasources.stream()
-                .collect(Collectors.toMap(DolphinDatasourceOption::getName, opt -> opt,
-                        (v1, v2) -> v1));
-
-        // Fetch task groups once
-        List<DolphinTaskGroupOption> allTaskGroups = dolphinSchedulerService.listTaskGroups(null);
-        Map<String, DolphinTaskGroupOption> taskGroupMap = allTaskGroups.stream()
-                .collect(Collectors.toMap(DolphinTaskGroupOption::getName, opt -> opt,
-                        (v1, v2) -> v1));
+        Map<Long, TaskDeployMetadata> deployMetadataByTaskCode = loadTaskDeployMetadata(workflow);
 
         Map<Integer, Integer> levelOffsets = new HashMap<>(); // Track Y offset per level
         Map<Long, WorkflowTaskRelation> bindingByTaskId = bindings.stream()
@@ -131,10 +112,30 @@ public class WorkflowDeployService {
         for (DataTask task : orderedTasks) {
             WorkflowTaskRelation binding = bindingByTaskId.get(task.getId());
             NodeAttr attr = parseNodeAttr(binding);
-            String nodeType = attr.getNodeType() != null ? attr.getNodeType()
-                    : (task.getDolphinNodeType() == null ? "SHELL" : task.getDolphinNodeType());
-            String priority = attr.getPriority() != null ? attr.getPriority() : mapPriority(task.getPriority());
-            int version = task.getDolphinTaskVersion() == null ? 1 : task.getDolphinTaskVersion();
+            String nodeType = StringUtils.hasText(attr.getNodeType())
+                    ? attr.getNodeType().trim()
+                    : normalizeText(task.getDolphinNodeType());
+            if (!StringUtils.hasText(nodeType)) {
+                throw new IllegalStateException(String.format(
+                        "Task '%s' 缺少 dolphinNodeType 元数据，请先保存或修复元数据后再发布",
+                        taskLabel(task)));
+            }
+            String priority = StringUtils.hasText(attr.getPriority())
+                    ? attr.getPriority().trim()
+                    : mapPriority(task.getPriority(), task);
+            int version = task.getDolphinTaskVersion();
+            Integer retryTimes = coalesce(attr.getRetryTimes(), task.getRetryTimes());
+            Integer retryInterval = coalesce(attr.getRetryInterval(), task.getRetryInterval());
+            Integer timeoutSeconds = coalesce(attr.getTimeoutSeconds(), task.getTimeoutSeconds());
+            if (retryTimes == null || retryInterval == null || timeoutSeconds == null) {
+                throw new IllegalStateException(String.format(
+                        "Task '%s' 缺少重试/超时元数据(retryTimes=%s,retryInterval=%s,timeoutSeconds=%s)，请先保存或修复元数据后再发布",
+                        taskLabel(task), retryTimes, retryInterval, timeoutSeconds));
+            }
+            TaskDeployMetadata deployMetadata = deployMetadataByTaskCode.get(task.getDolphinTaskCode());
+            if (deployMetadata == null) {
+                deployMetadata = new TaskDeployMetadata();
+            }
 
             String sqlOrScript;
             if ("SQL".equalsIgnoreCase(nodeType)) {
@@ -143,53 +144,24 @@ public class WorkflowDeployService {
                 sqlOrScript = dolphinSchedulerService.buildShellScript(task.getTaskSql());
             }
 
-            Long datasourceId = null;
-            String realDatasourceType = null;
-            if (StringUtils.hasText(task.getDatasourceName())) {
-                DolphinDatasourceOption option = datasourceMap.get(task.getDatasourceName());
-                if (option == null) {
-                    // Try refreshing list if not found
-                    log.debug("Datasource {} not found in cache, refreshing...", task.getDatasourceName());
-                    List<DolphinDatasourceOption> refreshed = dolphinSchedulerService.listDatasources(null,
-                            task.getDatasourceName());
-                    option = refreshed.stream()
-                            .filter(d -> Objects.equals(d.getName(), task.getDatasourceName()))
-                            .findFirst()
-                            .orElse(null);
-                }
-
-                if (option != null) {
-                    datasourceId = option.getId();
-                    realDatasourceType = option.getType();
-                }
-            }
-
-            if ("SQL".equalsIgnoreCase(nodeType) && datasourceId == null) {
+            Long datasourceId = deployMetadata.getDatasourceId();
+            if ("SQL".equalsIgnoreCase(nodeType) && (datasourceId == null || datasourceId <= 0)) {
                 throw new IllegalStateException(String.format(
-                        "Datasource '%s' not found for task '%s'. Please check if the datasource exists in DolphinScheduler.",
-                        task.getDatasourceName(), task.getTaskName()));
+                        "Task '%s' 缺少 datasourceId 元数据，请先执行“修复元数据”后再发布",
+                        taskLabel(task)));
             }
+            String realDatasourceType = StringUtils.hasText(deployMetadata.getDatasourceType())
+                    ? deployMetadata.getDatasourceType()
+                    : task.getDatasourceType();
 
-            Integer taskGroupId = null;
             String groupName = StringUtils.hasText(task.getTaskGroupName())
                     ? task.getTaskGroupName()
                     : workflow.getTaskGroupName();
-            if (StringUtils.hasText(groupName)) {
-                DolphinTaskGroupOption group = taskGroupMap.get(groupName);
-                if (group == null) {
-                    log.debug("Task group {} not found in cache, refreshing...", groupName);
-                    List<DolphinTaskGroupOption> refreshed = dolphinSchedulerService.listTaskGroups(groupName);
-                    group = refreshed.stream()
-                            .filter(g -> Objects.equals(g.getName(), groupName))
-                            .findFirst()
-                            .orElse(null);
-                }
-                if (group == null) {
-                    throw new IllegalStateException(String.format(
-                            "Task group '%s' not found for task '%s'. Please check if the task group exists in DolphinScheduler.",
-                            groupName, task.getTaskName()));
-                }
-                taskGroupId = group.getId();
+            Integer taskGroupId = deployMetadata.getTaskGroupId();
+            if (StringUtils.hasText(groupName) && (taskGroupId == null || taskGroupId <= 0)) {
+                throw new IllegalStateException(String.format(
+                        "Task '%s' 缺少 taskGroupId 元数据(任务组=%s)，请先执行“修复元数据”后再发布",
+                        taskLabel(task), groupName));
             }
 
             Map<String, Object> definition = dolphinSchedulerService.buildTaskDefinition(
@@ -199,9 +171,9 @@ public class WorkflowDeployService {
                     task.getTaskDesc(),
                     sqlOrScript,
                     priority,
-                    coalesce(attr.getRetryTimes(), task.getRetryTimes(), 1),
-                    coalesce(attr.getRetryInterval(), task.getRetryInterval(), 1),
-                    coalesce(attr.getTimeoutSeconds(), task.getTimeoutSeconds(), 60),
+                    retryTimes,
+                    retryInterval,
+                    timeoutSeconds,
                     nodeType,
                     datasourceId,
                     realDatasourceType != null ? realDatasourceType : task.getDatasourceType(),
@@ -220,7 +192,7 @@ public class WorkflowDeployService {
                 for (DataTask upstream : upstreams) {
                     relationPayloads.add(dolphinSchedulerService.buildRelation(
                             upstream.getDolphinTaskCode(),
-                            upstream.getDolphinTaskVersion() == null ? 1 : upstream.getDolphinTaskVersion(),
+                            upstream.getDolphinTaskVersion(),
                             task.getDolphinTaskCode(),
                             version));
                 }
@@ -288,25 +260,114 @@ public class WorkflowDeployService {
                 .build();
     }
 
-    private void ensureTaskCodes(List<DataTask> tasks) {
-        List<Long> existingCodes = tasks.stream()
-                .map(DataTask::getDolphinTaskCode)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
-        dolphinSchedulerService.alignSequenceWithExistingTasks(existingCodes);
+    private Map<Long, TaskDeployMetadata> loadTaskDeployMetadata(DataWorkflow workflow) {
+        if (workflow == null || !StringUtils.hasText(workflow.getDefinitionJson())) {
+            return Collections.emptyMap();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(workflow.getDefinitionJson());
+            JsonNode taskNodes = root != null ? root.get("taskDefinitionList") : null;
+            if (taskNodes == null || !taskNodes.isArray()) {
+                return Collections.emptyMap();
+            }
+            Map<Long, TaskDeployMetadata> result = new HashMap<>();
+            for (JsonNode taskNode : taskNodes) {
+                Long taskCode = readLong(taskNode, "taskCode", "code");
+                if (taskCode == null || taskCode <= 0) {
+                    taskCode = readLong(taskNode != null ? taskNode.get("xPlatformTaskMeta") : null, "dolphinTaskCode");
+                }
+                if (taskCode == null || taskCode <= 0) {
+                    continue;
+                }
+                JsonNode taskParams = taskNode != null ? taskNode.get("taskParams") : null;
+                TaskDeployMetadata metadata = new TaskDeployMetadata();
+                metadata.setDatasourceId(readLong(taskParams, "datasourceId", "datasource"));
+                metadata.setDatasourceType(readText(taskParams, "datasourceType", "type"));
+                metadata.setTaskGroupId(readInt(taskNode, "taskGroupId"));
+                result.put(taskCode, metadata);
+            }
+            return result;
+        } catch (Exception ex) {
+            log.warn("Failed to parse deploy metadata from workflow definition, workflowId={}: {}",
+                    workflow.getId(), ex.getMessage());
+            return Collections.emptyMap();
+        }
+    }
+
+    private Long readLong(JsonNode node, String... fields) {
+        if (node == null || node.isNull() || fields == null) {
+            return null;
+        }
+        for (String field : fields) {
+            if (!StringUtils.hasText(field)) {
+                continue;
+            }
+            JsonNode value = node.get(field);
+            if (value == null || value.isNull()) {
+                continue;
+            }
+            if (value.isNumber()) {
+                return value.asLong();
+            }
+            if (value.isTextual()) {
+                String text = value.asText();
+                if (!StringUtils.hasText(text)) {
+                    continue;
+                }
+                try {
+                    return Long.parseLong(text.trim());
+                } catch (NumberFormatException ignored) {
+                    // skip invalid text value
+                }
+            }
+        }
+        return null;
+    }
+
+    private Integer readInt(JsonNode node, String... fields) {
+        Long value = readLong(node, fields);
+        return value == null ? null : value.intValue();
+    }
+
+    private String readText(JsonNode node, String... fields) {
+        if (node == null || node.isNull() || fields == null) {
+            return null;
+        }
+        for (String field : fields) {
+            if (!StringUtils.hasText(field)) {
+                continue;
+            }
+            JsonNode value = node.get(field);
+            if (value == null || value.isNull()) {
+                continue;
+            }
+            String text = value.isTextual() ? value.asText() : value.toString();
+            if (StringUtils.hasText(text)) {
+                return text.trim();
+            }
+        }
+        return null;
+    }
+
+    private void validateTaskCodes(List<DataTask> tasks) {
+        if (CollectionUtils.isEmpty(tasks)) {
+            throw new IllegalStateException("工作流任务为空");
+        }
+        List<String> invalidTasks = new ArrayList<>();
         for (DataTask task : tasks) {
-            boolean changed = false;
-            if (task.getDolphinTaskCode() == null) {
-                task.setDolphinTaskCode(dolphinSchedulerService.nextTaskCode());
-                changed = true;
+            if (task == null) {
+                continue;
             }
-            if (task.getDolphinTaskVersion() == null) {
-                task.setDolphinTaskVersion(1);
-                changed = true;
+            boolean missingCode = task.getDolphinTaskCode() == null || task.getDolphinTaskCode() <= 0;
+            boolean missingVersion = task.getDolphinTaskVersion() == null || task.getDolphinTaskVersion() <= 0;
+            if (missingCode || missingVersion) {
+                invalidTasks.add(String.format("%s(code=%s,version=%s)",
+                        taskLabel(task), task.getDolphinTaskCode(), task.getDolphinTaskVersion()));
             }
-            if (changed) {
-                dataTaskMapper.updateById(task);
-            }
+        }
+        if (!invalidTasks.isEmpty()) {
+            throw new IllegalStateException("检测到任务缺少 Dolphin 元数据，请先保存/修复后再发布: "
+                    + String.join(", ", invalidTasks));
         }
     }
 
@@ -467,8 +528,13 @@ public class WorkflowDeployService {
         return level;
     }
 
-    private String mapPriority(Integer value) {
-        int priority = value == null ? 5 : value;
+    private String mapPriority(Integer value, DataTask task) {
+        if (value == null) {
+            throw new IllegalStateException(String.format(
+                    "Task '%s' 缺少 priority 元数据，请先保存或修复元数据后再发布",
+                    taskLabel(task)));
+        }
+        int priority = value;
         if (priority >= 9) {
             return "HIGHEST";
         } else if (priority >= 7) {
@@ -488,6 +554,20 @@ public class WorkflowDeployService {
             }
         }
         return null;
+    }
+
+    private String normalizeText(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String taskLabel(DataTask task) {
+        if (task == null) {
+            return "unknown-task";
+        }
+        if (StringUtils.hasText(task.getTaskName())) {
+            return task.getTaskName().trim();
+        }
+        return task.getId() != null ? "task#" + task.getId() : "unknown-task";
     }
 
     private NodeAttr parseNodeAttr(WorkflowTaskRelation relation) {
@@ -545,5 +625,12 @@ public class WorkflowDeployService {
         private Integer retryTimes;
         private Integer retryInterval;
         private Integer timeoutSeconds;
+    }
+
+    @Data
+    private static class TaskDeployMetadata {
+        private Long datasourceId;
+        private String datasourceType;
+        private Integer taskGroupId;
     }
 }
