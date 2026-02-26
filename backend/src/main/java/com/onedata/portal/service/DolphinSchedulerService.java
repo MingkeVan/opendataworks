@@ -965,9 +965,14 @@ public class DolphinSchedulerService {
                 if (StringUtils.hasText(keyword) && !group.getName().contains(keyword)) {
                     continue;
                 }
-                if (hasProjectCode && currentProjectCode != null
-                        && !Objects.equals(currentProjectCode, group.getProjectCode())) {
-                    continue;
+                if (hasProjectCode && currentProjectCode != null) {
+                    Long groupProjectCode = group.getProjectCode();
+                    // projectCode=0 视为全局任务组，允许跨项目复用；其余项目级任务组需与当前项目一致。
+                    if (groupProjectCode != null
+                            && groupProjectCode > 0
+                            && !Objects.equals(currentProjectCode, groupProjectCode)) {
+                        continue;
+                    }
                 }
                 DolphinTaskGroupOption option = new DolphinTaskGroupOption();
                 option.setId(group.getId());

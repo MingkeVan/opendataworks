@@ -266,6 +266,10 @@ public class WorkflowPublishService {
             baselineSnapshotJson = runtimeSnapshot.getSnapshotJson();
         }
         RuntimeDiffSummary rawDiffSummary = runtimeDiffService.buildDiff(baselineSnapshotJson, platformSnapshot);
+        if (!hasRuntimeSchedule(runtimeDefinition) && rawDiffSummary != null) {
+            // Workflow 没有运行态 scheduleId（未创建调度）时，schedule.* 仅反映平台侧配置，不应作为发布修复差异。
+            rawDiffSummary.setScheduleChanges(Collections.emptyList());
+        }
         List<WorkflowPublishRepairIssue> repairIssues = new ArrayList<>(buildRepairIssues(rawDiffSummary));
         repairIssues.addAll(buildPublishMetadataRepairIssues(workflow, platformDefinition));
         response.setRepairIssues(repairIssues);
@@ -671,6 +675,14 @@ public class WorkflowPublishService {
                 || !CollectionUtils.isEmpty(summary.getEdgeAdded())
                 || !CollectionUtils.isEmpty(summary.getEdgeRemoved())
                 || !CollectionUtils.isEmpty(summary.getScheduleChanges());
+    }
+
+    private boolean hasRuntimeSchedule(RuntimeWorkflowDefinition runtimeDefinition) {
+        if (runtimeDefinition == null || runtimeDefinition.getSchedule() == null) {
+            return false;
+        }
+        Long scheduleId = runtimeDefinition.getSchedule().getScheduleId();
+        return scheduleId != null && scheduleId > 0;
     }
 
     private String normalizeDiffValue(String value) {
