@@ -2,7 +2,6 @@ package com.onedata.portal.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.onedata.portal.dto.dolphin.DolphinSchedule;
 import com.onedata.portal.dto.workflow.WorkflowScheduleRequest;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.mapper.DataWorkflowMapper;
@@ -17,7 +16,6 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * 工作流定时调度（DolphinScheduler Schedule）管理
@@ -126,7 +124,6 @@ public class WorkflowScheduleService {
         }
 
         String scheduleJson = buildScheduleJson(start, end, timezone, cron);
-        trySyncScheduleFromEngine(workflow);
         Long scheduleId = workflow.getDolphinScheduleId();
         boolean newSchedule = scheduleId == null || scheduleId <= 0;
         if (newSchedule) {
@@ -231,47 +228,7 @@ public class WorkflowScheduleService {
         if (workflow.getWorkflowCode() == null || workflow.getWorkflowCode() <= 0) {
             throw new IllegalStateException("工作流尚未部署或缺少 Dolphin 编码");
         }
-        trySyncScheduleFromEngine(workflow);
         return workflow;
-    }
-
-    private void trySyncScheduleFromEngine(DataWorkflow workflow) {
-        if (workflow == null) {
-            return;
-        }
-        Long workflowCode = workflow.getWorkflowCode();
-        if (workflowCode == null || workflowCode <= 0) {
-            return;
-        }
-        boolean needsSync = workflow.getDolphinScheduleId() == null
-                || workflow.getDolphinScheduleId() <= 0
-                || !StringUtils.hasText(workflow.getScheduleState());
-        if (!needsSync) {
-            return;
-        }
-        try {
-            DolphinSchedule schedule = dolphinSchedulerService.getWorkflowSchedule(workflowCode);
-            if (schedule == null || schedule.getId() == null || schedule.getId() <= 0) {
-                return;
-            }
-            boolean changed = false;
-            if (workflow.getDolphinScheduleId() == null
-                    || workflow.getDolphinScheduleId() <= 0
-                    || !Objects.equals(workflow.getDolphinScheduleId(), schedule.getId())) {
-                workflow.setDolphinScheduleId(schedule.getId());
-                changed = true;
-            }
-            if (StringUtils.hasText(schedule.getReleaseState())
-                    && !schedule.getReleaseState().equalsIgnoreCase(workflow.getScheduleState())) {
-                workflow.setScheduleState(schedule.getReleaseState());
-                changed = true;
-            }
-            if (changed) {
-                dataWorkflowMapper.updateById(workflow);
-            }
-        } catch (Exception e) {
-            log.debug("Failed to sync schedule for workflow {}: {}", workflow.getId(), e.getMessage());
-        }
     }
 
     private String buildScheduleJson(LocalDateTime start,

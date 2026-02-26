@@ -25,6 +25,8 @@ public class WorkflowPublishPreviewResponse {
 
     private RuntimeDiffSummary diffSummary;
 
+    private List<WorkflowPublishRepairIssue> repairIssues = new ArrayList<>();
+
     private List<RuntimeSyncIssue> warnings = new ArrayList<>();
 
     private List<RuntimeSyncIssue> errors = new ArrayList<>();

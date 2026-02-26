@@ -15,6 +15,8 @@ import com.onedata.portal.dto.workflow.WorkflowVersionCompareResponse;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowDetailResponse;
 import com.onedata.portal.dto.workflow.WorkflowPublishPreviewResponse;
+import com.onedata.portal.dto.workflow.WorkflowPublishRepairRequest;
+import com.onedata.portal.dto.workflow.WorkflowPublishRepairResponse;
 import com.onedata.portal.dto.workflow.WorkflowPublishRequest;
 import com.onedata.portal.dto.workflow.WorkflowQueryRequest;
 import com.onedata.portal.dto.workflow.WorkflowVersionRollbackRequest;
@@ -22,14 +24,10 @@ import com.onedata.portal.dto.workflow.WorkflowVersionRollbackResponse;
 import com.onedata.portal.dto.workflow.WorkflowVersionDeleteResponse;
 import com.onedata.portal.dto.workflow.WorkflowScheduleRequest;
 import com.onedata.portal.dto.workflow.runtime.DolphinRuntimeWorkflowOption;
-import com.onedata.portal.dto.workflow.runtime.RuntimeSyncRecordDetailResponse;
-import com.onedata.portal.dto.workflow.runtime.RuntimeSyncRecordListItem;
-import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowDiffResponse;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.WorkflowPublishRecord;
 import com.onedata.portal.service.WorkflowPublishService;
 import com.onedata.portal.service.WorkflowDefinitionLifecycleService;
-import com.onedata.portal.service.WorkflowRuntimeSyncService;
 import com.onedata.portal.service.WorkflowScheduleService;
 import com.onedata.portal.service.WorkflowService;
 import com.onedata.portal.service.WorkflowVersionOperationService;
@@ -47,7 +45,6 @@ public class WorkflowController {
     private final WorkflowService workflowService;
     private final WorkflowPublishService workflowPublishService;
     private final WorkflowScheduleService workflowScheduleService;
-    private final WorkflowRuntimeSyncService workflowRuntimeSyncService;
     private final WorkflowVersionOperationService workflowVersionOperationService;
     private final WorkflowDefinitionLifecycleService workflowDefinitionLifecycleService;
 
@@ -60,24 +57,6 @@ public class WorkflowController {
     @GetMapping("/{id}")
     public Result<WorkflowDetailResponse> detail(@PathVariable Long id) {
         return Result.success(workflowService.getDetail(id));
-    }
-
-    @GetMapping("/{id}/runtime-diff")
-    public Result<RuntimeWorkflowDiffResponse> runtimeDiff(@PathVariable Long id) {
-        return Result.success(workflowRuntimeSyncService.runtimeDiff(id));
-    }
-
-    @GetMapping("/{id}/runtime-sync-records")
-    public Result<PageResult<RuntimeSyncRecordListItem>> listRuntimeSyncRecords(@PathVariable Long id,
-                                                                                 @RequestParam(defaultValue = "1") Integer pageNum,
-                                                                                 @RequestParam(defaultValue = "20") Integer pageSize) {
-        return Result.success(workflowRuntimeSyncService.listSyncRecords(id, pageNum, pageSize));
-    }
-
-    @GetMapping("/{id}/runtime-sync-records/{recordId}")
-    public Result<RuntimeSyncRecordDetailResponse> getRuntimeSyncRecord(@PathVariable Long id,
-                                                                         @PathVariable Long recordId) {
-        return Result.success(workflowRuntimeSyncService.getSyncRecordDetail(id, recordId));
     }
 
     @PostMapping("/{id}/versions/compare")
@@ -147,6 +126,12 @@ public class WorkflowController {
     @GetMapping("/{id}/publish/preview")
     public Result<WorkflowPublishPreviewResponse> previewPublish(@PathVariable Long id) {
         return Result.success(workflowPublishService.previewPublish(id));
+    }
+
+    @PostMapping("/{id}/publish/repair-metadata")
+    public Result<WorkflowPublishRepairResponse> repairPublishMetadata(@PathVariable Long id,
+                                                                       @RequestBody(required = false) WorkflowPublishRepairRequest request) {
+        return Result.success(workflowPublishService.repairPublishMetadata(id, request));
     }
 
     @PostMapping("/{id}/publish/{recordId}/approve")

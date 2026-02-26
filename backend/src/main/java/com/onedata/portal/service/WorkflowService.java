@@ -6,9 +6,9 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import com.onedata.portal.dto.dolphin.DolphinSchedule;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowDetailResponse;
 import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
@@ -72,6 +72,15 @@ public class WorkflowService {
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
     };
     private static final int SNAPSHOT_SCHEMA_VERSION_DEFINITION = 3;
+    private static final String DEFAULT_FAILURE_STRATEGY = "CONTINUE";
+    private static final String DEFAULT_WARNING_TYPE = "NONE";
+    private static final String DEFAULT_PROCESS_INSTANCE_PRIORITY = "MEDIUM";
+    private static final Long DEFAULT_WARNING_GROUP_ID = 0L;
+    private static final Long DEFAULT_ENVIRONMENT_CODE = -1L;
+    private static final Integer DEFAULT_TASK_PRIORITY = 5;
+    private static final Integer DEFAULT_TASK_RETRY_TIMES = 1;
+    private static final Integer DEFAULT_TASK_RETRY_INTERVAL = 1;
+    private static final Integer DEFAULT_TASK_TIMEOUT_SECONDS = 60;
 
     private final DataWorkflowMapper dataWorkflowMapper;
     private final WorkflowTaskRelationMapper workflowTaskRelationMapper;
@@ -107,7 +116,6 @@ public class WorkflowService {
         if (workflow == null) {
             throw new IllegalArgumentException("Workflow not found: " + workflowId);
         }
-        trySyncScheduleFromEngine(workflow);
         List<WorkflowTaskRelation> relations = workflowTaskRelationMapper.selectList(
                 Wrappers.<WorkflowTaskRelation>lambdaQuery()
                         .eq(WorkflowTaskRelation::getWorkflowId, workflowId)
@@ -206,109 +214,6 @@ public class WorkflowService {
         workflows.forEach(workflow -> workflow.setCurrentVersionNo(versionNoById.get(workflow.getCurrentVersionId())));
     }
 
-    private void trySyncScheduleFromEngine(DataWorkflow workflow) {
-        if (workflow == null) {
-            return;
-        }
-        Long workflowCode = workflow.getWorkflowCode();
-        if (workflowCode == null || workflowCode <= 0) {
-            return;
-        }
-
-        boolean needsSync = workflow.getDolphinScheduleId() == null
-                || workflow.getDolphinScheduleId() <= 0
-                || !StringUtils.hasText(workflow.getScheduleState())
-                || !StringUtils.hasText(workflow.getScheduleCron())
-                || !StringUtils.hasText(workflow.getScheduleTimezone())
-                || workflow.getScheduleStartTime() == null
-                || workflow.getScheduleEndTime() == null;
-        if (!needsSync) {
-            return;
-        }
-
-        DolphinSchedule schedule = dolphinSchedulerService.getWorkflowSchedule(workflowCode);
-        if (schedule == null || schedule.getId() == null || schedule.getId() <= 0) {
-            return;
-        }
-
-        boolean changed = false;
-
-        if (workflow.getDolphinScheduleId() == null
-                || workflow.getDolphinScheduleId() <= 0
-                || !Objects.equals(workflow.getDolphinScheduleId(), schedule.getId())) {
-            workflow.setDolphinScheduleId(schedule.getId());
-            changed = true;
-        }
-
-        if (StringUtils.hasText(schedule.getReleaseState())
-                && !schedule.getReleaseState().equalsIgnoreCase(workflow.getScheduleState())) {
-            workflow.setScheduleState(schedule.getReleaseState());
-            changed = true;
-        }
-
-        if (!StringUtils.hasText(workflow.getScheduleCron()) && StringUtils.hasText(schedule.getCrontab())) {
-            workflow.setScheduleCron(schedule.getCrontab());
-            changed = true;
-        }
-        if (!StringUtils.hasText(workflow.getScheduleTimezone()) && StringUtils.hasText(schedule.getTimezoneId())) {
-            workflow.setScheduleTimezone(schedule.getTimezoneId());
-            changed = true;
-        }
-        if (workflow.getScheduleStartTime() == null && StringUtils.hasText(schedule.getStartTime())) {
-            LocalDateTime start = parseFlexibleDateTime(schedule.getStartTime());
-            if (start != null) {
-                workflow.setScheduleStartTime(start);
-                changed = true;
-            }
-        }
-        if (workflow.getScheduleEndTime() == null && StringUtils.hasText(schedule.getEndTime())) {
-            LocalDateTime end = parseFlexibleDateTime(schedule.getEndTime());
-            if (end != null) {
-                workflow.setScheduleEndTime(end);
-                changed = true;
-            }
-        }
-
-        if (!StringUtils.hasText(workflow.getScheduleFailureStrategy())
-                && StringUtils.hasText(schedule.getFailureStrategy())) {
-            workflow.setScheduleFailureStrategy(schedule.getFailureStrategy());
-            changed = true;
-        }
-        if (!StringUtils.hasText(workflow.getScheduleWarningType()) && StringUtils.hasText(schedule.getWarningType())) {
-            String warningType = schedule.getWarningType();
-            if ("SUCCESS_FAILURE".equalsIgnoreCase(warningType)) {
-                warningType = "ALL";
-            }
-            workflow.setScheduleWarningType(warningType);
-            changed = true;
-        }
-        if (workflow.getScheduleWarningGroupId() == null) {
-            workflow.setScheduleWarningGroupId(schedule.getWarningGroupId() != null ? schedule.getWarningGroupId() : 0L);
-            changed = true;
-        }
-        if (!StringUtils.hasText(workflow.getScheduleProcessInstancePriority())
-                && StringUtils.hasText(schedule.getProcessInstancePriority())) {
-            workflow.setScheduleProcessInstancePriority(schedule.getProcessInstancePriority());
-            changed = true;
-        }
-        if (!StringUtils.hasText(workflow.getScheduleWorkerGroup()) && StringUtils.hasText(schedule.getWorkerGroup())) {
-            workflow.setScheduleWorkerGroup(schedule.getWorkerGroup());
-            changed = true;
-        }
-        if (!StringUtils.hasText(workflow.getScheduleTenantCode()) && StringUtils.hasText(schedule.getTenantCode())) {
-            workflow.setScheduleTenantCode(schedule.getTenantCode());
-            changed = true;
-        }
-        if (workflow.getScheduleEnvironmentCode() == null) {
-            workflow.setScheduleEnvironmentCode(schedule.getEnvironmentCode() != null ? schedule.getEnvironmentCode() : -1L);
-            changed = true;
-        }
-
-        if (changed) {
-            dataWorkflowMapper.updateById(workflow);
-        }
-    }
-
     @Transactional
     public DataWorkflow createWorkflow(WorkflowDefinitionRequest request) {
         DataWorkflow workflow = new DataWorkflow();
@@ -331,9 +236,11 @@ public class WorkflowService {
         workflow.setUpdatedBy(request.getOperator());
         workflow.setCreatedAt(now);
         workflow.setUpdatedAt(now);
+        normalizeWorkflowScheduleDefaults(workflow);
         dataWorkflowMapper.insert(workflow);
 
         persistTaskRelations(workflow.getId(), taskBindings, null, topology);
+        normalizeTaskMetadata(taskIdsInOrder, workflow.getTaskGroupName());
 
         workflow.setDefinitionJson(resolveDefinitionJson(workflow, request, taskBindings, topology));
         dataWorkflowMapper.updateById(workflow);
@@ -467,8 +374,10 @@ public class WorkflowService {
         if (workflow.getProjectCode() == null || workflow.getProjectCode() == 0) {
             workflow.setProjectCode(resolveProjectCode(request.getProjectCode()));
         }
+        normalizeWorkflowScheduleDefaults(workflow);
 
         persistTaskRelations(workflowId, taskBindings, workflow.getCurrentVersionId(), topology);
+        normalizeTaskMetadata(taskIdsInOrder, workflow.getTaskGroupName());
 
         workflow.setDefinitionJson(resolveDefinitionJson(workflow, request, taskBindings, topology));
         dataWorkflowMapper.updateById(workflow);
@@ -480,6 +389,54 @@ public class WorkflowService {
             dataWorkflowMapper.updateById(workflow);
             updateRelationVersion(workflowId, version.getId());
         }
+        return workflow;
+    }
+
+    @Transactional
+    public DataWorkflow normalizeAndPersistMetadata(Long workflowId, String operator) {
+        if (workflowId == null) {
+            throw new IllegalArgumentException("workflowId 不能为空");
+        }
+        DataWorkflow workflow = dataWorkflowMapper.selectById(workflowId);
+        if (workflow == null) {
+            throw new IllegalArgumentException("Workflow not found: " + workflowId);
+        }
+        List<WorkflowTaskRelation> relations = workflowTaskRelationMapper.selectList(
+                Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                        .eq(WorkflowTaskRelation::getWorkflowId, workflowId)
+                        .orderByAsc(WorkflowTaskRelation::getId));
+        List<WorkflowTaskBinding> taskBindings = new ArrayList<>();
+        if (!CollectionUtils.isEmpty(relations)) {
+            for (WorkflowTaskRelation relation : relations) {
+                if (relation == null || relation.getTaskId() == null) {
+                    continue;
+                }
+                WorkflowTaskBinding binding = new WorkflowTaskBinding();
+                binding.setTaskId(relation.getTaskId());
+                binding.setEntry(relation.getIsEntry());
+                binding.setExit(relation.getIsExit());
+                if (StringUtils.hasText(relation.getNodeAttrs())) {
+                    try {
+                        binding.setNodeAttrs(objectMapper.readValue(relation.getNodeAttrs(), Map.class));
+                    } catch (Exception ignored) {
+                        // ignore malformed node attrs
+                    }
+                }
+                taskBindings.add(binding);
+            }
+        }
+        List<Long> taskIdsInOrder = collectTaskIds(taskBindings);
+        WorkflowTopologyResult topology = workflowTopologyService.buildTopology(taskIdsInOrder);
+        workflow.setEntryTaskIds(toJson(orderTaskIds(topology.getEntryTaskIds(), taskIdsInOrder)));
+        workflow.setExitTaskIds(toJson(orderTaskIds(topology.getExitTaskIds(), taskIdsInOrder)));
+        normalizeWorkflowScheduleDefaults(workflow);
+        normalizeTaskMetadata(taskIdsInOrder, workflow.getTaskGroupName());
+        workflow.setDefinitionJson(resolveDefinitionJson(workflow, null, taskBindings, topology));
+        if (StringUtils.hasText(operator)) {
+            workflow.setUpdatedBy(operator.trim());
+        }
+        workflow.setUpdatedAt(LocalDateTime.now());
+        dataWorkflowMapper.updateById(workflow);
         return workflow;
     }
 
@@ -601,14 +558,17 @@ public class WorkflowService {
             WorkflowDefinitionRequest request,
             List<WorkflowTaskBinding> taskBindings,
             WorkflowTopologyResult topology) {
+        String incomingDefinitionJson = null;
         if (request != null && StringUtils.hasText(request.getDefinitionJson())) {
             String normalized = normalizeJsonText(request.getDefinitionJson());
             if (isMeaningfulDefinitionJson(normalized)) {
-                return normalized;
+                incomingDefinitionJson = normalized;
             }
         }
         Map<String, Object> definition = buildPlatformDefinitionDocument(workflow, taskBindings, topology);
-        return toJson(definition);
+        return mergeAndNormalizeDefinitionJson(definition,
+                workflow != null ? workflow.getDefinitionJson() : null,
+                incomingDefinitionJson);
     }
 
     private boolean isMeaningfulDefinitionJson(String definitionJson) {
@@ -641,6 +601,263 @@ public class WorkflowService {
         } catch (Exception ignored) {
             return trimmed;
         }
+    }
+
+    private String mergeAndNormalizeDefinitionJson(Map<String, Object> generatedDefinition,
+            String persistedDefinitionJson,
+            String incomingDefinitionJson) {
+        try {
+            ObjectNode generatedNode = objectMapper.valueToTree(generatedDefinition);
+            if (generatedNode == null || generatedNode.isNull() || generatedNode.isMissingNode()) {
+                return "{}";
+            }
+            applyDefinitionMetadataSeed(generatedNode, persistedDefinitionJson);
+            applyDefinitionMetadataSeed(generatedNode, incomingDefinitionJson);
+            return objectMapper.writeValueAsString(generatedNode);
+        } catch (Exception ex) {
+            return toJson(generatedDefinition);
+        }
+    }
+
+    private void applyDefinitionMetadataSeed(ObjectNode targetRoot, String seedJson) {
+        if (targetRoot == null || !StringUtils.hasText(seedJson)) {
+            return;
+        }
+        JsonNode seedRoot;
+        try {
+            seedRoot = objectMapper.readTree(seedJson);
+        } catch (Exception ignored) {
+            return;
+        }
+        if (seedRoot == null || seedRoot.isNull() || seedRoot.isMissingNode()) {
+            return;
+        }
+        mergeScheduleSeed(targetRoot, seedRoot);
+        mergeTaskSeed(targetRoot, seedRoot);
+    }
+
+    private void mergeScheduleSeed(ObjectNode targetRoot, JsonNode seedRoot) {
+        if (targetRoot == null || seedRoot == null || seedRoot.isNull() || seedRoot.isMissingNode()) {
+            return;
+        }
+        ObjectNode targetSchedule = ensureObjectNode(targetRoot, "schedule");
+        JsonNode seedSchedule = firstPresent(seedRoot, "schedule");
+        if (seedSchedule == null || seedSchedule.isNull() || seedSchedule.isMissingNode()) {
+            JsonNode processDefinition = firstPresent(seedRoot, "processDefinition", "workflowDefinition");
+            seedSchedule = firstPresent(processDefinition, "schedule");
+        }
+        if (seedSchedule == null || seedSchedule.isNull() || seedSchedule.isMissingNode()) {
+            return;
+        }
+        copyLongIfMissing(targetSchedule, "id", seedSchedule, "id", "scheduleId");
+        copyTextIfMissing(targetSchedule, "timezoneId", seedSchedule, "timezoneId", "timezone");
+        copyTextIfMissing(targetSchedule, "crontab", seedSchedule, "crontab", "cron");
+    }
+
+    private void mergeTaskSeed(ObjectNode targetRoot, JsonNode seedRoot) {
+        JsonNode targetTasksNode = targetRoot.get("taskDefinitionList");
+        if (!(targetTasksNode instanceof ArrayNode)) {
+            return;
+        }
+        ArrayNode targetTasks = (ArrayNode) targetTasksNode;
+        if (targetTasks.isEmpty()) {
+            return;
+        }
+        JsonNode seedTasksNode = firstPresent(seedRoot, "taskDefinitionList", "tasks", "taskList");
+        if (seedTasksNode == null || seedTasksNode.isNull() || seedTasksNode.isMissingNode()) {
+            JsonNode processDefinition = firstPresent(seedRoot, "processDefinition", "workflowDefinition");
+            seedTasksNode = firstPresent(processDefinition, "taskDefinitionList", "tasks", "taskList");
+        }
+        if (!(seedTasksNode instanceof ArrayNode)) {
+            return;
+        }
+        Map<String, JsonNode> seedTaskByCode = new LinkedHashMap<>();
+        for (JsonNode seedTask : (ArrayNode) seedTasksNode) {
+            String key = taskCodeKey(seedTask);
+            if (StringUtils.hasText(key)) {
+                seedTaskByCode.putIfAbsent(key, seedTask);
+            }
+        }
+        if (seedTaskByCode.isEmpty()) {
+            return;
+        }
+        for (JsonNode targetTaskNode : targetTasks) {
+            if (!(targetTaskNode instanceof ObjectNode)) {
+                continue;
+            }
+            ObjectNode targetTask = (ObjectNode) targetTaskNode;
+            JsonNode seedTask = seedTaskByCode.get(taskCodeKey(targetTask));
+            if (seedTask == null || seedTask.isNull() || seedTask.isMissingNode()) {
+                continue;
+            }
+            mergeTaskMetadata(targetTask, seedTask);
+        }
+    }
+
+    private void mergeTaskMetadata(ObjectNode targetTask, JsonNode seedTask) {
+        copyLongIfMissing(targetTask, "version", seedTask, "version", "taskVersion");
+        copyLongIfMissing(targetTask, "taskGroupId", seedTask, "taskGroupId");
+        copyTextIfMissing(targetTask, "taskPriority", seedTask, "taskPriority", "priority");
+        copyArrayIfMissing(targetTask, "inputTableIds", seedTask, "inputTableIds");
+        copyArrayIfMissing(targetTask, "outputTableIds", seedTask, "outputTableIds");
+
+        ObjectNode targetParams = ensureObjectNode(targetTask, "taskParams");
+        JsonNode seedParams = firstPresent(seedTask, "taskParams");
+        if (seedParams == null || seedParams.isNull() || seedParams.isMissingNode()) {
+            return;
+        }
+        copyLongIfMissing(targetParams, "datasourceId", seedParams, "datasourceId", "datasource");
+        copyLongIfMissing(targetParams, "datasource", seedParams, "datasource", "datasourceId");
+        copyTextIfMissing(targetParams, "datasourceName", seedParams, "datasourceName");
+        copyTextIfMissing(targetParams, "type", seedParams, "type", "datasourceType");
+        copyTextIfMissing(targetParams, "datasourceType", seedParams, "datasourceType", "type");
+    }
+
+    private JsonNode firstPresent(JsonNode node, String... fields) {
+        if (node == null || node.isNull() || node.isMissingNode() || fields == null) {
+            return null;
+        }
+        for (String field : fields) {
+            if (!StringUtils.hasText(field)) {
+                continue;
+            }
+            JsonNode value = node.get(field);
+            if (value != null && !value.isNull() && !value.isMissingNode()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private String taskCodeKey(JsonNode taskNode) {
+        if (taskNode == null || taskNode.isNull() || taskNode.isMissingNode()) {
+            return null;
+        }
+        JsonNode taskCodeNode = firstPresent(taskNode, "taskCode", "code");
+        if (taskCodeNode == null || taskCodeNode.isNull() || taskCodeNode.isMissingNode()) {
+            return null;
+        }
+        String key = taskCodeNode.asText(null);
+        return StringUtils.hasText(key) ? key.trim() : null;
+    }
+
+    private ObjectNode ensureObjectNode(ObjectNode root, String fieldName) {
+        JsonNode existing = root.get(fieldName);
+        if (existing instanceof ObjectNode) {
+            return (ObjectNode) existing;
+        }
+        ObjectNode created = objectMapper.createObjectNode();
+        root.set(fieldName, created);
+        return created;
+    }
+
+    private void copyLongIfMissing(ObjectNode target,
+            String targetField,
+            JsonNode source,
+            String... sourceFields) {
+        if (target == null || !isMissingNodeValue(target.get(targetField))) {
+            return;
+        }
+        Long value = readLong(source, sourceFields);
+        if (value == null || value <= 0) {
+            return;
+        }
+        target.put(targetField, value);
+    }
+
+    private void copyTextIfMissing(ObjectNode target,
+            String targetField,
+            JsonNode source,
+            String... sourceFields) {
+        if (target == null || !isMissingNodeValue(target.get(targetField))) {
+            return;
+        }
+        String value = readText(source, sourceFields);
+        if (!StringUtils.hasText(value)) {
+            return;
+        }
+        target.put(targetField, value.trim());
+    }
+
+    private void copyArrayIfMissing(ObjectNode target,
+            String targetField,
+            JsonNode source,
+            String... sourceFields) {
+        if (target == null || !isMissingNodeValue(target.get(targetField))) {
+            JsonNode current = target != null ? target.get(targetField) : null;
+            if (current != null && current.isArray() && current.size() == 0) {
+                // allow fallback fill from seed
+            } else {
+                return;
+            }
+        }
+        JsonNode sourceArray = firstPresent(source, sourceFields);
+        if (sourceArray == null || !sourceArray.isArray() || sourceArray.size() == 0) {
+            return;
+        }
+        ArrayNode copied = objectMapper.createArrayNode();
+        sourceArray.forEach(copied::add);
+        target.set(targetField, copied);
+    }
+
+    private boolean isMissingNodeValue(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return true;
+        }
+        if (node.isTextual()) {
+            return !StringUtils.hasText(node.asText(null));
+        }
+        return false;
+    }
+
+    private Long readLong(JsonNode node, String... fieldNames) {
+        if (node == null || node.isNull() || node.isMissingNode() || fieldNames == null) {
+            return null;
+        }
+        for (String fieldName : fieldNames) {
+            if (!StringUtils.hasText(fieldName)) {
+                continue;
+            }
+            JsonNode value = node.get(fieldName);
+            if (value == null || value.isNull() || value.isMissingNode()) {
+                continue;
+            }
+            if (value.isNumber()) {
+                return value.asLong();
+            }
+            if (value.isTextual()) {
+                String text = value.asText();
+                if (!StringUtils.hasText(text)) {
+                    continue;
+                }
+                try {
+                    return Long.parseLong(text.trim());
+                } catch (NumberFormatException ignored) {
+                    // ignore invalid number
+                }
+            }
+        }
+        return null;
+    }
+
+    private String readText(JsonNode node, String... fieldNames) {
+        if (node == null || node.isNull() || node.isMissingNode() || fieldNames == null) {
+            return null;
+        }
+        for (String fieldName : fieldNames) {
+            if (!StringUtils.hasText(fieldName)) {
+                continue;
+            }
+            JsonNode value = node.get(fieldName);
+            if (value == null || value.isNull() || value.isMissingNode()) {
+                continue;
+            }
+            String text = value.isTextual() ? value.asText() : value.toString();
+            if (StringUtils.hasText(text)) {
+                return text;
+            }
+        }
+        return null;
     }
 
     private Map<String, Object> buildPlatformDefinitionDocument(DataWorkflow workflow,
@@ -852,6 +1069,29 @@ public class WorkflowService {
         schedule.put("tenantCode", workflow.getScheduleTenantCode());
         schedule.put("environmentCode", workflow.getScheduleEnvironmentCode());
         schedule.put("scheduleAutoOnline", Boolean.TRUE.equals(workflow.getScheduleAutoOnline()));
+        if (hasScheduleConfig(workflow)) {
+            if (!StringUtils.hasText((String) schedule.get("failureStrategy"))) {
+                schedule.put("failureStrategy", DEFAULT_FAILURE_STRATEGY);
+            }
+            if (!StringUtils.hasText((String) schedule.get("warningType"))) {
+                schedule.put("warningType", DEFAULT_WARNING_TYPE);
+            }
+            if (schedule.get("warningGroupId") == null) {
+                schedule.put("warningGroupId", DEFAULT_WARNING_GROUP_ID);
+            }
+            if (!StringUtils.hasText((String) schedule.get("processInstancePriority"))) {
+                schedule.put("processInstancePriority", DEFAULT_PROCESS_INSTANCE_PRIORITY);
+            }
+            if (!StringUtils.hasText((String) schedule.get("workerGroup"))) {
+                schedule.put("workerGroup", dolphinSchedulerService.getDefaultWorkerGroup());
+            }
+            if (!StringUtils.hasText((String) schedule.get("tenantCode"))) {
+                schedule.put("tenantCode", dolphinSchedulerService.getDefaultTenantCode());
+            }
+            if (schedule.get("environmentCode") == null) {
+                schedule.put("environmentCode", DEFAULT_ENVIRONMENT_CODE);
+            }
+        }
         return schedule;
     }
 
@@ -1169,7 +1409,112 @@ public class WorkflowService {
     }
 
     private String defaultJson(String definitionJson) {
-        return StringUtils.hasText(definitionJson) ? definitionJson : "{}";
+        return normalizeJsonText(definitionJson);
+    }
+
+    private void normalizeTaskMetadata(List<Long> taskIds, String workflowTaskGroupName) {
+        if (CollectionUtils.isEmpty(taskIds)) {
+            return;
+        }
+        List<DataTask> tasks = dataTaskMapper.selectBatchIds(taskIds);
+        if (CollectionUtils.isEmpty(tasks)) {
+            return;
+        }
+        List<Long> existingDolphinTaskCodes = tasks.stream()
+                .map(DataTask::getDolphinTaskCode)
+                .filter(Objects::nonNull)
+                .filter(code -> code > 0)
+                .collect(Collectors.toList());
+        dolphinSchedulerService.alignSequenceWithExistingTasks(existingDolphinTaskCodes);
+        for (DataTask task : tasks) {
+            if (task == null || task.getId() == null) {
+                continue;
+            }
+            boolean changed = false;
+            if (task.getDolphinTaskCode() == null || task.getDolphinTaskCode() <= 0) {
+                task.setDolphinTaskCode(dolphinSchedulerService.nextTaskCode());
+                changed = true;
+            }
+            if (task.getDolphinTaskVersion() == null || task.getDolphinTaskVersion() <= 0) {
+                task.setDolphinTaskVersion(1);
+                changed = true;
+            }
+            if (!StringUtils.hasText(task.getTaskGroupName()) && StringUtils.hasText(workflowTaskGroupName)) {
+                task.setTaskGroupName(workflowTaskGroupName.trim());
+                changed = true;
+            }
+            if (task.getPriority() == null) {
+                task.setPriority(DEFAULT_TASK_PRIORITY);
+                changed = true;
+            }
+            if (task.getRetryTimes() == null) {
+                task.setRetryTimes(DEFAULT_TASK_RETRY_TIMES);
+                changed = true;
+            }
+            if (task.getRetryInterval() == null) {
+                task.setRetryInterval(DEFAULT_TASK_RETRY_INTERVAL);
+                changed = true;
+            }
+            if (task.getTimeoutSeconds() == null || task.getTimeoutSeconds() <= 0) {
+                task.setTimeoutSeconds(DEFAULT_TASK_TIMEOUT_SECONDS);
+                changed = true;
+            }
+            if (StringUtils.hasText(task.getDatasourceName())) {
+                String trimmed = task.getDatasourceName().trim();
+                if (!Objects.equals(task.getDatasourceName(), trimmed)) {
+                    task.setDatasourceName(trimmed);
+                    changed = true;
+                }
+            }
+            if (StringUtils.hasText(task.getDatasourceType())) {
+                String trimmed = task.getDatasourceType().trim();
+                if (!Objects.equals(task.getDatasourceType(), trimmed)) {
+                    task.setDatasourceType(trimmed);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                dataTaskMapper.updateById(task);
+            }
+        }
+    }
+
+    private void normalizeWorkflowScheduleDefaults(DataWorkflow workflow) {
+        if (!hasScheduleConfig(workflow)) {
+            return;
+        }
+        if (!StringUtils.hasText(workflow.getScheduleFailureStrategy())) {
+            workflow.setScheduleFailureStrategy(DEFAULT_FAILURE_STRATEGY);
+        }
+        if (!StringUtils.hasText(workflow.getScheduleWarningType())) {
+            workflow.setScheduleWarningType(DEFAULT_WARNING_TYPE);
+        }
+        if (workflow.getScheduleWarningGroupId() == null) {
+            workflow.setScheduleWarningGroupId(DEFAULT_WARNING_GROUP_ID);
+        }
+        if (!StringUtils.hasText(workflow.getScheduleProcessInstancePriority())) {
+            workflow.setScheduleProcessInstancePriority(DEFAULT_PROCESS_INSTANCE_PRIORITY);
+        }
+        if (!StringUtils.hasText(workflow.getScheduleWorkerGroup())) {
+            workflow.setScheduleWorkerGroup(dolphinSchedulerService.getDefaultWorkerGroup());
+        }
+        if (!StringUtils.hasText(workflow.getScheduleTenantCode())) {
+            workflow.setScheduleTenantCode(dolphinSchedulerService.getDefaultTenantCode());
+        }
+        if (workflow.getScheduleEnvironmentCode() == null) {
+            workflow.setScheduleEnvironmentCode(DEFAULT_ENVIRONMENT_CODE);
+        }
+    }
+
+    private boolean hasScheduleConfig(DataWorkflow workflow) {
+        if (workflow == null) {
+            return false;
+        }
+        return (workflow.getDolphinScheduleId() != null && workflow.getDolphinScheduleId() > 0)
+                || StringUtils.hasText(workflow.getScheduleCron())
+                || StringUtils.hasText(workflow.getScheduleTimezone())
+                || workflow.getScheduleStartTime() != null
+                || workflow.getScheduleEndTime() != null;
     }
 
     private Long resolveProjectCode(Long requestProjectCode) {

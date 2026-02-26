@@ -50,6 +50,13 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class DataTaskService {
 
+    private static final int DEFAULT_TASK_PRIORITY = 5;
+    private static final int DEFAULT_TASK_VERSION = 1;
+    private static final int DEFAULT_TASK_RETRY_TIMES = 1;
+    private static final int DEFAULT_TASK_RETRY_INTERVAL = 1;
+    private static final int DEFAULT_TASK_TIMEOUT_SECONDS = 60;
+    private static final String DEFAULT_OPERATOR = "system";
+
     private final DataTaskMapper dataTaskMapper;
     private final DataLineageMapper dataLineageMapper;
     private final TaskExecutionLogMapper executionLogMapper;
@@ -243,7 +250,9 @@ public class DataTaskService {
             workflowService.refreshTaskRelations(task.getWorkflowId());
         }
 
-        return task;
+        normalizeTaskMetadataOnPersist(task.getId(), task.getWorkflowId(), null, task.getOwner());
+        DataTask persisted = dataTaskMapper.selectById(task.getId());
+        return persisted != null ? persisted : task;
     }
 
     /**
@@ -307,7 +316,9 @@ public class DataTaskService {
 
         syncWorkflowRelation(task.getId(), task.getWorkflowId(), workflowRelation, previousWorkflowId);
 
-        return task;
+        normalizeTaskMetadataOnPersist(task.getId(), task.getWorkflowId(), previousWorkflowId, task.getOwner());
+        DataTask persisted = dataTaskMapper.selectById(task.getId());
+        return persisted != null ? persisted : task;
     }
 
     /**
@@ -354,6 +365,7 @@ public class DataTaskService {
             throw new RuntimeException("未找到任何 Dolphin 引擎任务");
         }
         log.info("找到 {} 个 Dolphin 引擎任务", dolphinTasks.size());
+        validatePublishMetadata(dolphinTasks);
 
         // 强制刷新 project code 缓存,确保使用最新的项目信息
         // 这对于 DolphinScheduler 重置后获取正确的 projectCode 很重要
@@ -372,29 +384,6 @@ public class DataTaskService {
         log.info("使用 workflow code: {} ({})", workflowCode,
                 workflowCode > 0 ? "更新现有工作流" : "创建新工作流");
 
-        // 对齐任务编号生成器，避免与已存在的任务编码冲突
-        dolphinSchedulerService.alignSequenceWithExistingTasks(
-                dolphinTasks.stream()
-                        .map(DataTask::getDolphinTaskCode)
-                        .collect(Collectors.toList()));
-
-        for (DataTask dataTask : dolphinTasks) {
-            boolean changed = false;
-            if (dataTask.getDolphinTaskCode() == null) {
-                dataTask.setDolphinTaskCode(dolphinSchedulerService.nextTaskCode());
-                dataTask.setDolphinTaskVersion(1);
-                changed = true;
-            }
-            if (dataTask.getDolphinTaskVersion() == null) {
-                dataTask.setDolphinTaskVersion(1);
-                changed = true;
-            }
-            // 暂时不更新 dolphinProcessCode，等 syncWorkflow 返回实际的 code
-            if (changed) {
-                dataTaskMapper.updateById(dataTask);
-            }
-        }
-
         Map<Long, DataTask> taskMap = dolphinTasks.stream()
                 .collect(java.util.stream.Collectors.toMap(DataTask::getId, t -> t));
 
@@ -409,11 +398,9 @@ public class DataTaskService {
 
         int index = 0;
         for (DataTask dataTask : dolphinTasks) {
-            String priority = mapPriority(dataTask.getPriority());
-            int version = dataTask.getDolphinTaskVersion() != null ? dataTask.getDolphinTaskVersion() : 1;
-
-            // Determine node type (default to SHELL if not specified)
-            String nodeType = dataTask.getDolphinNodeType() != null ? dataTask.getDolphinNodeType() : "SHELL";
+            String priority = mapPriority(dataTask.getPriority(), dataTask);
+            int version = dataTask.getDolphinTaskVersion();
+            String nodeType = dataTask.getDolphinNodeType().trim();
             String sqlOrScript;
 
             // For SQL node, use raw SQL; for SHELL, wrap in shell script
@@ -438,7 +425,9 @@ public class DataTaskService {
                             .findFirst()
                             .orElse(null);
                     if (datasourceId == null) {
-                        log.warn("Source datasource not found for DataX: name={}", dataTask.getDatasourceName());
+                        throw new IllegalStateException(String.format(
+                                "Source datasource '%s' not found for task '%s'",
+                                dataTask.getDatasourceName(), taskLabel(dataTask)));
                     }
                 }
                 if (StringUtils.hasText(dataTask.getTargetDatasourceName())) {
@@ -450,8 +439,15 @@ public class DataTaskService {
                             .findFirst()
                             .orElse(null);
                     if (targetDatasourceId == null) {
-                        log.warn("Target datasource not found for DataX: name={}", dataTask.getTargetDatasourceName());
+                        throw new IllegalStateException(String.format(
+                                "Target datasource '%s' not found for task '%s'",
+                                dataTask.getTargetDatasourceName(), taskLabel(dataTask)));
                     }
+                }
+                if (datasourceId == null || targetDatasourceId == null) {
+                    throw new IllegalStateException(String.format(
+                            "DataX task '%s' 缺少有效数据源映射(source=%s,target=%s)",
+                            taskLabel(dataTask), dataTask.getDatasourceName(), dataTask.getTargetDatasourceName()));
                 }
             } else if (StringUtils.hasText(dataTask.getDatasourceName())) {
                 // For SQL, only get source datasource
@@ -462,10 +458,11 @@ public class DataTaskService {
                         .map(DolphinDatasourceOption::getId)
                         .findFirst()
                         .orElse(null);
-                if (datasourceId == null) {
-                    log.warn("Datasource not found: name={}, type={}", dataTask.getDatasourceName(),
-                            dataTask.getDatasourceType());
-                }
+            }
+            if ("SQL".equalsIgnoreCase(nodeType) && datasourceId == null) {
+                throw new IllegalStateException(String.format(
+                        "Datasource '%s' not found for task '%s'",
+                        dataTask.getDatasourceName(), taskLabel(dataTask)));
             }
 
             Integer taskGroupId = null;
@@ -494,9 +491,9 @@ public class DataTaskService {
                     dataTask.getTaskDesc(),
                     sqlOrScript,
                     priority,
-                    dataTask.getRetryTimes() == null ? 1 : dataTask.getRetryTimes(),
-                    dataTask.getRetryInterval() == null ? 1 : dataTask.getRetryInterval(),
-                    dataTask.getTimeoutSeconds() == null ? 60 : dataTask.getTimeoutSeconds(),
+                    dataTask.getRetryTimes(),
+                    dataTask.getRetryInterval(),
+                    dataTask.getTimeoutSeconds(),
                     nodeType,
                     datasourceId,
                     dataTask.getDatasourceType(),
@@ -516,7 +513,7 @@ public class DataTaskService {
                 for (DataTask upstream : upstreamTasks) {
                     relations.add(dolphinSchedulerService.buildRelation(
                             upstream.getDolphinTaskCode(),
-                            upstream.getDolphinTaskVersion() == null ? 1 : upstream.getDolphinTaskVersion(),
+                            upstream.getDolphinTaskVersion(),
                             dataTask.getDolphinTaskCode(),
                             version));
                 }
@@ -602,8 +599,66 @@ public class DataTaskService {
                 .collect(Collectors.toList());
     }
 
-    private String mapPriority(Integer value) {
-        int priority = value == null ? 5 : value;
+    private void validatePublishMetadata(List<DataTask> tasks) {
+        if (CollectionUtils.isEmpty(tasks)) {
+            throw new IllegalStateException("未找到可发布任务");
+        }
+        List<String> invalidTasks = new ArrayList<>();
+        for (DataTask task : tasks) {
+            if (task == null) {
+                continue;
+            }
+            List<String> missingFields = new ArrayList<>();
+            if (task.getDolphinTaskCode() == null || task.getDolphinTaskCode() <= 0) {
+                missingFields.add("dolphinTaskCode");
+            }
+            if (task.getDolphinTaskVersion() == null || task.getDolphinTaskVersion() <= 0) {
+                missingFields.add("dolphinTaskVersion");
+            }
+            String nodeType = normalizeText(task.getDolphinNodeType());
+            if (!StringUtils.hasText(nodeType)) {
+                missingFields.add("dolphinNodeType");
+            }
+            if (task.getPriority() == null) {
+                missingFields.add("priority");
+            }
+            if (task.getRetryTimes() == null) {
+                missingFields.add("retryTimes");
+            }
+            if (task.getRetryInterval() == null) {
+                missingFields.add("retryInterval");
+            }
+            if (task.getTimeoutSeconds() == null || task.getTimeoutSeconds() <= 0) {
+                missingFields.add("timeoutSeconds");
+            }
+            if ("SQL".equalsIgnoreCase(nodeType) && !StringUtils.hasText(task.getDatasourceName())) {
+                missingFields.add("datasourceName");
+            }
+            if ("DATAX".equalsIgnoreCase(nodeType)) {
+                if (!StringUtils.hasText(task.getDatasourceName())) {
+                    missingFields.add("datasourceName");
+                }
+                if (!StringUtils.hasText(task.getTargetDatasourceName())) {
+                    missingFields.add("targetDatasourceName");
+                }
+            }
+            if (!missingFields.isEmpty()) {
+                invalidTasks.add(taskLabel(task) + " missing=" + String.join(",", missingFields));
+            }
+        }
+        if (!invalidTasks.isEmpty()) {
+            throw new IllegalStateException("检测到任务元数据缺失，请先保存修复后再发布: "
+                    + String.join("; ", invalidTasks));
+        }
+    }
+
+    private String mapPriority(Integer value, DataTask task) {
+        if (value == null) {
+            throw new IllegalStateException(String.format(
+                    "Task '%s' 缺少 priority 元数据，请先保存后再发布",
+                    taskLabel(task)));
+        }
+        int priority = value;
         if (priority >= 9) {
             return "HIGHEST";
         } else if (priority >= 7) {
@@ -625,6 +680,114 @@ public class DataTaskService {
             return 2;
         }
         return 0;
+    }
+
+    private void normalizeTaskMetadataOnPersist(Long taskId, Long workflowId, Long previousWorkflowId, String operator) {
+        if (taskId == null) {
+            return;
+        }
+        DataTask task = dataTaskMapper.selectById(taskId);
+        if (task == null) {
+            return;
+        }
+        boolean changed = false;
+
+        String datasourceName = normalizeText(task.getDatasourceName());
+        if (!Objects.equals(task.getDatasourceName(), datasourceName)) {
+            task.setDatasourceName(datasourceName);
+            changed = true;
+        }
+        String datasourceType = normalizeText(task.getDatasourceType());
+        if (!Objects.equals(task.getDatasourceType(), datasourceType)) {
+            task.setDatasourceType(datasourceType);
+            changed = true;
+        }
+        String taskGroupName = normalizeText(task.getTaskGroupName());
+        if (!Objects.equals(task.getTaskGroupName(), taskGroupName)) {
+            task.setTaskGroupName(taskGroupName);
+            changed = true;
+        }
+
+        if ("dolphin".equalsIgnoreCase(task.getEngine())) {
+            if (task.getDolphinTaskCode() == null || task.getDolphinTaskCode() <= 0) {
+                task.setDolphinTaskCode(nextAvailableTaskCode());
+                changed = true;
+            }
+            if (task.getDolphinTaskVersion() == null || task.getDolphinTaskVersion() <= 0) {
+                task.setDolphinTaskVersion(DEFAULT_TASK_VERSION);
+                changed = true;
+            }
+            if (task.getPriority() == null) {
+                task.setPriority(DEFAULT_TASK_PRIORITY);
+                changed = true;
+            }
+            if (task.getRetryTimes() == null) {
+                task.setRetryTimes(DEFAULT_TASK_RETRY_TIMES);
+                changed = true;
+            }
+            if (task.getRetryInterval() == null) {
+                task.setRetryInterval(DEFAULT_TASK_RETRY_INTERVAL);
+                changed = true;
+            }
+            if (task.getTimeoutSeconds() == null || task.getTimeoutSeconds() <= 0) {
+                task.setTimeoutSeconds(DEFAULT_TASK_TIMEOUT_SECONDS);
+                changed = true;
+            }
+        }
+
+        if (!StringUtils.hasText(task.getTaskGroupName()) && workflowId != null) {
+            DataWorkflow workflow = dataWorkflowMapper.selectById(workflowId);
+            if (workflow != null && StringUtils.hasText(workflow.getTaskGroupName())) {
+                task.setTaskGroupName(workflow.getTaskGroupName().trim());
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            dataTaskMapper.updateById(task);
+        }
+
+        String normalizedOperator = resolveOperator(operator);
+        if (workflowId != null) {
+            workflowService.normalizeAndPersistMetadata(workflowId, normalizedOperator);
+        }
+        if (previousWorkflowId != null && !Objects.equals(previousWorkflowId, workflowId)) {
+            workflowService.normalizeAndPersistMetadata(previousWorkflowId, normalizedOperator);
+        }
+    }
+
+    private Long nextAvailableTaskCode() {
+        List<Long> existingCodes = dataTaskMapper.selectList(
+                Wrappers.<DataTask>lambdaQuery()
+                        .select(DataTask::getDolphinTaskCode)).stream()
+                .filter(Objects::nonNull)
+                .map(DataTask::getDolphinTaskCode)
+                .filter(Objects::nonNull)
+                .filter(code -> code > 0)
+                .collect(Collectors.toList());
+        dolphinSchedulerService.alignSequenceWithExistingTasks(existingCodes);
+        return dolphinSchedulerService.nextTaskCode();
+    }
+
+    private String resolveOperator(String operator) {
+        if (StringUtils.hasText(operator)) {
+            return operator.trim();
+        }
+        return DEFAULT_OPERATOR;
+    }
+
+    private String taskLabel(DataTask task) {
+        if (task == null) {
+            return "unknown-task";
+        }
+        if (StringUtils.hasText(task.getTaskName())) {
+            return task.getTaskName().trim();
+        }
+        return task.getId() != null ? "task#" + task.getId() : "unknown-task";
+    }
+
+    private String normalizeText(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
     /**

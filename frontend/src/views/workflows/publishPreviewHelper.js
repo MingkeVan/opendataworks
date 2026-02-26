@@ -196,6 +196,56 @@ export const buildPublishPreviewHtml = (preview) => {
   `
 }
 
+export const buildPublishRepairHtml = (preview) => {
+  const repairIssues = Array.isArray(preview?.repairIssues) ? preview.repairIssues : []
+  const warnings = Array.isArray(preview?.warnings) ? preview.warnings : []
+  const rows = repairIssues.slice(0, MAX_RENDER_COUNT)
+    .map((issue) => {
+      const task = issue?.taskName || issue?.taskCode
+        ? `${issue?.taskName || '-'} (${issue?.taskCode ?? '-'})`
+        : '-'
+      return `
+        <tr>
+          <td style="padding: 6px 8px; border: 1px solid #ebeef5;">${escapeHtml(issue?.field || '-')}</td>
+          <td style="padding: 6px 8px; border: 1px solid #ebeef5;">${escapeHtml(task)}</td>
+          <td style="padding: 6px 8px; border: 1px solid #ebeef5;">${escapeHtml(issue?.message || '-')}</td>
+        </tr>
+      `
+    })
+    .join('')
+  const remain = repairIssues.length - MAX_RENDER_COUNT
+  const more = remain > 0
+    ? `<div style="margin-top: 4px; color: #909399;">... 另有 ${remain} 项</div>`
+    : ''
+  const warn = warnings.length
+    ? `
+      <div style="margin-top: 8px; color: #e6a23c;">
+        <div style="font-weight: 600; margin-bottom: 4px;">预检告警</div>
+        <ul style="margin: 0 0 0 16px; line-height: 1.5;">${warnings.map(renderIssue).join('')}</ul>
+      </div>
+    `
+    : ''
+  return `
+    <div style="max-height: 60vh; overflow: auto; padding-right: 8px;">
+      <div>检测到可修复的元数据漂移。建议先修复元数据，再重新发布。</div>
+      ${warn}
+      <div style="margin-top: 10px;">
+        <table style="border-collapse: collapse; width: 100%; font-size: 12px; color: #606266;">
+          <thead>
+            <tr>
+              <th style="padding: 6px 8px; border: 1px solid #ebeef5; text-align: left;">字段</th>
+              <th style="padding: 6px 8px; border: 1px solid #ebeef5; text-align: left;">任务</th>
+              <th style="padding: 6px 8px; border: 1px solid #ebeef5; text-align: left;">问题</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${more}
+      </div>
+    </div>
+  `
+}
+
 export const firstPreviewErrorMessage = (preview) => {
   const first = Array.isArray(preview?.errors) ? preview.errors[0] : null
   return first?.message || '发布预检未通过'

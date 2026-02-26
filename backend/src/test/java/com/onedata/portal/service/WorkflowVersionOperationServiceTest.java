@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -659,6 +660,86 @@ class WorkflowVersionOperationServiceTest {
                 "应基于 V3 definition 识别调度字段变更");
     }
 
+    @Test
+    void compareShouldDetectTaskRuntimeMetadataDiffs() {
+        final long workflowId = 44L;
+        String definitionV1 = metadataDefinitionJson(
+                1L,
+                "task_meta",
+                1001L,
+                1L,
+                5L,
+                1L,
+                1L,
+                60L);
+        String definitionV2 = metadataDefinitionJson(
+                1L,
+                "task_meta",
+                2002L,
+                3L,
+                9L,
+                4L,
+                6L,
+                180L);
+
+        WorkflowVersion v1 = version(401L, workflowId, 1, definitionV1);
+        WorkflowVersion v2 = version(402L, workflowId, 2, definitionV2);
+
+        when(workflowVersionMapper.selectById(401L)).thenReturn(v1);
+        when(workflowVersionMapper.selectById(402L)).thenReturn(v2);
+
+        WorkflowVersionCompareResponse response = compare(workflowId, 401L, 402L);
+        assertTrue(Boolean.TRUE.equals(response.getChanged()));
+        assertListContains(response.getModified().getTasks(), "dolphinTaskCode",
+                "任务 dolphinTaskCode 变更应被识别");
+        assertListContains(response.getModified().getTasks(), "dolphinTaskVersion",
+                "任务 dolphinTaskVersion 变更应被识别");
+        assertListContains(response.getModified().getTasks(), "priority",
+                "任务 priority 变更应被识别");
+        assertListContains(response.getModified().getTasks(), "retryTimes",
+                "任务 retryTimes 变更应被识别");
+        assertListContains(response.getModified().getTasks(), "retryInterval",
+                "任务 retryInterval 变更应被识别");
+        assertListContains(response.getModified().getTasks(), "timeoutSeconds",
+                "任务 timeoutSeconds 变更应被识别");
+    }
+
+    @Test
+    void compareShouldTreatAlignedTaskRuntimeMetadataAsNoDiff() {
+        final long workflowId = 45L;
+        String definitionV1 = metadataDefinitionJson(
+                1L,
+                "task_meta",
+                1001L,
+                1L,
+                5L,
+                1L,
+                1L,
+                60L);
+        String definitionV2 = metadataDefinitionJson(
+                1L,
+                "task_meta",
+                1001L,
+                1L,
+                5L,
+                1L,
+                1L,
+                60L);
+
+        WorkflowVersion v1 = version(411L, workflowId, 1, definitionV1);
+        WorkflowVersion v2 = version(412L, workflowId, 2, definitionV2);
+
+        when(workflowVersionMapper.selectById(411L)).thenReturn(v1);
+        when(workflowVersionMapper.selectById(412L)).thenReturn(v2);
+
+        WorkflowVersionCompareResponse response = compare(workflowId, 411L, 412L);
+        assertFalse(Boolean.TRUE.equals(response.getChanged()), "元数据一致时不应产生差异");
+        assertTrue(response.getModified().getTasks().isEmpty(), "元数据一致时任务修改列表应为空");
+        assertTrue(response.getAdded().getTasks().isEmpty(), "元数据一致时不应出现新增任务");
+        assertTrue(response.getRemoved().getTasks().isEmpty(), "元数据一致时不应出现删除任务");
+        assertListContains(response.getUnchanged().getTasks(), "task_meta", "元数据一致时任务应归类为未变化");
+    }
+
     private WorkflowVersion version(Long id, Long workflowId, Integer versionNo, String snapshot) {
         return versionWithSchema(id, workflowId, versionNo, snapshot, 3);
     }
@@ -874,6 +955,68 @@ class WorkflowVersionOperationServiceTest {
         Map<String, Object> workflow = workflowNode(workflowName, null, null, null);
         workflow.put("definitionJson", definitionJson);
         return workflow;
+    }
+
+    private String metadataDefinitionJson(Long taskCode,
+                                          String taskName,
+                                          Long dolphinTaskCode,
+                                          Long dolphinTaskVersion,
+                                          Long taskPriority,
+                                          Long retryTimes,
+                                          Long retryInterval,
+                                          Long timeoutSeconds) {
+        Map<String, Object> root = new LinkedHashMap<>();
+
+        Map<String, Object> process = new LinkedHashMap<>();
+        process.put("name", "wf_meta");
+        process.put("description", "meta compare");
+        process.put("globalParams", "[]");
+        process.put("taskGroupName", "tg_meta");
+        process.put("releaseState", "offline");
+        root.put("processDefinition", process);
+
+        Map<String, Object> task = new LinkedHashMap<>();
+        task.put("code", taskCode);
+        task.put("taskCode", taskCode);
+        task.put("name", taskName);
+        task.put("taskName", taskName);
+        task.put("taskType", "SQL");
+        task.put("nodeType", "SQL");
+        task.put("taskPriority", taskPriority);
+        task.put("failRetryTimes", retryTimes);
+        task.put("failRetryInterval", retryInterval);
+        task.put("timeout", timeoutSeconds);
+        task.put("inputTableIds", Collections.singletonList(10L));
+        task.put("outputTableIds", Collections.singletonList(20L));
+
+        Map<String, Object> taskParams = new LinkedHashMap<>();
+        taskParams.put("sql", "select 1");
+        taskParams.put("rawScript", "select 1");
+        taskParams.put("datasourceName", "meta_ds");
+        taskParams.put("type", "MYSQL");
+        task.put("taskParams", taskParams);
+
+        Map<String, Object> taskMeta = new LinkedHashMap<>();
+        taskMeta.put("taskId", taskCode);
+        taskMeta.put("platformTaskCode", "meta_" + taskCode);
+        taskMeta.put("entry", true);
+        taskMeta.put("exit", true);
+        taskMeta.put("engine", "dolphin");
+        taskMeta.put("platformTaskType", "batch");
+        taskMeta.put("dolphinTaskCode", dolphinTaskCode);
+        taskMeta.put("dolphinTaskVersion", dolphinTaskVersion);
+        task.put("xPlatformTaskMeta", taskMeta);
+
+        root.put("taskDefinitionList", Collections.singletonList(task));
+        root.put("processTaskRelationList", Collections.singletonList(definitionRelationNode(0L, taskCode)));
+        root.put("schedule", Collections.emptyMap());
+        root.put("schemaVersion", 3);
+
+        try {
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception ex) {
+            throw new IllegalStateException("构建 metadata definitionJson 失败", ex);
+        }
     }
 
     private Map<String, Object> scheduleNode(String scheduleCron,
