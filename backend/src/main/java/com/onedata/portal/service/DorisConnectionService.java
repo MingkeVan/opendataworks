@@ -920,6 +920,49 @@ public class DorisConnectionService {
     }
 
     /**
+     * 获取所有 schema 的对象列表（表/视图），支持关键字过滤。
+     */
+    public List<Map<String, Object>> getSchemaObjects(Long clusterId, String keyword) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        List<Map<String, Object>> objects = new ArrayList<>();
+
+        StringBuilder sqlBuilder = new StringBuilder("SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE, TABLE_COMMENT ")
+                .append("FROM information_schema.tables ")
+                .append("WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')");
+
+        boolean hasKeyword = StringUtils.hasText(keyword);
+        if (hasKeyword) {
+            sqlBuilder.append(" AND (LOWER(TABLE_NAME) LIKE ? ESCAPE '\\\\' ")
+                    .append("OR LOWER(COALESCE(TABLE_COMMENT, '')) LIKE ? ESCAPE '\\\\')");
+        }
+        sqlBuilder.append(" ORDER BY TABLE_SCHEMA, TABLE_NAME");
+
+        try (Connection connection = getConnection(cluster, null);
+                PreparedStatement stmt = connection.prepareStatement(sqlBuilder.toString())) {
+            if (hasKeyword) {
+                String pattern = toEscapedLikePattern(keyword);
+                stmt.setString(1, pattern);
+                stmt.setString(2, pattern);
+            }
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    Map<String, Object> object = new HashMap<>();
+                    object.put("schemaName", rs.getString("TABLE_SCHEMA"));
+                    object.put("tableName", rs.getString("TABLE_NAME"));
+                    object.put("tableType", rs.getString("TABLE_TYPE"));
+                    object.put("tableComment", rs.getString("TABLE_COMMENT"));
+                    objects.add(object);
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to list schema objects from cluster {}", cluster.getClusterName(), e);
+            throw new RuntimeException("获取 schema 对象列表失败: " + e.getMessage(), e);
+        }
+
+        return objects;
+    }
+
+    /**
      * 获取指定数据库的所有表
      */
     public List<Map<String, Object>> getTablesInDatabase(Long clusterId, String database) {
@@ -1008,6 +1051,15 @@ public class DorisConnectionService {
         }
 
         return columns;
+    }
+
+    private String toEscapedLikePattern(String keyword) {
+        String normalized = String.valueOf(keyword).trim().toLowerCase(Locale.ROOT);
+        String escaped = normalized
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
+        return "%" + escaped + "%";
     }
 
     private String resolveColumnDataType(ResultSet rs) throws SQLException {

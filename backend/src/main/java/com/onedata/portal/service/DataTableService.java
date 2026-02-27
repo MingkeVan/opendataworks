@@ -114,6 +114,44 @@ public class DataTableService {
     }
 
     /**
+     * 获取软删除表键集合（db::table）。
+     */
+    public Set<String> listSoftDeletedTableKeys(Long clusterId) {
+        return listSoftDeletedTableKeys(clusterId, null);
+    }
+
+    /**
+     * 获取软删除表键集合（db::table）。
+     */
+    public Set<String> listSoftDeletedTableKeys(Long clusterId, String dbName) {
+        LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<DataTable>()
+                .select(DataTable::getDbName, DataTable::getTableName)
+                .eq(DataTable::getStatus, "deprecated");
+        if (clusterId != null) {
+            wrapper.eq(DataTable::getClusterId, clusterId);
+        }
+        if (StringUtils.hasText(dbName)) {
+            wrapper.eq(DataTable::getDbName, dbName.trim());
+        }
+        List<DataTable> tables = dataTableMapper.selectList(wrapper);
+        Set<String> result = new HashSet<>(tables.size());
+        for (DataTable table : tables) {
+            String key = buildDbTableKey(table.getDbName(), table.getTableName());
+            if (key != null) {
+                result.add(key);
+            }
+        }
+        return result;
+    }
+
+    public static String buildDbTableKey(String dbName, String tableName) {
+        if (!StringUtils.hasText(dbName) || !StringUtils.hasText(tableName)) {
+            return null;
+        }
+        return dbName.trim().toLowerCase(Locale.ROOT) + "::" + tableName.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
      * 应用排序逻辑
      */
     private void applySorting(LambdaQueryWrapper<DataTable> wrapper, String sortField, String sortOrder) {

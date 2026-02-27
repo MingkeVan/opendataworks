@@ -127,14 +127,22 @@
                       <el-icon
                         :class="[
                           'refresh-icon',
-                          { 'is-disabled': dbLoading || tableLoading[`${String(data.sourceId)}::${data.schemaName}`] }
+                          {
+                            'is-disabled':
+                              dbLoading ||
+                              schemaCountLoading[String(data.sourceId)] ||
+                              tableLoading[`${String(data.sourceId)}::${data.schemaName}`]
+                          }
                         ]"
                         @click.stop="refreshSchemaNode(data)"
                       >
                         <Refresh />
                       </el-icon>
                     </el-tooltip>
-                    <el-icon v-if="tableLoading[`${String(data.sourceId)}::${data.schemaName}`]" class="is-loading loading-icon">
+                    <el-icon
+                      v-if="schemaCountLoading[String(data.sourceId)] || tableLoading[`${String(data.sourceId)}::${data.schemaName}`]"
+                      class="is-loading loading-icon"
+                    >
                       <Loading />
                     </el-icon>
                   </div>
@@ -1233,12 +1241,18 @@ const dataSources = ref([])
 const activeSource = ref('')
 const schemaStore = reactive({})
 const schemaLoading = reactive({})
+const schemaCountStore = reactive({})
+const schemaCountLoading = reactive({})
+const schemaCountKeyword = reactive({})
+const schemaCountRequestSeq = reactive({})
 const activeSchema = reactive({})
 const tableLoading = reactive({})
 const tableStore = reactive({})
 const lineageCache = reactive({})
 const activatedSources = reactive({})
 const datasourceActivationTasks = new Map()
+const EMPTY_SCHEMA_COUNTS = Object.freeze({ tableCount: 0, viewCount: 0, totalCount: 0 })
+let schemaCountReloadTimer = null
 
 const catalogTreeRef = ref(null)
 const catalogTreeProps = {
@@ -1578,11 +1592,81 @@ const activateDatasource = async (sourceId) => {
   return task
 }
 
+const toSafeCount = (value) => {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num <= 0) return 0
+  return Math.floor(num)
+}
+
+const normalizeSchemaCounts = (item) => {
+  const tableCount = toSafeCount(item?.tableCount)
+  const viewCount = toSafeCount(item?.viewCount)
+  const totalFromPayload = toSafeCount(item?.totalCount)
+  const totalCount = totalFromPayload || tableCount + viewCount
+  return { tableCount, viewCount, totalCount }
+}
+
+const normalizeKeyword = (keyword) => String(keyword || '').trim()
+
+const getSchemaCountSnapshot = (sourceId, schemaName) => {
+  const sourceKey = String(sourceId || '')
+  if (!sourceKey || !schemaName) return EMPTY_SCHEMA_COUNTS
+  return schemaCountStore[sourceKey]?.[schemaName] || EMPTY_SCHEMA_COUNTS
+}
+
+const isSchemaTablesLoaded = (sourceId, database) => {
+  const sourceKey = String(sourceId || '')
+  return Array.isArray(tableStore[sourceKey]?.[database])
+}
+
+const loadSchemaCounts = async (sourceId, keyword = searchKeyword.value, force = false) => {
+  if (!sourceId) return false
+  const sourceKey = String(sourceId)
+  const normalizedKeyword = normalizeKeyword(keyword)
+  if (!force && schemaCountStore[sourceKey] && schemaCountKeyword[sourceKey] === normalizedKeyword) {
+    return true
+  }
+
+  const requestSeq = (schemaCountRequestSeq[sourceKey] || 0) + 1
+  schemaCountRequestSeq[sourceKey] = requestSeq
+  schemaCountLoading[sourceKey] = true
+  try {
+    const params = {}
+    if (normalizedKeyword) {
+      params.keyword = normalizedKeyword
+    }
+    const counts = await dorisClusterApi.getSchemaObjectCounts(sourceId, params)
+    if (schemaCountRequestSeq[sourceKey] !== requestSeq) {
+      return false
+    }
+    const normalizedStore = {}
+    ;(Array.isArray(counts) ? counts : []).forEach((item) => {
+      const schemaName = String(item?.schemaName || '')
+      if (!schemaName) return
+      normalizedStore[schemaName] = normalizeSchemaCounts(item)
+    })
+    schemaCountStore[sourceKey] = normalizedStore
+    schemaCountKeyword[sourceKey] = normalizedKeyword
+    return true
+  } catch (error) {
+    if (schemaCountRequestSeq[sourceKey] === requestSeq && !schemaCountStore[sourceKey]) {
+      schemaCountStore[sourceKey] = {}
+    }
+    console.error('加载 schema 计数失败', error)
+    return false
+  } finally {
+    if (schemaCountRequestSeq[sourceKey] === requestSeq) {
+      schemaCountLoading[sourceKey] = false
+    }
+  }
+}
+
 const loadSchemas = async (sourceId, force = false) => {
   if (!sourceId) return false
   const key = String(sourceId)
   if (schemaStore[key] && !force) {
     activatedSources[key] = true
+    await loadSchemaCounts(sourceId, searchKeyword.value)
     return true
   }
   schemaLoading[key] = true
@@ -1593,9 +1677,9 @@ const loadSchemas = async (sourceId, force = false) => {
     schemaStore[key] = Array.isArray(schemas) ? schemas : []
     activatedSources[key] = true
     refreshDatasourceChildrenInTree(sourceId)
+    await loadSchemaCounts(sourceId, searchKeyword.value, true)
     if (!activeSchema[key] && schemaStore[key].length) {
       activeSchema[key] = schemaStore[key][0]
-      await loadTables(sourceId, activeSchema[key])
     }
     return true
   } catch (error) {
@@ -1703,11 +1787,22 @@ const getDisplayedTables = (sourceId, database) => {
   return list
 }
 
-const getTableCount = (sourceId, database) => getFilteredTables(sourceId, database).length
-const getTableCountByType = (sourceId, database, objectType) =>
-  getFilteredTables(sourceId, database).filter((item) =>
-    objectType === 'view' ? isViewTable(item) : !isViewTable(item)
-  ).length
+const getTableCount = (sourceId, database) => {
+  if (isSchemaTablesLoaded(sourceId, database)) {
+    return getFilteredTables(sourceId, database).length
+  }
+  return getSchemaCountSnapshot(sourceId, database).totalCount
+}
+
+const getTableCountByType = (sourceId, database, objectType) => {
+  if (isSchemaTablesLoaded(sourceId, database)) {
+    return getFilteredTables(sourceId, database).filter((item) =>
+      objectType === 'view' ? isViewTable(item) : !isViewTable(item)
+    ).length
+  }
+  const snapshot = getSchemaCountSnapshot(sourceId, database)
+  return objectType === 'view' ? snapshot.viewCount : snapshot.tableCount
+}
 
 const setTableRef = (key, el, tableId) => {
   if (!key || !el) return
@@ -1908,9 +2003,37 @@ const refreshLoadedSchemaNodesInTree = () => {
   })
 }
 
+const reloadSchemaCountsForLoadedDatasources = async (keyword) => {
+  const tree = catalogTreeRef.value
+  if (!tree) return
+  const loadedSources = dataSources.value
+    .map((item) => String(item.id))
+    .filter((sourceId) => tree.getNode(getDatasourceNodeKey(sourceId))?.loaded)
+  if (!loadedSources.length) return
+  await Promise.allSettled(
+    loadedSources.map((sourceId) => loadSchemaCounts(sourceId, keyword, true))
+  )
+}
+
 const filterCatalogNode = (value, data) => {
   if (!value) return true
   const keyword = String(value).toLowerCase()
+  if (data?.type === 'datasource') {
+    const nameMatched = String(data?.name || '').toLowerCase().includes(keyword)
+    if (nameMatched) return true
+    const schemas = schemaStore[String(data.sourceId)] || []
+    return schemas.some((schemaName) => getTableCount(data.sourceId, schemaName) > 0)
+  }
+  if (data?.type === 'schema') {
+    const nameMatched = String(data?.name || '').toLowerCase().includes(keyword)
+    if (nameMatched) return true
+    return getTableCount(data.sourceId, data.schemaName) > 0
+  }
+  if (data?.type === 'object_group') {
+    const nameMatched = String(data?.name || '').toLowerCase().includes(keyword)
+    if (nameMatched) return true
+    return getTableCountByType(data.sourceId, data.schemaName, data.objectType) > 0
+  }
   if (data?.type === 'table') {
     const name = String(data.table?.tableName || data.name || '').toLowerCase()
     const comment = String(data.table?.tableComment || '').toLowerCase()
@@ -1939,11 +2062,6 @@ const loadCatalogNode = async (node, resolve, reject) => {
   }
 
   if (data.type === 'schema') {
-    const ok = await loadTables(data.sourceId, data.schemaName)
-    if (!ok) {
-      reject?.()
-      return
-    }
     resolve(buildSchemaChildren(data.sourceId, data.schemaName))
     nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
     return
@@ -2633,7 +2751,9 @@ const refreshCatalog = async () => {
       if (!ok) continue
       const schemas = schemaStore[String(sourceId)] || []
       for (const schemaName of schemas) {
-        if (tree.getNode(getSchemaNodeKey(sourceId, schemaName))?.loaded) {
+        const tableGroupLoaded = tree.getNode(getObjectGroupNodeKey(sourceId, schemaName, 'table'))?.loaded
+        const viewGroupLoaded = tree.getNode(getObjectGroupNodeKey(sourceId, schemaName, 'view'))?.loaded
+        if (tableGroupLoaded || viewGroupLoaded) {
           await loadTables(sourceId, schemaName, true)
         }
       }
@@ -2657,8 +2777,13 @@ const refreshSchemaNode = async (nodeData) => {
   const schemaName = nodeData?.schemaName
   if (!sourceId || !schemaName) return
   const key = `${String(sourceId)}::${schemaName}`
-  if (dbLoading.value || tableLoading[key]) return
-  await loadTables(sourceId, schemaName, true)
+  if (dbLoading.value || schemaCountLoading[String(sourceId)] || tableLoading[key]) return
+  await loadSchemaCounts(sourceId, searchKeyword.value, true)
+  if (isSchemaTablesLoaded(sourceId, schemaName)) {
+    await loadTables(sourceId, schemaName, true)
+  } else {
+    nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
+  }
 }
 
 const focusTableInSidebar = async (table, key, dbFallback = '', sourceFallback = '') => {
@@ -4453,6 +4578,16 @@ watch(
 
 watch(searchKeyword, (value) => {
   catalogTreeRef.value?.filter(value)
+  if (schemaCountReloadTimer) {
+    clearTimeout(schemaCountReloadTimer)
+  }
+  schemaCountReloadTimer = setTimeout(() => {
+    schemaCountReloadTimer = null
+    void (async () => {
+      await reloadSchemaCountsForLoadedDatasources(value)
+      catalogTreeRef.value?.filter(value)
+    })()
+  }, 300)
 })
 
 watch([sortField, sortOrder], () => {
@@ -4521,9 +4656,13 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   flushPersistTabs()
   window.removeEventListener('resize', handleResize)
-			chartInstances.forEach((instance) => instance.dispose())
-			chartInstances.clear()
-			resultTableInstances.clear()
+  if (schemaCountReloadTimer) {
+    clearTimeout(schemaCountReloadTimer)
+    schemaCountReloadTimer = null
+  }
+				chartInstances.forEach((instance) => instance.dispose())
+				chartInstances.clear()
+				resultTableInstances.clear()
 			queryTimerHandles.forEach((handle) => clearInterval(handle))
 			queryTimerHandles.clear()
   if (tableObserver.value) {

@@ -977,7 +977,7 @@ public class DorisMetadataSyncService {
         String tableComment = (String) dorisTable.get("tableComment");
         newTable.setTableComment(tableComment != null ? tableComment : "");
 
-        newTable.setStatus(TableNameUtils.isDeprecatedTableName(tableName) ? "deprecated" : "active");
+        newTable.setStatus("active");
         newTable.setIsSynced(isDoris ? 1 : 0);
         newTable.setSyncTime(LocalDateTime.now());
 
@@ -1073,16 +1073,9 @@ public class DorisMetadataSyncService {
             updated = true;
         }
 
-        // 自动识别 deprecated 表（历史上手工重命名/遗留表）
-        if (TableNameUtils.isDeprecatedTableName(tableName) && !"deprecated".equals(localTable.getStatus())) {
-            addChangedValue(tableChanges, "status", localTable.getStatus(), "deprecated");
-            localTable.setStatus("deprecated");
-            updated = true;
-        }
         // 之前因账号不可见被降级为 inactive 的表，在再次可见时自动恢复
         if ("inactive".equals(localTable.getStatus())
-                && Objects.equals(localTable.getIsSynced(), 0)
-                && !TableNameUtils.isDeprecatedTableName(tableName)) {
+                && Objects.equals(localTable.getIsSynced(), 0)) {
             addChangedValue(tableChanges, "status", localTable.getStatus(), "active");
             localTable.setStatus("active");
             updated = true;

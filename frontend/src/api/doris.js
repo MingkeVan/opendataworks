@@ -33,8 +33,12 @@ export const dorisClusterApi = {
     return request.get(`/v1/doris-clusters/${id}/databases`)
   },
 
-  getTables(id, dbName) {
-    return request.get(`/v1/doris-clusters/${id}/databases/${dbName}/tables`)
+  getTables(id, dbName, params = {}) {
+    return request.get(`/v1/doris-clusters/${id}/databases/${dbName}/tables`, { params })
+  },
+
+  getSchemaObjectCounts(id, params = {}) {
+    return request.get(`/v1/doris-clusters/${id}/schema-object-counts`, { params })
   },
 
   getSyncHistory(id, params = {}) {

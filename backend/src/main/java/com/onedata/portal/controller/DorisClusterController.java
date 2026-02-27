@@ -10,19 +10,25 @@ import com.onedata.portal.dto.backup.SchemaBackupSnapshot;
 import com.onedata.portal.dto.backup.SchemaBackupTriggerResponse;
 import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
+import com.onedata.portal.dto.SchemaObjectCount;
 import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.entity.MetadataSyncHistory;
+import com.onedata.portal.service.DataTableService;
 import com.onedata.portal.service.DorisClusterService;
 import com.onedata.portal.service.DorisConnectionService;
 import com.onedata.portal.service.MetadataSyncHistoryService;
 import com.onedata.portal.service.SchemaBackupService;
-import com.onedata.portal.util.TableNameUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -35,6 +41,7 @@ public class DorisClusterController {
 
     private final DorisClusterService dorisClusterService;
     private final DorisConnectionService dorisConnectionService;
+    private final DataTableService dataTableService;
     private final MetadataSyncHistoryService metadataSyncHistoryService;
     private final SchemaBackupService schemaBackupService;
 
@@ -86,18 +93,65 @@ public class DorisClusterController {
     public Result<List<Map<String, Object>>> listTables(
             @PathVariable Long id,
             @PathVariable String database,
-            @RequestParam(required = false, defaultValue = "false") boolean includeDeprecated) {
+            @RequestParam(required = false, defaultValue = "false") boolean includeSoftDeleted) {
         List<Map<String, Object>> tables = dorisConnectionService.getTablesInDatabase(id, database);
-        if (includeDeprecated) {
+        if (includeSoftDeleted) {
+            return Result.success(tables);
+        }
+        Set<String> softDeletedKeys = dataTableService.listSoftDeletedTableKeys(id, database);
+        if (softDeletedKeys.isEmpty()) {
             return Result.success(tables);
         }
         List<Map<String, Object>> filtered = tables.stream()
                 .filter(table -> {
-                    Object tableName = table.get("tableName");
-                    return tableName == null || !TableNameUtils.isDeprecatedTableName(String.valueOf(tableName));
+                    String tableName = toText(table.get("tableName"));
+                    if (!StringUtils.hasText(tableName)) {
+                        return true;
+                    }
+                    return !softDeletedKeys.contains(buildDbTableKey(database, tableName));
                 })
                 .collect(Collectors.toList());
         return Result.success(filtered);
+    }
+
+    @RequireAuth
+    @GetMapping("/{id}/schema-object-counts")
+    public Result<List<SchemaObjectCount>> listSchemaObjectCounts(
+            @PathVariable Long id,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false, defaultValue = "false") boolean includeSoftDeleted) {
+        List<Map<String, Object>> objects = dorisConnectionService.getSchemaObjects(id, keyword);
+        Set<String> softDeletedKeys = includeSoftDeleted
+                ? Collections.emptySet()
+                : dataTableService.listSoftDeletedTableKeys(id);
+        Map<String, SchemaObjectCount> countMap = new java.util.HashMap<>();
+        for (Map<String, Object> object : objects) {
+            String schemaName = toText(object.get("schemaName"));
+            String tableName = toText(object.get("tableName"));
+            if (!StringUtils.hasText(schemaName) || !StringUtils.hasText(tableName)) {
+                continue;
+            }
+            if (!includeSoftDeleted && softDeletedKeys.contains(buildDbTableKey(schemaName, tableName))) {
+                continue;
+            }
+            SchemaObjectCount count = countMap.computeIfAbsent(schemaName, key -> {
+                SchemaObjectCount item = new SchemaObjectCount();
+                item.setSchemaName(key);
+                return item;
+            });
+            if (isViewType(toText(object.get("tableType")))) {
+                count.setViewCount(count.getViewCount() + 1);
+            } else {
+                count.setTableCount(count.getTableCount() + 1);
+            }
+            count.setTotalCount(count.getTableCount() + count.getViewCount());
+        }
+
+        List<SchemaObjectCount> result = new ArrayList<>(countMap.values());
+        result.sort(Comparator.comparing(
+                item -> StringUtils.hasText(item.getSchemaName()) ? item.getSchemaName() : "",
+                String.CASE_INSENSITIVE_ORDER));
+        return Result.success(result);
     }
 
     @GetMapping("/{id}/sync-history")
@@ -172,5 +226,20 @@ public class DorisClusterController {
             @PathVariable String schema,
             @RequestBody SchemaBackupRestoreRequest request) {
         return Result.success(schemaBackupService.restoreSnapshot(id, schema, request));
+    }
+
+    private String toText(Object value) {
+        if (value == null) {
+            return "";
+        }
+        return String.valueOf(value);
+    }
+
+    private String buildDbTableKey(String dbName, String tableName) {
+        return DataTableService.buildDbTableKey(dbName, tableName);
+    }
+
+    private boolean isViewType(String tableType) {
+        return StringUtils.hasText(tableType) && tableType.trim().toUpperCase().contains("VIEW");
     }
 }
