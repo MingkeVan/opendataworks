@@ -41,6 +41,7 @@ class DolphinSchedulerServiceIntegrationTest {
     private DolphinSchedulerService service;
 
     private static final String TEST_WORKFLOW_NAME = "java-integration-test";
+    private static final String TEST_WORKFLOW_DESCRIPTION = "java integration workflow description";
 
     @Mock
     private DolphinOpenApiClient openApiClient;
@@ -145,6 +146,7 @@ class DolphinSchedulerServiceIntegrationTest {
         long workflowCode = service.syncWorkflow(
                 0, // workflowCode = 0 means create new
                 TEST_WORKFLOW_NAME,
+                TEST_WORKFLOW_DESCRIPTION,
                 tasks,
                 relations,
                 locations,
@@ -152,8 +154,17 @@ class DolphinSchedulerServiceIntegrationTest {
 
         assertEquals(999L, workflowCode);
         verify(openApiClient, times(1)).getProject("test-project");
-        verify(openApiClient, times(1)).createOrUpdateProcessDefinition(eq(123456L), eq(TEST_WORKFLOW_NAME), any(),
-                any(), any(), any(), any(), any(), isNull(), isNull());
+        verify(openApiClient, times(1)).createOrUpdateProcessDefinition(
+                eq(123456L),
+                eq(TEST_WORKFLOW_NAME),
+                eq(TEST_WORKFLOW_DESCRIPTION),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                isNull(),
+                isNull());
 
         System.out.println("✅ Workflow synced successfully (Mocked)");
 

@@ -1262,6 +1262,7 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         long updatedCode = dolphinSchedulerService.syncWorkflow(
                 runtimeWorkflowCode,
                 runtimeDefinition.getWorkflowName(),
+                runtimeDefinition.getDescription(),
                 taskDefinitions,
                 mismatchedRelations,
                 locations,
@@ -1746,6 +1747,7 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         long updatedCode = dolphinSchedulerService.syncWorkflow(
                 runtimeWorkflowCode,
                 definition.getWorkflowName(),
+                definition.getDescription(),
                 taskDefinitions,
                 relations,
                 locations,
@@ -2720,6 +2722,7 @@ class WorkflowRuntimeSyncRealIntegrationTest {
         return dolphinSchedulerService.syncWorkflow(
                 0L,
                 workflowName,
+                "integration shell workflow",
                 definitions,
                 relations,
                 locations,

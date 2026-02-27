@@ -228,6 +228,7 @@ public class WorkflowDeployService {
         long deployedCode = dolphinSchedulerService.syncWorkflow(
                 workflowCode,
                 workflow.getWorkflowName(),
+                workflow.getDescription(),
                 definitions,
                 relationPayloads,
                 locationPayloads,

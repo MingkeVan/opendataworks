@@ -82,6 +82,7 @@ class WorkflowDeployServiceTest {
         workflow.setId(1L);
         workflow.setWorkflowName("wf_test");
         workflow.setProjectCode(11L);
+        workflow.setDescription("workflow description");
 
         WorkflowTaskRelation relation = new WorkflowTaskRelation();
         relation.setWorkflowId(1L);
@@ -99,7 +100,14 @@ class WorkflowDeployServiceTest {
 
         IllegalStateException ex = assertThrows(IllegalStateException.class, () -> service.deploy(workflow));
         assertTrue(ex.getMessage().contains("缺少 Dolphin 元数据"));
-        verify(dolphinSchedulerService, never()).syncWorkflow(anyLong(), anyString(), anyList(), anyList(), anyList(), any());
+        verify(dolphinSchedulerService, never()).syncWorkflow(
+                anyLong(),
+                anyString(),
+                anyString(),
+                anyList(),
+                anyList(),
+                anyList(),
+                any());
     }
 
     @Test
@@ -108,6 +116,7 @@ class WorkflowDeployServiceTest {
         workflow.setId(1L);
         workflow.setWorkflowName("wf_test");
         workflow.setProjectCode(11L);
+        workflow.setDescription("workflow deploy description");
         workflow.setTaskGroupName("tg_default");
         workflow.setGlobalParams("[]");
         workflow.setDefinitionJson("{\"taskDefinitionList\":["
@@ -179,7 +188,14 @@ class WorkflowDeployServiceTest {
                         invocation.getArgument(3)));
         when(dolphinSchedulerService.buildLocation(anyLong(), anyInt(), anyInt()))
                 .thenAnswer(invocation -> dolphinLocation(invocation.getArgument(0)));
-        when(dolphinSchedulerService.syncWorkflow(anyLong(), anyString(), anyList(), anyList(), anyList(), any()))
+        when(dolphinSchedulerService.syncWorkflow(
+                anyLong(),
+                anyString(),
+                anyString(),
+                anyList(),
+                anyList(),
+                anyList(),
+                any()))
                 .thenReturn(90001L);
         when(dolphinSchedulerService.getProjectCode(true)).thenReturn(11L);
 
@@ -204,6 +220,14 @@ class WorkflowDeployServiceTest {
         assertEquals(Integer.valueOf(180), timeoutCaptor.getValue());
 
         verify(dolphinSchedulerService).buildRelation(1001L, 3, 2002L, 5);
+        verify(dolphinSchedulerService).syncWorkflow(
+                anyLong(),
+                eq("wf_test"),
+                eq("workflow deploy description"),
+                anyList(),
+                anyList(),
+                anyList(),
+                eq("[]"));
         verify(dolphinSchedulerService, never()).checkWorkflowExists(anyLong());
         verify(dolphinSchedulerService, never()).listDatasources(any(), any());
         verify(dolphinSchedulerService, never()).listTaskGroups(any());
