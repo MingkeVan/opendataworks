@@ -1690,7 +1690,7 @@ const loadSchemas = async (sourceId, force = false) => {
   }
 }
 
-const loadTables = async (sourceId, database, force = false) => {
+const loadTables = async (sourceId, database, force = false, refreshTree = true) => {
   if (!sourceId || !database) return false
   const sourceKey = String(sourceId)
   const sourceType = String(getDatasourceById(sourceKey)?.sourceType || '').toUpperCase()
@@ -1732,9 +1732,11 @@ const loadTables = async (sourceId, database, force = false) => {
       }
     })
     tableStore[sourceKey][database] = list
-    refreshSchemaChildrenInTree(sourceId, database)
-    refreshObjectGroupChildrenInTree(sourceId, database, 'table')
-    refreshObjectGroupChildrenInTree(sourceId, database, 'view')
+    if (refreshTree) {
+      refreshSchemaChildrenInTree(sourceId, database)
+      refreshObjectGroupChildrenInTree(sourceId, database, 'table')
+      refreshObjectGroupChildrenInTree(sourceId, database, 'view')
+    }
     return true
   } catch (error) {
     ElMessage.error('加载表列表失败')
@@ -2068,7 +2070,9 @@ const loadCatalogNode = async (node, resolve, reject) => {
   }
 
   if (data.type === 'object_group') {
-    const ok = await loadTables(data.sourceId, data.schemaName)
+    // Keep current expand transition stable: do not rebuild schema/group nodes
+    // while this group is being lazily expanded.
+    const ok = await loadTables(data.sourceId, data.schemaName, false, false)
     if (!ok) {
       reject?.()
       return
@@ -2081,8 +2085,15 @@ const loadCatalogNode = async (node, resolve, reject) => {
   resolve([])
 }
 
-const handleCatalogNodeClick = async (data) => {
+const isExpandIconClick = (event) => {
+  const target = event?.target
+  if (!target || typeof target.closest !== 'function') return false
+  return Boolean(target.closest('.el-tree-node__expand-icon'))
+}
+
+const handleCatalogNodeClick = async (data, _node, _component, event) => {
   if (!data) return
+  if (isExpandIconClick(event)) return
   const currentTab = activeTab.value
     ? openTabs.value.find((item) => String(item.id) === String(activeTab.value))
     : null
@@ -2107,11 +2118,6 @@ const handleCatalogNodeClick = async (data) => {
     openTableTab(data.table, data.schemaName, data.sourceId)
     return
   }
-  nextTick(() => {
-    if (selectedTableKey.value) {
-      catalogTreeRef.value?.setCurrentKey(selectedTableKey.value, false)
-    }
-  })
 }
 
 const expandCatalogNode = (key) => {
@@ -2796,13 +2802,18 @@ const focusTableInSidebar = async (table, key, dbFallback = '', sourceFallback =
   }
   if (sourceId && dbName) {
     activeSchema[String(sourceId)] = dbName
-    await loadTables(sourceId, dbName)
   }
   await nextTick()
   await ensureCatalogPathExpanded(sourceId, dbName)
   if (sourceId && dbName) {
+    await loadTables(sourceId, dbName)
     const objectType = isViewTable(table) ? 'view' : 'table'
     await expandCatalogNode(getObjectGroupNodeKey(sourceId, dbName, objectType))
+    await nextTick()
+    if (!catalogTreeRef.value?.getNode(key)) {
+      const fallbackType = objectType === 'view' ? 'table' : 'view'
+      await expandCatalogNode(getObjectGroupNodeKey(sourceId, dbName, fallbackType))
+    }
   }
   catalogTreeRef.value?.setCurrentKey(key)
   await nextTick()
@@ -2810,6 +2821,21 @@ const focusTableInSidebar = async (table, key, dbFallback = '', sourceFallback =
   if (ref?.scrollIntoView) {
     ref.scrollIntoView({ block: 'nearest' })
   }
+}
+
+const focusActiveTableInSidebar = async () => {
+  const currentTab = openTabs.value.find((item) => String(item.id) === String(activeTab.value))
+  if (!currentTab || currentTab.kind !== 'table') return
+  const state = tabStates[String(currentTab.id)]
+  const table = state?.table
+  if (!table) return
+  const sourceId = String(table.sourceId || table.clusterId || currentTab.sourceId || '')
+  const dbName = table.dbName || table.databaseName || table.database || currentTab.dbName || ''
+  const payload = { ...table, sourceId, dbName }
+  const key = getTableKey(payload, dbName, sourceId)
+  if (!key) return
+  selectedTableKey.value = key
+  await focusTableInSidebar(payload, key, dbName, sourceId)
 }
 
 const syncRouteWithTab = (tab, tabId) => {
@@ -4644,6 +4670,7 @@ onMounted(async () => {
   await loadClusters()
   fetchHistory()
   await syncFromRoute()
+  await focusActiveTableInSidebar()
   if (route.query.create) {
     createDrawerVisible.value = true
     clearCreateQuery()
