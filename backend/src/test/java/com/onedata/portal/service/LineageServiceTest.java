@@ -123,6 +123,25 @@ class LineageServiceTest {
         assertEquals(newHashSet("20->21"), edgePairs);
     }
 
+    @Test
+    void getLineageGraphShouldWorkWithoutWorkflowBindingData() {
+        when(dataTableMapper.selectList(any())).thenReturn(buildTables());
+        when(dataLineageMapper.selectList(any())).thenReturn(buildChainLineages());
+
+        LineageService.LineageGraph graph = lineageService.getLineageGraph(
+                null, null, null, null, null, null, 2L, 2);
+
+        Set<String> nodeIds = graph.getNodes().stream()
+                .map(LineageService.LineageNode::getId)
+                .collect(Collectors.toSet());
+        Set<String> edgePairs = graph.getEdges().stream()
+                .map(edge -> edge.getSource() + "->" + edge.getTarget())
+                .collect(Collectors.toSet());
+
+        assertEquals(newHashSet("0", "1", "2", "3", "4"), nodeIds);
+        assertEquals(newHashSet("0->1", "1->2", "2->3", "3->4"), edgePairs);
+    }
+
     private List<DataTable> buildTables() {
         List<DataTable> tables = new ArrayList<>();
         tables.add(table(0L, "ods_user"));

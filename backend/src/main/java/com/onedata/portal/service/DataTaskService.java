@@ -863,12 +863,6 @@ public class DataTaskService {
             return;
         }
 
-        Long workflowCode = task.getDolphinProcessCode();
-        if (workflowCode != null) {
-            log.info("Deleting task {}: taking workflow {} OFFLINE before cleanup", id, workflowCode);
-            dolphinSchedulerService.setWorkflowReleaseState(workflowCode, "OFFLINE");
-        }
-
         // 删除血缘关系
         dataLineageMapper.delete(
                 new LambdaQueryWrapper<DataLineage>()
@@ -887,21 +881,7 @@ public class DataTaskService {
         // 如果任务属于工作流，重新计算工作流中所有任务的上下游关系
         if (workflowId != null) {
             workflowService.refreshTaskRelations(workflowId);
-        }
-
-        if (workflowCode != null) {
-            List<DataTask> remainingDolphinTasks = dataTaskMapper.selectList(
-                    new LambdaQueryWrapper<DataTask>()
-                            .eq(DataTask::getEngine, "dolphin"));
-            if (remainingDolphinTasks.isEmpty()) {
-                log.info("No Dolphin tasks remain, deleting workflow {}", workflowCode);
-                dolphinSchedulerService.deleteWorkflow(workflowCode);
-            } else {
-                Long republishTaskId = remainingDolphinTasks.get(0).getId();
-                log.info("Re-synchronising workflow {} after task deletion using task {}", workflowCode,
-                        republishTaskId);
-                publish(republishTaskId);
-            }
+            workflowService.normalizeAndPersistMetadata(workflowId, DEFAULT_OPERATOR);
         }
     }
 
@@ -1241,17 +1221,10 @@ public class DataTaskService {
             throw new IllegalArgumentException("任务不能为空");
         }
         boolean enforceLineage = task.getId() == null || inputTableIds != null || outputTableIds != null;
-        if ("SQL".equalsIgnoreCase(task.getDolphinNodeType())) {
-            if (!StringUtils.hasText(task.getDatasourceName())) {
-                throw new IllegalArgumentException("SQL 任务必须选择数据源");
-            }
-            if (enforceLineage && isEmptyTableSelection(outputTableIds)) {
+        if (enforceLineage && isEmptyTableSelection(outputTableIds)) {
+            if ("SQL".equalsIgnoreCase(task.getDolphinNodeType())) {
                 throw new IllegalArgumentException("SQL 任务必须至少配置一个输出表");
             }
-            return;
-        }
-
-        if (enforceLineage && isEmptyTableSelection(outputTableIds)) {
             throw new IllegalArgumentException("任务必须至少配置一个输出表");
         }
     }

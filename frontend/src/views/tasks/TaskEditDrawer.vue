@@ -417,7 +417,7 @@ const fetchDatasourceOptions = async () => {
     datasourceOptions.value = res || []
   } catch (error) {
     console.error('获取数据源失败:', error)
-    ElMessage.error('获取数据源失败')
+    ElMessage.warning('数据源目录加载失败，可继续编辑并保存')
   }
 }
 
@@ -432,7 +432,6 @@ const rules = computed(() => {
   if (form.task.dolphinNodeType === 'SQL') {
     return {
       ...baseRules,
-      'task.datasourceName': [{ required: true, message: '请选择数据源', trigger: 'change' }],
       'task.taskSql': [{ required: true, message: 'SQL 脚本不能为空', trigger: 'blur' }]
     }
   }
@@ -440,8 +439,6 @@ const rules = computed(() => {
   if (form.task.dolphinNodeType === 'DATAX') {
     return {
       ...baseRules,
-      'task.datasourceName': [{ required: true, message: '请选择源数据源', trigger: 'change' }],
-      'task.targetDatasourceName': [{ required: true, message: '请选择目标数据源', trigger: 'change' }],
       'task.sourceTable': [{ required: true, message: '请输入源表名', trigger: 'blur' }],
       'task.targetTable': [{ required: true, message: '请输入目标表名', trigger: 'blur' }]
     }
@@ -878,7 +875,24 @@ const handleSave = async () => {
 
   loading.value = true
   try {
-    const { taskGroupName, ...taskPayload } = form.task
+    const { taskGroupName, ...rawTaskPayload } = form.task
+    const normalizeOptionalText = (value) => {
+      if (typeof value !== 'string') return value ?? null
+      const trimmed = value.trim()
+      return trimmed ? trimmed : null
+    }
+    const taskPayload = {
+      ...rawTaskPayload,
+      datasourceName: normalizeOptionalText(rawTaskPayload.datasourceName),
+      datasourceType: normalizeOptionalText(rawTaskPayload.datasourceType),
+      targetDatasourceName: normalizeOptionalText(rawTaskPayload.targetDatasourceName),
+      sourceTable: normalizeOptionalText(rawTaskPayload.sourceTable),
+      targetTable: normalizeOptionalText(rawTaskPayload.targetTable),
+      columnMapping: normalizeOptionalText(rawTaskPayload.columnMapping)
+    }
+    if (!taskPayload.datasourceName) {
+      taskPayload.datasourceType = null
+    }
     const payload = {
       task: taskPayload,
       inputTableIds: form.inputTableIds,

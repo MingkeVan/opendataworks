@@ -21,6 +21,8 @@ import java.util.Collections;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -162,5 +164,152 @@ class DataTaskServiceWorkflowMetadataTest {
         assertEquals(101L, result.getId());
         verify(dolphinSchedulerService).alignSequenceWithExistingTasks(Collections.singletonList(1001L));
         verify(dolphinSchedulerService).nextTaskCode();
+    }
+
+    @Test
+    void createSqlTaskWithoutDatasourceShouldSucceed() {
+        DataTask input = new DataTask();
+        input.setTaskName("task-create-sql-no-datasource");
+        input.setTaskCode("task-create-sql-no-datasource-code");
+        input.setEngine("dolphin");
+        input.setDolphinNodeType("SQL");
+        input.setDatasourceName(null);
+        input.setDatasourceType(null);
+        input.setTaskSql("insert into dwd.t2 select * from ods.t2");
+        input.setOwner("tester");
+
+        when(dataTaskMapper.selectCount(any())).thenReturn(0L);
+        when(dataTaskMapper.selectOne(any())).thenReturn(null);
+        when(dataTaskMapper.insert(any())).thenAnswer(invocation -> {
+            DataTask task = invocation.getArgument(0);
+            task.setId(201L);
+            return 1;
+        });
+        DataTask persisted = new DataTask();
+        persisted.setId(201L);
+        persisted.setTaskName(input.getTaskName());
+        persisted.setTaskCode(input.getTaskCode());
+        persisted.setEngine("dolphin");
+        persisted.setDolphinNodeType("SQL");
+        persisted.setTaskSql(input.getTaskSql());
+        persisted.setOwner(input.getOwner());
+        when(dataTaskMapper.selectById(201L)).thenReturn(persisted);
+
+        DataTask codeRecord = new DataTask();
+        codeRecord.setDolphinTaskCode(3001L);
+        when(dataTaskMapper.selectList(any())).thenReturn(Collections.singletonList(codeRecord));
+        when(dolphinSchedulerService.nextTaskCode()).thenReturn(4002L);
+
+        DataTask result = dataTaskService.create(input, Collections.singletonList(31L), Collections.singletonList(32L));
+
+        assertNotNull(result);
+        assertEquals(201L, result.getId());
+    }
+
+    @Test
+    void createDataXTaskWithoutDatasourceShouldSucceed() {
+        DataTask input = new DataTask();
+        input.setTaskName("task-create-datax-no-datasource");
+        input.setTaskCode("task-create-datax-no-datasource-code");
+        input.setEngine("dolphin");
+        input.setDolphinNodeType("DATAX");
+        input.setDatasourceName(null);
+        input.setTargetDatasourceName(null);
+        input.setSourceTable("src_table");
+        input.setTargetTable("tgt_table");
+        input.setTaskSql("select 1");
+        input.setOwner("tester");
+
+        when(dataTaskMapper.selectCount(any())).thenReturn(0L);
+        when(dataTaskMapper.selectOne(any())).thenReturn(null);
+        when(dataTaskMapper.insert(any())).thenAnswer(invocation -> {
+            DataTask task = invocation.getArgument(0);
+            task.setId(202L);
+            return 1;
+        });
+        DataTask persisted = new DataTask();
+        persisted.setId(202L);
+        persisted.setTaskName(input.getTaskName());
+        persisted.setTaskCode(input.getTaskCode());
+        persisted.setEngine("dolphin");
+        persisted.setDolphinNodeType("DATAX");
+        persisted.setSourceTable(input.getSourceTable());
+        persisted.setTargetTable(input.getTargetTable());
+        persisted.setTaskSql(input.getTaskSql());
+        persisted.setOwner(input.getOwner());
+        when(dataTaskMapper.selectById(202L)).thenReturn(persisted);
+
+        DataTask codeRecord = new DataTask();
+        codeRecord.setDolphinTaskCode(5001L);
+        when(dataTaskMapper.selectList(any())).thenReturn(Collections.singletonList(codeRecord));
+        when(dolphinSchedulerService.nextTaskCode()).thenReturn(6002L);
+
+        DataTask result = dataTaskService.create(input, Collections.singletonList(41L), Collections.singletonList(42L));
+
+        assertNotNull(result);
+        assertEquals(202L, result.getId());
+    }
+
+    @Test
+    void updateSqlTaskWithoutDatasourceShouldSucceed() {
+        DataTask existing = new DataTask();
+        existing.setId(301L);
+        existing.setTaskName("task-update-sql-no-datasource");
+        existing.setEngine("dolphin");
+        existing.setDolphinNodeType("SQL");
+        existing.setTaskSql("select 1");
+
+        DataTask updatePayload = new DataTask();
+        updatePayload.setId(301L);
+        updatePayload.setTaskName("task-update-sql-no-datasource");
+        updatePayload.setEngine("dolphin");
+        updatePayload.setDolphinNodeType("SQL");
+        updatePayload.setDatasourceName(null);
+        updatePayload.setDatasourceType(null);
+        updatePayload.setTaskSql("insert into dwd.t3 select * from ods.t3");
+
+        DataTask persisted = new DataTask();
+        persisted.setId(301L);
+        persisted.setTaskName("task-update-sql-no-datasource");
+        persisted.setEngine("dolphin");
+        persisted.setDolphinNodeType("SQL");
+        persisted.setTaskSql("insert into dwd.t3 select * from ods.t3");
+
+        when(dataTaskMapper.selectById(301L)).thenReturn(existing, persisted, persisted);
+        when(workflowTaskRelationMapper.selectOne(any())).thenReturn(null);
+        when(dataTaskMapper.updateById(updatePayload)).thenReturn(1);
+        when(dataLineageMapper.delete(any())).thenReturn(0);
+        when(tableTaskRelationMapper.hardDeleteByTaskId(301L)).thenReturn(1);
+
+        DataTask result = dataTaskService.update(updatePayload, null, null);
+
+        assertNotNull(result);
+        assertEquals(301L, result.getId());
+    }
+
+    @Test
+    void deleteShouldNotOperateDolphinAndShouldRefreshLocalWorkflowMetadata() {
+        WorkflowTaskRelation relation = new WorkflowTaskRelation();
+        relation.setTaskId(401L);
+        relation.setWorkflowId(88L);
+        when(workflowTaskRelationMapper.selectOne(any())).thenReturn(relation);
+
+        DataTask task = new DataTask();
+        task.setId(401L);
+        task.setTaskName("task-delete-no-dolphin");
+        task.setDolphinProcessCode(123456L);
+        when(dataTaskMapper.selectById(401L)).thenReturn(task);
+
+        when(dataLineageMapper.delete(any())).thenReturn(2);
+        when(tableTaskRelationMapper.hardDeleteByTaskId(401L)).thenReturn(1);
+        when(workflowTaskRelationMapper.delete(any())).thenReturn(1);
+        when(dataTaskMapper.deleteById(401L)).thenReturn(1);
+
+        dataTaskService.delete(401L);
+
+        verify(workflowService).refreshTaskRelations(88L);
+        verify(workflowService).normalizeAndPersistMetadata(88L, "system");
+        verify(dolphinSchedulerService, never()).setWorkflowReleaseState(anyLong(), anyString());
+        verify(dolphinSchedulerService, never()).deleteWorkflow(anyLong());
     }
 }
