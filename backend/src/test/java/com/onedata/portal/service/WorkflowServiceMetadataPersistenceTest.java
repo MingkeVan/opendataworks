@@ -14,6 +14,7 @@ import com.onedata.portal.entity.WorkflowTaskRelation;
 import com.onedata.portal.entity.WorkflowVersion;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
+import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.WorkflowPublishRecordMapper;
@@ -28,12 +29,15 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Collections;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -75,6 +79,9 @@ class WorkflowServiceMetadataPersistenceTest {
     private DataTaskMapper dataTaskMapper;
 
     @Mock
+    private DataLineageMapper dataLineageMapper;
+
+    @Mock
     private TableTaskRelationMapper tableTaskRelationMapper;
 
     @Mock
@@ -99,6 +106,7 @@ class WorkflowServiceMetadataPersistenceTest {
                 objectMapper,
                 dolphinSchedulerService,
                 dataTaskMapper,
+                dataLineageMapper,
                 tableTaskRelationMapper,
                 taskExecutionLogMapper,
                 workflowTopologyService);
@@ -187,6 +195,68 @@ class WorkflowServiceMetadataPersistenceTest {
         assertFalse(firstTask.has("taskGroupId"));
         assertFalse(params.has("datasourceId"));
         assertFalse(params.has("datasource"));
+    }
+
+    @Test
+    void deleteWorkflowShouldSoftDeleteWorkflowOnlyWhenCascadeDisabled() {
+        DataWorkflow workflow = baseWorkflow("{}");
+        workflow.setWorkflowCode(12345L);
+        workflow.setDolphinScheduleId(6789L);
+        when(dataWorkflowMapper.selectById(1L)).thenReturn(workflow);
+
+        WorkflowTaskRelation relation1 = new WorkflowTaskRelation();
+        relation1.setWorkflowId(1L);
+        relation1.setTaskId(10L);
+        WorkflowTaskRelation relation2 = new WorkflowTaskRelation();
+        relation2.setWorkflowId(1L);
+        relation2.setTaskId(20L);
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Arrays.asList(relation1, relation2));
+        when(dolphinSchedulerService.checkWorkflowExists(12345L)).thenReturn(true);
+
+        service.deleteWorkflow(1L, false);
+
+        verify(dolphinSchedulerService).offlineWorkflowSchedule(6789L);
+        verify(dolphinSchedulerService).setWorkflowReleaseState(12345L, "OFFLINE");
+        verify(dolphinSchedulerService).deleteWorkflow(12345L);
+        verify(workflowTaskRelationMapper).delete(any());
+        verify(dataWorkflowMapper).deleteById(1L);
+        verify(dataLineageMapper, never()).delete(any());
+        verify(dataTaskMapper, never()).deleteBatchIds(anyList());
+        verify(tableTaskRelationMapper, never()).delete(any());
+        verify(tableTaskRelationMapper, never()).hardDeleteByTaskId(any());
+    }
+
+    @Test
+    void deleteWorkflowShouldCascadeSoftDeleteTasksWhenEnabled() {
+        DataWorkflow workflow = baseWorkflow("{}");
+        workflow.setWorkflowCode(null);
+        when(dataWorkflowMapper.selectById(1L)).thenReturn(workflow);
+
+        WorkflowTaskRelation relation1 = new WorkflowTaskRelation();
+        relation1.setWorkflowId(1L);
+        relation1.setTaskId(10L);
+        WorkflowTaskRelation relation2 = new WorkflowTaskRelation();
+        relation2.setWorkflowId(1L);
+        relation2.setTaskId(20L);
+        WorkflowTaskRelation relation3 = new WorkflowTaskRelation();
+        relation3.setWorkflowId(1L);
+        relation3.setTaskId(10L);
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Arrays.asList(relation1, relation2, relation3));
+
+        service.deleteWorkflow(1L, true);
+
+        verify(dataLineageMapper).delete(any());
+        verify(tableTaskRelationMapper).delete(any());
+        verify(tableTaskRelationMapper, never()).hardDeleteByTaskId(any());
+        verify(dataTaskMapper).deleteBatchIds(argThat(ids -> {
+            if (!(ids instanceof List)) {
+                return false;
+            }
+            List<?> values = (List<?>) ids;
+            return values.size() == 2 && values.contains(10L) && values.contains(20L);
+        }));
+        verify(workflowTaskRelationMapper).delete(any());
+        verify(dataWorkflowMapper).deleteById(1L);
     }
 
     private void mockNormalizeContext(DataWorkflow workflow, DataTask task) {

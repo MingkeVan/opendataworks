@@ -173,8 +173,9 @@ public class WorkflowController {
     }
 
     @DeleteMapping("/{id}")
-    public Result<Void> delete(@PathVariable Long id) {
-        workflowService.deleteWorkflow(id);
+    public Result<Void> delete(@PathVariable Long id,
+                               @RequestParam(defaultValue = "false") Boolean cascadeDeleteTasks) {
+        workflowService.deleteWorkflow(id, Boolean.TRUE.equals(cascadeDeleteTasks));
         return Result.success();
     }
 }
