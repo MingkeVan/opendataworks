@@ -78,16 +78,11 @@ public class WorkflowPublishService {
     };
     private static final Set<String> PUBLISH_NOISE_TASK_FIELDS = Collections.unmodifiableSet(
             new LinkedHashSet<>(java.util.Arrays.asList(
-                    "task.datasourceId",
-                    "task.datasourceName",
                     "task.inputTableIds",
                     "task.outputTableIds",
-                    "task.taskGroupId",
-                    "task.taskPriority",
                     "task.taskVersion")));
     private static final Set<String> PUBLISH_NOISE_SCHEDULE_FIELDS = Collections.unmodifiableSet(
             new LinkedHashSet<>(java.util.Arrays.asList(
-                    "schedule.scheduleId",
                     "schedule.releaseState")));
 
     private final WorkflowPublishRecordMapper publishRecordMapper;
@@ -309,6 +304,8 @@ public class WorkflowPublishService {
                 .filter(Objects::nonNull)
                 .filter(task -> task.getId() != null)
                 .collect(Collectors.toMap(DataTask::getId, item -> item, (left, right) -> left));
+        Map<Long, DefinitionTaskMetadata> definitionTaskMetadataByCode = loadDefinitionTaskMetadata(
+                workflow.getDefinitionJson());
         Map<Long, List<Long>> inputTableIdsByTask = loadTaskTableRelationMap(taskIds, "read");
         Map<Long, List<Long>> outputTableIdsByTask = loadTaskTableRelationMap(taskIds, "write");
 
@@ -330,6 +327,13 @@ public class WorkflowPublishService {
             runtimeTask.setSql(task.getTaskSql());
             runtimeTask.setDatasourceName(task.getDatasourceName());
             runtimeTask.setDatasourceType(task.getDatasourceType());
+            DefinitionTaskMetadata metadata = runtimeTask.getTaskCode() != null
+                    ? definitionTaskMetadataByCode.get(runtimeTask.getTaskCode())
+                    : null;
+            if (metadata != null) {
+                runtimeTask.setDatasourceId(metadata.getDatasourceId());
+                runtimeTask.setTaskGroupId(metadata.getTaskGroupId());
+            }
             runtimeTask.setTaskGroupName(StringUtils.hasText(task.getTaskGroupName())
                     ? task.getTaskGroupName()
                     : workflow.getTaskGroupName());
@@ -337,7 +341,7 @@ public class WorkflowPublishService {
             runtimeTask.setRetryInterval(task.getRetryInterval());
             runtimeTask.setTimeoutSeconds(task.getTimeoutSeconds());
             if (task.getPriority() != null) {
-                runtimeTask.setTaskPriority(String.valueOf(task.getPriority()));
+                runtimeTask.setTaskPriority(mapTaskPriorityForDiff(task.getPriority()));
             }
             runtimeTask.setInputTableIds(inputTableIdsByTask.getOrDefault(task.getId(), Collections.emptyList()));
             runtimeTask.setOutputTableIds(outputTableIdsByTask.getOrDefault(task.getId(), Collections.emptyList()));
@@ -363,6 +367,25 @@ public class WorkflowPublishService {
         schedule.setTenantCode(workflow.getScheduleTenantCode());
         schedule.setEnvironmentCode(workflow.getScheduleEnvironmentCode());
         return schedule;
+    }
+
+    private String mapTaskPriorityForDiff(Integer priority) {
+        if (priority == null) {
+            return null;
+        }
+        if (priority >= 9) {
+            return "HIGHEST";
+        }
+        if (priority >= 7) {
+            return "HIGH";
+        }
+        if (priority >= 5) {
+            return "MEDIUM";
+        }
+        if (priority >= 3) {
+            return "LOW";
+        }
+        return "LOWEST";
     }
 
     private Map<Long, List<Long>> loadTaskTableRelationMap(List<Long> taskIds, String relationType) {

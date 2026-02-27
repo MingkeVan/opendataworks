@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import com.onedata.portal.dto.DolphinDatasourceOption;
+import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowDetailResponse;
 import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
@@ -613,6 +615,7 @@ public class WorkflowService {
             }
             applyDefinitionMetadataSeed(generatedNode, persistedDefinitionJson);
             applyDefinitionMetadataSeed(generatedNode, incomingDefinitionJson);
+            enrichDefinitionMetadataFromCatalog(generatedNode);
             return objectMapper.writeValueAsString(generatedNode);
         } catch (Exception ex) {
             return toJson(generatedDefinition);
@@ -711,6 +714,101 @@ public class WorkflowService {
         copyTextIfMissing(targetParams, "datasourceName", seedParams, "datasourceName");
         copyTextIfMissing(targetParams, "type", seedParams, "type", "datasourceType");
         copyTextIfMissing(targetParams, "datasourceType", seedParams, "datasourceType", "type");
+    }
+
+    private void enrichDefinitionMetadataFromCatalog(ObjectNode definitionRoot) {
+        if (definitionRoot == null || definitionRoot.isNull() || definitionRoot.isMissingNode()) {
+            return;
+        }
+        JsonNode taskNode = definitionRoot.get("taskDefinitionList");
+        if (!(taskNode instanceof ArrayNode)) {
+            return;
+        }
+        ArrayNode taskList = (ArrayNode) taskNode;
+        if (taskList.isEmpty()) {
+            return;
+        }
+
+        boolean needDatasourceResolve = false;
+        boolean needTaskGroupResolve = false;
+        for (JsonNode taskItem : taskList) {
+            if (!(taskItem instanceof ObjectNode)) {
+                continue;
+            }
+            ObjectNode taskObject = (ObjectNode) taskItem;
+            ObjectNode taskParams = ensureObjectNode(taskObject, "taskParams");
+            Long datasourceId = readLong(taskParams, "datasourceId", "datasource");
+            String datasourceName = readText(taskParams, "datasourceName");
+            if ((datasourceId == null || datasourceId <= 0) && StringUtils.hasText(datasourceName)) {
+                needDatasourceResolve = true;
+            }
+            Integer taskGroupId = readInt(taskObject, "taskGroupId");
+            String taskGroupName = readText(taskObject, "taskGroupName");
+            if ((taskGroupId == null || taskGroupId <= 0) && StringUtils.hasText(taskGroupName)) {
+                needTaskGroupResolve = true;
+            }
+        }
+        if (!needDatasourceResolve && !needTaskGroupResolve) {
+            return;
+        }
+
+        Map<String, DolphinDatasourceOption> datasourceByName = Collections.emptyMap();
+        if (needDatasourceResolve) {
+            datasourceByName = dolphinSchedulerService.listDatasources(null, null).stream()
+                    .filter(Objects::nonNull)
+                    .filter(item -> StringUtils.hasText(item.getName()) && item.getId() != null && item.getId() > 0)
+                    .collect(Collectors.toMap(item -> item.getName().trim(), item -> item, (left, right) -> left));
+        }
+
+        Map<String, DolphinTaskGroupOption> taskGroupByName = Collections.emptyMap();
+        if (needTaskGroupResolve) {
+            taskGroupByName = dolphinSchedulerService.listTaskGroups(null).stream()
+                    .filter(Objects::nonNull)
+                    .filter(item -> StringUtils.hasText(item.getName()) && item.getId() != null && item.getId() > 0)
+                    .collect(Collectors.toMap(item -> item.getName().trim(), item -> item, (left, right) -> left));
+        }
+
+        int unresolvedDatasource = 0;
+        int unresolvedTaskGroup = 0;
+        for (JsonNode taskItem : taskList) {
+            if (!(taskItem instanceof ObjectNode)) {
+                continue;
+            }
+            ObjectNode taskObject = (ObjectNode) taskItem;
+            ObjectNode taskParams = ensureObjectNode(taskObject, "taskParams");
+
+            Long datasourceId = readLong(taskParams, "datasourceId", "datasource");
+            String datasourceName = readText(taskParams, "datasourceName");
+            if ((datasourceId == null || datasourceId <= 0) && StringUtils.hasText(datasourceName)) {
+                DolphinDatasourceOption datasourceOption = datasourceByName.get(datasourceName.trim());
+                if (datasourceOption != null && datasourceOption.getId() != null && datasourceOption.getId() > 0) {
+                    taskParams.put("datasourceId", datasourceOption.getId());
+                    taskParams.put("datasource", datasourceOption.getId());
+                    if (StringUtils.hasText(datasourceOption.getType())) {
+                        taskParams.put("datasourceType", datasourceOption.getType().trim());
+                        taskParams.put("type", datasourceOption.getType().trim());
+                    }
+                } else {
+                    unresolvedDatasource++;
+                }
+            }
+
+            Integer taskGroupId = readInt(taskObject, "taskGroupId");
+            String taskGroupName = readText(taskObject, "taskGroupName");
+            if ((taskGroupId == null || taskGroupId <= 0) && StringUtils.hasText(taskGroupName)) {
+                DolphinTaskGroupOption taskGroupOption = taskGroupByName.get(taskGroupName.trim());
+                if (taskGroupOption != null && taskGroupOption.getId() != null && taskGroupOption.getId() > 0) {
+                    taskObject.put("taskGroupId", taskGroupOption.getId());
+                } else {
+                    unresolvedTaskGroup++;
+                }
+            }
+        }
+
+        if (unresolvedDatasource > 0 || unresolvedTaskGroup > 0) {
+            log.warn("Definition metadata enrichment left unresolved fields: datasource={}, taskGroup={}",
+                    unresolvedDatasource, unresolvedTaskGroup);
+        }
     }
 
     private JsonNode firstPresent(JsonNode node, String... fields) {
@@ -860,6 +958,11 @@ public class WorkflowService {
         return null;
     }
 
+    private Integer readInt(JsonNode node, String... fieldNames) {
+        Long value = readLong(node, fieldNames);
+        return value == null ? null : value.intValue();
+    }
+
     private Map<String, Object> buildPlatformDefinitionDocument(DataWorkflow workflow,
             List<WorkflowTaskBinding> bindings,
             WorkflowTopologyResult topology) {
@@ -867,7 +970,8 @@ public class WorkflowService {
         root.put("schemaVersion", SNAPSHOT_SCHEMA_VERSION_DEFINITION);
         root.put("processDefinition", buildProcessDefinitionNode(workflow));
         List<Map<String, Object>> taskNodes = buildTaskSnapshotNodes(bindings);
-        root.put("taskDefinitionList", buildTaskDefinitionNodes(taskNodes));
+        root.put("taskDefinitionList", buildTaskDefinitionNodes(taskNodes,
+                workflow != null ? workflow.getTaskGroupName() : null));
         root.put("processTaskRelationList", buildProcessTaskRelationNodes(taskNodes, topology));
         root.put("schedule", buildScheduleDefinitionNode(workflow));
         root.put("xPlatformWorkflowMeta", buildPlatformWorkflowMetaNode(workflow));
@@ -904,10 +1008,12 @@ public class WorkflowService {
         return meta;
     }
 
-    private List<Map<String, Object>> buildTaskDefinitionNodes(List<Map<String, Object>> taskNodes) {
+    private List<Map<String, Object>> buildTaskDefinitionNodes(List<Map<String, Object>> taskNodes,
+            String workflowTaskGroupName) {
         if (CollectionUtils.isEmpty(taskNodes)) {
             return Collections.emptyList();
         }
+        String normalizedWorkflowTaskGroupName = normalizeText(workflowTaskGroupName);
         List<Map<String, Object>> definitions = new ArrayList<>();
         for (Map<String, Object> taskNode : taskNodes) {
             if (taskNode == null) {
@@ -934,7 +1040,11 @@ public class WorkflowService {
             item.put("failRetryTimes", taskNode.get("retryTimes"));
             item.put("failRetryInterval", taskNode.get("retryInterval"));
             item.put("taskPriority", taskNode.get("priority"));
-            item.put("taskGroupName", taskNode.get("taskGroupName"));
+            String taskGroupName = normalizeText(asText(taskNode.get("taskGroupName")));
+            if (!StringUtils.hasText(taskGroupName)) {
+                taskGroupName = normalizedWorkflowTaskGroupName;
+            }
+            item.put("taskGroupName", taskGroupName);
 
             Map<String, Object> taskParams = new LinkedHashMap<>();
             taskParams.put("sql", taskNode.get("taskSql"));
@@ -959,6 +1069,18 @@ public class WorkflowService {
             definitions.add(item);
         }
         return definitions;
+    }
+
+    private String asText(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value);
+        return StringUtils.hasText(text) ? text : null;
+    }
+
+    private String normalizeText(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
     private List<Map<String, Object>> buildProcessTaskRelationNodes(List<Map<String, Object>> taskNodes,
