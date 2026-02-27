@@ -9,6 +9,24 @@
 ### Changed
 - 待补充。
 
+## [0.8.0] - 2026-02-27
+
+### Added
+- 新增工作流软删除能力，支持可选级联处理任务关系。
+- 新增 DataStudio schema 计数预加载与软删除对象过滤。
+- 新增数据源创建后元数据同步提示，并支持空密码数据源创建。
+- 新增同步历史详情中新增/修改/删除明细展示。
+
+### Changed
+- 解耦工作流保存流程与 Dolphin 元数据依赖，降低保存链路耦合。
+- 增强工作流发布预览与元数据修复流程，统一任务组映射与差异行为。
+- 改进工作流差异可读性：差异摘要可点击、同步 UX 简化并支持以 Dolphin 导入新工作流。
+
+### Fixed
+- 修复发布预览中的调度噪声与任务组解析问题。
+- 修复 syncWorkflow 路径中工作流描述必填校验缺失问题。
+- 修复 DataStudio 树展开稳定性、SQL 高亮范围异常与任务抽屉异常关闭问题。
+
 ## [0.7.1] - 2026-02-24
 
 ### Fixed
@@ -80,7 +98,8 @@
 
 以上早期版本请参考 GitHub Releases 与 Git tags 历史记录。
 
-[Unreleased]: https://github.com/MingkeVan/opendataworks/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/MingkeVan/opendataworks/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/MingkeVan/opendataworks/releases/tag/v0.8.0
 [0.7.1]: https://github.com/MingkeVan/opendataworks/releases/tag/v0.7.1
 [0.7.0]: https://github.com/MingkeVan/opendataworks/releases/tag/v0.7.0
 [0.6.2]: https://github.com/MingkeVan/opendataworks/releases/tag/v0.6.2
