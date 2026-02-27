@@ -14,7 +14,7 @@ on:
       version:
         description: 'Image version tag'
         required: false
-        default: 'latest'
+        default: ''
 
 permissions:
   contents: write
@@ -62,8 +62,8 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version != '' && (github.event.inputs.version != 'latest' || github.ref == 'refs/heads/main') }}
 
       - name: Build and push
         id: build
