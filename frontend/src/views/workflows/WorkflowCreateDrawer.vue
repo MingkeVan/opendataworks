@@ -241,7 +241,7 @@ const loadTaskGroupOptions = async () => {
     taskGroupOptions.value = res || []
   } catch (error) {
     console.error('加载任务组失败', error)
-    ElMessage.error('加载任务组失败，请稍后重试')
+    ElMessage.warning('任务组目录加载失败，可继续编辑并保存')
   } finally {
     taskGroupsLoading.value = false
   }

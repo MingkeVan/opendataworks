@@ -843,6 +843,8 @@ class WorkflowPublishServiceTest {
         mockPreviewInputs(workflow);
 
         WorkflowPublishPreviewResponse preview = previewService.previewPublish(1L);
+        assertTrue(Boolean.TRUE.equals(preview.getCanPublish()));
+        assertTrue(preview.getErrors().isEmpty());
         assertTrue(preview.getRepairIssues().stream()
                 .anyMatch(item -> "task.datasourceId".equals(item.getField())));
     }

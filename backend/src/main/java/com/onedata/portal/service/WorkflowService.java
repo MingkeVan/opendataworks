@@ -9,8 +9,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import com.onedata.portal.dto.DolphinDatasourceOption;
-import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowDetailResponse;
 import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
@@ -81,6 +79,8 @@ public class WorkflowService {
     private static final String DEFAULT_PROCESS_INSTANCE_PRIORITY = "MEDIUM";
     private static final Long DEFAULT_WARNING_GROUP_ID = 0L;
     private static final Long DEFAULT_ENVIRONMENT_CODE = -1L;
+    private static final String DEFAULT_WORKER_GROUP = "default";
+    private static final String DEFAULT_TENANT_CODE = "default";
     private static final Integer DEFAULT_TASK_PRIORITY = 5;
     private static final Integer DEFAULT_TASK_RETRY_TIMES = 1;
     private static final Integer DEFAULT_TASK_RETRY_INTERVAL = 1;
@@ -618,7 +618,6 @@ public class WorkflowService {
             }
             applyDefinitionMetadataSeed(generatedNode, persistedDefinitionJson);
             applyDefinitionMetadataSeed(generatedNode, incomingDefinitionJson);
-            enrichDefinitionMetadataFromCatalog(generatedNode);
             return objectMapper.writeValueAsString(generatedNode);
         } catch (Exception ex) {
             return toJson(generatedDefinition);
@@ -717,101 +716,6 @@ public class WorkflowService {
         copyTextIfMissing(targetParams, "datasourceName", seedParams, "datasourceName");
         copyTextIfMissing(targetParams, "type", seedParams, "type", "datasourceType");
         copyTextIfMissing(targetParams, "datasourceType", seedParams, "datasourceType", "type");
-    }
-
-    private void enrichDefinitionMetadataFromCatalog(ObjectNode definitionRoot) {
-        if (definitionRoot == null || definitionRoot.isNull() || definitionRoot.isMissingNode()) {
-            return;
-        }
-        JsonNode taskNode = definitionRoot.get("taskDefinitionList");
-        if (!(taskNode instanceof ArrayNode)) {
-            return;
-        }
-        ArrayNode taskList = (ArrayNode) taskNode;
-        if (taskList.isEmpty()) {
-            return;
-        }
-
-        boolean needDatasourceResolve = false;
-        boolean needTaskGroupResolve = false;
-        for (JsonNode taskItem : taskList) {
-            if (!(taskItem instanceof ObjectNode)) {
-                continue;
-            }
-            ObjectNode taskObject = (ObjectNode) taskItem;
-            ObjectNode taskParams = ensureObjectNode(taskObject, "taskParams");
-            Long datasourceId = readLong(taskParams, "datasourceId", "datasource");
-            String datasourceName = readText(taskParams, "datasourceName");
-            if ((datasourceId == null || datasourceId <= 0) && StringUtils.hasText(datasourceName)) {
-                needDatasourceResolve = true;
-            }
-            Integer taskGroupId = readInt(taskObject, "taskGroupId");
-            String taskGroupName = readText(taskObject, "taskGroupName");
-            if ((taskGroupId == null || taskGroupId <= 0) && StringUtils.hasText(taskGroupName)) {
-                needTaskGroupResolve = true;
-            }
-        }
-        if (!needDatasourceResolve && !needTaskGroupResolve) {
-            return;
-        }
-
-        Map<String, DolphinDatasourceOption> datasourceByName = Collections.emptyMap();
-        if (needDatasourceResolve) {
-            datasourceByName = dolphinSchedulerService.listDatasources(null, null).stream()
-                    .filter(Objects::nonNull)
-                    .filter(item -> StringUtils.hasText(item.getName()) && item.getId() != null && item.getId() > 0)
-                    .collect(Collectors.toMap(item -> item.getName().trim(), item -> item, (left, right) -> left));
-        }
-
-        Map<String, DolphinTaskGroupOption> taskGroupByName = Collections.emptyMap();
-        if (needTaskGroupResolve) {
-            taskGroupByName = dolphinSchedulerService.listTaskGroups(null).stream()
-                    .filter(Objects::nonNull)
-                    .filter(item -> StringUtils.hasText(item.getName()) && item.getId() != null && item.getId() > 0)
-                    .collect(Collectors.toMap(item -> item.getName().trim(), item -> item, (left, right) -> left));
-        }
-
-        int unresolvedDatasource = 0;
-        int unresolvedTaskGroup = 0;
-        for (JsonNode taskItem : taskList) {
-            if (!(taskItem instanceof ObjectNode)) {
-                continue;
-            }
-            ObjectNode taskObject = (ObjectNode) taskItem;
-            ObjectNode taskParams = ensureObjectNode(taskObject, "taskParams");
-
-            Long datasourceId = readLong(taskParams, "datasourceId", "datasource");
-            String datasourceName = readText(taskParams, "datasourceName");
-            if ((datasourceId == null || datasourceId <= 0) && StringUtils.hasText(datasourceName)) {
-                DolphinDatasourceOption datasourceOption = datasourceByName.get(datasourceName.trim());
-                if (datasourceOption != null && datasourceOption.getId() != null && datasourceOption.getId() > 0) {
-                    taskParams.put("datasourceId", datasourceOption.getId());
-                    taskParams.put("datasource", datasourceOption.getId());
-                    if (StringUtils.hasText(datasourceOption.getType())) {
-                        taskParams.put("datasourceType", datasourceOption.getType().trim());
-                        taskParams.put("type", datasourceOption.getType().trim());
-                    }
-                } else {
-                    unresolvedDatasource++;
-                }
-            }
-
-            Integer taskGroupId = readInt(taskObject, "taskGroupId");
-            String taskGroupName = readText(taskObject, "taskGroupName");
-            if ((taskGroupId == null || taskGroupId <= 0) && StringUtils.hasText(taskGroupName)) {
-                DolphinTaskGroupOption taskGroupOption = taskGroupByName.get(taskGroupName.trim());
-                if (taskGroupOption != null && taskGroupOption.getId() != null && taskGroupOption.getId() > 0) {
-                    taskObject.put("taskGroupId", taskGroupOption.getId());
-                } else {
-                    unresolvedTaskGroup++;
-                }
-            }
-        }
-
-        if (unresolvedDatasource > 0 || unresolvedTaskGroup > 0) {
-            log.warn("Definition metadata enrichment left unresolved fields: datasource={}, taskGroup={}",
-                    unresolvedDatasource, unresolvedTaskGroup);
-        }
     }
 
     private JsonNode firstPresent(JsonNode node, String... fields) {
@@ -1208,10 +1112,10 @@ public class WorkflowService {
                 schedule.put("processInstancePriority", DEFAULT_PROCESS_INSTANCE_PRIORITY);
             }
             if (!StringUtils.hasText((String) schedule.get("workerGroup"))) {
-                schedule.put("workerGroup", dolphinSchedulerService.getDefaultWorkerGroup());
+                schedule.put("workerGroup", DEFAULT_WORKER_GROUP);
             }
             if (!StringUtils.hasText((String) schedule.get("tenantCode"))) {
-                schedule.put("tenantCode", dolphinSchedulerService.getDefaultTenantCode());
+                schedule.put("tenantCode", DEFAULT_TENANT_CODE);
             }
             if (schedule.get("environmentCode") == null) {
                 schedule.put("environmentCode", DEFAULT_ENVIRONMENT_CODE);
@@ -1621,10 +1525,10 @@ public class WorkflowService {
             workflow.setScheduleProcessInstancePriority(DEFAULT_PROCESS_INSTANCE_PRIORITY);
         }
         if (!StringUtils.hasText(workflow.getScheduleWorkerGroup())) {
-            workflow.setScheduleWorkerGroup(dolphinSchedulerService.getDefaultWorkerGroup());
+            workflow.setScheduleWorkerGroup(DEFAULT_WORKER_GROUP);
         }
         if (!StringUtils.hasText(workflow.getScheduleTenantCode())) {
-            workflow.setScheduleTenantCode(dolphinSchedulerService.getDefaultTenantCode());
+            workflow.setScheduleTenantCode(DEFAULT_TENANT_CODE);
         }
         if (workflow.getScheduleEnvironmentCode() == null) {
             workflow.setScheduleEnvironmentCode(DEFAULT_ENVIRONMENT_CODE);
@@ -1646,7 +1550,7 @@ public class WorkflowService {
         if (requestProjectCode != null && requestProjectCode > 0) {
             return requestProjectCode;
         }
-        return dolphinSchedulerService.getProjectCode();
+        return null;
     }
 
     private void attachLatestInstanceInfo(List<DataWorkflow> workflows) {
