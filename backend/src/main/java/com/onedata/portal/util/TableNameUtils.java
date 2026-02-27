@@ -18,13 +18,6 @@ public final class TableNameUtils {
     private TableNameUtils() {
     }
 
-    public static boolean isDeprecatedTableName(String tableName) {
-        if (!StringUtils.hasText(tableName)) {
-            return false;
-        }
-        return tableName.toLowerCase().contains("deprecated");
-    }
-
     /**
      * Infer table layer from name prefix, e.g. ods_xxx -> ODS.
      */
