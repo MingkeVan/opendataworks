@@ -540,6 +540,7 @@ public class DataTaskService {
             long actualWorkflowCode = dolphinSchedulerService.syncWorkflow(
                     workflowCode,
                     workflowName,
+                    null,
                     definitions,
                     relations,
                     locations,

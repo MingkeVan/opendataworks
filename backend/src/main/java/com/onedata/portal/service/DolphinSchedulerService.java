@@ -134,6 +134,7 @@ public class DolphinSchedulerService {
      */
     public long syncWorkflow(long workflowCode,
             String workflowName,
+            String workflowDescription,
             List<Map<String, Object>> tasks,
             List<TaskRelationPayload> relations,
             List<TaskLocationPayload> locations,
@@ -156,7 +157,7 @@ public class DolphinSchedulerService {
             return openApiClient.createOrUpdateProcessDefinition(
                     projectCode,
                     workflowName,
-                    "", // description
+                    StringUtils.hasText(workflowDescription) ? workflowDescription.trim() : "",
                     config.getTenantCode(),
                     config.getExecutionType(),
                     relationJson,
