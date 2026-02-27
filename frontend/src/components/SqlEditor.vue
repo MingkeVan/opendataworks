@@ -5,7 +5,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, placeholder, Decoration } from '@codemirror/view'
-import { EditorState, Compartment, RangeSetBuilder } from '@codemirror/state'
+import { EditorState, Compartment } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { autocompletion, acceptCompletion } from '@codemirror/autocomplete'
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
@@ -46,18 +46,28 @@ const placeholderCompartment = new Compartment()
 const completionCompartment = new Compartment()
 const highlightCompartment = new Compartment()
 
-const normalizeHighlights = (highlights = []) => {
+const normalizeHighlights = (highlights = [], docLength = null) => {
+  const safeDocLength = Number.isFinite(docLength) && docLength >= 0 ? Number(docLength) : null
   return (highlights || [])
     .map((item) => {
-      const from = Number(item?.from)
-      const to = Number(item?.to)
+      let from = Number(item?.from)
+      let to = Number(item?.to)
       const status = String(item?.status || 'matched').toLowerCase()
+      if (safeDocLength !== null) {
+        from = Math.max(0, Math.min(from, safeDocLength))
+        to = Math.max(0, Math.min(to, safeDocLength))
+      }
       if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to <= from) {
         return null
       }
       return { from, to, status }
     })
     .filter(Boolean)
+    .sort((a, b) => {
+      if (a.from !== b.from) return a.from - b.from
+      if (a.to !== b.to) return a.to - b.to
+      return String(a.status).localeCompare(String(b.status))
+    })
 }
 
 const decorationClassByStatus = (status) => {
@@ -66,16 +76,11 @@ const decorationClassByStatus = (status) => {
   return 'cm-sql-table-hit-matched'
 }
 
-const buildHighlightExtension = (highlights = []) => {
-  const builder = new RangeSetBuilder()
-  normalizeHighlights(highlights).forEach((item) => {
-    builder.add(
-      item.from,
-      item.to,
-      Decoration.mark({ class: decorationClassByStatus(item.status) })
-    )
-  })
-  return EditorView.decorations.of(builder.finish())
+const buildHighlightExtension = (highlights = [], docLength = null) => {
+  const ranges = normalizeHighlights(highlights, docLength).map((item) =>
+    Decoration.mark({ class: decorationClassByStatus(item.status) }).range(item.from, item.to)
+  )
+  return EditorView.decorations.of(Decoration.set(ranges, true))
 }
 
 const SQL_KEYWORDS = [
@@ -195,7 +200,7 @@ const buildExtensions = () => {
         activateOnTyping: true
       })
     ),
-    highlightCompartment.of(buildHighlightExtension(props.highlights))
+    highlightCompartment.of(buildHighlightExtension(props.highlights, String(props.modelValue || '').length))
   )
 
   extensions.push(
@@ -367,7 +372,13 @@ watch(
 watch(
   () => props.highlights,
   (next) => {
-    reconfigure(highlightCompartment, buildHighlightExtension(next))
+    const docLength = view ? view.state.doc.length : String(props.modelValue || '').length
+    try {
+      reconfigure(highlightCompartment, buildHighlightExtension(next, docLength))
+    } catch (error) {
+      console.error('更新 SQL 高亮失败，已降级为空高亮:', error)
+      reconfigure(highlightCompartment, buildHighlightExtension([], docLength))
+    }
   },
   { deep: true }
 )
