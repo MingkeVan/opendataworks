@@ -658,18 +658,42 @@ async function handleSubmit() {
   }
 
   try {
+    let createdCluster = null
     if (isEdit.value && currentId.value) {
       await dorisClusterApi.update(currentId.value, payload)
       ElMessage.success('更新成功')
     } else {
       payload.password = form.password
-      await dorisClusterApi.create(payload)
+      createdCluster = await dorisClusterApi.create(payload)
       ElMessage.success('创建成功')
     }
     dialogVisible.value = false
     await loadClusters()
+    if (createdCluster?.id) {
+      await promptSyncAfterCreate(createdCluster)
+    }
   } finally {
     saving.value = false
+  }
+}
+
+async function promptSyncAfterCreate(cluster) {
+  if (!cluster?.id) return
+  const clusterName = cluster.clusterName || form.clusterName || '当前数据源'
+  try {
+    await ElMessageBox.confirm(
+      `数据源「${clusterName}」创建成功。建议立即同步一次元数据，是否现在执行？`,
+      '立即同步元数据',
+      {
+        type: 'info',
+        confirmButtonText: '立即同步',
+        cancelButtonText: '稍后再说',
+        distinguishCancelAndClose: true
+      }
+    )
+    await performSync(cluster)
+  } catch {
+    // cancel or close
   }
 }
 
@@ -893,11 +917,11 @@ const confirmSyncFromDialog = async () => {
   await performSync()
 }
 
-const performSync = async () => {
-  if (!selectedCluster.value?.id) return
+const performSync = async (cluster = selectedCluster.value) => {
+  if (!cluster?.id) return
   syncLoading.value = true
   try {
-    const response = await tableApi.syncMetadata(selectedCluster.value.id)
+    const response = await tableApi.syncMetadata(cluster.id)
     const status = String(response?.status || '').toUpperCase()
     const blocked = Number(response?.blockedDeletedTables || 0)
     const runId = response?.syncRunId
