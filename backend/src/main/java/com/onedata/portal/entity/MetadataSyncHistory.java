@@ -60,6 +60,8 @@ public class MetadataSyncHistory {
 
     private String errorDetails;
 
+    private String changeDetails;
+
     @TableField("created_at")
     private LocalDateTime createdAt;
 }

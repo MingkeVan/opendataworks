@@ -65,6 +65,7 @@ public class MetadataSyncHistoryService {
             history.setErrorCount(errors.size());
             history.setErrorSummary(buildErrorSummary(errors));
             history.setErrorDetails(toJson(errors));
+            history.setChangeDetails(toJson(result.getChangeDetails()));
         } else {
             history.setNewTables(0);
             history.setUpdatedTables(0);
@@ -77,6 +78,7 @@ public class MetadataSyncHistoryService {
             history.setErrorCount(1);
             history.setErrorSummary("同步结果为空");
             history.setErrorDetails("[]");
+            history.setChangeDetails("{\"added\":[],\"updated\":[],\"deleted\":[]}");
         }
 
         metadataSyncHistoryMapper.insert(history);
@@ -131,11 +133,11 @@ public class MetadataSyncHistoryService {
         return first.length() > 500 ? first.substring(0, 500) : first;
     }
 
-    private String toJson(List<String> errors) {
+    private String toJson(Object value) {
         try {
-            return objectMapper.writeValueAsString(errors == null ? Collections.emptyList() : errors);
+            return objectMapper.writeValueAsString(value == null ? Collections.emptyList() : value);
         } catch (JsonProcessingException e) {
-            log.warn("Failed to serialize metadata sync errors", e);
+            log.warn("Failed to serialize metadata sync payload", e);
             return "[]";
         }
     }

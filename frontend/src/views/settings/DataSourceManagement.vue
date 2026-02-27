@@ -310,7 +310,7 @@
     <el-dialog
       v-model="syncHistoryDetailVisible"
       title="同步历史详情"
-      width="58%"
+      width="72%"
       :close-on-click-modal="false"
     >
       <el-descriptions v-if="syncHistoryDetail" :column="1" border>
@@ -327,6 +327,41 @@
         <el-descriptions-item label="错误摘要">{{ syncHistoryDetail.errorSummary || '-' }}</el-descriptions-item>
         <el-descriptions-item label="错误明细">
           <pre class="error-detail">{{ formatErrorDetails(syncHistoryDetail.errorDetails) }}</pre>
+        </el-descriptions-item>
+        <el-descriptions-item label="变更详情">
+          <div class="change-detail-section">
+            <el-empty
+              v-if="!syncHistoryChangeGroups.length"
+              description="无新增、修改或删除明细"
+              :image-size="72"
+            />
+            <div v-else class="change-groups">
+              <div v-for="group in syncHistoryChangeGroups" :key="group.key" class="change-group">
+                <div class="change-group-title">
+                  <el-tag size="small" :type="group.tagType">{{ group.label }} {{ group.items.length }}</el-tag>
+                </div>
+                <div class="change-item-list">
+                  <div v-for="(item, index) in group.items" :key="`${group.key}-${index}`" class="change-item">
+                    <div class="change-item-header">
+                      <span class="change-item-location">{{ formatChangeLocation(item) }}</span>
+                      <el-tag size="small" type="info">{{ item.objectType || '-' }}</el-tag>
+                    </div>
+                    <div class="change-item-summary">{{ item.summary || '-' }}</div>
+                    <div v-if="formatChangePairs(item.changes).length" class="change-item-pairs">
+                      <div
+                        v-for="pair in formatChangePairs(item.changes)"
+                        :key="pair.key"
+                        class="change-pair"
+                      >
+                        <span class="pair-key">{{ pair.key }}</span>
+                        <span class="pair-value">{{ pair.oldValue }} -> {{ pair.newValue }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </el-descriptions-item>
       </el-descriptions>
       <template #footer>
@@ -473,6 +508,68 @@ const formatErrorDetails = value => {
   } catch {
     return String(value)
   }
+}
+
+const parseChangeDetails = value => {
+  if (!value) return { added: [], updated: [], deleted: [] }
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value
+    return {
+      added: Array.isArray(parsed?.added) ? parsed.added : [],
+      updated: Array.isArray(parsed?.updated) ? parsed.updated : [],
+      deleted: Array.isArray(parsed?.deleted) ? parsed.deleted : []
+    }
+  } catch {
+    return { added: [], updated: [], deleted: [] }
+  }
+}
+
+const syncHistoryChangeGroups = computed(() => {
+  const detail = parseChangeDetails(syncHistoryDetail.value?.changeDetails)
+  return [
+    { key: 'added', label: '新增', tagType: 'success', items: detail.added },
+    { key: 'updated', label: '修改', tagType: 'warning', items: detail.updated },
+    { key: 'deleted', label: '删除', tagType: 'danger', items: detail.deleted }
+  ].filter(group => group.items.length > 0)
+})
+
+const toDisplayText = value => {
+  if (value === null || value === undefined || value === '') return '-'
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+  return String(value)
+}
+
+const formatChangeLocation = item => {
+  const database = item?.database ? String(item.database) : '-'
+  const tableName = item?.tableName ? String(item.tableName) : ''
+  const fieldName = item?.fieldName ? String(item.fieldName) : ''
+  if (!tableName) return database
+  if (!fieldName) return `${database}.${tableName}`
+  return `${database}.${tableName}.${fieldName}`
+}
+
+const formatChangePairs = changes => {
+  if (!changes || typeof changes !== 'object') return []
+  return Object.entries(changes).map(([key, value]) => {
+    if (value && typeof value === 'object' && ('old' in value || 'new' in value)) {
+      return {
+        key,
+        oldValue: toDisplayText(value.old),
+        newValue: toDisplayText(value.new)
+      }
+    }
+    return {
+      key,
+      oldValue: '-',
+      newValue: toDisplayText(value)
+    }
+  })
 }
 
 async function loadClusters() {
@@ -968,6 +1065,76 @@ loadClusters()
 .field-change-item strong {
   color: #666;
   font-weight: 600;
+}
+
+.change-detail-section {
+  padding: 4px 0;
+}
+
+.change-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.change-group-title {
+  margin-bottom: 8px;
+}
+
+.change-item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.change-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.change-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.change-item-location {
+  font-weight: 600;
+  color: #334155;
+  word-break: break-all;
+}
+
+.change-item-summary {
+  margin-top: 6px;
+  color: #475569;
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.change-item-pairs {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.change-pair {
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.5;
+}
+
+.pair-key {
+  display: inline-block;
+  min-width: 116px;
+  color: #64748b;
+}
+
+.pair-value {
+  word-break: break-word;
 }
 
 .history-pagination {

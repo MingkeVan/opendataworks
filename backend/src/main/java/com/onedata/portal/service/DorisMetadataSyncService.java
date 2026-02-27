@@ -58,6 +58,7 @@ public class DorisMetadataSyncService {
         private int blockedDeletedTables = 0;
         private int inactivatedTables = 0;
         private List<String> errors = new ArrayList<>();
+        private final ChangeDetails changeDetails = new ChangeDetails();
 
         public void addNewTable() {
             newTables++;
@@ -93,6 +94,47 @@ public class DorisMetadataSyncService {
 
         public void addError(String error) {
             errors.add(error);
+        }
+
+        public void addAddedTableDetail(String database, String tableName, String summary) {
+            changeDetails.addAdded(new ChangeItem("TABLE", database, tableName, null, summary, Collections.emptyMap()));
+        }
+
+        public void addUpdatedTableDetail(String database, String tableName, String summary, Map<String, Object> changes) {
+            changeDetails.addUpdated(new ChangeItem("TABLE", database, tableName, null, summary, sanitizeChanges(changes)));
+        }
+
+        public void addDeletedTableDetail(String database, String tableName, String summary) {
+            changeDetails.addDeleted(new ChangeItem("TABLE", database, tableName, null, summary, Collections.emptyMap()));
+        }
+
+        public void addAddedFieldDetail(String database,
+                String tableName,
+                String fieldName,
+                Map<String, Object> changes) {
+            changeDetails.addAdded(new ChangeItem("FIELD", database, tableName, fieldName, "新增字段", sanitizeChanges(changes)));
+        }
+
+        public void addUpdatedFieldDetail(String database,
+                String tableName,
+                String fieldName,
+                Map<String, Object> changes) {
+            changeDetails.addUpdated(new ChangeItem("FIELD", database, tableName, fieldName, "字段属性更新", sanitizeChanges(changes)));
+        }
+
+        public void addDeletedFieldDetail(String database, String tableName, String fieldName) {
+            changeDetails.addDeleted(new ChangeItem("FIELD", database, tableName, fieldName, "删除字段", Collections.emptyMap()));
+        }
+
+        public ChangeDetails getChangeDetails() {
+            return changeDetails;
+        }
+
+        private Map<String, Object> sanitizeChanges(Map<String, Object> changes) {
+            if (changes == null || changes.isEmpty()) {
+                return Collections.emptyMap();
+            }
+            return new LinkedHashMap<>(changes);
         }
 
         public int getNewTables() {
@@ -143,9 +185,99 @@ public class DorisMetadataSyncService {
         @Override
         public String toString() {
             return String.format(
-                    "SyncResult{status=%s, newTables=%d, updatedTables=%d, deletedTables=%d, blockedDeletedTables=%d, inactivatedTables=%d, newFields=%d, updatedFields=%d, deletedFields=%d, errors=%d}",
+                    "SyncResult{status=%s, newTables=%d, updatedTables=%d, deletedTables=%d, blockedDeletedTables=%d, inactivatedTables=%d, newFields=%d, updatedFields=%d, deletedFields=%d, errors=%d, changeDetails={added=%d, updated=%d, deleted=%d}}",
                     getStatus(), newTables, updatedTables, deletedTables, blockedDeletedTables, inactivatedTables,
-                    newFields, updatedFields, deletedFields, errors.size());
+                    newFields, updatedFields, deletedFields, errors.size(),
+                    changeDetails.getAdded().size(), changeDetails.getUpdated().size(), changeDetails.getDeleted().size());
+        }
+    }
+
+    /**
+     * 同步变更明细
+     */
+    public static class ChangeDetails {
+        private final List<ChangeItem> added = new ArrayList<>();
+        private final List<ChangeItem> updated = new ArrayList<>();
+        private final List<ChangeItem> deleted = new ArrayList<>();
+
+        public void addAdded(ChangeItem item) {
+            if (item != null) {
+                added.add(item);
+            }
+        }
+
+        public void addUpdated(ChangeItem item) {
+            if (item != null) {
+                updated.add(item);
+            }
+        }
+
+        public void addDeleted(ChangeItem item) {
+            if (item != null) {
+                deleted.add(item);
+            }
+        }
+
+        public List<ChangeItem> getAdded() {
+            return added;
+        }
+
+        public List<ChangeItem> getUpdated() {
+            return updated;
+        }
+
+        public List<ChangeItem> getDeleted() {
+            return deleted;
+        }
+    }
+
+    /**
+     * 同步变更项
+     */
+    public static class ChangeItem {
+        private final String objectType;
+        private final String database;
+        private final String tableName;
+        private final String fieldName;
+        private final String summary;
+        private final Map<String, Object> changes;
+
+        public ChangeItem(String objectType,
+                String database,
+                String tableName,
+                String fieldName,
+                String summary,
+                Map<String, Object> changes) {
+            this.objectType = objectType;
+            this.database = database;
+            this.tableName = tableName;
+            this.fieldName = fieldName;
+            this.summary = summary;
+            this.changes = changes == null ? Collections.emptyMap() : changes;
+        }
+
+        public String getObjectType() {
+            return objectType;
+        }
+
+        public String getDatabase() {
+            return database;
+        }
+
+        public String getTableName() {
+            return tableName;
+        }
+
+        public String getFieldName() {
+            return fieldName;
+        }
+
+        public String getSummary() {
+            return summary;
+        }
+
+        public Map<String, Object> getChanges() {
+            return changes;
         }
     }
 
@@ -678,6 +810,11 @@ public class DorisMetadataSyncService {
             update.setSyncTime(LocalDateTime.now());
             dataTableMapper.updateById(update);
             result.addInactivatedTable();
+            result.addUpdatedTableDetail(
+                    table.getDbName(),
+                    table.getTableName(),
+                    "表在当前账号下不可见，已标记为 inactive",
+                    Collections.singletonMap("status", buildValueChange("active", "inactive")));
             log.info("Inactivated hidden table metadata: {}.{} (cluster={})",
                     table.getDbName(), table.getTableName(), clusterId);
         }
@@ -760,6 +897,7 @@ public class DorisMetadataSyncService {
                     log.info("Deleting table not in Doris: {}.{}", database, localTable.getTableName());
                     dataTableMapper.deleteById(localTable.getId());
                     result.addDeletedTable();
+                    result.addDeletedTableDetail(database, localTable.getTableName(), "Doris 中不存在，已删除平台元数据");
                 } catch (Exception e) {
                     log.error("Failed to delete table {}.{}", database, localTable.getTableName(), e);
                     result.addError("删除表 " + database + "." + localTable.getTableName() + " 失败: " + e.getMessage());
@@ -899,10 +1037,11 @@ public class DorisMetadataSyncService {
 
         dataTableMapper.insert(newTable);
         result.addNewTable();
+        result.addAddedTableDetail(database, tableName, "新增表并同步平台元数据");
         recordStatisticsSnapshot(clusterId, database, tableName, newTable);
 
         // 同步字段
-        syncTableFields(newTable.getId(), columns, result);
+        syncTableFields(newTable.getId(), database, tableName, columns, result);
     }
 
     /**
@@ -920,19 +1059,23 @@ public class DorisMetadataSyncService {
 
         boolean updated = false;
         boolean statisticsUpdated = false;
+        Map<String, Object> tableChanges = new LinkedHashMap<>();
 
         // 同步数据源
         if (!Objects.equals(localTable.getClusterId(), clusterId)) {
+            addChangedValue(tableChanges, "clusterId", localTable.getClusterId(), clusterId);
             localTable.setClusterId(clusterId);
             updated = true;
         }
         if (!Objects.equals(tableType, localTable.getTableType())) {
+            addChangedValue(tableChanges, "tableType", localTable.getTableType(), tableType);
             localTable.setTableType(tableType);
             updated = true;
         }
 
         // 自动识别 deprecated 表（历史上手工重命名/遗留表）
         if (TableNameUtils.isDeprecatedTableName(tableName) && !"deprecated".equals(localTable.getStatus())) {
+            addChangedValue(tableChanges, "status", localTable.getStatus(), "deprecated");
             localTable.setStatus("deprecated");
             updated = true;
         }
@@ -940,6 +1083,7 @@ public class DorisMetadataSyncService {
         if ("inactive".equals(localTable.getStatus())
                 && Objects.equals(localTable.getIsSynced(), 0)
                 && !TableNameUtils.isDeprecatedTableName(tableName)) {
+            addChangedValue(tableChanges, "status", localTable.getStatus(), "active");
             localTable.setStatus("active");
             updated = true;
         }
@@ -947,6 +1091,7 @@ public class DorisMetadataSyncService {
         // 按表名前缀自动修正数据分层（ods_/dwd_/dim_/dws_/ads_）
         String inferredLayer = TableNameUtils.inferLayerFromTableName(tableName);
         if (StringUtils.hasText(inferredLayer) && !Objects.equals(inferredLayer, localTable.getLayer())) {
+            addChangedValue(tableChanges, "layer", localTable.getLayer(), inferredLayer);
             localTable.setLayer(inferredLayer);
             updated = true;
         }
@@ -954,6 +1099,7 @@ public class DorisMetadataSyncService {
         // 更新表注释
         String tableComment = (String) dorisTable.get("tableComment");
         if (tableComment != null && !tableComment.equals(localTable.getTableComment())) {
+            addChangedValue(tableChanges, "tableComment", localTable.getTableComment(), tableComment);
             localTable.setTableComment(tableComment);
             updated = true;
         }
@@ -963,6 +1109,7 @@ public class DorisMetadataSyncService {
             if (tableCreateInfo.containsKey("bucketNum")) {
                 Integer bucketNum = (Integer) tableCreateInfo.get("bucketNum");
                 if (!Objects.equals(bucketNum, localTable.getBucketNum())) {
+                    addChangedValue(tableChanges, "bucketNum", localTable.getBucketNum(), bucketNum);
                     localTable.setBucketNum(bucketNum);
                     updated = true;
                 }
@@ -972,6 +1119,7 @@ public class DorisMetadataSyncService {
             if (tableCreateInfo.containsKey("replicationNum")) {
                 Integer replicationNum = (Integer) tableCreateInfo.get("replicationNum");
                 if (!Objects.equals(replicationNum, localTable.getReplicaNum())) {
+                    addChangedValue(tableChanges, "replicationNum", localTable.getReplicaNum(), replicationNum);
                     localTable.setReplicaNum(replicationNum);
                     updated = true;
                 }
@@ -981,6 +1129,7 @@ public class DorisMetadataSyncService {
             if (tableCreateInfo.containsKey("partitionColumn")) {
                 String partitionColumn = (String) tableCreateInfo.get("partitionColumn");
                 if (!Objects.equals(partitionColumn, localTable.getPartitionColumn())) {
+                    addChangedValue(tableChanges, "partitionColumn", localTable.getPartitionColumn(), partitionColumn);
                     localTable.setPartitionColumn(partitionColumn);
                     updated = true;
                 }
@@ -990,6 +1139,7 @@ public class DorisMetadataSyncService {
             if (tableCreateInfo.containsKey("distributionColumn")) {
                 String distributionColumn = (String) tableCreateInfo.get("distributionColumn");
                 if (!Objects.equals(distributionColumn, localTable.getDistributionColumn())) {
+                    addChangedValue(tableChanges, "distributionColumn", localTable.getDistributionColumn(), distributionColumn);
                     localTable.setDistributionColumn(distributionColumn);
                     updated = true;
                 }
@@ -999,6 +1149,7 @@ public class DorisMetadataSyncService {
             if (tableCreateInfo.containsKey("keyColumns")) {
                 String keyColumns = (String) tableCreateInfo.get("keyColumns");
                 if (!Objects.equals(keyColumns, localTable.getKeyColumns())) {
+                    addChangedValue(tableChanges, "keyColumns", localTable.getKeyColumns(), keyColumns);
                     localTable.setKeyColumns(keyColumns);
                     updated = true;
                 }
@@ -1008,6 +1159,7 @@ public class DorisMetadataSyncService {
             if (tableCreateInfo.containsKey("tableModel")) {
                 String tableModel = (String) tableCreateInfo.get("tableModel");
                 if (!Objects.equals(tableModel, localTable.getTableModel())) {
+                    addChangedValue(tableChanges, "tableModel", localTable.getTableModel(), tableModel);
                     localTable.setTableModel(tableModel);
                     updated = true;
                 }
@@ -1017,42 +1169,51 @@ public class DorisMetadataSyncService {
             if (tableCreateInfo.containsKey("createTableSql")) {
                 String createTableSql = (String) tableCreateInfo.get("createTableSql");
                 if (!Objects.equals(createTableSql, localTable.getDorisDdl())) {
+                    addChangedValue(tableChanges, "dorisDdl", localTable.getDorisDdl(), createTableSql);
                     localTable.setDorisDdl(createTableSql);
                     updated = true;
                 }
             }
         } else {
             if (localTable.getBucketNum() != null) {
+                addChangedValue(tableChanges, "bucketNum", localTable.getBucketNum(), null);
                 localTable.setBucketNum(null);
                 updated = true;
             }
             if (localTable.getReplicaNum() != null) {
+                addChangedValue(tableChanges, "replicationNum", localTable.getReplicaNum(), null);
                 localTable.setReplicaNum(null);
                 updated = true;
             }
             if (StringUtils.hasText(localTable.getPartitionColumn())) {
+                addChangedValue(tableChanges, "partitionColumn", localTable.getPartitionColumn(), null);
                 localTable.setPartitionColumn(null);
                 updated = true;
             }
             if (StringUtils.hasText(localTable.getDistributionColumn())) {
+                addChangedValue(tableChanges, "distributionColumn", localTable.getDistributionColumn(), null);
                 localTable.setDistributionColumn(null);
                 updated = true;
             }
             if (StringUtils.hasText(localTable.getKeyColumns())) {
+                addChangedValue(tableChanges, "keyColumns", localTable.getKeyColumns(), null);
                 localTable.setKeyColumns(null);
                 updated = true;
             }
             if (StringUtils.hasText(localTable.getTableModel())) {
+                addChangedValue(tableChanges, "tableModel", localTable.getTableModel(), null);
                 localTable.setTableModel(null);
                 updated = true;
             }
             String createTableSql = (String) tableCreateInfo.get("createTableSql");
             if (StringUtils.hasText(createTableSql)) {
                 if (!Objects.equals(createTableSql, localTable.getDorisDdl())) {
+                    addChangedValue(tableChanges, "dorisDdl", localTable.getDorisDdl(), createTableSql);
                     localTable.setDorisDdl(createTableSql);
                     updated = true;
                 }
             } else if (StringUtils.hasText(localTable.getDorisDdl())) {
+                addChangedValue(tableChanges, "dorisDdl", localTable.getDorisDdl(), null);
                 localTable.setDorisDdl(null);
                 updated = true;
             }
@@ -1061,6 +1222,7 @@ public class DorisMetadataSyncService {
         // 更新统计信息
         Long tableRows = (Long) dorisTable.get("tableRows");
         if (tableRows != null && !Objects.equals(tableRows, localTable.getRowCount())) {
+            addChangedValue(tableChanges, "rowCount", localTable.getRowCount(), tableRows);
             localTable.setRowCount(tableRows);
             updated = true;
             statisticsUpdated = true;
@@ -1068,6 +1230,7 @@ public class DorisMetadataSyncService {
 
         Long dataLength = (Long) dorisTable.get("dataLength");
         if (dataLength != null && !Objects.equals(dataLength, localTable.getStorageSize())) {
+            addChangedValue(tableChanges, "storageSize", localTable.getStorageSize(), dataLength);
             localTable.setStorageSize(dataLength);
             updated = true;
             statisticsUpdated = true;
@@ -1077,6 +1240,7 @@ public class DorisMetadataSyncService {
         if (updateTime != null) {
             LocalDateTime updateDateTime = updateTime.toLocalDateTime();
             if (!Objects.equals(updateDateTime, localTable.getDorisUpdateTime())) {
+                addChangedValue(tableChanges, "dorisUpdateTime", localTable.getDorisUpdateTime(), updateDateTime);
                 localTable.setDorisUpdateTime(updateDateTime);
                 updated = true;
                 statisticsUpdated = true;
@@ -1086,6 +1250,7 @@ public class DorisMetadataSyncService {
         // 更新同步状态
         Integer synced = isDoris ? 1 : 0;
         if (!Objects.equals(synced, localTable.getIsSynced())) {
+            addChangedValue(tableChanges, "isSynced", localTable.getIsSynced(), synced);
             localTable.setIsSynced(synced);
             updated = true;
         }
@@ -1096,6 +1261,7 @@ public class DorisMetadataSyncService {
         if (localTable.getDorisCreateTime() == null) {
             Timestamp createTime = (Timestamp) dorisTable.get("createTime");
             if (createTime != null) {
+                addChangedValue(tableChanges, "dorisCreateTime", localTable.getDorisCreateTime(), createTime.toLocalDateTime());
                 localTable.setDorisCreateTime(createTime.toLocalDateTime());
                 updated = true;
             }
@@ -1103,14 +1269,17 @@ public class DorisMetadataSyncService {
 
         if (updated) {
             dataTableMapper.updateById(localTable);
-            result.addUpdatedTable();
+            if (!tableChanges.isEmpty()) {
+                result.addUpdatedTable();
+                result.addUpdatedTableDetail(database, tableName, "表元数据更新", tableChanges);
+            }
         }
         if (statisticsUpdated) {
             recordStatisticsSnapshot(clusterId, database, tableName, localTable);
         }
 
         // 同步字段（增量更新）
-        syncTableFieldsIncremental(localTable.getId(), columns, result);
+        syncTableFieldsIncremental(localTable.getId(), database, tableName, columns, result);
     }
 
     /**
@@ -1145,7 +1314,7 @@ public class DorisMetadataSyncService {
     /**
      * 同步表字段（全量插入，用于新表）
      */
-    private void syncTableFields(Long tableId, List<Map<String, Object>> columns, SyncResult result) {
+    private void syncTableFields(Long tableId, String database, String tableName, List<Map<String, Object>> columns, SyncResult result) {
         for (Map<String, Object> column : columns) {
             DataField field = new DataField();
             field.setTableId(tableId);
@@ -1159,13 +1328,25 @@ public class DorisMetadataSyncService {
 
             dataFieldMapper.insert(field);
             result.addNewField();
+            Map<String, Object> fieldChanges = new LinkedHashMap<>();
+            addChangedValue(fieldChanges, "type", null, field.getFieldType());
+            addChangedValue(fieldChanges, "comment", null, field.getFieldComment());
+            addChangedValue(fieldChanges, "nullable", null, field.getIsNullable());
+            addChangedValue(fieldChanges, "primary", null, field.getIsPrimary());
+            addChangedValue(fieldChanges, "default", null, field.getDefaultValue());
+            addChangedValue(fieldChanges, "order", null, field.getFieldOrder());
+            result.addAddedFieldDetail(database, tableName, field.getFieldName(), fieldChanges);
         }
     }
 
     /**
      * 同步表字段（增量更新，用于已存在的表）
      */
-    private void syncTableFieldsIncremental(Long tableId, List<Map<String, Object>> dorisColumns, SyncResult result) {
+    private void syncTableFieldsIncremental(Long tableId,
+            String database,
+            String tableName,
+            List<Map<String, Object>> dorisColumns,
+            SyncResult result) {
         // 获取本地已存在的字段
         List<DataField> localFields = dataFieldMapper.selectList(
                 new LambdaQueryWrapper<DataField>()
@@ -1197,42 +1378,57 @@ public class DorisMetadataSyncService {
 
                 dataFieldMapper.insert(newField);
                 result.addNewField();
+                Map<String, Object> fieldChanges = new LinkedHashMap<>();
+                addChangedValue(fieldChanges, "type", null, newField.getFieldType());
+                addChangedValue(fieldChanges, "comment", null, newField.getFieldComment());
+                addChangedValue(fieldChanges, "nullable", null, newField.getIsNullable());
+                addChangedValue(fieldChanges, "primary", null, newField.getIsPrimary());
+                addChangedValue(fieldChanges, "default", null, newField.getDefaultValue());
+                addChangedValue(fieldChanges, "order", null, newField.getFieldOrder());
+                result.addAddedFieldDetail(database, tableName, fieldName, fieldChanges);
             } else {
                 // 已存在字段：更新
                 boolean updated = false;
+                Map<String, Object> fieldChanges = new LinkedHashMap<>();
 
                 String dataType = (String) dorisColumn.get("dataType");
                 if (!Objects.equals(dataType, localField.getFieldType())) {
+                    addChangedValue(fieldChanges, "type", localField.getFieldType(), dataType);
                     localField.setFieldType(dataType);
                     updated = true;
                 }
 
                 String columnComment = truncateComment((String) dorisColumn.get("columnComment"));
                 if (!Objects.equals(columnComment, localField.getFieldComment())) {
+                    addChangedValue(fieldChanges, "comment", localField.getFieldComment(), columnComment);
                     localField.setFieldComment(columnComment);
                     updated = true;
                 }
 
                 Integer isNullable = (Integer) dorisColumn.get("isNullable");
                 if (!Objects.equals(isNullable, localField.getIsNullable())) {
+                    addChangedValue(fieldChanges, "nullable", localField.getIsNullable(), isNullable);
                     localField.setIsNullable(isNullable);
                     updated = true;
                 }
 
                 Integer isPrimary = (Integer) dorisColumn.get("isPrimary");
                 if (!Objects.equals(isPrimary, localField.getIsPrimary())) {
+                    addChangedValue(fieldChanges, "primary", localField.getIsPrimary(), isPrimary);
                     localField.setIsPrimary(isPrimary);
                     updated = true;
                 }
 
                 String defaultValue = (String) dorisColumn.get("defaultValue");
                 if (!Objects.equals(defaultValue, localField.getDefaultValue())) {
+                    addChangedValue(fieldChanges, "default", localField.getDefaultValue(), defaultValue);
                     localField.setDefaultValue(defaultValue);
                     updated = true;
                 }
 
                 Integer ordinalPosition = (Integer) dorisColumn.get("ordinalPosition");
                 if (!Objects.equals(ordinalPosition, localField.getFieldOrder())) {
+                    addChangedValue(fieldChanges, "order", localField.getFieldOrder(), ordinalPosition);
                     localField.setFieldOrder(ordinalPosition);
                     updated = true;
                 }
@@ -1240,6 +1436,7 @@ public class DorisMetadataSyncService {
                 if (updated) {
                     dataFieldMapper.updateById(localField);
                     result.addUpdatedField();
+                    result.addUpdatedFieldDetail(database, tableName, fieldName, fieldChanges);
                 }
             }
         }
@@ -1250,6 +1447,7 @@ public class DorisMetadataSyncService {
                 // 逻辑删除
                 dataFieldMapper.deleteById(localField.getId());
                 result.addDeletedField();
+                result.addDeletedFieldDetail(database, tableName, localField.getFieldName());
                 log.info("Logically deleted field: {} from table {}", localField.getFieldName(), tableId);
             }
         }
@@ -1302,6 +1500,20 @@ public class DorisMetadataSyncService {
         }
 
         return result;
+    }
+
+    private void addChangedValue(Map<String, Object> changes, String key, Object oldValue, Object newValue) {
+        if (changes == null || !StringUtils.hasText(key) || Objects.equals(oldValue, newValue)) {
+            return;
+        }
+        changes.put(key, buildValueChange(oldValue, newValue));
+    }
+
+    private static Map<String, Object> buildValueChange(Object oldValue, Object newValue) {
+        Map<String, Object> diff = new LinkedHashMap<>(2);
+        diff.put("old", oldValue);
+        diff.put("new", newValue);
+        return diff;
     }
 
     private DorisCluster resolveCluster(Long clusterId) {
