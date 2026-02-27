@@ -475,6 +475,52 @@ class WorkflowPublishServiceTest {
     }
 
     @Test
+    void previewPublishShouldIgnoreScheduleDiffWhenRuntimeScheduleMissing() {
+        DataWorkflow workflow = workflow(1L, 5001L, 101L);
+        workflow.setWorkflowName("wf_platform");
+        workflow.setScheduleCron("0 0 1 * * ? *");
+        workflow.setScheduleTimezone("Asia/Shanghai");
+        workflow.setScheduleFailureStrategy("CONTINUE");
+        workflow.setScheduleWarningType("NONE");
+        workflow.setScheduleWarningGroupId(0L);
+        workflow.setScheduleProcessInstancePriority("MEDIUM");
+        workflow.setScheduleWorkerGroup("default");
+        workflow.setScheduleTenantCode("default");
+        workflow.setScheduleEnvironmentCode(-1L);
+        when(dataWorkflowMapper.selectById(1L)).thenReturn(workflow);
+        mockPreviewInputs(workflow);
+
+        RuntimeWorkflowDefinition runtimeDefinition = new RuntimeWorkflowDefinition();
+        runtimeDefinition.setProjectCode(11L);
+        runtimeDefinition.setWorkflowCode(5001L);
+        runtimeDefinition.setWorkflowName("wf_platform");
+        runtimeDefinition.setDescription(workflow.getDescription());
+        runtimeDefinition.setGlobalParams(workflow.getGlobalParams());
+        runtimeDefinition.setTasks(Collections.singletonList(
+                runtimeTask(10001L, "task_a", "INSERT INTO dws.t1 SELECT * FROM ods.t1",
+                        Collections.emptyList(), Collections.emptyList())));
+        runtimeDefinition.setSchedule(null);
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(11L, 5001L))
+                .thenReturn(runtimeDefinition);
+
+        RuntimeDiffSummary diff = new RuntimeDiffSummary();
+        diff.setChanged(true);
+        diff.setScheduleChanges(Arrays.asList(
+                fieldChange("schedule.crontab", null, "0 0 1 * * ? *"),
+                fieldChange("schedule.workerGroup", null, "default"),
+                fieldChange("schedule.tenantCode", null, "default")));
+        when(runtimeDiffService.buildDiff(any(), any())).thenReturn(diff);
+
+        WorkflowPublishPreviewResponse preview = service.previewPublish(1L);
+        assertNotNull(preview.getDiffSummary());
+        assertTrue(preview.getDiffSummary().getScheduleChanges().isEmpty(), "运行态无调度时不应提示 schedule 差异");
+        assertFalse(Boolean.TRUE.equals(preview.getDiffSummary().getChanged()), "仅 schedule 空跑差异不应标记变更");
+        assertFalse(Boolean.TRUE.equals(preview.getRequireConfirm()), "仅 schedule 空跑差异不应要求确认");
+        assertTrue(preview.getRepairIssues().stream().noneMatch(item -> item.getField() != null
+                && item.getField().startsWith("schedule.")), "运行态无调度时不应出现 schedule 修复提示");
+    }
+
+    @Test
     void previewPublishShouldAlignRuntimeEntryEdgesBeforeDiff() {
         WorkflowPublishService previewService = buildPreviewServiceWithRealDiff();
         DataWorkflow workflow = workflow(1L, 5001L, 101L);

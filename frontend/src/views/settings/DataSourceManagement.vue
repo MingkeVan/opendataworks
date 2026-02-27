@@ -112,7 +112,7 @@
         <el-form-item label="密码" prop="password">
           <el-input
             v-model="form.password"
-            placeholder="请输入密码（编辑时留空表示不修改）"
+            placeholder="可为空（编辑时留空表示不修改）"
             type="password"
             show-password
           />
@@ -423,18 +423,6 @@ const rules = {
   feHost: [{ required: true, message: '请输入地址', trigger: 'blur' }],
   fePort: [{ required: true, message: '请输入端口', trigger: 'change' }],
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  password: [
-    {
-      validator: (_, value, callback) => {
-        if (!isEdit.value && !value) {
-          callback(new Error('请输入密码'))
-        } else {
-          callback()
-        }
-      },
-      trigger: 'blur'
-    }
-  ],
   syncCron: [
     {
       validator: (_, value, callback) => {

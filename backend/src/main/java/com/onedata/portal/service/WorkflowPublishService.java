@@ -261,6 +261,10 @@ public class WorkflowPublishService {
             baselineSnapshotJson = runtimeSnapshot.getSnapshotJson();
         }
         RuntimeDiffSummary rawDiffSummary = runtimeDiffService.buildDiff(baselineSnapshotJson, platformSnapshot);
+        if (!hasRuntimeSchedule(runtimeDefinition) && rawDiffSummary != null) {
+            // Workflow 没有运行态 scheduleId（未创建调度）时，schedule.* 仅反映平台侧配置，不应作为发布修复差异。
+            rawDiffSummary.setScheduleChanges(Collections.emptyList());
+        }
         List<WorkflowPublishRepairIssue> repairIssues = new ArrayList<>(buildRepairIssues(rawDiffSummary));
         repairIssues.addAll(buildPublishMetadataRepairIssues(workflow, platformDefinition));
         response.setRepairIssues(repairIssues);
@@ -308,6 +312,7 @@ public class WorkflowPublishService {
                 workflow.getDefinitionJson());
         Map<Long, List<Long>> inputTableIdsByTask = loadTaskTableRelationMap(taskIds, "read");
         Map<Long, List<Long>> outputTableIdsByTask = loadTaskTableRelationMap(taskIds, "write");
+        Map<Long, DefinitionTaskMetadata> metadataByCode = loadDefinitionTaskMetadata(workflow.getDefinitionJson());
 
         List<RuntimeTaskDefinition> tasks = new ArrayList<>();
         for (WorkflowTaskRelation relation : relations) {
@@ -319,7 +324,8 @@ public class WorkflowPublishService {
                 continue;
             }
             RuntimeTaskDefinition runtimeTask = new RuntimeTaskDefinition();
-            runtimeTask.setTaskCode(resolveTaskCodeForDiff(task));
+            Long runtimeTaskCode = resolveTaskCodeForDiff(task);
+            runtimeTask.setTaskCode(runtimeTaskCode);
             runtimeTask.setTaskVersion(task.getDolphinTaskVersion());
             runtimeTask.setTaskName(task.getTaskName());
             runtimeTask.setDescription(task.getTaskDesc());
@@ -337,6 +343,10 @@ public class WorkflowPublishService {
             runtimeTask.setTaskGroupName(StringUtils.hasText(task.getTaskGroupName())
                     ? task.getTaskGroupName()
                     : workflow.getTaskGroupName());
+            DefinitionTaskMetadata taskMetadata = runtimeTaskCode != null ? metadataByCode.get(runtimeTaskCode) : null;
+            if (taskMetadata != null) {
+                runtimeTask.setTaskGroupId(taskMetadata.getTaskGroupId());
+            }
             runtimeTask.setRetryTimes(task.getRetryTimes());
             runtimeTask.setRetryInterval(task.getRetryInterval());
             runtimeTask.setTimeoutSeconds(task.getTimeoutSeconds());
@@ -688,6 +698,14 @@ public class WorkflowPublishService {
                 || !CollectionUtils.isEmpty(summary.getEdgeAdded())
                 || !CollectionUtils.isEmpty(summary.getEdgeRemoved())
                 || !CollectionUtils.isEmpty(summary.getScheduleChanges());
+    }
+
+    private boolean hasRuntimeSchedule(RuntimeWorkflowDefinition runtimeDefinition) {
+        if (runtimeDefinition == null || runtimeDefinition.getSchedule() == null) {
+            return false;
+        }
+        Long scheduleId = runtimeDefinition.getSchedule().getScheduleId();
+        return scheduleId != null && scheduleId > 0;
     }
 
     private String normalizeDiffValue(String value) {

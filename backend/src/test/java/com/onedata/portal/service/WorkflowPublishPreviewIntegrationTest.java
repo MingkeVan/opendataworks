@@ -234,6 +234,91 @@ class WorkflowPublishPreviewIntegrationTest {
         assertFalse(Boolean.TRUE.equals(preview.getRequireConfirm()), "仅噪声字段变化不应要求确认");
     }
 
+    @Test
+    @DisplayName("运行态无 scheduleId 时预检不应持续提示 schedule 差异")
+    void previewShouldIgnoreScheduleDiffWhenRuntimeScheduleMissing() {
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String operator = "it-publish-preview";
+
+        Long sourceTable = createTable("it_pub_no_schedule_src_" + suffix, "ods");
+        Long sinkTable = createTable("it_pub_no_schedule_sink_" + suffix, "dwd");
+
+        Long taskId = createSqlTask(
+                "it_pub_no_schedule_task_" + suffix,
+                "it_pub_no_schedule_task_" + suffix,
+                "insert into it_pub_no_schedule_sink_" + suffix + " select * from it_pub_no_schedule_src_" + suffix,
+                "doris_ds",
+                Collections.singletonList(sourceTable),
+                Collections.singletonList(sinkTable),
+                operator);
+
+        DataTask task = dataTaskMapper.selectById(taskId);
+        assertNotNull(task);
+        task.setDolphinTaskCode(74001L);
+        task.setDolphinNodeType("SQL");
+        task.setDatasourceType("MYSQL");
+        task.setTaskGroupName("tg-alpha");
+        dataTaskMapper.updateById(task);
+
+        DataWorkflow workflow = workflowService.createWorkflow(buildWorkflowRequest(
+                "it_pub_no_schedule_wf_" + suffix,
+                "publish-preview-no-schedule-it",
+                "[]",
+                "tg-alpha",
+                operator,
+                Collections.singletonList(taskId)));
+        assertNotNull(workflow.getId());
+
+        Long workflowCode = 880000L + Math.abs(suffix.hashCode() % 100000);
+        dataWorkflowMapper.update(
+                null,
+                Wrappers.<DataWorkflow>lambdaUpdate()
+                        .eq(DataWorkflow::getId, workflow.getId())
+                        .set(DataWorkflow::getWorkflowCode, workflowCode)
+                        .set(DataWorkflow::getScheduleCron, "0 0 1 * * ? *")
+                        .set(DataWorkflow::getScheduleTimezone, "Asia/Shanghai")
+                        .set(DataWorkflow::getScheduleFailureStrategy, "CONTINUE")
+                        .set(DataWorkflow::getScheduleWarningType, "NONE")
+                        .set(DataWorkflow::getScheduleWarningGroupId, 0L)
+                        .set(DataWorkflow::getScheduleProcessInstancePriority, "MEDIUM")
+                        .set(DataWorkflow::getScheduleWorkerGroup, "default")
+                        .set(DataWorkflow::getScheduleTenantCode, "default")
+                        .set(DataWorkflow::getScheduleEnvironmentCode, -1L)
+                        .set(DataWorkflow::getDolphinScheduleId, null)
+                        .set(DataWorkflow::getScheduleState, "draft"));
+        DataWorkflow latest = dataWorkflowMapper.selectById(workflow.getId());
+        assertNotNull(latest);
+
+        RuntimeWorkflowDefinition runtime = new RuntimeWorkflowDefinition();
+        runtime.setProjectCode(latest.getProjectCode());
+        runtime.setWorkflowCode(latest.getWorkflowCode());
+        runtime.setWorkflowName(latest.getWorkflowName());
+        runtime.setDescription(latest.getDescription());
+        runtime.setGlobalParams(latest.getGlobalParams());
+        runtime.setReleaseState(latest.getStatus());
+        runtime.setTasks(Collections.singletonList(
+                runtimeTask(74001L,
+                        task.getTaskName(),
+                        task.getTaskSql(),
+                        Collections.singletonList(sourceTable),
+                        Collections.singletonList(sinkTable),
+                        "tg-alpha")));
+        runtime.setSchedule(null);
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(latest.getProjectCode(), latest.getWorkflowCode()))
+                .thenReturn(runtime);
+
+        WorkflowPublishPreviewResponse preview = workflowPublishService.previewPublish(latest.getId());
+        assertTrue(preview.getErrors().isEmpty(), "预检不应报错");
+        assertTrue(Boolean.TRUE.equals(preview.getCanPublish()), "预检应允许发布");
+        assertNotNull(preview.getDiffSummary(), "差异摘要不能为空");
+        assertTrue(preview.getDiffSummary().getScheduleChanges().isEmpty(), "运行态无 scheduleId 时不应提示 schedule 差异");
+        assertFalse(Boolean.TRUE.equals(preview.getDiffSummary().getChanged()), "无真实差异时不应要求确认");
+        assertFalse(Boolean.TRUE.equals(preview.getRequireConfirm()), "无真实差异时不应要求确认");
+        assertTrue(preview.getRepairIssues().stream()
+                .noneMatch(item -> item.getField() != null && item.getField().startsWith("schedule.")),
+                "运行态无 scheduleId 时不应出现 schedule 修复提示");
+    }
+
     private Long createTable(String tableName, String layer) {
         DataTable table = new DataTable();
         table.setTableName(tableName);

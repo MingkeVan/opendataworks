@@ -25,6 +25,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * Dolphin 运行态定义提取服务
@@ -138,6 +140,7 @@ public class DolphinRuntimeDefinitionService {
                 // 旧路径兼容分支，导出兜底失败时保留已有解析结果
             }
         }
+        enrichTaskGroupNames(tasks);
 
         tasks = enrichTaskMetadataFromCatalog(tasks);
         result.setTasks(tasks);
@@ -202,6 +205,7 @@ public class DolphinRuntimeDefinitionService {
         if (explicitEdges.isEmpty()) {
             explicitEdges = parseTaskEdges(definition);
         }
+        enrichTaskGroupNames(tasks);
 
         tasks = enrichTaskMetadataFromCatalog(tasks);
         result.setTasks(tasks);
@@ -515,6 +519,48 @@ public class DolphinRuntimeDefinitionService {
                 "taskList",
                 "tasks");
         return parseTaskDefinitionsFromNode(taskNode);
+    }
+
+    private void enrichTaskGroupNames(List<RuntimeTaskDefinition> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return;
+        }
+        LinkedHashSet<Integer> missingTaskGroupIds = tasks.stream()
+                .filter(Objects::nonNull)
+                .filter(task -> !StringUtils.hasText(task.getTaskGroupName()))
+                .map(RuntimeTaskDefinition::getTaskGroupId)
+                .filter(id -> id != null && id > 0)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (missingTaskGroupIds.isEmpty()) {
+            return;
+        }
+
+        List<DolphinTaskGroupOption> taskGroups = dolphinSchedulerService.listTaskGroups(null);
+        if (taskGroups == null || taskGroups.isEmpty()) {
+            return;
+        }
+        Map<Integer, String> taskGroupNameById = new LinkedHashMap<>();
+        for (DolphinTaskGroupOption taskGroup : taskGroups) {
+            if (taskGroup == null || taskGroup.getId() == null || taskGroup.getId() <= 0
+                    || !StringUtils.hasText(taskGroup.getName())) {
+                continue;
+            }
+            taskGroupNameById.putIfAbsent(taskGroup.getId(), taskGroup.getName().trim());
+        }
+        if (taskGroupNameById.isEmpty()) {
+            return;
+        }
+
+        for (RuntimeTaskDefinition task : tasks) {
+            if (task == null || StringUtils.hasText(task.getTaskGroupName())
+                    || task.getTaskGroupId() == null || task.getTaskGroupId() <= 0) {
+                continue;
+            }
+            String resolvedName = taskGroupNameById.get(task.getTaskGroupId());
+            if (StringUtils.hasText(resolvedName)) {
+                task.setTaskGroupName(resolvedName);
+            }
+        }
     }
 
     private List<RuntimeTaskDefinition> parseTaskDefinitionsFromNode(JsonNode taskNode) {

@@ -56,7 +56,7 @@ public class DorisClusterService {
      */
     @Transactional
     public DorisCluster create(DorisCluster cluster) {
-        validate(cluster, true);
+        validate(cluster);
         handleDefaultFlag(cluster, null);
         if (cluster.getAutoSync() != null && cluster.getAutoSync() == 1) {
             cluster.setLastSyncTime(LocalDateTime.now());
@@ -96,7 +96,7 @@ public class DorisClusterService {
             // 开启自动同步时，将 lastSyncTime 置为当前时间作为调度基准
             cluster.setLastSyncTime(LocalDateTime.now());
         }
-        validate(cluster, false);
+        validate(cluster);
         cluster.setId(id);
         handleDefaultFlag(cluster, id);
         dorisClusterMapper.updateById(cluster);
@@ -130,7 +130,7 @@ public class DorisClusterService {
         log.info("Set default Doris cluster: {}", id);
     }
 
-    private void validate(DorisCluster cluster, boolean requirePassword) {
+    private void validate(DorisCluster cluster) {
         if (cluster == null) {
             throw new IllegalArgumentException("Doris 集群不能为空");
         }
@@ -154,8 +154,8 @@ public class DorisClusterService {
         if (!StringUtils.hasText(cluster.getUsername())) {
             throw new RuntimeException("用户名不能为空");
         }
-        if (requirePassword && !StringUtils.hasText(cluster.getPassword())) {
-            throw new RuntimeException("密码不能为空");
+        if (cluster.getPassword() == null) {
+            cluster.setPassword("");
         }
         if (cluster.getIsDefault() == null) {
             cluster.setIsDefault(0);
