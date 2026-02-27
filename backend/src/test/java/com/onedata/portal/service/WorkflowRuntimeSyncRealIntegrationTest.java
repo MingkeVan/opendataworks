@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.dto.DolphinDatasourceOption;
+import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.dolphin.DolphinPageData;
 import com.onedata.portal.dto.dolphin.DolphinProject;
 import com.onedata.portal.dto.dolphin.DolphinSchedule;
@@ -1334,6 +1335,107 @@ class WorkflowRuntimeSyncRealIntegrationTest {
                 .anyMatch(item -> "success".equals(item.getStatus())));
     }
 
+    @Test
+    @DisplayName("首次发布后仅变更单个任务时，未变更任务不应出现发布差异")
+    void publishPreviewShouldOnlyShowChangedTasksForExistingRuntimeWorkflow() {
+        bootstrapOrSkip();
+        cleanupHistoricalITData();
+
+        DolphinTaskGroupOption taskGroup = resolveAvailableTaskGroup();
+        assertNotNull(taskGroup, "集成环境缺少可用任务组，无法验证 taskGroupName 差异收敛");
+        assertTrue(StringUtils.hasText(taskGroup.getName()), "任务组名称不能为空");
+
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String dbName = "opendataworks";
+        String srcTable = IT_PREFIX + "src_preview_" + suffix;
+        String dwdTable = IT_PREFIX + "dwd_preview_" + suffix;
+        String dwsTable = IT_PREFIX + "dws_preview_" + suffix;
+
+        Long srcTableId = createMetadataTable(dbName, srcTable, "ODS");
+        Long dwdTableId = createMetadataTable(dbName, dwdTable, "DWD");
+        Long dwsTableId = createMetadataTable(dbName, dwsTable, "DWS");
+
+        DataTask taskExtract = createSqlTask(
+                IT_PREFIX + "task_extract_preview_" + suffix,
+                IT_PREFIX + "task_extract_preview_" + suffix,
+                String.format("INSERT INTO %s.%s SELECT user_id, user_name FROM %s.%s",
+                        dbName, dwdTable, dbName, srcTable),
+                Collections.singletonList(srcTableId),
+                Collections.singletonList(dwdTableId));
+        taskExtract.setTaskGroupName(taskGroup.getName());
+        dataTaskMapper.updateById(taskExtract);
+
+        DataTask taskLoad = createSqlTask(
+                IT_PREFIX + "task_load_preview_" + suffix,
+                IT_PREFIX + "task_load_preview_" + suffix,
+                String.format("INSERT INTO %s.%s SELECT user_id, COUNT(1) AS total FROM %s.%s GROUP BY user_id",
+                        dbName, dwsTable, dbName, dwdTable),
+                Collections.singletonList(dwdTableId),
+                Collections.singletonList(dwsTableId));
+        taskLoad.setTaskGroupName(taskGroup.getName());
+        dataTaskMapper.updateById(taskLoad);
+
+        DataWorkflow workflow = createWorkflow(
+                IT_PREFIX + "wf_publish_preview_" + suffix,
+                Arrays.asList(taskExtract.getId(), taskLoad.getId()),
+                effectiveProjectCode);
+        createdWorkflowIds.add(workflow.getId());
+
+        WorkflowPublishPreviewResponse firstPreview = workflowPublishService.previewPublish(workflow.getId());
+        assertTrue(firstPreview.getErrors().isEmpty(),
+                "首次发布前预检不应报错, errors=" + safeJson(firstPreview.getErrors()));
+        assertTrue(firstPreview.getRepairIssues().stream()
+                        .noneMatch(item -> "task.datasourceId".equals(item.getField())
+                                || "task.taskGroupId".equals(item.getField())),
+                "保存后首次预检不应再提示 datasourceId/taskGroupId 修复: "
+                        + safeJson(firstPreview.getRepairIssues()));
+
+        WorkflowPublishRequest deployRequest = new WorkflowPublishRequest();
+        deployRequest.setOperation("deploy");
+        deployRequest.setOperator("it-runtime-sync");
+        deployRequest.setRequireApproval(false);
+        deployRequest.setConfirmDiff(true);
+        WorkflowPublishRecord deployRecord = workflowPublishService.publish(workflow.getId(), deployRequest);
+        assertEquals("success", deployRecord.getStatus(), "基线发布应成功");
+
+        DataWorkflow deployedWorkflow = dataWorkflowMapper.selectById(workflow.getId());
+        assertNotNull(deployedWorkflow);
+        assertNotNull(deployedWorkflow.getWorkflowCode(), "发布后应存在 workflowCode");
+        createdRuntimeWorkflowCodes.add(deployedWorkflow.getWorkflowCode());
+
+        DataTask latestExtractTask = dataTaskMapper.selectById(taskExtract.getId());
+        DataTask latestLoadTask = dataTaskMapper.selectById(taskLoad.getId());
+        assertNotNull(latestExtractTask);
+        assertNotNull(latestLoadTask);
+        assertNotNull(latestExtractTask.getDolphinTaskCode(), "任务1应具备 Dolphin taskCode");
+        assertNotNull(latestLoadTask.getDolphinTaskCode(), "任务2应具备 Dolphin taskCode");
+
+        latestLoadTask.setTaskSql(String.format(
+                "INSERT INTO %s.%s SELECT user_id, COUNT(1) AS total FROM %s.%s WHERE user_id > 0 GROUP BY user_id",
+                dbName, dwsTable, dbName, dwdTable));
+        dataTaskMapper.updateById(latestLoadTask);
+        workflowService.normalizeAndPersistMetadata(workflow.getId(), "it-runtime-sync");
+
+        WorkflowPublishPreviewResponse deltaPreview = workflowPublishService.previewPublish(workflow.getId());
+        assertTrue(deltaPreview.getErrors().isEmpty(),
+                "增量发布预检不应报错, errors=" + safeJson(deltaPreview.getErrors()));
+        assertTrue(Boolean.TRUE.equals(deltaPreview.getCanPublish()), "增量发布预检应允许发布");
+        assertNotNull(deltaPreview.getDiffSummary(), "增量发布差异摘要不能为空");
+        assertTrue(deltaPreview.getRepairIssues().stream()
+                        .noneMatch(item -> "task.datasourceId".equals(item.getField())
+                                || "task.taskGroupId".equals(item.getField())),
+                "增量发布预检不应再提示 datasourceId/taskGroupId 修复: "
+                        + safeJson(deltaPreview.getRepairIssues()));
+
+        assertTrue(deltaPreview.getDiffSummary().getTaskModified().stream()
+                        .anyMatch(item -> Objects.equals(item.getTaskCode(), latestLoadTask.getDolphinTaskCode())),
+                "应识别被修改的 task_load 差异");
+        assertTrue(deltaPreview.getDiffSummary().getTaskModified().stream()
+                        .noneMatch(item -> Objects.equals(item.getTaskCode(), latestExtractTask.getDolphinTaskCode())),
+                "未变更的 task_extract 不应出现在差异列表, taskModified="
+                        + safeJson(deltaPreview.getDiffSummary().getTaskModified()));
+    }
+
     private RuntimeSyncExecuteResponse previewAndSync(Long workflowCode, String operator) {
         RuntimeSyncPreviewRequest previewRequest = new RuntimeSyncPreviewRequest();
         previewRequest.setProjectCode(effectiveProjectCode);
@@ -2315,6 +2417,73 @@ class WorkflowRuntimeSyncRealIntegrationTest {
             return mysqlOptions.get(0).getName();
         }
         return null;
+    }
+
+    private DolphinTaskGroupOption resolveAvailableTaskGroup() {
+        List<DolphinTaskGroupOption> options = dolphinSchedulerService.listTaskGroups(null);
+        DolphinTaskGroupOption selected = selectAvailableTaskGroup(options);
+        if (selected != null) {
+            return selected;
+        }
+
+        ensureTaskGroup();
+        return selectAvailableTaskGroup(dolphinSchedulerService.listTaskGroups(null));
+    }
+
+    private DolphinTaskGroupOption selectAvailableTaskGroup(List<DolphinTaskGroupOption> options) {
+        if (options == null || options.isEmpty()) {
+            return null;
+        }
+        for (DolphinTaskGroupOption option : options) {
+            if (option == null || option.getId() == null || option.getId() <= 0
+                    || !StringUtils.hasText(option.getName())) {
+                continue;
+            }
+            if (effectiveProjectCode != null && option.getProjectCode() != null
+                    && Objects.equals(effectiveProjectCode, option.getProjectCode())) {
+                return option;
+            }
+        }
+        for (DolphinTaskGroupOption option : options) {
+            if (option != null && option.getId() != null && option.getId() > 0 && StringUtils.hasText(option.getName())) {
+                return option;
+            }
+        }
+        return null;
+    }
+
+    private void ensureTaskGroup() {
+        if (!StringUtils.hasText(effectiveToken)) {
+            return;
+        }
+        String groupName = IT_PREFIX + "tg_default";
+        String groupDesc = "integration-test task group";
+        try {
+            JsonNode resp = webClient().post()
+                    .uri(uriBuilder -> {
+                        if (effectiveProjectCode != null && effectiveProjectCode > 0) {
+                            return uriBuilder.path("/task-group/create")
+                                    .queryParam("name", groupName)
+                                    .queryParam("description", groupDesc)
+                                    .queryParam("groupSize", 1)
+                                    .queryParam("projectCode", effectiveProjectCode)
+                                    .build();
+                        }
+                        return uriBuilder.path("/task-group/create")
+                                .queryParam("name", groupName)
+                                .queryParam("description", groupDesc)
+                                .queryParam("groupSize", 1)
+                                .build();
+                    })
+                    .header("token", effectiveToken)
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block();
+            if (resp == null || resp.path("code").asInt(-1) != 0) {
+                // Ignore create failure here and rely on follow-up list query.
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     private Long ensureClusterId() {

@@ -1,0 +1,245 @@
+package com.onedata.portal.service;
+
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.onedata.portal.dto.DolphinDatasourceOption;
+import com.onedata.portal.dto.DolphinTaskGroupOption;
+import com.onedata.portal.dto.workflow.WorkflowTopologyResult;
+import com.onedata.portal.entity.DataTask;
+import com.onedata.portal.entity.DataWorkflow;
+import com.onedata.portal.entity.TableTaskRelation;
+import com.onedata.portal.entity.WorkflowTaskRelation;
+import com.onedata.portal.entity.WorkflowVersion;
+import com.onedata.portal.mapper.DataTaskMapper;
+import com.onedata.portal.mapper.DataWorkflowMapper;
+import com.onedata.portal.mapper.TableTaskRelationMapper;
+import com.onedata.portal.mapper.TaskExecutionLogMapper;
+import com.onedata.portal.mapper.WorkflowPublishRecordMapper;
+import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
+import com.onedata.portal.mapper.WorkflowVersionMapper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.Collections;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class WorkflowServiceMetadataPersistenceTest {
+
+    static {
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(), "");
+        TableInfoHelper.initTableInfo(assistant, DataWorkflow.class);
+        TableInfoHelper.initTableInfo(assistant, WorkflowTaskRelation.class);
+        TableInfoHelper.initTableInfo(assistant, DataTask.class);
+        TableInfoHelper.initTableInfo(assistant, TableTaskRelation.class);
+        TableInfoHelper.initTableInfo(assistant, WorkflowVersion.class);
+    }
+
+    @Mock
+    private DataWorkflowMapper dataWorkflowMapper;
+
+    @Mock
+    private WorkflowTaskRelationMapper workflowTaskRelationMapper;
+
+    @Mock
+    private WorkflowPublishRecordMapper workflowPublishRecordMapper;
+
+    @Mock
+    private WorkflowVersionService workflowVersionService;
+
+    @Mock
+    private WorkflowVersionMapper workflowVersionMapper;
+
+    @Mock
+    private WorkflowInstanceCacheService workflowInstanceCacheService;
+
+    @Mock
+    private DolphinSchedulerService dolphinSchedulerService;
+
+    @Mock
+    private DataTaskMapper dataTaskMapper;
+
+    @Mock
+    private TableTaskRelationMapper tableTaskRelationMapper;
+
+    @Mock
+    private TaskExecutionLogMapper taskExecutionLogMapper;
+
+    @Mock
+    private WorkflowTopologyService workflowTopologyService;
+
+    private ObjectMapper objectMapper;
+    private WorkflowService service;
+
+    @BeforeEach
+    void setUp() {
+        objectMapper = new ObjectMapper();
+        service = new WorkflowService(
+                dataWorkflowMapper,
+                workflowTaskRelationMapper,
+                workflowPublishRecordMapper,
+                workflowVersionService,
+                workflowVersionMapper,
+                workflowInstanceCacheService,
+                objectMapper,
+                dolphinSchedulerService,
+                dataTaskMapper,
+                tableTaskRelationMapper,
+                taskExecutionLogMapper,
+                workflowTopologyService);
+    }
+
+    @Test
+    void normalizeAndPersistMetadataShouldFillDefinitionIdsFromCatalog() throws Exception {
+        DataWorkflow workflow = baseWorkflow("{}");
+        DataTask task = baseTask();
+        task.setTaskGroupName(null);
+
+        mockNormalizeContext(workflow, task);
+
+        DolphinDatasourceOption datasourceOption = new DolphinDatasourceOption();
+        datasourceOption.setId(501L);
+        datasourceOption.setName("ds_main");
+        datasourceOption.setType("MYSQL");
+        when(dolphinSchedulerService.listDatasources(null, null))
+                .thenReturn(Collections.singletonList(datasourceOption));
+
+        DolphinTaskGroupOption taskGroupOption = new DolphinTaskGroupOption();
+        taskGroupOption.setId(71);
+        taskGroupOption.setName("tg_default");
+        when(dolphinSchedulerService.listTaskGroups(null))
+                .thenReturn(Collections.singletonList(taskGroupOption));
+
+        service.normalizeAndPersistMetadata(1L, "tester");
+
+        ArgumentCaptor<DataWorkflow> workflowCaptor = ArgumentCaptor.forClass(DataWorkflow.class);
+        verify(dataWorkflowMapper).updateById(workflowCaptor.capture());
+        DataWorkflow updated = workflowCaptor.getValue();
+        assertNotNull(updated);
+
+        JsonNode firstTask = firstTaskNode(updated.getDefinitionJson());
+        assertEquals("tg_default", firstTask.path("taskGroupName").asText());
+        assertEquals(71, firstTask.path("taskGroupId").asInt());
+        JsonNode params = firstTask.path("taskParams");
+        assertEquals(501L, params.path("datasourceId").asLong());
+        assertEquals(501L, params.path("datasource").asLong());
+        assertEquals("MYSQL", params.path("datasourceType").asText());
+        assertEquals("MYSQL", params.path("type").asText());
+    }
+
+    @Test
+    void normalizeAndPersistMetadataShouldKeepExistingIdsWhenPresent() throws Exception {
+        String seedDefinition = "{\"taskDefinitionList\":[{\"taskCode\":1001,\"taskGroupId\":88,"
+                + "\"taskParams\":{\"datasourceId\":999,\"datasource\":999,\"datasourceName\":\"ds_main\","
+                + "\"datasourceType\":\"POSTGRES\",\"type\":\"POSTGRES\"}}]}";
+        DataWorkflow workflow = baseWorkflow(seedDefinition);
+        DataTask task = baseTask();
+        task.setDatasourceType(null);
+
+        mockNormalizeContext(workflow, task);
+
+        service.normalizeAndPersistMetadata(1L, "tester");
+
+        ArgumentCaptor<DataWorkflow> workflowCaptor = ArgumentCaptor.forClass(DataWorkflow.class);
+        verify(dataWorkflowMapper).updateById(workflowCaptor.capture());
+        DataWorkflow updated = workflowCaptor.getValue();
+        JsonNode firstTask = firstTaskNode(updated.getDefinitionJson());
+        assertEquals(88, firstTask.path("taskGroupId").asInt());
+        JsonNode params = firstTask.path("taskParams");
+        assertEquals(999L, params.path("datasourceId").asLong());
+        assertEquals(999L, params.path("datasource").asLong());
+
+        verify(dolphinSchedulerService, never()).listDatasources(any(), any());
+        verify(dolphinSchedulerService, never()).listTaskGroups(any());
+    }
+
+    @Test
+    void normalizeAndPersistMetadataShouldNotFailWhenCatalogIsEmpty() throws Exception {
+        DataWorkflow workflow = baseWorkflow("{}");
+        DataTask task = baseTask();
+
+        mockNormalizeContext(workflow, task);
+        when(dolphinSchedulerService.listDatasources(null, null)).thenReturn(Collections.emptyList());
+        when(dolphinSchedulerService.listTaskGroups(null)).thenReturn(Collections.emptyList());
+
+        service.normalizeAndPersistMetadata(1L, "tester");
+
+        ArgumentCaptor<DataWorkflow> workflowCaptor = ArgumentCaptor.forClass(DataWorkflow.class);
+        verify(dataWorkflowMapper).updateById(workflowCaptor.capture());
+        DataWorkflow updated = workflowCaptor.getValue();
+        JsonNode firstTask = firstTaskNode(updated.getDefinitionJson());
+        JsonNode params = firstTask.path("taskParams");
+        assertFalse(firstTask.has("taskGroupId"));
+        assertFalse(params.has("datasourceId"));
+        assertFalse(params.has("datasource"));
+    }
+
+    private void mockNormalizeContext(DataWorkflow workflow, DataTask task) {
+        when(dataWorkflowMapper.selectById(1L)).thenReturn(workflow);
+
+        WorkflowTaskRelation relation = new WorkflowTaskRelation();
+        relation.setWorkflowId(1L);
+        relation.setTaskId(10L);
+        relation.setIsEntry(true);
+        relation.setIsExit(true);
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Collections.singletonList(relation));
+
+        WorkflowTopologyResult topology = WorkflowTopologyResult.builder()
+                .entryTaskIds(Collections.singleton(10L))
+                .exitTaskIds(Collections.singleton(10L))
+                .build();
+        when(workflowTopologyService.buildTopology(anyList())).thenReturn(topology);
+
+        when(dataTaskMapper.selectBatchIds(anyList())).thenReturn(Collections.singletonList(task));
+        when(tableTaskRelationMapper.selectList(any())).thenReturn(Collections.emptyList());
+    }
+
+    private DataWorkflow baseWorkflow(String definitionJson) {
+        DataWorkflow workflow = new DataWorkflow();
+        workflow.setId(1L);
+        workflow.setWorkflowName("wf_meta");
+        workflow.setTaskGroupName("tg_default");
+        workflow.setDefinitionJson(definitionJson);
+        return workflow;
+    }
+
+    private DataTask baseTask() {
+        DataTask task = new DataTask();
+        task.setId(10L);
+        task.setTaskName("task_sql");
+        task.setTaskCode("task_sql");
+        task.setEngine("dolphin");
+        task.setDolphinNodeType("SQL");
+        task.setDolphinTaskCode(1001L);
+        task.setDolphinTaskVersion(1);
+        task.setDatasourceName("ds_main");
+        task.setDatasourceType("MYSQL");
+        task.setTaskSql("select 1");
+        task.setPriority(5);
+        task.setRetryTimes(1);
+        task.setRetryInterval(1);
+        task.setTimeoutSeconds(60);
+        return task;
+    }
+
+    private JsonNode firstTaskNode(String definitionJson) throws Exception {
+        JsonNode root = objectMapper.readTree(definitionJson);
+        JsonNode taskList = root.path("taskDefinitionList");
+        return taskList.get(0);
+    }
+}

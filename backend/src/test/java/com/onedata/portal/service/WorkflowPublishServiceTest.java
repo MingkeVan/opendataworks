@@ -322,7 +322,8 @@ class WorkflowPublishServiceTest {
                 fieldChange("task.inputTableIds", "[]", "[1,2]"),
                 fieldChange("task.outputTableIds", "[]", "[3]"),
                 fieldChange("task.taskGroupId", "0", null),
-                fieldChange("task.taskPriority", "MEDIUM", "5"),
+                fieldChange("task.taskGroupName", null, "tg-default"),
+                fieldChange("task.taskPriority", "MEDIUM", "LOW"),
                 fieldChange("task.taskVersion", "2", "1")));
         diff.setTaskModified(Collections.singletonList(modified));
         diff.setScheduleChanges(Arrays.asList(
@@ -341,23 +342,63 @@ class WorkflowPublishServiceTest {
 
         assertNotNull(preview.getDiffSummary());
         assertTrue(Boolean.TRUE.equals(preview.getDiffSummary().getChanged()), "非噪声调度字段应触发变更确认");
-        assertTrue(preview.getDiffSummary().getTaskModified().isEmpty(), "噪声任务字段应被过滤");
+        assertFalse(preview.getDiffSummary().getTaskModified().isEmpty(), "taskPriority 变更应保留");
+        assertTrue(preview.getDiffSummary().getTaskModified().stream()
+                .flatMap(item -> item.getFieldChanges() == null
+                        ? java.util.stream.Stream.empty()
+                        : item.getFieldChanges().stream())
+                .anyMatch(item -> "task.datasourceId".equals(item.getField())), "应保留 task.datasourceId 差异");
+        assertTrue(preview.getDiffSummary().getTaskModified().stream()
+                .flatMap(item -> item.getFieldChanges() == null
+                        ? java.util.stream.Stream.empty()
+                        : item.getFieldChanges().stream())
+                .anyMatch(item -> "task.datasourceName".equals(item.getField())), "应保留 task.datasourceName 差异");
+        assertTrue(preview.getDiffSummary().getTaskModified().stream()
+                .flatMap(item -> item.getFieldChanges() == null
+                        ? java.util.stream.Stream.empty()
+                        : item.getFieldChanges().stream())
+                .anyMatch(item -> "task.taskGroupId".equals(item.getField())), "应保留 task.taskGroupId 差异");
+        assertTrue(preview.getDiffSummary().getTaskModified().stream()
+                .flatMap(item -> item.getFieldChanges() == null
+                        ? java.util.stream.Stream.empty()
+                        : item.getFieldChanges().stream())
+                .anyMatch(item -> "task.taskGroupName".equals(item.getField())), "应保留 task.taskGroupName 差异");
+        assertTrue(preview.getDiffSummary().getTaskModified().stream()
+                .flatMap(item -> item.getFieldChanges() == null
+                        ? java.util.stream.Stream.empty()
+                        : item.getFieldChanges().stream())
+                .anyMatch(item -> "task.taskPriority".equals(item.getField())), "应保留 task.taskPriority 差异");
         assertFalse(preview.getDiffSummary().getScheduleChanges().isEmpty(), "调度差异应保留并提示修复");
         assertTrue(preview.getDiffSummary().getScheduleChanges().stream()
                 .anyMatch(item -> item.contains("schedule.failureStrategy")));
+        assertTrue(preview.getDiffSummary().getScheduleChanges().stream()
+                .anyMatch(item -> item.contains("schedule.scheduleId")), "应保留 schedule.scheduleId 差异");
         assertFalse(preview.getRepairIssues().isEmpty(), "应给出可修复问题列表");
         assertTrue(preview.getRepairIssues().stream()
                 .anyMatch(item -> "schedule.failureStrategy".equals(item.getField())),
                 "应保留非噪声调度修复提示");
         assertTrue(preview.getRepairIssues().stream()
-                .noneMatch(item -> "task.datasourceId".equals(item.getField())
-                        || "task.datasourceName".equals(item.getField())
-                        || "task.inputTableIds".equals(item.getField())
+                .anyMatch(item -> "task.datasourceId".equals(item.getField())),
+                "datasourceId 差异应出现在修复提示中");
+        assertTrue(preview.getRepairIssues().stream()
+                .anyMatch(item -> "task.datasourceName".equals(item.getField())),
+                "datasourceName 差异应出现在修复提示中");
+        assertTrue(preview.getRepairIssues().stream()
+                .anyMatch(item -> "task.taskGroupId".equals(item.getField())),
+                "taskGroupId 差异应出现在修复提示中");
+        assertTrue(preview.getRepairIssues().stream()
+                .anyMatch(item -> "task.taskGroupName".equals(item.getField())),
+                "taskGroupName 差异应出现在修复提示中");
+        assertTrue(preview.getRepairIssues().stream()
+                .anyMatch(item -> "task.taskPriority".equals(item.getField())),
+                "taskPriority 差异应出现在修复提示中");
+        assertTrue(preview.getRepairIssues().stream()
+                .anyMatch(item -> "schedule.scheduleId".equals(item.getField())),
+                "scheduleId 差异应出现在修复提示中");
+        assertTrue(preview.getRepairIssues().stream()
+                .noneMatch(item -> "task.inputTableIds".equals(item.getField())
                         || "task.outputTableIds".equals(item.getField())
-                        || "task.taskGroupId".equals(item.getField())
-                        || "task.taskPriority".equals(item.getField())
                         || "task.taskVersion".equals(item.getField())
-                        || "schedule.scheduleId".equals(item.getField())
                         || "schedule.releaseState".equals(item.getField())),
                 "噪声字段不应出现在修复提示中");
         assertTrue(Boolean.TRUE.equals(preview.getRequireConfirm()), "存在调度差异时应要求确认");
@@ -484,6 +525,9 @@ class WorkflowPublishServiceTest {
         WorkflowPublishService previewService = buildPreviewServiceWithRealDiff();
         DataWorkflow workflow = workflow(1L, 5001L, 101L);
         workflow.setWorkflowName("wf_platform");
+        workflow.setDefinitionJson("{\"taskDefinitionList\":["
+                + "{\"taskCode\":1001,\"taskParams\":{\"datasourceId\":10}},"
+                + "{\"taskCode\":2002,\"taskParams\":{\"datasourceId\":10}}]}");
         when(dataWorkflowMapper.selectById(1L)).thenReturn(workflow);
 
         WorkflowTaskRelation relA = new WorkflowTaskRelation();
@@ -874,16 +918,11 @@ class WorkflowPublishServiceTest {
         modified.setTaskCode(10001L);
         modified.setTaskName("task_a");
         modified.setFieldChanges(Arrays.asList(
-                fieldChange("task.datasourceId", "10", "11"),
-                fieldChange("task.datasourceName", "ds_a", "ds_b"),
                 fieldChange("task.inputTableIds", "[]", "[1]"),
                 fieldChange("task.outputTableIds", "[]", "[2]"),
-                fieldChange("task.taskGroupId", "0", "1"),
-                fieldChange("task.taskPriority", "MEDIUM", "5"),
                 fieldChange("task.taskVersion", "1", "2")));
         diff.setTaskModified(Collections.singletonList(modified));
         diff.setScheduleChanges(Arrays.asList(
-                fieldChange("schedule.scheduleId", "900", "901"),
                 fieldChange("schedule.releaseState", "OFFLINE", "ONLINE")));
         return diff;
     }

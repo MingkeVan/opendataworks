@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.onedata.portal.dto.DolphinDatasourceOption;
 import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskDefinition;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskEdge;
@@ -178,6 +179,59 @@ class DolphinExportDefinitionParserTest {
     }
 
     @Test
+    void shouldEnrichTaskMetadataBidirectionallyFromCatalog() {
+        ObjectNode exported = objectMapper.createObjectNode();
+        ObjectNode workflowDefinition = exported.putObject("workflowDefinition");
+        workflowDefinition.put("code", 1010L);
+        workflowDefinition.put("name", "wf_meta_enrich");
+
+        ArrayNode taskDefinitions = exported.putArray("taskDefinitionList");
+
+        ObjectNode fromNameTask = taskDefinitions.addObject();
+        fromNameTask.put("code", 4101L);
+        fromNameTask.put("name", "task_from_name");
+        fromNameTask.put("taskType", "SQL");
+        fromNameTask.put("taskPriority", "MEDIUM");
+        fromNameTask.put("taskGroupName", "tg_alpha");
+        fromNameTask.put("taskParams", "{\"sql\":\"select 1\",\"datasourceName\":\"ds_alpha\"}");
+
+        ObjectNode fromIdTask = taskDefinitions.addObject();
+        fromIdTask.put("code", 4102L);
+        fromIdTask.put("name", "task_from_id");
+        fromIdTask.put("taskType", "SQL");
+        fromIdTask.put("taskPriority", "8");
+        fromIdTask.put("taskGroupId", 2202);
+        fromIdTask.put("taskParams", "{\"sql\":\"select 2\",\"datasource\":1102}");
+
+        when(openApiClient.exportDefinitionByCode(1L, 1010L)).thenReturn(exported);
+        when(dolphinSchedulerService.listDatasources(null, null)).thenReturn(java.util.Arrays.asList(
+                datasourceOption(1101L, "ds_alpha", "MYSQL"),
+                datasourceOption(1102L, "ds_beta", "DORIS")));
+        when(dolphinSchedulerService.listTaskGroups(null)).thenReturn(java.util.Arrays.asList(
+                taskGroupOption(2201, "tg_alpha"),
+                taskGroupOption(2202, "tg_beta")));
+
+        RuntimeWorkflowDefinition definition = service.loadRuntimeDefinitionFromExport(1L, 1010L);
+
+        assertEquals(2, definition.getTasks().size());
+        RuntimeTaskDefinition taskFromName = definition.getTasks().get(0);
+        assertEquals(1101L, taskFromName.getDatasourceId());
+        assertEquals("ds_alpha", taskFromName.getDatasourceName());
+        assertEquals("MYSQL", taskFromName.getDatasourceType());
+        assertEquals(2201, taskFromName.getTaskGroupId());
+        assertEquals("tg_alpha", taskFromName.getTaskGroupName());
+        assertEquals("MEDIUM", taskFromName.getTaskPriority());
+
+        RuntimeTaskDefinition taskFromId = definition.getTasks().get(1);
+        assertEquals(1102L, taskFromId.getDatasourceId());
+        assertEquals("ds_beta", taskFromId.getDatasourceName());
+        assertEquals("DORIS", taskFromId.getDatasourceType());
+        assertEquals(2202, taskFromId.getTaskGroupId());
+        assertEquals("tg_beta", taskFromId.getTaskGroupName());
+        assertEquals("HIGH", taskFromId.getTaskPriority());
+    }
+
+    @Test
     void shouldParseProcessTaskRelationListWhenLoadingRuntimeDefinition() {
         ObjectNode definition = objectMapper.createObjectNode();
         definition.put("code", 1005L);
@@ -239,5 +293,20 @@ class DolphinExportDefinitionParserTest {
         RuntimeTaskEdge edge = definition.getExplicitEdges().get(0);
         assertEquals(0L, edge.getUpstreamTaskCode());
         assertEquals(3201L, edge.getDownstreamTaskCode());
+    }
+
+    private DolphinDatasourceOption datasourceOption(Long id, String name, String type) {
+        DolphinDatasourceOption option = new DolphinDatasourceOption();
+        option.setId(id);
+        option.setName(name);
+        option.setType(type);
+        return option;
+    }
+
+    private DolphinTaskGroupOption taskGroupOption(Integer id, String name) {
+        DolphinTaskGroupOption option = new DolphinTaskGroupOption();
+        option.setId(id);
+        option.setName(name);
+        return option;
     }
 }

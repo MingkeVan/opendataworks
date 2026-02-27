@@ -3,6 +3,7 @@ package com.onedata.portal.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.onedata.portal.dto.DolphinDatasourceOption;
 import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.dolphin.DolphinSchedule;
 import com.onedata.portal.dto.workflow.runtime.DolphinRuntimeWorkflowOption;
@@ -13,6 +14,7 @@ import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowSchedule;
 import com.onedata.portal.service.dolphin.DolphinOpenApiClient;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -21,6 +23,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -29,6 +32,7 @@ import java.util.stream.Collectors;
  * Dolphin 运行态定义提取服务
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class DolphinRuntimeDefinitionService {
 
@@ -138,6 +142,7 @@ public class DolphinRuntimeDefinitionService {
         }
         enrichTaskGroupNames(tasks);
 
+        tasks = enrichTaskMetadataFromCatalog(tasks);
         result.setTasks(tasks);
         result.setExplicitEdges(explicitEdges);
         result.setRawDefinitionJson(toJson(raw));
@@ -202,6 +207,7 @@ public class DolphinRuntimeDefinitionService {
         }
         enrichTaskGroupNames(tasks);
 
+        tasks = enrichTaskMetadataFromCatalog(tasks);
         result.setTasks(tasks);
         result.setExplicitEdges(explicitEdges);
         result.setRawDefinitionJson(toJson(exported));
@@ -266,10 +272,157 @@ public class DolphinRuntimeDefinitionService {
             edges = parseTaskEdges(definition);
         }
 
+        tasks = enrichTaskMetadataFromCatalog(tasks);
         result.setTasks(tasks);
         result.setExplicitEdges(edges);
         result.setRawDefinitionJson(toJson(root));
         return result;
+    }
+
+    private List<RuntimeTaskDefinition> enrichTaskMetadataFromCatalog(List<RuntimeTaskDefinition> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return tasks;
+        }
+
+        boolean needDatasourceCatalog = false;
+        boolean needTaskGroupCatalog = false;
+        for (RuntimeTaskDefinition task : tasks) {
+            if (task == null) {
+                continue;
+            }
+            task.setDatasourceName(normalizeText(task.getDatasourceName()));
+            task.setDatasourceType(normalizeText(task.getDatasourceType()));
+            task.setTaskPriority(normalizeTaskPriority(task.getTaskPriority()));
+            task.setTaskGroupName(normalizeText(task.getTaskGroupName()));
+
+            Long datasourceId = task.getDatasourceId();
+            String datasourceName = task.getDatasourceName();
+            String datasourceType = task.getDatasourceType();
+            if (((datasourceId == null || datasourceId <= 0) && StringUtils.hasText(datasourceName))
+                    || ((datasourceId != null && datasourceId > 0)
+                            && (!StringUtils.hasText(datasourceName) || !StringUtils.hasText(datasourceType)))) {
+                needDatasourceCatalog = true;
+            }
+
+            Integer taskGroupId = task.getTaskGroupId();
+            String taskGroupName = task.getTaskGroupName();
+            if (((taskGroupId == null || taskGroupId <= 0) && StringUtils.hasText(taskGroupName))
+                    || ((taskGroupId != null && taskGroupId > 0) && !StringUtils.hasText(taskGroupName))) {
+                needTaskGroupCatalog = true;
+            }
+        }
+
+        if (!needDatasourceCatalog && !needTaskGroupCatalog) {
+            return tasks;
+        }
+
+        Map<Long, DolphinDatasourceOption> datasourceById = Collections.emptyMap();
+        Map<String, DolphinDatasourceOption> datasourceByName = Collections.emptyMap();
+        if (needDatasourceCatalog) {
+            List<DolphinDatasourceOption> datasourceOptions = safeListDatasources();
+            datasourceById = new LinkedHashMap<>();
+            datasourceByName = new LinkedHashMap<>();
+            for (DolphinDatasourceOption option : datasourceOptions) {
+                if (option == null) {
+                    continue;
+                }
+                if (option.getId() != null && option.getId() > 0) {
+                    datasourceById.putIfAbsent(option.getId(), option);
+                }
+                String name = normalizeText(option.getName());
+                if (StringUtils.hasText(name)) {
+                    datasourceByName.putIfAbsent(name, option);
+                }
+            }
+        }
+
+        Map<Integer, DolphinTaskGroupOption> taskGroupById = Collections.emptyMap();
+        Map<String, DolphinTaskGroupOption> taskGroupByName = Collections.emptyMap();
+        if (needTaskGroupCatalog) {
+            List<DolphinTaskGroupOption> taskGroupOptions = safeListTaskGroups();
+            taskGroupById = new LinkedHashMap<>();
+            taskGroupByName = new LinkedHashMap<>();
+            for (DolphinTaskGroupOption option : taskGroupOptions) {
+                if (option == null) {
+                    continue;
+                }
+                if (option.getId() != null && option.getId() > 0) {
+                    taskGroupById.putIfAbsent(option.getId(), option);
+                }
+                String name = normalizeText(option.getName());
+                if (StringUtils.hasText(name)) {
+                    taskGroupByName.putIfAbsent(name, option);
+                }
+            }
+        }
+
+        int unresolvedDatasourceIdByName = 0;
+        int unresolvedDatasourceDetailById = 0;
+        int unresolvedTaskGroupIdByName = 0;
+        int unresolvedTaskGroupNameById = 0;
+        for (RuntimeTaskDefinition task : tasks) {
+            if (task == null) {
+                continue;
+            }
+
+            Long datasourceId = task.getDatasourceId();
+            String datasourceName = normalizeText(task.getDatasourceName());
+            String datasourceType = normalizeText(task.getDatasourceType());
+            if ((datasourceId == null || datasourceId <= 0) && StringUtils.hasText(datasourceName)) {
+                DolphinDatasourceOption option = datasourceByName.get(datasourceName);
+                if (option != null && option.getId() != null && option.getId() > 0) {
+                    task.setDatasourceId(option.getId());
+                    if (!StringUtils.hasText(datasourceType) && StringUtils.hasText(option.getType())) {
+                        task.setDatasourceType(option.getType().trim());
+                    }
+                } else {
+                    unresolvedDatasourceIdByName++;
+                }
+            } else if (datasourceId != null && datasourceId > 0) {
+                DolphinDatasourceOption option = datasourceById.get(datasourceId);
+                if (option != null) {
+                    if (!StringUtils.hasText(datasourceName) && StringUtils.hasText(option.getName())) {
+                        task.setDatasourceName(option.getName().trim());
+                    }
+                    if (!StringUtils.hasText(datasourceType) && StringUtils.hasText(option.getType())) {
+                        task.setDatasourceType(option.getType().trim());
+                    }
+                } else if (!StringUtils.hasText(datasourceName) || !StringUtils.hasText(datasourceType)) {
+                    unresolvedDatasourceDetailById++;
+                }
+            }
+
+            Integer taskGroupId = task.getTaskGroupId();
+            String taskGroupName = normalizeText(task.getTaskGroupName());
+            if ((taskGroupId == null || taskGroupId <= 0) && StringUtils.hasText(taskGroupName)) {
+                DolphinTaskGroupOption option = taskGroupByName.get(taskGroupName);
+                if (option != null && option.getId() != null && option.getId() > 0) {
+                    task.setTaskGroupId(option.getId());
+                } else {
+                    unresolvedTaskGroupIdByName++;
+                }
+            } else if (taskGroupId != null && taskGroupId > 0 && !StringUtils.hasText(taskGroupName)) {
+                DolphinTaskGroupOption option = taskGroupById.get(taskGroupId);
+                if (option != null && StringUtils.hasText(option.getName())) {
+                    task.setTaskGroupName(option.getName().trim());
+                } else {
+                    unresolvedTaskGroupNameById++;
+                }
+            }
+        }
+
+        if (unresolvedDatasourceIdByName > 0
+                || unresolvedDatasourceDetailById > 0
+                || unresolvedTaskGroupIdByName > 0
+                || unresolvedTaskGroupNameById > 0) {
+            log.warn(
+                    "Runtime task metadata enrichment unresolved: datasourceIdByName={}, datasourceDetailById={}, taskGroupIdByName={}, taskGroupNameById={}",
+                    unresolvedDatasourceIdByName,
+                    unresolvedDatasourceDetailById,
+                    unresolvedTaskGroupIdByName,
+                    unresolvedTaskGroupNameById);
+        }
+        return tasks;
     }
 
     private RuntimeWorkflowSchedule extractSchedule(JsonNode definition, Long workflowCode) {
@@ -440,7 +593,7 @@ public class DolphinRuntimeDefinitionService {
             task.setTimeoutSeconds(readInt(item, "timeout", "timeoutSeconds"));
             task.setRetryTimes(readInt(item, "failRetryTimes", "retryTimes"));
             task.setRetryInterval(readInt(item, "failRetryInterval", "retryInterval"));
-            task.setTaskPriority(readText(item, "taskPriority", "priority"));
+            task.setTaskPriority(normalizeTaskPriority(readText(item, "taskPriority", "priority")));
             task.setTaskGroupId(readInt(item, "taskGroupId"));
             task.setTaskGroupName(readText(item, "taskGroupName"));
 
@@ -656,6 +809,86 @@ public class DolphinRuntimeDefinitionService {
             ids.add(value);
         }
         return new ArrayList<>(ids);
+    }
+
+    private List<DolphinDatasourceOption> safeListDatasources() {
+        List<DolphinDatasourceOption> options = dolphinSchedulerService.listDatasources(null, null);
+        if (options == null) {
+            return Collections.emptyList();
+        }
+        return options;
+    }
+
+    private List<DolphinTaskGroupOption> safeListTaskGroups() {
+        List<DolphinTaskGroupOption> options = dolphinSchedulerService.listTaskGroups(null);
+        if (options == null) {
+            return Collections.emptyList();
+        }
+        return options;
+    }
+
+    private String normalizeText(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private String normalizeTaskPriority(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String normalized = value.trim();
+        String uppercase = normalized.toUpperCase(Locale.ROOT);
+        switch (uppercase) {
+            case "HIGHEST":
+            case "HIGH":
+            case "MEDIUM":
+            case "LOW":
+            case "LOWEST":
+                return uppercase;
+            default:
+                break;
+        }
+
+        Integer parsedPriority = null;
+        try {
+            parsedPriority = Integer.parseInt(normalized);
+        } catch (NumberFormatException ignored) {
+            // keep original text when parsing fails
+        }
+        if (parsedPriority == null) {
+            return normalized;
+        }
+
+        if (parsedPriority >= 0 && parsedPriority <= 4) {
+            switch (parsedPriority) {
+                case 0:
+                    return "HIGHEST";
+                case 1:
+                    return "HIGH";
+                case 2:
+                    return "MEDIUM";
+                case 3:
+                    return "LOW";
+                default:
+                    return "LOWEST";
+            }
+        }
+
+        if (parsedPriority >= 9) {
+            return "HIGHEST";
+        }
+        if (parsedPriority >= 7) {
+            return "HIGH";
+        }
+        if (parsedPriority >= 5) {
+            return "MEDIUM";
+        }
+        if (parsedPriority >= 3) {
+            return "LOW";
+        }
+        return "LOWEST";
     }
 
     private long resolveProjectCode(Long projectCode) {
