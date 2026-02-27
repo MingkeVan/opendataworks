@@ -2,6 +2,7 @@ version: '3'
 services:
   doris-fe:
     image: apache/doris:doris-all-in-one-2.1.0
+    pull_policy: always
     container_name: doris-fe
     hostname: doris-fe
     ports:

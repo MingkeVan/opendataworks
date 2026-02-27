@@ -4,6 +4,7 @@ services:
   # MySQL 数据库
   mysql:
     image: mysql:8.0
+    pull_policy: always
     container_name: opendataworks-mysql
     restart: always
     environment:
@@ -31,6 +32,7 @@ services:
   # 后端服务
   backend:
     image: mikefan2019/opendataworks-backend:latest
+    pull_policy: always
     container_name: opendataworks-backend
     restart: always
     env_file:
@@ -53,6 +55,7 @@ services:
   # 前端服务
   frontend:
     image: mikefan2019/opendataworks-frontend:latest
+    pull_policy: always
     container_name: opendataworks-frontend
     restart: always
     env_file:
