@@ -4,6 +4,8 @@
     :title="isEdit ? '编辑任务' : '创建任务'"
     size="50%"
     :close-on-click-modal="false"
+    :before-close="handleBeforeClose"
+    @closed="handleDrawerClosed"
     destroy-on-close
   >
     <el-form
@@ -610,6 +612,15 @@ const clearSqlAnalysis = () => {
   sqlAnalysis.ambiguous = []
 }
 
+const cancelPendingAnalyze = () => {
+  analyzeSeq += 1
+  if (sqlAnalyzeTimer) {
+    clearTimeout(sqlAnalyzeTimer)
+    sqlAnalyzeTimer = null
+  }
+  analysisLoading.value = false
+}
+
 const runSqlAnalyze = async (sqlText, options = {}) => {
   const { autoApply = true } = options
   const seq = ++analyzeSeq
@@ -622,7 +633,7 @@ const runSqlAnalyze = async (sqlText, options = {}) => {
       nodeType: form.task.dolphinNodeType
     })
 
-    if (seq !== analyzeSeq) return
+    if (seq !== analyzeSeq || !visible.value) return
 
     sqlAnalysis.inputRefs = Array.isArray(result?.inputRefs) ? result.inputRefs : []
     sqlAnalysis.outputRefs = Array.isArray(result?.outputRefs) ? result.outputRefs : []
@@ -633,7 +644,7 @@ const runSqlAnalyze = async (sqlText, options = {}) => {
       await applyMatchedSuggestions({ silent: true, mode: 'replace' })
     }
   } catch (error) {
-    if (seq !== analyzeSeq) return
+    if (seq !== analyzeSeq || !visible.value) return
     console.error('SQL 解析失败:', error)
     analysisError.value = error?.message || 'SQL 解析失败'
     sqlAnalysis.inputRefs = []
@@ -670,10 +681,7 @@ const scheduleSqlAnalyze = () => {
 }
 
 const handleReAnalyzeClick = () => {
-  if (sqlAnalyzeTimer) {
-    clearTimeout(sqlAnalyzeTimer)
-    sqlAnalyzeTimer = null
-  }
+  cancelPendingAnalyze()
 
   const sqlText = String(form.task.taskSql || '').trim()
   if (!visible.value || form.task.dolphinNodeType !== 'SQL' || !sqlText || analysisLoading.value) {
@@ -815,8 +823,41 @@ const open = async (id = null, initialData = {}) => {
   scheduleSqlAnalyze()
 }
 
+const safeResetOnClose = () => {
+  cancelPendingAnalyze()
+  if (tableSearchTimer) {
+    clearTimeout(tableSearchTimer)
+    tableSearchTimer = null
+  }
+  if (taskNameCheckTimer) {
+    clearTimeout(taskNameCheckTimer)
+    taskNameCheckTimer = null
+  }
+  taskNameChecking.value = false
+  loading.value = false
+  clearSqlAnalysis()
+}
+
+const handleBeforeClose = (done) => {
+  try {
+    safeResetOnClose()
+  } catch (error) {
+    console.error('关闭任务抽屉时发生异常，已强制关闭:', error)
+  } finally {
+    done()
+  }
+}
+
 const handleClose = () => {
+  try {
+    safeResetOnClose()
+  } catch (error) {
+    console.error('点击取消时重置状态失败:', error)
+  }
   visible.value = false
+}
+
+const handleDrawerClosed = () => {
   emit('close')
 }
 
@@ -1002,9 +1043,9 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  cancelPendingAnalyze()
   if (tableSearchTimer) clearTimeout(tableSearchTimer)
   if (taskNameCheckTimer) clearTimeout(taskNameCheckTimer)
-  if (sqlAnalyzeTimer) clearTimeout(sqlAnalyzeTimer)
 })
 
 defineExpose({
