@@ -81,7 +81,11 @@ export const workflowApi = {
     return request.delete(`/v1/workflows/${id}/versions/${versionId}`)
   },
 
-  delete(id) {
-    return request.delete(`/v1/workflows/${id}`)
+  delete(id, cascadeDeleteTasks = false) {
+    return request.delete(`/v1/workflows/${id}`, {
+      params: {
+        cascadeDeleteTasks
+      }
+    })
   }
 }

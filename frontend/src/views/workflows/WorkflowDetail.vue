@@ -2102,7 +2102,7 @@ const handleDelete = async (row) => {
       `确定要删除工作流"${row.workflowName}"吗？<br/><br/>
       <div style="color: #666; font-size: 12px;">
       • 将删除工作流相关的所有数据（版本、发布记录、执行历史等）<br/>
-      • 任务定义将被保留，可被其他工作流复用<br/>
+      • 任务定义默认保留，下一步可选择是否级联删除<br/>
       • 此操作不可恢复
       </div>`,
       '确认删除',
@@ -2113,21 +2113,49 @@ const handleDelete = async (row) => {
         dangerouslyUseHTMLString: true
       }
     )
-
-    setActionLoading(row.id, 'delete', true)
-    try {
-      await workflowApi.delete(row.id)
-      ElMessage.success('工作流删除成功')
-      // 跳转到工作流列表页
-      router.push('/workflows')
-    } catch (error) {
-      console.error('删除失败', error)
+  } catch (error) {
+    if (!isDialogCancel(error)) {
       ElMessage.error(getErrorMessage(error))
-    } finally {
-      setActionLoading(row.id, 'delete', false)
     }
-  } catch {
-    // 用户取消删除
+    return
+  }
+
+  let cascadeDeleteTasks = false
+  try {
+    await ElMessageBox.confirm(
+      `是否同时级联软删除工作流下的任务？<br/><br/>
+      <div style="color: #666; font-size: 12px;">
+      • 选择“级联删除任务”：将软删除工作流和其绑定任务<br/>
+      • 选择“仅删除工作流”：仅软删除工作流，任务会保留
+      </div>`,
+      '删除范围确认',
+      {
+        confirmButtonText: '级联删除任务',
+        cancelButtonText: '仅删除工作流',
+        type: 'warning',
+        distinguishCancelAndClose: true,
+        dangerouslyUseHTMLString: true
+      }
+    )
+    cascadeDeleteTasks = true
+  } catch (error) {
+    if (error === 'cancel') {
+      cascadeDeleteTasks = false
+    } else {
+      return
+    }
+  }
+
+  setActionLoading(row.id, 'delete', true)
+  try {
+    await workflowApi.delete(row.id, cascadeDeleteTasks)
+    ElMessage.success(cascadeDeleteTasks ? '工作流和任务已删除' : '工作流删除成功，任务已保留')
+    router.push('/workflows')
+  } catch (error) {
+    console.error('删除失败', error)
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    setActionLoading(row.id, 'delete', false)
   }
 }
 

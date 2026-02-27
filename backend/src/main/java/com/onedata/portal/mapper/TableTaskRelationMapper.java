@@ -22,6 +22,8 @@ public interface TableTaskRelationMapper extends BaseMapper<TableTaskRelation> {
         "FROM table_task_relation t_read " +
         "JOIN table_task_relation t_write ON t_read.table_id = t_write.table_id " +
         "WHERE t_read.task_id = #{taskId} " +
+        "  AND t_read.deleted = 0 " +
+        "  AND t_write.deleted = 0 " +
         "  AND t_read.relation_type = 'read' " +
         "  AND t_write.relation_type = 'write' " +
         "  AND t_write.task_id <> t_read.task_id")
@@ -31,6 +33,8 @@ public interface TableTaskRelationMapper extends BaseMapper<TableTaskRelation> {
         "FROM table_task_relation t_write " +
         "JOIN table_task_relation t_read ON t_write.table_id = t_read.table_id " +
         "WHERE t_write.task_id = #{taskId} " +
+        "  AND t_write.deleted = 0 " +
+        "  AND t_read.deleted = 0 " +
         "  AND t_write.relation_type = 'write' " +
         "  AND t_read.relation_type = 'read' " +
         "  AND t_read.task_id <> t_write.task_id")

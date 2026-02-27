@@ -18,6 +18,7 @@ import com.onedata.portal.dto.workflow.WorkflowBackfillRequest;
 import com.onedata.portal.dto.workflow.WorkflowQueryRequest;
 import com.onedata.portal.dto.workflow.WorkflowTaskBinding;
 import com.onedata.portal.dto.workflow.WorkflowTopologyResult;
+import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.TableTaskRelation;
@@ -26,6 +27,7 @@ import com.onedata.portal.entity.WorkflowInstanceCache;
 import com.onedata.portal.entity.WorkflowPublishRecord;
 import com.onedata.portal.entity.WorkflowTaskRelation;
 import com.onedata.portal.entity.WorkflowVersion;
+import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
@@ -93,6 +95,7 @@ public class WorkflowService {
     private final ObjectMapper objectMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
     private final DataTaskMapper dataTaskMapper;
+    private final DataLineageMapper dataLineageMapper;
     private final TableTaskRelationMapper tableTaskRelationMapper;
     private final TaskExecutionLogMapper taskExecutionLogMapper;
     private final WorkflowTopologyService workflowTopologyService;
@@ -1770,69 +1773,87 @@ public class WorkflowService {
 
     /**
      * 删除工作流
-     * 只删除工作流相关数据，保留任务定义以便复用
+     * 软删除工作流定义；默认保留任务定义以便复用
      */
     @Transactional
     public void deleteWorkflow(Long workflowId) {
+        deleteWorkflow(workflowId, false);
+    }
+
+    /**
+     * 删除工作流
+     *
+     * @param workflowId          工作流ID
+     * @param cascadeDeleteTasks  是否级联软删除绑定任务
+     */
+    @Transactional
+    public void deleteWorkflow(Long workflowId, boolean cascadeDeleteTasks) {
         if (workflowId == null) {
             throw new IllegalArgumentException("工作流ID不能为空");
         }
 
-        // 查询工作流信息
         DataWorkflow workflow = dataWorkflowMapper.selectById(workflowId);
         if (workflow == null) {
             log.warn("工作流不存在: {}", workflowId);
             return;
         }
 
-        log.info("开始删除工作流: {}, code: {}", workflowId, workflow.getWorkflowCode());
+        List<Long> taskIds = workflowTaskRelationMapper.selectList(
+                Wrappers.<WorkflowTaskRelation>lambdaQuery()
+                        .eq(WorkflowTaskRelation::getWorkflowId, workflowId))
+                .stream()
+                .map(WorkflowTaskRelation::getTaskId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+
+        log.info("开始删除工作流: workflowId={}, workflowCode={}, cascadeDeleteTasks={}, taskCount={}",
+                workflowId, workflow.getWorkflowCode(), cascadeDeleteTasks, taskIds.size());
 
         try {
-            // Step 1: 删除DolphinScheduler中的工作流定义
-            if (workflow.getWorkflowCode() != null) {
+            if (workflow.getWorkflowCode() != null && workflow.getWorkflowCode() > 0) {
                 try {
-                    if (workflow.getDolphinScheduleId() != null && workflow.getDolphinScheduleId() > 0) {
-                        try {
-                            dolphinSchedulerService.offlineWorkflowSchedule(workflow.getDolphinScheduleId());
-                        } catch (Exception ex) {
-                            log.warn("Failed to offline schedule {} before workflow delete: {}",
-                                    workflow.getDolphinScheduleId(), ex.getMessage());
+                    boolean dolphinWorkflowExists = dolphinSchedulerService.checkWorkflowExists(workflow.getWorkflowCode());
+                    if (!dolphinWorkflowExists) {
+                        log.info("DolphinScheduler中不存在工作流，跳过同步删除: {}", workflow.getWorkflowCode());
+                    } else {
+                        if (workflow.getDolphinScheduleId() != null && workflow.getDolphinScheduleId() > 0) {
+                            try {
+                                dolphinSchedulerService.offlineWorkflowSchedule(workflow.getDolphinScheduleId());
+                            } catch (Exception ex) {
+                                log.warn("Failed to offline schedule {} before workflow delete: {}",
+                                        workflow.getDolphinScheduleId(), ex.getMessage());
+                            }
                         }
+                        dolphinSchedulerService.setWorkflowReleaseState(workflow.getWorkflowCode(), "OFFLINE");
+                        dolphinSchedulerService.deleteWorkflow(workflow.getWorkflowCode());
+                        log.info("已删除DolphinScheduler中的工作流定义: {}", workflow.getWorkflowCode());
                     }
-                    dolphinSchedulerService.setWorkflowReleaseState(workflow.getWorkflowCode(), "OFFLINE");
-                    dolphinSchedulerService.deleteWorkflow(workflow.getWorkflowCode());
-                    log.info("已删除DolphinScheduler中的工作流定义: {}", workflow.getWorkflowCode());
                 } catch (Exception e) {
                     log.warn("删除DolphinScheduler工作流定义失败: {}", e.getMessage());
-                    // 继续清理其他数据
                 }
             }
 
-            // Step 2: 删除工作流任务关联关系
+            if (cascadeDeleteTasks && !taskIds.isEmpty()) {
+                dataLineageMapper.delete(
+                        Wrappers.<DataLineage>lambdaQuery()
+                                .in(DataLineage::getTaskId, taskIds));
+                tableTaskRelationMapper.delete(
+                        Wrappers.<TableTaskRelation>lambdaQuery()
+                                .in(TableTaskRelation::getTaskId, taskIds));
+                dataTaskMapper.deleteBatchIds(taskIds);
+                log.info("已级联软删除任务: workflowId={}, taskCount={}", workflowId, taskIds.size());
+            }
+
             workflowTaskRelationMapper.delete(
-                    new LambdaQueryWrapper<WorkflowTaskRelation>()
+                    Wrappers.<WorkflowTaskRelation>lambdaQuery()
                             .eq(WorkflowTaskRelation::getWorkflowId, workflowId));
-            log.info("已删除工作流任务关联关系");
+            log.info("已删除工作流任务关联关系: workflowId={}", workflowId);
 
-            // Step 3: 删除工作流版本记录
-            workflowVersionService.deleteByWorkflowId(workflowId);
-            log.info("已删除工作流版本记录");
-
-            // Step 4: 删除工作流发布记录
-            workflowPublishRecordMapper.delete(
-                    new LambdaQueryWrapper<WorkflowPublishRecord>()
-                            .eq(WorkflowPublishRecord::getWorkflowId, workflowId));
-            log.info("已删除工作流发布记录");
-
-            // Step 5: 删除工作流执行历史缓存
-            workflowInstanceCacheService.deleteByWorkflowId(workflowId);
-            log.info("已删除工作流执行历史缓存");
-
-            // Step 6: 删除工作流定义本身
             dataWorkflowMapper.deleteById(workflowId);
-            log.info("已删除工作流定义: {}", workflowId);
+            log.info("已软删除工作流定义: {}", workflowId);
 
-            log.info("工作流删除完成: {}", workflowId);
+            log.info("工作流删除完成: workflowId={}", workflowId);
         } catch (Exception e) {
             log.error("删除工作流失败: {}", workflowId, e);
             throw new RuntimeException("删除工作流失败: " + e.getMessage(), e);
