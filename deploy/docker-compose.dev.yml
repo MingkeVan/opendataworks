@@ -52,6 +52,35 @@ services:
     volumes:
       - backend-logs:/app/logs
 
+  dataagent-backend:
+    build:
+      context: ../dataagent-backend
+    container_name: dataagent-backend
+    restart: always
+    env_file:
+      - ./.env
+    environment:
+      AQS_DB_URL: jdbc:mysql://mysql:3306/opendataworks?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+      AQS_DB_USERNAME: ${MYSQL_USER:-opendataworks}
+      AQS_DB_PASSWORD: ${MYSQL_PASSWORD:-opendataworks123}
+      AQS_CORE_BACKEND_BASE_URL: http://backend:8080/api
+      AQS_LLM_BASE_URL: ${AQS_LLM_BASE_URL:-https://api.openai.com}
+      AQS_LLM_MODEL: ${AQS_LLM_MODEL:-gpt-4o-mini}
+      AQS_LLM_API_KEY: ${AQS_LLM_API_KEY:-}
+    ports:
+      - "8090:8090"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/api/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   # 前端服务
   frontend:
     image: mikefan2019/opendataworks-frontend:latest
@@ -64,6 +93,7 @@ services:
       - "8081:80"
     depends_on:
       - backend
+      - dataagent-backend
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost"]
       interval: 30s
