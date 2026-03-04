@@ -1,0 +1,12 @@
+assistant:
+  llm:
+    chat:
+      enabled: false
+  startup:
+    fail-fast: false
+
+auth:
+  anonymous:
+    enabled: true
+    user-id: assistant_it_user
+    username: assistant_it
