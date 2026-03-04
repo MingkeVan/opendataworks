@@ -5,7 +5,7 @@ server:
 
 spring:
   application:
-    name: odw-assistant-query-service
+    name: dataagent-backend
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: ${AQS_DB_URL:jdbc:mysql://localhost:3306/opendataworks_assistant?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}

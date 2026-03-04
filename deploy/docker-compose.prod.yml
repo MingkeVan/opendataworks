@@ -54,9 +54,9 @@ services:
     volumes:
       - backend-logs:/app/logs
 
-  assistant-query-service:
-    image: ${OPENDATAWORKS_ASSISTANT_QUERY_IMAGE:-mikefan2019/opendataworks-assistant-query-service:0.1.0}
-    container_name: assistant-query-service
+  dataagent-backend:
+    image: ${OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE:-mikefan2019/opendataworks-dataagent-backend:0.1.0}
+    container_name: dataagent-backend
     restart: always
     env_file:
       - ./.env
@@ -95,7 +95,7 @@ services:
       - "8081:80"
     depends_on:
       - backend
-      - assistant-query-service
+      - dataagent-backend
     networks:
       - opendataworks-network
     healthcheck:

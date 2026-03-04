@@ -52,10 +52,10 @@ services:
     volumes:
       - backend-logs:/app/logs
 
-  assistant-query-service:
+  dataagent-backend:
     build:
-      context: ../assistant-query-service
-    container_name: assistant-query-service
+      context: ../dataagent-backend
+    container_name: dataagent-backend
     restart: always
     env_file:
       - ./.env
@@ -93,7 +93,7 @@ services:
       - "8081:80"
     depends_on:
       - backend
-      - assistant-query-service
+      - dataagent-backend
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost"]
       interval: 30s
