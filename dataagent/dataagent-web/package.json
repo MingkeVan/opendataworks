@@ -1,0 +1,37 @@
+{
+  "name": "dataagent-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/dataagent-web.umd.cjs",
+  "module": "dist/dataagent-web.js",
+  "exports": {
+    ".": {
+      "import": "./dist/dataagent-web.js",
+      "require": "./dist/dataagent-web.umd.cjs"
+    },
+    "./style.css": "./dist/style.css"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:lib": "vite build --mode lib"
+  },
+  "peerDependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "axios": "^1.6.2",
+    "dayjs": "^1.11.10",
+    "echarts": "^5.4.3",
+    "element-plus": "^2.5.0",
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "axios": "^1.6.2",
+    "dayjs": "^1.11.10",
+    "echarts": "^5.4.3",
+    "element-plus": "^2.5.0",
+    "vite": "^5.0.8",
+    "vue": "^3.4.0"
+  }
+}

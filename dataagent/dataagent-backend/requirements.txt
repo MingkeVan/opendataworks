@@ -1,0 +1,10 @@
+claude-agent-sdk>=0.1.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pymysql>=1.1.0
+cryptography>=42.0.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+jieba>=0.42.1
+numpy>=1.26.0
