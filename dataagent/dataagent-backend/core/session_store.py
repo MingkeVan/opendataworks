@@ -23,6 +23,12 @@ def _to_iso(value) -> str:
     return str(value) if value is not None else ""
 
 
+def _json_default(value):
+    if isinstance(value, datetime):
+        return value.isoformat(timespec="seconds")
+    return str(value)
+
+
 class SessionStore:
     def __init__(self):
         self._ready = False
@@ -139,7 +145,7 @@ class SessionStore:
 
     def append_message(self, session_id: str, role: str, content: str, payload: dict | None = None):
         self._ensure_ready()
-        payload_json = json.dumps(payload, ensure_ascii=False) if payload else None
+        payload_json = json.dumps(payload, ensure_ascii=False, default=_json_default) if payload else None
         conn = self._connect(database=self._schema_name())
         try:
             with conn.cursor() as cur:
