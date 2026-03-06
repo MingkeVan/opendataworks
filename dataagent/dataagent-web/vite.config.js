@@ -4,6 +4,7 @@ import { resolve } from 'path'
 
 export default defineConfig(({ mode }) => {
   const isLib = mode === 'lib'
+  const devProxyTarget = process.env.VITE_DEV_PROXY_TARGET || 'http://localhost:8900'
 
   if (isLib) {
     return {
@@ -36,7 +37,14 @@ export default defineConfig(({ mode }) => {
       }
     },
     server: {
-      port: 3100
+      host: '0.0.0.0',
+      port: 3100,
+      proxy: {
+        '/api': {
+          target: devProxyTarget,
+          changeOrigin: true
+        }
+      }
     }
   }
 })

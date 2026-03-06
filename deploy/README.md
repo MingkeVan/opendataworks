@@ -40,7 +40,15 @@ Use this method if you have internet access and are deploying directly from the 
    ../scripts/start.sh
    ```
 
-   > **💡 数据库自动初始化**: MySQL 容器首次启动时，会自动执行 `database/mysql/` 目录下的初始化脚本，创建数据库和用户。无需手动创建数据库。表结构由后端服务的 Flyway 自动创建。
+   DataAgent 默认地址：
+   - DataAgent Frontend: `http://localhost:3100/nl2sql`
+   - DataAgent Backend: `http://localhost:8900`
+   - 可直接编辑挂载文件后生效：
+     - `dataagent/.claude/settings.json`（大模型配置 JSON）
+     - `dataagent/.claude/skills/`（Skills 目录）
+   - DataAgent 前端默认通过同源 `/api` 代理访问后端，无需额外改前端地址
+
+   > **💡 数据库自动初始化**: MySQL 容器首次启动时，会自动执行 `deploy/database/mysql/` 目录下的初始化脚本，创建数据库和用户。无需手动创建数据库。表结构由后端服务的 Flyway 自动创建。
 
 ---
 
@@ -76,6 +84,11 @@ Use this method for isolated environments without internet access. You will use 
    ```bash
    scripts/start.sh
    ```
+
+   DataAgent 默认地址：
+   - DataAgent Frontend: `http://localhost:3100/nl2sql`
+   - DataAgent Backend: `http://localhost:8900`
+   - 离线包内同样保留 `dataagent/.claude/settings.json` 与 `dataagent/.claude/skills/`，可直接编辑
 
    > **💡 数据库自动初始化**: MySQL 容器首次启动时，会自动执行 `deploy/database/mysql/` 目录下的初始化脚本，创建数据库和用户。无需手动创建数据库。表结构由后端服务的 Flyway 自动创建。
 

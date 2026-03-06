@@ -179,7 +179,7 @@ import { createNl2SqlApiClient } from '../api/nl2sqlApi'
 marked.setOptions({ breaks: true, gfm: true })
 
 const props = defineProps({
-  nl2sqlBase: { type: String, default: 'http://localhost:8900' }
+  nl2sqlBase: { type: String, default: '' }
 })
 
 const api = createNl2SqlApiClient({ baseURL: props.nl2sqlBase, timeout: 300000 })

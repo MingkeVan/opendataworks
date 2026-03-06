@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # MySQL 数据库
   mysql:
@@ -17,8 +15,7 @@ services:
       - "3316:3306"
     volumes:
       - mysql-data:/var/lib/mysql
-      # 可选：在 ../database/mysql 中放置初始化 SQL
-      - ../database/mysql:/docker-entrypoint-initdb.d:ro
+      - ./database/mysql:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
       interval: 10s
@@ -70,8 +67,79 @@ services:
       timeout: 10s
       retries: 3
 
+  # DataAgent 后端服务（NL2SQL）
+  dataagent-backend:
+    image: python:3.11-slim
+    container_name: opendataworks-dataagent-backend
+    restart: always
+    env_file:
+      - ./.env
+    working_dir: /workspace/dataagent/dataagent-backend
+    command: 'sh -c "pip install --cache-dir /root/.cache/pip -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8900"'
+    environment:
+      PYTHONUNBUFFERED: "1"
+      HOST: 0.0.0.0
+      PORT: 8900
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${DATAAGENT_MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${DATAAGENT_MYSQL_PASSWORD:-root123}
+      MYSQL_DATABASE: ${DATAAGENT_MYSQL_DATABASE:-opendataworks}
+      SESSION_MYSQL_DATABASE: ${DATAAGENT_SESSION_MYSQL_DATABASE:-dataagent}
+      SKILLS_OUTPUT_DIR: ${DATAAGENT_SKILLS_OUTPUT_DIR:-../.claude/skills/dataagent-nl2sql}
+      LLM_PROVIDER: ${DATAAGENT_LLM_PROVIDER:-anyrouter}
+      CLAUDE_MODEL: ${DATAAGENT_CLAUDE_MODEL:-claude-opus-4-6}
+      ANTHROPIC_AUTH_TOKEN: ${DATAAGENT_ANTHROPIC_AUTH_TOKEN:-}
+      ANTHROPIC_API_KEY: ${DATAAGENT_ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${DATAAGENT_ANTHROPIC_BASE_URL:-https://a-ocnfniawgw.cn-shanghai.fcapp.run}
+    ports:
+      - "8900:8900"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8900/api/v1/nl2sql/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    volumes:
+      - ../dataagent/dataagent-backend:/workspace/dataagent/dataagent-backend
+      - ${DATAAGENT_LLM_JSON_FILE:-../dataagent/.claude/settings.json}:/workspace/dataagent/.claude/settings.json
+      - ${DATAAGENT_SKILLS_DIR:-../dataagent/.claude/skills}:/workspace/dataagent/.claude/skills
+      - dataagent-backend-pip-cache:/root/.cache/pip
+
+  # DataAgent 前端服务
+  dataagent-frontend:
+    image: node:20-alpine
+    container_name: opendataworks-dataagent-frontend
+    restart: always
+    working_dir: /workspace/dataagent/dataagent-web
+    command: 'sh -c "if [ ! -f node_modules/.package-lock.json ]; then npm ci; fi && npm run dev -- --host 0.0.0.0 --port 3100"'
+    environment:
+      VITE_NL2SQL_BASE: ${DATAAGENT_NL2SQL_BASE_URL:-}
+      VITE_DEV_PROXY_TARGET: ${DATAAGENT_DEV_PROXY_TARGET:-http://dataagent-backend:8900}
+    ports:
+      - "3100:3100"
+    depends_on:
+      dataagent-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3100').then((r)=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    volumes:
+      - ../dataagent/dataagent-web:/workspace/dataagent/dataagent-web
+      - dataagent-web-node-modules:/workspace/dataagent/dataagent-web/node_modules
+
 volumes:
   mysql-data:
     driver: local
   backend-logs:
+    driver: local
+  dataagent-backend-pip-cache:
+    driver: local
+  dataagent-web-node-modules:
     driver: local
