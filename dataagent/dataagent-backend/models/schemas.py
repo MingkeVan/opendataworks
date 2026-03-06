@@ -152,6 +152,116 @@ class SettingsResponse(BaseModel):
     doris_database: str = ""
 
 
+class AdminSettingsResponse(BaseModel):
+    provider_id: str
+    model: str
+    providers: List[ProviderConfig] = Field(default_factory=list)
+    anthropic_api_key: str = ""
+    anthropic_auth_token: str = ""
+    anthropic_base_url: str = ""
+    mysql_host: str = ""
+    mysql_port: int = 3306
+    mysql_user: str = ""
+    mysql_password: str = ""
+    mysql_database: str = ""
+    doris_host: str = ""
+    doris_port: int = 9030
+    doris_user: str = ""
+    doris_password: str = ""
+    doris_database: str = ""
+    skills_output_dir: str = ""
+    session_mysql_database: str = ""
+    settings_file_path: str = ""
+    skills_root_dir: str = ""
+    updated_at: str = ""
+
+
+class AdminSettingsUpdateRequest(BaseModel):
+    provider_id: Optional[str] = None
+    model: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    anthropic_auth_token: Optional[str] = None
+    anthropic_base_url: Optional[str] = None
+    mysql_host: Optional[str] = None
+    mysql_port: Optional[int] = None
+    mysql_user: Optional[str] = None
+    mysql_password: Optional[str] = None
+    mysql_database: Optional[str] = None
+    doris_host: Optional[str] = None
+    doris_port: Optional[int] = None
+    doris_user: Optional[str] = None
+    doris_password: Optional[str] = None
+    doris_database: Optional[str] = None
+    skills_output_dir: Optional[str] = None
+
+
+class SkillDocumentVersionSummary(BaseModel):
+    id: int
+    document_id: int
+    version_no: int
+    change_source: str
+    change_summary: str = ""
+    actor: str = ""
+    content_hash: str = ""
+    file_size: int = 0
+    metadata: Optional[Dict[str, Any]] = None
+    parent_version_id: Optional[int] = None
+    created_at: str = ""
+    is_current: bool = False
+
+
+class SkillDocumentSummary(BaseModel):
+    id: int
+    relative_path: str
+    file_name: str
+    category: str
+    content_type: str
+    current_hash: str = ""
+    current_version_id: Optional[int] = None
+    version_count: int = 0
+    last_change_source: str = ""
+    last_change_summary: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class SkillDocumentDetail(SkillDocumentSummary):
+    current_content: str = ""
+    versions: List[SkillDocumentVersionSummary] = Field(default_factory=list)
+
+
+class SkillDocumentUpdateRequest(BaseModel):
+    content: str
+    change_summary: Optional[str] = None
+
+
+class SkillDocumentCompareRequest(BaseModel):
+    left_version_id: Optional[int] = None
+    right_version_id: Optional[int] = None
+
+
+class SkillDocumentCompareResponse(BaseModel):
+    document_id: int
+    left_label: str
+    right_label: str
+    left_content: str = ""
+    right_content: str = ""
+    diff_text: str = ""
+    added_lines: int = 0
+    removed_lines: int = 0
+    changed_lines: int = 0
+
+
+class SkillSyncResponse(BaseModel):
+    skills_root_dir: str
+    metadata_schema: str
+    knowledge_schema: str
+    stats: Dict[str, int] = Field(default_factory=dict)
+    changed_documents: List[SkillDocumentSummary] = Field(default_factory=list)
+    imported_documents: List[SkillDocumentSummary] = Field(default_factory=list)
+    document_count: int = 0
+
+
 class SessionSummary(BaseModel):
     session_id: str
     title: str

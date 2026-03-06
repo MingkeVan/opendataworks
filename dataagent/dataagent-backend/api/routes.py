@@ -13,9 +13,10 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from config import get_settings, update_settings
+from config import get_settings
 from core.nl2sql_agent import AgentRunInput, stream_agent_reply
 from core.semantic_layer import get_semantic_layer
+from core.skill_admin_service import persist_admin_settings
 from core.session_store import SessionStore, get_session_store
 from core.sql_executor import execute_sql
 from core.stream_events import encode_sse
@@ -68,48 +69,13 @@ async def api_update_settings(request: SettingsUpdateRequest):
     patch = request.model_dump(exclude_none=True)
     if not patch:
         raise HTTPException(status_code=400, detail="No fields to update")
-
-    mapped_patch: dict[str, Any] = {}
-    provider_id = patch.get("provider_id")
-    if provider_id is not None:
-        provider_id = str(provider_id).strip().lower()
-        if provider_id not in SUPPORTED_PROVIDERS:
-            raise HTTPException(status_code=400, detail="provider_id must be one of anthropic/openrouter/anyrouter/anthropic_compatible")
-        mapped_patch["llm_provider"] = provider_id
-
-    model = patch.get("model")
-    if model is not None:
-        mapped_patch["claude_model"] = str(model).strip()
-
-    passthrough_keys = {
-        "anthropic_api_key",
-        "anthropic_auth_token",
-        "anthropic_base_url",
-        "mysql_host",
-        "mysql_port",
-        "mysql_user",
-        "mysql_password",
-        "mysql_database",
-        "doris_host",
-        "doris_port",
-        "doris_user",
-        "doris_password",
-        "doris_database",
-        "skills_output_dir",
-    }
-    for key in passthrough_keys:
-        if key in patch:
-            mapped_patch[key] = patch[key]
-
-    if "skills_output_dir" in mapped_patch:
-        normalized = str(mapped_patch["skills_output_dir"] or "").replace("\\", "/")
-        if "/.claude/skills/" not in normalized and not normalized.startswith(".claude/skills/"):
-            raise HTTPException(
-                status_code=400,
-                detail="skills_output_dir must be under .claude/skills",
-            )
-
-    cfg = update_settings(mapped_patch)
+    try:
+        persisted = persist_admin_settings(patch)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    cfg = get_settings()
+    if persisted.get("provider_id") and persisted["provider_id"] not in SUPPORTED_PROVIDERS:
+        raise HTTPException(status_code=400, detail="provider_id must be one of anthropic/openrouter/anyrouter/anthropic_compatible")
     return _build_settings_response(cfg)
 
 

@@ -12,17 +12,48 @@
         <el-tab-pane label="MinIO 环境" name="minio">
           <MinioConfigManagement />
         </el-tab-pane>
+        <el-tab-pane label="DataAgent 配置" name="dataagent">
+          <DataAgentConfig />
+        </el-tab-pane>
+        <el-tab-pane label="Skill 管理" name="skills">
+          <SkillStudio />
+        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import DolphinConfig from './DolphinConfig.vue'
 import MinioConfigManagement from './MinioConfigManagement.vue'
+import DataAgentConfig from './DataAgentConfig.vue'
+import SkillStudio from './SkillStudio.vue'
 
-const activeTab = ref('dolphin')
+const route = useRoute()
+const router = useRouter()
+const availableTabs = new Set(['dolphin', 'minio', 'dataagent', 'skills'])
+const activeTab = ref(availableTabs.has(route.query.tab) ? route.query.tab : 'dolphin')
+
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (availableTabs.has(tab)) {
+      activeTab.value = tab
+    }
+  }
+)
+
+watch(activeTab, (tab) => {
+  router.replace({
+    path: route.path,
+    query: {
+      ...route.query,
+      tab
+    }
+  })
+})
 </script>
 
 <style scoped>
