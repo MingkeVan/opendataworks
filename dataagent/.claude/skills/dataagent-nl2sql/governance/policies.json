@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "items": [
+    {
+      "policy_key": "sql_read_only",
+      "description": "仅允许查询语句",
+      "enabled": true
+    },
+    {
+      "policy_key": "require_limit",
+      "description": "查询必须包含 LIMIT 保护",
+      "enabled": true
+    }
+  ]
+}

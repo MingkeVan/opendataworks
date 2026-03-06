@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "items": [
+    {
+      "metric_key": "order_cnt",
+      "name": "订单数",
+      "formula": "COUNT(ods_order.order_id)",
+      "default_time_field": "order_time"
+    },
+    {
+      "metric_key": "order_amount",
+      "name": "订单金额",
+      "formula": "SUM(ods_order.total_amount)",
+      "default_time_field": "order_time"
+    },
+    {
+      "metric_key": "paid_order_cnt",
+      "name": "支付订单数",
+      "formula": "SUM(dws_order_daily.paid_orders)",
+      "default_time_field": "stat_date"
+    }
+  ]
+}

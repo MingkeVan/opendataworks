@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "global": {
+    "row_limit_max": 1000,
+    "timezone": "Asia/Shanghai",
+    "forbidden_ops": [
+      "drop",
+      "truncate",
+      "delete",
+      "alter",
+      "create",
+      "insert",
+      "update"
+    ]
+  },
+  "items": []
+}
