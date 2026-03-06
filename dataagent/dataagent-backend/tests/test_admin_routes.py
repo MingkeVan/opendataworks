@@ -45,7 +45,6 @@ def test_admin_settings_contract(monkeypatch):
             "session_mysql_database": "dataagent",
         },
     )
-    monkeypatch.setattr(admin_routes, "resolve_claude_settings_path", lambda: "/tmp/settings.json")
     monkeypatch.setattr(admin_routes, "resolve_skills_root_dir", lambda: "/tmp/.claude/skills/dataagent-nl2sql")
     monkeypatch.setattr(
         admin_routes,
@@ -54,8 +53,12 @@ def test_admin_settings_contract(monkeypatch):
             admin_routes.ProviderConfig(
                 provider_id="openrouter",
                 display_name="OpenRouter",
+                provider_group="聚合路由",
                 models=["anthropic/claude-sonnet-4.5"],
+                supported_models=["anthropic/claude-sonnet-4.5"],
                 default_model="anthropic/claude-sonnet-4.5",
+                enabled=True,
+                validation_status="verified",
             )
         ],
     )
@@ -82,10 +85,10 @@ def test_admin_settings_contract(monkeypatch):
 def test_skill_document_routes_contract(monkeypatch):
     summary = {
         "id": 1,
-        "relative_path": "metadata/metadata_catalog.json",
-        "file_name": "metadata_catalog.json",
-        "category": "metadata",
-        "content_type": "json",
+        "relative_path": "reference/40-runtime-metadata.md",
+        "file_name": "40-runtime-metadata.md",
+        "category": "reference",
+        "content_type": "markdown",
         "current_hash": "hash",
         "current_version_id": 3,
         "version_count": 3,
@@ -158,7 +161,7 @@ def test_skill_document_routes_contract(monkeypatch):
 
     list_response = client.get("/api/v1/dataagent/skills/documents")
     assert list_response.status_code == 200
-    assert list_response.json()[0]["relative_path"] == "metadata/metadata_catalog.json"
+    assert list_response.json()[0]["relative_path"] == "reference/40-runtime-metadata.md"
 
     detail_response = client.get("/api/v1/dataagent/skills/documents/1")
     assert detail_response.status_code == 200

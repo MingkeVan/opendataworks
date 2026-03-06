@@ -7,18 +7,19 @@ DataAgent NL2SQL API（Skills + SSE Block Stream）
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from config import get_settings
 from core.nl2sql_agent import AgentRunInput, stream_agent_reply
-from core.semantic_layer import get_semantic_layer
-from core.skill_admin_service import persist_admin_settings
+from core.skill_admin_service import (
+    persist_admin_settings,
+    resolve_runtime_provider_selection,
+    resolved_chat_settings_payload,
+)
 from core.session_store import SessionStore, get_session_store
-from core.sql_executor import execute_sql
 from core.stream_events import encode_sse
 from models.schemas import (
     AssistantMessageResponse,
@@ -30,7 +31,6 @@ from models.schemas import (
     SessionSummary,
     SettingsResponse,
     SettingsUpdateRequest,
-    SqlExecutionResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,12 +40,6 @@ router = APIRouter(prefix="/api/v1/nl2sql")
 MAX_HISTORY_MESSAGES = 24
 MAX_HISTORY_CONTENT_CHARS = 1600
 SUPPORTED_PROVIDERS = {"anthropic", "openrouter", "anyrouter", "anthropic_compatible"}
-
-
-class ExecuteSqlRequest(BaseModel):
-    sql: str
-    database: Optional[str] = None
-    limit: Optional[int] = None
 
 
 @router.get("/health")
@@ -61,7 +55,7 @@ async def api_health():
 
 @router.get("/settings", response_model=SettingsResponse)
 async def api_get_settings():
-    return _build_settings_response(get_settings())
+    return _build_settings_response()
 
 
 @router.put("/settings", response_model=SettingsResponse)
@@ -73,10 +67,9 @@ async def api_update_settings(request: SettingsUpdateRequest):
         persisted = persist_admin_settings(patch)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    cfg = get_settings()
     if persisted.get("provider_id") and persisted["provider_id"] not in SUPPORTED_PROVIDERS:
         raise HTTPException(status_code=400, detail="provider_id must be one of anthropic/openrouter/anyrouter/anthropic_compatible")
-    return _build_settings_response(cfg)
+    return _build_settings_response()
 
 
 @router.post("/sessions", response_model=SessionDetail)
@@ -110,15 +103,6 @@ async def api_delete_session(session_id: str):
     return {"status": "ok"}
 
 
-@router.post("/execute", response_model=SqlExecutionResult)
-async def api_execute_sql(request: ExecuteSqlRequest):
-    return execute_sql(
-        sql=request.sql,
-        database=request.database,
-        limit=request.limit,
-    )
-
-
 @router.post("/sessions/{session_id}/messages")
 async def api_send_message(session_id: str, request: SendMessageRequest):
     content = str(request.content or "").strip()
@@ -139,17 +123,12 @@ async def api_send_message(session_id: str, request: SendMessageRequest):
     history_messages = [m for m in messages if str(m.get("message_id") or "") != user_message_id]
     history = _build_history_messages(history_messages[-MAX_HISTORY_MESSAGES:])
 
-    resolved_database = _resolve_database(
-        question=content,
-        explicit_database=request.database,
-        history_messages=history_messages,
-    )
-
     run_id = f"run_{uuid.uuid4().hex[:24]}"
     assistant_message_id = f"a_{uuid.uuid4().hex[:24]}"
-    provider_id = (request.provider_id or get_settings().llm_provider or "").strip() or "openrouter"
-    model = (request.model or get_settings().claude_model or "").strip() or "anthropic/claude-sonnet-4.5"
-    debug = bool(request.debug)
+    try:
+        resolved_target = resolve_runtime_provider_selection(request.provider_id, request.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     run_input = AgentRunInput(
         run_id=run_id,
@@ -157,10 +136,10 @@ async def api_send_message(session_id: str, request: SendMessageRequest):
         message_id=assistant_message_id,
         question=content,
         history=history,
-        provider_id=provider_id,
-        model=model,
-        resolved_database=resolved_database,
-        debug=debug,
+        provider_id=str(resolved_target.get("provider_id") or ""),
+        model=str(resolved_target.get("model") or ""),
+        database_hint=str(request.database or "").strip() or None,
+        debug=bool(request.debug),
     )
 
     if request.stream:
@@ -174,78 +153,23 @@ async def api_send_message(session_id: str, request: SendMessageRequest):
             },
         )
 
-    response = await _collect_message_response(store=store, run_input=run_input)
-    return response
+    return await _collect_message_response(store=store, run_input=run_input)
 
 
-def _build_settings_response(cfg) -> SettingsResponse:
-    anthropic_models = [
-        "claude-opus-4-6",
-        "claude-sonnet-4-20250514",
-        "claude-3-7-sonnet-20250219",
-    ]
-    openrouter_models = [
-        "anthropic/claude-sonnet-4.5",
-        "anthropic/claude-sonnet-4.6",
-        "anthropic/claude-opus-4.1",
-    ]
-    anyrouter_models = [
-        "claude-opus-4-6",
-        "claude-sonnet-4-20250514",
-        "claude-3-7-sonnet-20250219",
-    ]
-    compatible_models = [cfg.claude_model] if cfg.claude_model else []
-
-    providers = [
-        ProviderConfig(
-            provider_id="anthropic",
-            display_name="Anthropic",
-            base_url="https://api.anthropic.com",
-            api_key_set=bool(cfg.anthropic_api_key),
-            auth_token_set=bool(cfg.anthropic_auth_token),
-            models=anthropic_models,
-            default_model="claude-sonnet-4-20250514",
-        ),
-        ProviderConfig(
-            provider_id="openrouter",
-            display_name="OpenRouter (Anthropic Compatible)",
-            base_url="https://openrouter.ai/api",
-            api_key_set=bool(cfg.anthropic_api_key),
-            auth_token_set=bool(cfg.anthropic_auth_token),
-            models=openrouter_models,
-            default_model="anthropic/claude-sonnet-4.5",
-        ),
-        ProviderConfig(
-            provider_id="anyrouter",
-            display_name="AnyRouter (Anthropic Compatible)",
-            base_url=cfg.anthropic_base_url or "https://a-ocnfniawgw.cn-shanghai.fcapp.run",
-            api_key_set=bool(cfg.anthropic_api_key),
-            auth_token_set=bool(cfg.anthropic_auth_token),
-            models=anyrouter_models,
-            default_model=cfg.claude_model or "claude-opus-4-6",
-        ),
-        ProviderConfig(
-            provider_id="anthropic_compatible",
-            display_name="Anthropic Compatible",
-            base_url=cfg.anthropic_base_url or "",
-            api_key_set=bool(cfg.anthropic_api_key),
-            auth_token_set=bool(cfg.anthropic_auth_token),
-            models=compatible_models,
-            default_model=cfg.claude_model or "",
-        ),
-    ]
-
+def _build_settings_response() -> SettingsResponse:
+    payload = resolved_chat_settings_payload()
+    providers = [ProviderConfig.model_validate(item) for item in payload.get("providers") or []]
     return SettingsResponse(
-        default_provider_id=cfg.llm_provider,
-        default_model=cfg.claude_model,
+        default_provider_id=str(payload.get("default_provider_id") or ""),
+        default_model=str(payload.get("default_model") or ""),
         providers=providers,
-        skills_output_dir=cfg.skills_output_dir,
-        mysql_host=cfg.mysql_host,
-        mysql_port=cfg.mysql_port,
-        mysql_database=cfg.mysql_database,
-        doris_host=cfg.doris_host,
-        doris_port=cfg.doris_port,
-        doris_database=cfg.doris_database,
+        skills_output_dir=str(payload.get("skills_output_dir") or ""),
+        mysql_host=str(payload.get("mysql_host") or ""),
+        mysql_port=int(payload.get("mysql_port") or 3306),
+        mysql_database=str(payload.get("mysql_database") or ""),
+        doris_host=str(payload.get("doris_host") or ""),
+        doris_port=int(payload.get("doris_port") or 9030),
+        doris_database=str(payload.get("doris_database") or ""),
     )
 
 
@@ -260,7 +184,7 @@ async def _stream_message_events(store: SessionStore, run_input: AgentRunInput) 
                 break
             events.append(event)
             yield encode_sse(event)
-    except Exception as e:
+    except Exception as exc:
         logger.exception("stream run failed: run_id=%s", run_input.run_id)
         error_event = {
             "run_id": run_input.run_id,
@@ -269,7 +193,7 @@ async def _stream_message_events(store: SessionStore, run_input: AgentRunInput) 
             "seq": len(events) + 1,
             "type": "error",
             "ts": datetime.utcnow().isoformat(),
-            "payload": {"code": "stream_failed", "message": str(e)},
+            "payload": {"code": "stream_failed", "message": str(exc)},
         }
         done_event = {
             "run_id": run_input.run_id,
@@ -286,14 +210,11 @@ async def _stream_message_events(store: SessionStore, run_input: AgentRunInput) 
                         "block_id": "error-1",
                         "type": "error",
                         "status": "failed",
-                        "text": str(e),
-                        "payload": {"code": "stream_failed", "message": str(e)},
+                        "text": str(exc),
+                        "payload": {"code": "stream_failed", "message": str(exc)},
                     }
                 ],
-                "sql": "",
-                "execution": None,
-                "error": {"code": "stream_failed", "message": str(e)},
-                "resolved_database": run_input.resolved_database,
+                "error": {"code": "stream_failed", "message": str(exc)},
                 "provider_id": run_input.provider_id,
                 "model": run_input.model,
             },
@@ -313,10 +234,7 @@ async def _stream_message_events(store: SessionStore, run_input: AgentRunInput) 
                 "status": "failed",
                 "content": "模型未返回完成事件",
                 "blocks": [],
-                "sql": "",
-                "execution": None,
                 "error": {"code": "done_missing", "message": "模型未返回完成事件"},
-                "resolved_database": run_input.resolved_database,
                 "provider_id": run_input.provider_id,
                 "model": run_input.model,
             },
@@ -325,7 +243,7 @@ async def _stream_message_events(store: SessionStore, run_input: AgentRunInput) 
     events.append(done_event)
     try:
         await _persist_run(store=store, run_input=run_input, events=events, done_payload=done_event.get("payload") or {})
-    except Exception as e:
+    except Exception as exc:
         logger.exception("persist run failed: run_id=%s", run_input.run_id)
         error_event = {
             "run_id": run_input.run_id,
@@ -334,7 +252,7 @@ async def _stream_message_events(store: SessionStore, run_input: AgentRunInput) 
             "seq": len(events) + 1,
             "type": "error",
             "ts": datetime.utcnow().isoformat(),
-            "payload": {"code": "persist_failed", "message": str(e)},
+            "payload": {"code": "persist_failed", "message": str(exc)},
         }
         yield encode_sse(error_event)
         return
@@ -354,9 +272,7 @@ async def _collect_message_response(store: SessionStore, run_input: AgentRunInpu
     if not done_event:
         raise HTTPException(status_code=500, detail="Model stream missing done event")
 
-    payload = done_event.get("payload") or {}
-    saved = await _persist_run(store=store, run_input=run_input, events=events, done_payload=payload)
-    return saved
+    return await _persist_run(store=store, run_input=run_input, events=events, done_payload=done_event.get("payload") or {})
 
 
 async def _persist_run(
@@ -371,14 +287,8 @@ async def _persist_run(
     blocks = done_payload.get("blocks")
     if not isinstance(blocks, list):
         blocks = []
-    sql = str(done_payload.get("sql") or "")
-    execution_payload = done_payload.get("execution")
-    execution: dict[str, Any] | None = execution_payload if isinstance(execution_payload, dict) else None
     error_payload = done_payload.get("error")
     error: dict[str, Any] | None = error_payload if isinstance(error_payload, dict) else None
-    resolved_database = done_payload.get("resolved_database")
-    if resolved_database is not None:
-        resolved_database = str(resolved_database).strip() or None
     provider_id = str(done_payload.get("provider_id") or run_input.provider_id)
     model = str(done_payload.get("model") or run_input.model)
 
@@ -389,10 +299,7 @@ async def _persist_run(
         content=content,
         status=status,
         blocks=blocks,
-        sql=sql,
-        execution=execution,
         error=error,
-        resolved_database=resolved_database,
         provider_id=provider_id,
         model=model,
     )
@@ -410,15 +317,11 @@ async def _persist_run(
         "run_id": run_input.run_id,
         "content": content,
         "blocks": blocks,
-        "sql": sql,
-        "execution": execution,
         "error": error,
-        "resolved_database": resolved_database,
         "provider_id": provider_id,
         "model": model,
         "created_at": datetime.utcnow().isoformat(),
     }
-
     return _to_assistant_message_response(saved)
 
 
@@ -433,16 +336,10 @@ def _load_message_from_session(store: SessionStore, session_id: str, message_id:
 
 
 def _to_assistant_message_response(message: dict[str, Any]) -> AssistantMessageResponse:
-    execution_payload = message.get("execution")
-    execution = None
-    if isinstance(execution_payload, dict):
-        execution = SqlExecutionResult.model_validate(execution_payload)
-
     blocks: list[MessageBlock] = []
     for block in message.get("blocks") or []:
-        if not isinstance(block, dict):
-            continue
-        blocks.append(MessageBlock.model_validate(block))
+        if isinstance(block, dict):
+            blocks.append(MessageBlock.model_validate(block))
 
     return AssistantMessageResponse(
         role="assistant",
@@ -451,10 +348,7 @@ def _to_assistant_message_response(message: dict[str, Any]) -> AssistantMessageR
         status=str(message.get("status") or "success"),
         content=str(message.get("content") or ""),
         blocks=blocks,
-        sql=str(message.get("sql") or ""),
-        execution=execution,
         error=message.get("error") if isinstance(message.get("error"), dict) else None,
-        resolved_database=str(message.get("resolved_database") or "") or None,
         provider_id=str(message.get("provider_id") or ""),
         model=str(message.get("model") or ""),
         created_at=str(message.get("created_at") or ""),
@@ -477,22 +371,19 @@ def _normalize_session(session: dict[str, Any]) -> dict[str, Any]:
     for message in session.get("messages") or []:
         if not isinstance(message, dict):
             continue
-        msg = {
+        payload = {
             "message_id": str(message.get("message_id") or ""),
             "role": str(message.get("role") or "assistant"),
             "content": str(message.get("content") or ""),
             "status": str(message.get("status") or "success"),
             "run_id": str(message.get("run_id") or "") or None,
             "blocks": message.get("blocks") if isinstance(message.get("blocks"), list) else [],
-            "sql": str(message.get("sql") or ""),
-            "execution": message.get("execution") if isinstance(message.get("execution"), dict) else None,
             "error": message.get("error") if isinstance(message.get("error"), dict) else None,
-            "resolved_database": str(message.get("resolved_database") or "") or None,
             "provider_id": str(message.get("provider_id") or "") or None,
             "model": str(message.get("model") or "") or None,
             "created_at": str(message.get("created_at") or ""),
         }
-        messages.append(SessionMessage.model_validate(msg).model_dump())
+        messages.append(SessionMessage.model_validate(payload).model_dump())
 
     return {
         "session_id": str(session.get("session_id") or ""),
@@ -509,68 +400,20 @@ def _build_history_messages(messages: list[dict[str, Any]]) -> list[dict[str, st
         role = str(item.get("role") or "")
         if role not in {"user", "assistant"}:
             continue
-
-        if role == "assistant":
-            content = str(item.get("content") or "").strip()
-            sql = str(item.get("sql") or "").strip()
-            merged = content
-            if sql:
-                merged = f"{merged}\n\nSQL:\n{sql}".strip()
-        else:
-            merged = str(item.get("content") or "").strip()
-
-        if not merged:
+        content = str(item.get("content") or "").strip()
+        if not content:
             continue
-        if len(merged) > MAX_HISTORY_CONTENT_CHARS:
-            merged = merged[:MAX_HISTORY_CONTENT_CHARS] + "..."
-        history.append({"role": role, "content": merged})
+        if len(content) > MAX_HISTORY_CONTENT_CHARS:
+            content = content[:MAX_HISTORY_CONTENT_CHARS] + "..."
+        history.append({"role": role, "content": content})
     return history
-
-
-def _resolve_database(
-    *,
-    question: str,
-    explicit_database: str | None,
-    history_messages: list[dict[str, Any]] | None = None,
-) -> str | None:
-    manual = _normalize_database_name(explicit_database)
-    if manual:
-        return manual
-
-    semantic_layer = get_semantic_layer()
-    if not semantic_layer._loaded:
-        try:
-            semantic_layer.load()
-        except Exception as e:
-            logger.warning("semantic layer load failed: %s", e)
-
-    try:
-        inferred_db, _ = semantic_layer.infer_database(question, top_k=8)
-        if inferred_db:
-            return inferred_db
-    except Exception as e:
-        logger.warning("database inference failed: %s", e)
-
-    history = history_messages or []
-    for msg in reversed(history):
-        if str(msg.get("role") or "") != "assistant":
-            continue
-        resolved = _normalize_database_name(msg.get("resolved_database"))
-        if resolved:
-            return resolved
-    return None
-
-
-def _normalize_database_name(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text or None
 
 
 def _get_store() -> SessionStore:
     store = get_session_store()
     try:
         store.init_schema()
-    except Exception as e:
+    except Exception as exc:
         logger.exception("session store init failed")
-        raise HTTPException(status_code=500, detail=f"Session store unavailable: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Session store unavailable: {exc}") from exc
     return store

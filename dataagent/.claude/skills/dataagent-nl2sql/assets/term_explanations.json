@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "items": [
+    {
+      "term": "活跃用户",
+      "aliases": [
+        "DAU",
+        "日活",
+        "活跃用户数"
+      ],
+      "explanation": "在给定时间窗口内发生某种活跃行为的去重用户数。活跃行为通常是登录、访问、下单或支付。",
+      "ambiguous_terms": [
+        "新增用户",
+        "留存用户"
+      ],
+      "ask_back": "请确认活跃的判定行为，以及需要按天、按周还是按月统计。",
+      "related_metrics": [
+        "注册用户数"
+      ],
+      "related_tables": [
+        "ods_user"
+      ]
+    },
+    {
+      "term": "订单金额",
+      "aliases": [
+        "GMV",
+        "成交额",
+        "销售额"
+      ],
+      "explanation": "订单金额通常是订单总金额求和，但是否只统计已支付订单、是否扣除退款需要额外确认。",
+      "ambiguous_terms": [
+        "支付金额",
+        "实收金额"
+      ],
+      "ask_back": "请确认是否只统计已支付订单，以及是否需要扣除退款或取消订单。",
+      "related_metrics": [
+        "订单金额",
+        "支付订单数"
+      ],
+      "related_tables": [
+        "ods_order",
+        "dws_order_daily"
+      ]
+    },
+    {
+      "term": "新增用户",
+      "aliases": [
+        "新用户",
+        "注册用户"
+      ],
+      "explanation": "在指定时间窗口内首次注册或首次建档的用户数，通常按注册时间字段统计。",
+      "ambiguous_terms": [
+        "活跃用户",
+        "留存用户"
+      ],
+      "ask_back": "请确认新增的定义是注册用户还是首次下单用户，以及统计时间范围。",
+      "related_metrics": [
+        "注册用户数"
+      ],
+      "related_tables": [
+        "ods_user"
+      ]
+    },
+    {
+      "term": "来源分布",
+      "aliases": [
+        "渠道分布",
+        "来源占比"
+      ],
+      "explanation": "按来源、渠道、入口等分类字段统计数量或金额占比。类别较少时更适合用饼图。",
+      "ambiguous_terms": [
+        "业务线分布",
+        "地区分布"
+      ],
+      "ask_back": "请确认来源字段是渠道、推广来源还是业务线，并确认是否需要占比展示。",
+      "related_metrics": [
+        "注册用户数",
+        "订单金额"
+      ],
+      "related_tables": [
+        "ods_user",
+        "ods_order"
+      ]
+    }
+  ]
+}

@@ -86,8 +86,9 @@ server {
 | 组件 | 文件 | 说明 |
 | --- | --- | --- |
 | Backend | `application.yml` | DB、Dolphin/Dinky、日志、CORS |
-| Frontend | `frontend/nginx.conf` | 反向代理 `/api/` 至 `backend:8080/api/` |
-| Compose | `deploy/docker-compose.prod.yml` | 镜像/tag/端口/卷 |
+| Frontend | `frontend/nginx.conf` | 反向代理 `/api/` 至 `backend:8080/api/`，并代理 `/api/v1/dataagent/`、`/api/v1/nl2sql/` 至 `dataagent-backend:8900` |
+| DataAgent Backend | `dataagent/dataagent-backend` | 智能问数 API、Skills 管理、NL2SQL 会话服务 |
+| Compose | `deploy/docker-compose.prod.yml` | 镜像/tag/端口/卷，主前端统一承载智能问数入口 |
 
 ## 滚动/重启
 
@@ -98,7 +99,7 @@ server {
 ## 镜像构建与大小控制
 
 - 构建脚本：`scripts/build/build-multiarch.sh`，支持多架构 `linux/amd64,linux/arm64`。
-- 产物：`opendataworks-backend`, `opendataworks-frontend`。
+- 产物：`opendataworks-backend`, `opendataworks-frontend`, `opendataworks-dataagent-backend`。
 - 构建前确保 `frontend/dist`、`backend/target` 已存在，否则脚本会自动触发构建。
 
 ## 运维 checklist

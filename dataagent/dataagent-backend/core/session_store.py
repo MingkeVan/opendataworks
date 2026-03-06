@@ -13,7 +13,6 @@ from datetime import datetime
 from typing import Any
 
 import pymysql
-
 from config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -68,99 +67,8 @@ class SessionStore:
         with self._ready_lock:
             if self._ready:
                 return
-
-            schema = self._schema_name()
-
-            conn = self._connect(database=None)
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f"CREATE DATABASE IF NOT EXISTS `{schema}` "
-                        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-                    )
-                conn.commit()
-            finally:
-                conn.close()
-
-            conn = self._connect(database=schema)
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS da_chat_session (
-                            session_id VARCHAR(64) NOT NULL PRIMARY KEY,
-                            title VARCHAR(255) NOT NULL,
-                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                            KEY idx_updated_at (updated_at)
-                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                        """
-                    )
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS da_chat_message (
-                            message_id VARCHAR(64) NOT NULL PRIMARY KEY,
-                            session_id VARCHAR(64) NOT NULL,
-                            role VARCHAR(16) NOT NULL,
-                            status VARCHAR(32) NOT NULL DEFAULT 'success',
-                            run_id VARCHAR(64) NULL,
-                            content LONGTEXT NOT NULL,
-                            sql_text LONGTEXT NULL,
-                            execution_json LONGTEXT NULL,
-                            error_json LONGTEXT NULL,
-                            resolved_database VARCHAR(255) NULL,
-                            provider_id VARCHAR(64) NULL,
-                            model_name VARCHAR(255) NULL,
-                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                            KEY idx_session_created (session_id, created_at, message_id),
-                            KEY idx_run_id (run_id),
-                            CONSTRAINT fk_da_message_session
-                                FOREIGN KEY (session_id) REFERENCES da_chat_session(session_id)
-                                ON DELETE CASCADE
-                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                        """
-                    )
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS da_chat_block (
-                            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                            message_id VARCHAR(64) NOT NULL,
-                            block_id VARCHAR(64) NOT NULL,
-                            block_type VARCHAR(64) NOT NULL,
-                            status VARCHAR(32) NOT NULL DEFAULT 'success',
-                            content_json LONGTEXT NULL,
-                            seq INT NOT NULL DEFAULT 0,
-                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            KEY idx_message_seq (message_id, seq),
-                            CONSTRAINT fk_da_block_message
-                                FOREIGN KEY (message_id) REFERENCES da_chat_message(message_id)
-                                ON DELETE CASCADE
-                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                        """
-                    )
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS da_chat_event (
-                            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                            run_id VARCHAR(64) NOT NULL,
-                            session_id VARCHAR(64) NOT NULL,
-                            message_id VARCHAR(64) NOT NULL,
-                            seq INT NOT NULL,
-                            event_type VARCHAR(64) NOT NULL,
-                            payload_json LONGTEXT NULL,
-                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            KEY idx_run_seq (run_id, seq),
-                            KEY idx_session_message (session_id, message_id)
-                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                        """
-                    )
-                conn.commit()
-            finally:
-                conn.close()
-
             self._ready = True
-            logger.info("Session store schema is ready: %s", schema)
+            logger.info("Session store is ready; schema is expected to be managed by Alembic")
 
     def _ensure_ready(self):
         if not self._ready:
@@ -233,15 +141,11 @@ class SessionStore:
         content: str,
         status: str,
         blocks: list[dict[str, Any]],
-        sql: str,
-        execution: dict[str, Any] | None,
         error: dict[str, Any] | None,
-        resolved_database: str | None,
         provider_id: str,
         model: str,
     ) -> dict[str, Any]:
         self._ensure_ready()
-        execution_json = json.dumps(execution, ensure_ascii=False, default=_json_default) if execution else None
         error_json = json.dumps(error, ensure_ascii=False, default=_json_default) if error else None
 
         conn = self._connect(database=self._schema_name())
@@ -250,17 +154,14 @@ class SessionStore:
                 cur.execute(
                     """
                     INSERT INTO da_chat_message (
-                        message_id, session_id, role, status, run_id, content, sql_text,
-                        execution_json, error_json, resolved_database, provider_id, model_name
-                    ) VALUES (%s, %s, 'assistant', %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        message_id, session_id, role, status, run_id, content,
+                        error_json, provider_id, model_name
+                    ) VALUES (%s, %s, 'assistant', %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         status = VALUES(status),
                         run_id = VALUES(run_id),
                         content = VALUES(content),
-                        sql_text = VALUES(sql_text),
-                        execution_json = VALUES(execution_json),
                         error_json = VALUES(error_json),
-                        resolved_database = VALUES(resolved_database),
                         provider_id = VALUES(provider_id),
                         model_name = VALUES(model_name),
                         updated_at = CURRENT_TIMESTAMP
@@ -271,10 +172,7 @@ class SessionStore:
                         status,
                         run_id,
                         content or "",
-                        sql or "",
-                        execution_json,
                         error_json,
-                        resolved_database,
                         provider_id,
                         model,
                     ),
@@ -309,10 +207,7 @@ class SessionStore:
             "status": status,
             "content": content or "",
             "blocks": blocks,
-            "sql": sql or "",
-            "execution": execution,
             "error": error,
-            "resolved_database": resolved_database,
             "provider_id": provider_id,
             "model": model,
         }
@@ -395,8 +290,8 @@ class SessionStore:
             with conn.cursor() as cur:
                 cur.execute(
                     (
-                        "SELECT message_id, session_id, role, status, run_id, content, sql_text, "
-                        "execution_json, error_json, resolved_database, provider_id, model_name, created_at "
+                        "SELECT message_id, session_id, role, status, run_id, content, error_json, "
+                        "provider_id, model_name, created_at "
                         "FROM da_chat_message "
                         f"WHERE session_id IN ({placeholders}) "
                         "ORDER BY created_at ASC, message_id ASC"
@@ -413,7 +308,6 @@ class SessionStore:
         result: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             msg_id = str(row.get("message_id") or "")
-            execution = _safe_json_load(row.get("execution_json"))
             error = _safe_json_load(row.get("error_json"))
             message = {
                 "message_id": msg_id,
@@ -422,10 +316,7 @@ class SessionStore:
                 "run_id": row.get("run_id"),
                 "content": row.get("content") or "",
                 "blocks": blocks_map.get(msg_id, []),
-                "sql": row.get("sql_text") or "",
-                "execution": execution if isinstance(execution, dict) else None,
                 "error": error if isinstance(error, dict) else None,
-                "resolved_database": row.get("resolved_database"),
                 "provider_id": row.get("provider_id"),
                 "model": row.get("model_name"),
                 "created_at": _to_iso(row.get("created_at")),

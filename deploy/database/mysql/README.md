@@ -25,7 +25,10 @@ Docker Compose 会将此目录挂载到 MySQL 容器的 `/docker-entrypoint-init
      docker compose up -d    # 重新启动，脚本会再次执行
      ```
 
-3. **表结构自动创建**: 数据库表结构由后端服务的 Flyway 自动创建，无需在此目录中放置建表脚本。
+3. **数据库初始化与迁移分工**:
+   - 本目录只负责创建 `opendataworks` / `dataagent` 数据库和授权
+   - DataAgent 的表结构由 `alembic upgrade head` 管理
+   - 不再由应用启动代码直接建表或删列
 
 4. **文件命名**: 建议使用数字前缀（如 `01-`, `02-`）来确保执行顺序。
 

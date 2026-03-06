@@ -13,6 +13,16 @@ const routes = [
         meta: { title: '控制台' }
       },
       {
+        path: '/intelligent-query',
+        name: 'IntelligentQuery',
+        component: () => import('@/views/intelligence/IntelligentQueryView.vue'),
+        meta: { title: '智能问数' }
+      },
+      {
+        path: '/nl2sql',
+        redirect: '/intelligent-query'
+      },
+      {
         path: '/datastudio',
         name: 'DataStudio',
         component: () => import('@/views/datastudio/DataStudioNew.vue'),

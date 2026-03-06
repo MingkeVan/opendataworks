@@ -35,6 +35,8 @@ def _content_type_for_path(relative_path: str) -> str:
     suffix = Path(relative_path).suffix.lower()
     if suffix == ".json":
         return "json"
+    if suffix == ".py":
+        return "python"
     if suffix in {".md", ".markdown"}:
         return "markdown"
     return "text"
@@ -75,100 +77,8 @@ class SkillAdminStore:
         with self._ready_lock:
             if self._ready:
                 return
-
-            schema = self._schema_name()
-
-            conn = self._connect(database=None)
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f"CREATE DATABASE IF NOT EXISTS `{schema}` "
-                        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-                    )
-                conn.commit()
-            finally:
-                conn.close()
-
-            conn = self._connect(database=schema)
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS da_agent_settings (
-                            settings_key VARCHAR(32) NOT NULL PRIMARY KEY,
-                            provider_id VARCHAR(64) NOT NULL DEFAULT 'openrouter',
-                            model_name VARCHAR(255) NOT NULL DEFAULT 'anthropic/claude-sonnet-4.5',
-                            anthropic_api_key VARCHAR(512) NULL,
-                            anthropic_auth_token VARCHAR(512) NULL,
-                            anthropic_base_url VARCHAR(512) NULL,
-                            mysql_host VARCHAR(255) NULL,
-                            mysql_port INT NULL,
-                            mysql_user VARCHAR(255) NULL,
-                            mysql_password VARCHAR(255) NULL,
-                            mysql_database VARCHAR(255) NULL,
-                            doris_host VARCHAR(255) NULL,
-                            doris_port INT NULL,
-                            doris_user VARCHAR(255) NULL,
-                            doris_password VARCHAR(255) NULL,
-                            doris_database VARCHAR(255) NULL,
-                            skills_output_dir VARCHAR(512) NULL,
-                            raw_json LONGTEXT NULL,
-                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                        """
-                    )
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS da_skill_document (
-                            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                            relative_path VARCHAR(255) NOT NULL,
-                            file_name VARCHAR(128) NOT NULL,
-                            category VARCHAR(64) NOT NULL,
-                            content_type VARCHAR(32) NOT NULL,
-                            current_content LONGTEXT NOT NULL,
-                            current_hash CHAR(64) NOT NULL,
-                            current_version_id BIGINT NULL,
-                            version_count INT NOT NULL DEFAULT 0,
-                            last_change_source VARCHAR(32) NOT NULL DEFAULT 'import',
-                            last_change_summary VARCHAR(255) NULL,
-                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                            UNIQUE KEY uk_skill_document_path (relative_path),
-                            KEY idx_skill_document_category (category),
-                            KEY idx_skill_document_updated (updated_at)
-                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                        """
-                    )
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS da_skill_document_version (
-                            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                            document_id BIGINT NOT NULL,
-                            version_no INT NOT NULL,
-                            change_source VARCHAR(32) NOT NULL,
-                            change_summary VARCHAR(255) NULL,
-                            actor VARCHAR(64) NULL,
-                            content LONGTEXT NOT NULL,
-                            content_hash CHAR(64) NOT NULL,
-                            file_size INT NOT NULL DEFAULT 0,
-                            metadata_json LONGTEXT NULL,
-                            parent_version_id BIGINT NULL,
-                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            UNIQUE KEY uk_skill_doc_version (document_id, version_no),
-                            KEY idx_skill_doc_version_created (document_id, created_at),
-                            CONSTRAINT fk_da_skill_document_version_document
-                                FOREIGN KEY (document_id) REFERENCES da_skill_document(id)
-                                ON DELETE CASCADE
-                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                        """
-                    )
-                conn.commit()
-            finally:
-                conn.close()
-
             self._ready = True
-            logger.info("Skill admin schema is ready: %s", schema)
+            logger.info("Skill admin store is ready; schema is expected to be managed by Alembic")
 
     def _ensure_ready(self):
         if not self._ready:
@@ -184,7 +94,7 @@ class SkillAdminStore:
                     SELECT settings_key, provider_id, model_name, anthropic_api_key, anthropic_auth_token,
                            anthropic_base_url, mysql_host, mysql_port, mysql_user, mysql_password,
                            mysql_database, doris_host, doris_port, doris_user, doris_password,
-                           doris_database, skills_output_dir, updated_at
+                           doris_database, skills_output_dir, raw_json, updated_at
                     FROM da_agent_settings
                     WHERE settings_key = 'default'
                     LIMIT 1
@@ -269,7 +179,7 @@ class SkillAdminStore:
                            current_version_id, version_count, last_change_source, last_change_summary,
                            created_at, updated_at
                     FROM da_skill_document
-                    ORDER BY FIELD(category, 'root', 'methodology', 'ontology', 'knowledge', 'metadata', 'governance'),
+                    ORDER BY FIELD(category, 'root', 'reference', 'scripts', 'assets'),
                              relative_path
                     """
                 )
@@ -363,6 +273,19 @@ class SkillAdminStore:
         finally:
             conn.close()
         return self._normalize_version_row(row, include_content=True) if row else None
+
+    def delete_document_by_path(self, relative_path: str):
+        self._ensure_ready()
+        conn = self._connect(database=self._schema_name())
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM da_skill_document WHERE relative_path = %s",
+                    (str(relative_path or "").replace('\\', '/').strip('/'),),
+                )
+            conn.commit()
+        finally:
+            conn.close()
 
     def save_document(
         self,
@@ -491,7 +414,7 @@ class SkillAdminStore:
 
     def _normalize_settings_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         data = dict(payload or {})
-        return {
+        normalized = {
             "provider_id": str(data.get("provider_id") or "openrouter").strip() or "openrouter",
             "model": str(data.get("model") or "anthropic/claude-sonnet-4.5").strip() or "anthropic/claude-sonnet-4.5",
             "anthropic_api_key": str(data.get("anthropic_api_key") or ""),
@@ -509,11 +432,26 @@ class SkillAdminStore:
             "doris_database": str(data.get("doris_database") or ""),
             "skills_output_dir": str(data.get("skills_output_dir") or ""),
         }
+        extra_keys = {
+            "validated_provider_id",
+            "validated_model",
+            "provider_validation_status",
+            "provider_validation_message",
+            "provider_validated_at",
+            "provider_settings",
+        }
+        for key in extra_keys:
+            if key in data:
+                if key == "provider_settings":
+                    normalized[key] = data.get(key) or {}
+                else:
+                    normalized[key] = str(data.get(key) or "")
+        return normalized
 
     def _normalize_settings_row(self, row: dict[str, Any] | None) -> dict[str, Any]:
         if not row:
             return {}
-        return {
+        normalized = {
             "provider_id": str(row.get("provider_id") or "openrouter"),
             "model": str(row.get("model_name") or "anthropic/claude-sonnet-4.5"),
             "anthropic_api_key": str(row.get("anthropic_api_key") or ""),
@@ -532,6 +470,27 @@ class SkillAdminStore:
             "skills_output_dir": str(row.get("skills_output_dir") or ""),
             "updated_at": _to_iso(row.get("updated_at")),
         }
+        raw_json = row.get("raw_json")
+        if raw_json:
+            try:
+                payload = json.loads(str(raw_json))
+                if isinstance(payload, dict):
+                    for key in {
+                        "validated_provider_id",
+                        "validated_model",
+                        "provider_validation_status",
+                        "provider_validation_message",
+                        "provider_validated_at",
+                        "provider_settings",
+                    }:
+                        if key in payload:
+                            if key == "provider_settings":
+                                normalized[key] = payload.get(key) or {}
+                            else:
+                                normalized[key] = str(payload.get(key) or "")
+            except Exception:
+                logger.warning("Failed to parse da_agent_settings.raw_json")
+        return normalized
 
     def _normalize_document_row(self, row: dict[str, Any] | None, *, include_content: bool = False) -> dict[str, Any]:
         if not row:

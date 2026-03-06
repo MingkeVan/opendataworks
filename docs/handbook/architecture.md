@@ -9,6 +9,7 @@
 │ Vue3 + Vite 前端 (frontend/)           │
 │  - 表/字段建模、任务向导               │
 │  - 血缘/指标/统计可视化                │
+│  - 智能问数 / NL2SQL 工作台            │
 └───────────────┬────────────────────────┘
                 │ HTTP/REST
 ┌───────────────▼────────────────────────┐
@@ -19,9 +20,15 @@
 └───────────────┬────────────────────────┘
                 │ REST/OpenAPI
         ┌───────▼────────┐        ┌────────────────────────┐
-        │ MySQL 8.0+      │        │ Apache DolphinScheduler │
-        │ 元数据/执行记录 │        │  - Master/Worker/API    │
-        └─────────────────┘        └────────────────────────┘
+        │ MySQL 8.0+      │        │ DataAgent Backend       │
+        │ 元数据/执行记录 │        │  - NL2SQL / Skills API  │
+        └─────────────────┘        └───────────┬────────────┘
+                                               │
+                                               │ REST/OpenAPI
+                                     ┌─────────▼──────────────┐
+                                     │ Apache DolphinScheduler │
+                                     │  - Master/Worker/API    │
+                                     └────────────────────────┘
                                      │
                                      │（预留）Dinky/Flink
                                      ▼
@@ -33,7 +40,8 @@
 | 模块 | 关键包/目录 | 职责 | 关键接口 |
 | --- | --- | --- | --- |
 | `backend` | `com.onedata.portal` | 表/字段/任务 CRUD、血缘生成、巡检、执行记录、调用 DolphinScheduler OpenAPI | `/api/v1/tables`, `/api/v1/tasks`, `/api/v1/lineage`, `/api/v1/dolphin/...` |
-| `frontend` | `src/views/*` | 可视化界面、交互校验、日志展示、血缘 ECharts | `/tables`, `/tasks`, `/lineage` 视图 |
+| `frontend` | `src/views/*` | 可视化界面、交互校验、日志展示、血缘 ECharts、智能问数工作台 | `/dashboard`, `/workflows`, `/lineage`, `/intelligent-query` |
+| `dataagent-backend` | `dataagent/dataagent-backend` | NL2SQL 会话、Skills 同步、问答流式响应与 SQL 执行 | `/api/v1/nl2sql/...`, `/api/v1/dataagent/...` |
 | `dinky/` | 上游源码 | 作为未来流任务执行引擎 | 目前仅占位，无需构建 |
 | `DolphinScheduler` | 外部集群 | 接收 Portal 提交的工作流/实例并运行 | OpenAPI `/projects/...` |
 
@@ -52,7 +60,8 @@
 | MySQL | 3306 | `mysqladmin ping` | Docker 卷 `mysql-data` or `/var/lib/mysql` |
 | Backend | 8080 | `/actuator/health` | `docker volume backend-logs` 或 `backend/logs/` |
 | DolphinScheduler | 12345 (示例) | `/dolphinscheduler` 登录页或 OpenAPI `/projects` | 外部集群日志 |
-| Frontend | 80/5173 | `/` | Nginx 日志或 `frontend/dist` |
+| Frontend | 80/3000/5173 | `/`、`/intelligent-query` | Nginx 日志或 `frontend/dist` |
+| DataAgent Backend | 8900 | `/api/v1/nl2sql/health` | 容器日志或 `dataagent/dataagent-backend` |
 
 ## 技术栈
 
@@ -66,4 +75,4 @@
 
 - **抽象层**：DolphinScheduler 适配服务隔离了后端与调度引擎；未来扩展其它调度器时可复用与 Portal 的契约。
 - **数据一致性**：所有任务/表/血缘信息以 MySQL 为准，DolphinScheduler/Dinky 视为从端，因此必须由 Portal 创建/更新。
- - **配置集中化**：统一放在 `deploy/.env`, `backend/src/main/resources/application*.yml`, `frontend/.env.*`，并在 `operations-guide.md` 里列出需要修改的变量。
+- **配置集中化**：统一放在 `deploy/.env`, `backend/src/main/resources/application*.yml`, `frontend/.env.*`，并在 `operations-guide.md` 里列出需要修改的变量。

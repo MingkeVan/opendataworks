@@ -7,7 +7,6 @@ NL2SQL Agent（Skills-first, stream-first）
 import json
 import logging
 import os
-import re
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 from urllib.parse import urlparse
@@ -15,16 +14,11 @@ from urllib.parse import urlparse
 import anyio
 
 from config import get_settings
+from core.skill_admin_service import resolve_runtime_provider_selection
 from core.skills_loader import resolve_agent_project_cwd
-from core.sql_executor import execute_sql
 from core.stream_events import EventSequencer
 
 logger = logging.getLogger(__name__)
-
-
-SQL_FENCE_RE = re.compile(r"```sql\s*([\s\S]*?)```", re.IGNORECASE)
-SQL_INLINE_RE = re.compile(r"(?is)\b(select|with|show|desc|describe|explain)\b[\s\S]{8,}")
-READ_ONLY_PREFIXES = ("SELECT", "WITH", "SHOW", "DESC", "DESCRIBE", "EXPLAIN")
 
 
 @dataclass
@@ -36,14 +30,15 @@ class AgentRunInput:
     history: list[dict[str, str]]
     provider_id: str
     model: str
-    resolved_database: str | None
+    database_hint: str | None
     debug: bool = False
 
 
 async def stream_agent_reply(params: AgentRunInput) -> AsyncIterator[dict[str, Any]]:
     cfg = get_settings()
-    provider_id = _normalize_provider_id(params.provider_id, cfg.anthropic_base_url)
-    model = (params.model or cfg.claude_model or "").strip()
+    runtime_target = resolve_runtime_provider_selection(params.provider_id, params.model)
+    provider_id = _normalize_provider_id(runtime_target.get("provider_id"), runtime_target.get("base_url"))
+    model = str(runtime_target.get("model") or cfg.claude_model or "").strip()
     if not model:
         model = _default_model_for_provider(provider_id)
 
@@ -109,7 +104,7 @@ async def stream_agent_reply(params: AgentRunInput) -> AsyncIterator[dict[str, A
         return "raw"
 
     prompt = _build_prompt(params.history, params.question)
-    system_prompt = _build_system_prompt(params.resolved_database)
+    system_prompt = _build_system_prompt(params.database_hint)
 
     if params.debug:
         yield _emit(
@@ -126,7 +121,7 @@ async def stream_agent_reply(params: AgentRunInput) -> AsyncIterator[dict[str, A
     start_payload = {
         "provider_id": provider_id,
         "model": model,
-        "resolved_database": params.resolved_database,
+        "database_hint": params.database_hint,
     }
     yield _emit("llm_response_created", start_payload)
 
@@ -157,24 +152,27 @@ async def stream_agent_reply(params: AgentRunInput) -> AsyncIterator[dict[str, A
             status="failed",
             content=reason,
             blocks=_serialize_blocks(),
-            sql="",
-            execution=None,
             error=error_payload,
-            resolved_database=params.resolved_database,
             provider_id=provider_id,
             model=model,
         )
         yield _emit("done", done_payload)
         return
 
-    env_payload = _build_provider_env(provider_id, cfg)
-    for key, value in env_payload.items():
+    env_payload = _build_provider_env(
+        provider_id,
+        api_key=str(runtime_target.get("api_key") or ""),
+        auth_token=str(runtime_target.get("auth_token") or ""),
+        base_url=str(runtime_target.get("base_url") or ""),
+    )
+    runtime_env = _build_runtime_env(cfg, env_payload)
+    for key, value in runtime_env.items():
         os.environ[key] = value
 
     project_cwd = resolve_agent_project_cwd()
-    # 避免受用户主目录 ~/.claude/settings.json 干扰，provider/base_url 完全由后端配置与 env 控制
+    # provider/base_url/token 全由后端运行时注入，避免依赖用户本地的 Claude 配置文件
     setting_sources = ["project"]
-    allowed_tools = ["Skill"]
+    allowed_tools = ["Skill", "Bash"]
 
     options = ClaudeAgentOptions(
         system_prompt=system_prompt,
@@ -186,11 +184,7 @@ async def stream_agent_reply(params: AgentRunInput) -> AsyncIterator[dict[str, A
         allowed_tools=allowed_tools,
         # 关键：开启 SDK partial stream，才能拿到 content_block_delta 等细粒度增量
         include_partial_messages=True,
-        env={
-            "ANTHROPIC_AUTH_TOKEN": env_payload.get("ANTHROPIC_AUTH_TOKEN", ""),
-            "ANTHROPIC_API_KEY": env_payload.get("ANTHROPIC_API_KEY", ""),
-            "ANTHROPIC_BASE_URL": env_payload.get("ANTHROPIC_BASE_URL", ""),
-        },
+        env=runtime_env,
         stderr=lambda line: logger.error(
             "sdk.stderr run_id=%s provider=%s model=%s %s",
             params.run_id,
@@ -469,10 +463,7 @@ async def stream_agent_reply(params: AgentRunInput) -> AsyncIterator[dict[str, A
             status="failed",
             content=main_text.strip() or reason,
             blocks=_serialize_blocks(),
-            sql="",
-            execution=None,
             error=error_payload,
-            resolved_database=params.resolved_database,
             provider_id=provider_id,
             model=model,
         )
@@ -488,12 +479,6 @@ async def stream_agent_reply(params: AgentRunInput) -> AsyncIterator[dict[str, A
         text_block = _ensure_block("main-text", "main_text")
         text_block["status"] = "success"
         yield _emit("text.complete", {"block_id": "main-text", "text": main_text})
-
-    execution = None
-    sql = _extract_sql_from_text(main_text)
-    if sql and _is_read_only_sql(sql):
-        execution_result = execute_sql(sql=sql, database=params.resolved_database)
-        execution = execution_result.model_dump()
 
     status = "success"
     error_payload = None
@@ -518,8 +503,7 @@ async def stream_agent_reply(params: AgentRunInput) -> AsyncIterator[dict[str, A
         "block_complete",
         {
             "status": status,
-            "has_sql": bool(sql),
-            "has_execution": bool(execution),
+            "database_hint": params.database_hint,
             "block_count": len(blocks_payload),
         },
     )
@@ -528,22 +512,18 @@ async def stream_agent_reply(params: AgentRunInput) -> AsyncIterator[dict[str, A
         status=status,
         content=final_content,
         blocks=blocks_payload,
-        sql=sql,
-        execution=execution,
         error=error_payload,
-        resolved_database=params.resolved_database,
         provider_id=provider_id,
         model=model,
     )
     yield _emit("done", done_payload)
 
     logger.info(
-        "run.done run_id=%s status=%s provider=%s model=%s sql=%s blocks=%d",
+        "run.done run_id=%s status=%s provider=%s model=%s blocks=%d",
         params.run_id,
         status,
         provider_id,
         model,
-        bool(sql),
         len(blocks_payload),
     )
 
@@ -560,16 +540,18 @@ def _build_prompt(history: list[dict[str, str]], question: str) -> str:
     return "\n\n".join(lines)
 
 
-def _build_system_prompt(resolved_database: str | None) -> str:
-    db_hint = resolved_database or "自动推断"
-    return (
-        "你是 DataAgent 智能问数助手。\\n"
-        "- 优先使用 Skill 工具完成数据问题分析与 SQL 生成。\\n"
-        "- 对闲聊/问候请直接自然回复，不要强制输出 JSON。\\n"
-        "- 如果给出 SQL，请使用 ```sql 代码块``` 包裹。\\n"
-        "- 仅允许只读查询（SELECT/WITH/SHOW/EXPLAIN/DESC）。\\n"
-        f"- 当前候选数据库: {db_hint}。"
-    )
+def _build_system_prompt(database_hint: str | None) -> str:
+    lines = [
+        "你是 DataAgent 智能问数助手。",
+        "- 数据问题统一通过 dataagent-nl2sql skill 处理。",
+        "- 需要动态元数据、血缘、数据源或 SQL/Python 执行时，优先在 skill 中使用 Bash 运行本地脚本。",
+        "- 不要依赖后端推断数据库；若无法唯一确定库或表，直接追问用户。",
+        "- 仅允许只读查询与只读脚本执行。",
+        "- 最终回答使用中文，结论优先，避免输出与工具结果重复的大段原文。",
+    ]
+    if database_hint:
+        lines.append(f"- 用户显式提供的 database hint: {database_hint}")
+    return "\\n".join(lines)
 
 
 def _extract_block(block: Any) -> tuple[str, str, dict[str, Any]]:
@@ -625,37 +607,6 @@ def _append_delta(current: str, incoming: str) -> tuple[str, str]:
     return current + new, new
 
 
-def _extract_sql_from_text(text: str) -> str:
-    raw = str(text or "").strip()
-    if not raw:
-        return ""
-
-    fence_match = SQL_FENCE_RE.search(raw)
-    if fence_match:
-        sql = fence_match.group(1).strip()
-        return _clean_sql(sql)
-
-    inline_match = SQL_INLINE_RE.search(raw)
-    if inline_match:
-        sql = inline_match.group(0).strip()
-        return _clean_sql(sql)
-
-    return ""
-
-
-def _clean_sql(sql: str) -> str:
-    lines = [line.rstrip() for line in str(sql or "").splitlines()]
-    cleaned = "\n".join(lines).strip()
-    if cleaned.endswith(";"):
-        cleaned = cleaned[:-1].strip()
-    return cleaned
-
-
-def _is_read_only_sql(sql: str) -> bool:
-    upper = str(sql or "").lstrip().upper()
-    return upper.startswith(READ_ONLY_PREFIXES)
-
-
 def _normalize_provider_id(raw: str | None, base_url: str | None = None) -> str:
     value = str(raw or "").strip().lower()
     if value in {"anthropic", "openrouter", "anyrouter", "anthropic_compatible"}:
@@ -670,37 +621,50 @@ def _normalize_provider_id(raw: str | None, base_url: str | None = None) -> str:
     return "anthropic"
 
 
-def _build_provider_env(provider_id: str, cfg) -> dict[str, str]:
-    api_key = str(cfg.anthropic_api_key or "").strip()
-    auth_token = str(cfg.anthropic_auth_token or "").strip()
-    base_url = str(cfg.anthropic_base_url or "").strip()
-
+def _build_provider_env(provider_id: str, *, api_key: str, auth_token: str, base_url: str) -> dict[str, str]:
     if provider_id == "openrouter":
         return {
-            "ANTHROPIC_AUTH_TOKEN": auth_token or api_key,
+            "ANTHROPIC_AUTH_TOKEN": str(auth_token or api_key).strip(),
             "ANTHROPIC_API_KEY": "",
-            "ANTHROPIC_BASE_URL": base_url or "https://openrouter.ai/api",
+            "ANTHROPIC_BASE_URL": str(base_url or "https://openrouter.ai/api").strip(),
         }
 
     if provider_id == "anyrouter":
         return {
-            "ANTHROPIC_AUTH_TOKEN": auth_token or api_key,
+            "ANTHROPIC_AUTH_TOKEN": str(auth_token or api_key).strip(),
             "ANTHROPIC_API_KEY": "",
-            "ANTHROPIC_BASE_URL": base_url or "https://a-ocnfniawgw.cn-shanghai.fcapp.run",
+            "ANTHROPIC_BASE_URL": str(base_url or "https://a-ocnfniawgw.cn-shanghai.fcapp.run").strip(),
         }
 
     if provider_id == "anthropic_compatible":
         return {
-            "ANTHROPIC_AUTH_TOKEN": auth_token or api_key,
+            "ANTHROPIC_AUTH_TOKEN": str(auth_token or api_key).strip(),
             "ANTHROPIC_API_KEY": "",
-            "ANTHROPIC_BASE_URL": base_url,
+            "ANTHROPIC_BASE_URL": str(base_url or "").strip(),
         }
 
     return {
         "ANTHROPIC_AUTH_TOKEN": "",
-        "ANTHROPIC_API_KEY": api_key,
-        "ANTHROPIC_BASE_URL": base_url,
+        "ANTHROPIC_API_KEY": str(api_key or "").strip(),
+        "ANTHROPIC_BASE_URL": str(base_url or "").strip(),
     }
+
+
+def _build_runtime_env(cfg, provider_env: dict[str, str]) -> dict[str, str]:
+    runtime_env = dict(provider_env)
+    runtime_env.update(
+        {
+            "ODW_MYSQL_HOST": str(cfg.mysql_host or "").strip(),
+            "ODW_MYSQL_PORT": str(int(cfg.mysql_port or 3306)),
+            "ODW_MYSQL_USER": str(cfg.mysql_user or "").strip(),
+            "ODW_MYSQL_PASSWORD": str(cfg.mysql_password or ""),
+            "ODW_MYSQL_DATABASE": str(cfg.mysql_database or "opendataworks").strip() or "opendataworks",
+            "DATAAGENT_QUERY_LIMIT": str(int(cfg.query_result_limit or 100)),
+            "DATAAGENT_RESULT_PREVIEW_ROWS": str(min(20, int(cfg.query_result_limit or 100))),
+            "TZ": str(os.getenv("TZ") or "Asia/Shanghai"),
+        }
+    )
+    return runtime_env
 
 
 def _default_model_for_provider(provider_id: str) -> str:
@@ -760,10 +724,7 @@ def _build_done_payload(
     status: str,
     content: str,
     blocks: list[dict[str, Any]],
-    sql: str,
-    execution: dict[str, Any] | None,
     error: dict[str, Any] | None,
-    resolved_database: str | None,
     provider_id: str,
     model: str,
 ) -> dict[str, Any]:
@@ -771,10 +732,7 @@ def _build_done_payload(
         "status": status,
         "content": content,
         "blocks": blocks,
-        "sql": sql,
-        "execution": execution,
         "error": error,
-        "resolved_database": resolved_database,
         "provider_id": provider_id,
         "model": model,
     }

@@ -19,6 +19,10 @@
             <el-icon><DataBoard /></el-icon>
             <span>控制台</span>
           </el-menu-item>
+          <el-menu-item index="/intelligent-query">
+            <el-icon><Message /></el-icon>
+            <span>智能问数</span>
+          </el-menu-item>
           <el-menu-item index="/datastudio">
             <el-icon><DataLine /></el-icon>
             <span>Data Studio</span>
@@ -60,13 +64,16 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { DataBoard, DataLine, Connection, Collection, Warning, Setting, Share, Link } from '@element-plus/icons-vue'
+import { DataBoard, DataLine, Connection, Collection, Warning, Setting, Share, Link, Message } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => {
   const path = route.path
   if (path.startsWith('/dashboard')) {
     return '/dashboard'
+  }
+  if (path.startsWith('/intelligent-query') || path.startsWith('/nl2sql')) {
+    return '/intelligent-query'
   }
   if (path.startsWith('/datastudio')) {
     return '/datastudio'

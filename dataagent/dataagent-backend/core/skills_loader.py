@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-Skills 文件加载器（静态技能包，严格校验）
+Skills 文件加载器（四段结构：SKILL.md / reference / scripts / assets）
 """
 
 import json
@@ -16,8 +16,6 @@ from models.schemas import BusinessRule, QAExample, SemanticEntry
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_ENGINES = {"mysql", "doris"}
-
 
 class SkillsLoadError(RuntimeError):
     pass
@@ -26,7 +24,6 @@ class SkillsLoadError(RuntimeError):
 @dataclass
 class SkillsBundle:
     root: Path
-    manifest: dict[str, Any]
     ontology: list[dict[str, Any]]
     business_concepts: list[dict[str, Any]]
     metrics: list[dict[str, Any]]
@@ -34,6 +31,8 @@ class SkillsBundle:
     few_shots: list[QAExample]
     business_rules: list[BusinessRule]
     semantic_mappings: list[SemanticEntry]
+    term_explanations: list[dict[str, Any]]
+    sql_examples: list[dict[str, Any]]
     metadata_catalog: list[dict[str, Any]]
     lineage_catalog: list[dict[str, Any]]
     source_mapping: dict[str, str]
@@ -74,6 +73,8 @@ def validate_skills_bundle(*, force_reload: bool = False) -> dict[str, Any]:
         "business_rules": len(bundle.business_rules),
         "semantic_mappings": len(bundle.semantic_mappings),
         "few_shots": len(bundle.few_shots),
+        "term_explanations": len(bundle.term_explanations),
+        "sql_examples": len(bundle.sql_examples),
         "lineage_edges": len(bundle.lineage_catalog),
         "available_databases": sorted(bundle.available_databases),
         "default_engine": bundle.default_engine,
@@ -136,19 +137,38 @@ def _read_items(path: Path, *, required: bool = True) -> list[dict[str, Any]]:
 
 def _require_files(root: Path):
     required = [
-        "manifest.json",
         "SKILL.md",
-        "methodology/nl2semantic2lf2sql.md",
-        "ontology/ontology.json",
-        "ontology/business_concepts.json",
-        "ontology/metrics.json",
-        "ontology/constraints.json",
-        "knowledge/few_shots.json",
-        "knowledge/business_rules.json",
-        "metadata/semantic_mappings.json",
-        "metadata/metadata_catalog.json",
-        "metadata/lineage_catalog.json",
-        "metadata/source_mapping.json",
+        "reference/00-skill-map.md",
+        "reference/10-query-playbooks.md",
+        "reference/11-datasource-routing.md",
+        "reference/20-term-index.md",
+        "reference/21-metric-index.md",
+        "reference/22-sql-example-index.md",
+        "reference/30-tool-recipes.md",
+        "reference/40-runtime-metadata.md",
+        "reference/50-tool-output-contract.md",
+        "scripts/_opendataworks_runtime.py",
+        "scripts/inspect_metadata.py",
+        "scripts/resolve_datasource.py",
+        "scripts/run_sql.py",
+        "scripts/build_chart_spec.py",
+        "scripts/format_answer.py",
+        "scripts/build_reference_digest.py",
+        "scripts/query_opendataworks_metadata.py",
+        "assets/ontology.json",
+        "assets/business_concepts.json",
+        "assets/metrics.json",
+        "assets/constraints.json",
+        "assets/few_shots.json",
+        "assets/business_rules.json",
+        "assets/semantic_mappings.json",
+        "assets/policies.json",
+        "assets/term_explanations.json",
+        "assets/sql_examples.json",
+        "assets/chart-template/table.json",
+        "assets/chart-template/bar.json",
+        "assets/chart-template/line.json",
+        "assets/chart-template/pie.json",
     ]
     for rel in required:
         path = root / rel
@@ -216,74 +236,36 @@ def _parse_few_shots(items: list[dict[str, Any]]) -> list[QAExample]:
     return examples
 
 
-def _parse_source_mapping(path: Path) -> tuple[dict[str, str], str]:
-    payload = _read_json(path)
-    default_engine = str(payload.get("default_engine") or "doris").strip().lower()
-    if default_engine not in SUPPORTED_ENGINES:
-        raise SkillsLoadError(f"Unsupported default_engine={default_engine}, file={path}")
-
-    mapping: dict[str, str] = {}
-    items = payload.get("items")
-    if not isinstance(items, list):
-        raise SkillsLoadError(f"`items` must be list: {path}")
-    for idx, item in enumerate(items):
-        if not isinstance(item, dict):
-            raise SkillsLoadError(f"`items[{idx}]` must be object: {path}")
-        db = str(item.get("database") or "").strip()
-        engine = str(item.get("engine") or "").strip().lower()
-        if not db:
-            raise SkillsLoadError(f"database is empty at items[{idx}], file={path}")
-        if engine not in SUPPORTED_ENGINES:
-            raise SkillsLoadError(f"Unsupported engine={engine} at items[{idx}], file={path}")
-        mapping[db] = engine
-    return mapping, default_engine
-
-
-def _validate_metadata_items(items: list[dict[str, Any]], path: Path):
-    for idx, item in enumerate(items):
-        table_name = str(item.get("table_name") or "").strip()
-        if not table_name:
-            raise SkillsLoadError(f"metadata_catalog.items[{idx}].table_name is required ({path})")
-        fields = item.get("fields") or []
-        if not isinstance(fields, list):
-            raise SkillsLoadError(f"metadata_catalog.items[{idx}].fields must be list ({path})")
-
-
 def _load_skills_bundle() -> SkillsBundle:
     cfg = get_settings()
     root = _resolve_root_dir(cfg.skills_output_dir)
     _require_files(root)
 
-    manifest = _read_json(root / "manifest.json")
-    if str(manifest.get("entrypoint") or "") != "SKILL.md":
-        raise SkillsLoadError("manifest.entrypoint must be SKILL.md")
+    ontology_items = _read_items(root / "assets/ontology.json")
+    concept_items = _read_items(root / "assets/business_concepts.json")
+    metric_items = _read_items(root / "assets/metrics.json")
+    constraints = _read_json(root / "assets/constraints.json")
 
-    ontology_items = _read_items(root / "ontology/ontology.json")
-    concept_items = _read_items(root / "ontology/business_concepts.json")
-    metric_items = _read_items(root / "ontology/metrics.json")
-    constraints = _read_json(root / "ontology/constraints.json")
-
-    few_shots = _parse_few_shots(_read_items(root / "knowledge/few_shots.json"))
-    rules = _parse_business_rules(_read_items(root / "knowledge/business_rules.json"))
-    semantics = _parse_semantic_mappings(_read_items(root / "metadata/semantic_mappings.json"))
-    metadata_catalog = _read_items(root / "metadata/metadata_catalog.json")
-    _validate_metadata_items(metadata_catalog, root / "metadata/metadata_catalog.json")
-    lineage_catalog = _read_items(root / "metadata/lineage_catalog.json")
-    source_mapping, default_engine = _parse_source_mapping(root / "metadata/source_mapping.json")
+    few_shots = _parse_few_shots(_read_items(root / "assets/few_shots.json"))
+    rules = _parse_business_rules(_read_items(root / "assets/business_rules.json"))
+    semantics = _parse_semantic_mappings(_read_items(root / "assets/semantic_mappings.json"))
+    term_explanations = _read_items(root / "assets/term_explanations.json")
+    sql_examples = _read_items(root / "assets/sql_examples.json")
+    metadata_catalog: list[dict[str, Any]] = []
+    lineage_catalog: list[dict[str, Any]] = []
+    source_mapping: dict[str, str] = {}
+    default_engine = "doris"
 
     logger.info(
-        "Skills loaded from %s: tables=%d rules=%d semantics=%d few_shots=%d lineage=%d",
+        "Skills loaded from %s: rules=%d semantics=%d few_shots=%d dynamic_metadata=skill-script",
         root,
-        len(metadata_catalog),
         len(rules),
         len(semantics),
         len(few_shots),
-        len(lineage_catalog),
     )
 
     return SkillsBundle(
         root=root,
-        manifest=manifest,
         ontology=ontology_items,
         business_concepts=concept_items,
         metrics=metric_items,
@@ -291,6 +273,8 @@ def _load_skills_bundle() -> SkillsBundle:
         few_shots=few_shots,
         business_rules=rules,
         semantic_mappings=semantics,
+        term_explanations=term_explanations,
+        sql_examples=sql_examples,
         metadata_catalog=metadata_catalog,
         lineage_catalog=lineage_catalog,
         source_mapping=source_mapping,

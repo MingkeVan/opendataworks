@@ -41,14 +41,15 @@ Use this method if you have internet access and are deploying directly from the 
    ```
 
    DataAgent 默认地址：
-   - DataAgent Frontend: `http://localhost:3100/nl2sql`
+   - 主前端智能问数入口: `http://localhost:8081/intelligent-query`
    - DataAgent Backend: `http://localhost:8900`
+   - 大模型供应商、Token 与候选模型请在主前端配置页中维护，后端保存到 DataAgent 配置存储
    - 可直接编辑挂载文件后生效：
-     - `dataagent/.claude/settings.json`（大模型配置 JSON）
      - `dataagent/.claude/skills/`（Skills 目录）
-   - DataAgent 前端默认通过同源 `/api` 代理访问后端，无需额外改前端地址
+     - 动态元数据查询示例在 skill 的 `references/` / `scripts/` 中，不再由后端同步生成 metadata 快照
+   - 主前端默认通过同源 `/api` 代理访问 DataAgent 后端，无需额外配置前端地址
 
-   > **💡 数据库自动初始化**: MySQL 容器首次启动时，会自动执行 `deploy/database/mysql/` 目录下的初始化脚本，创建数据库和用户。无需手动创建数据库。表结构由后端服务的 Flyway 自动创建。
+   > **💡 数据库自动初始化**: MySQL 容器首次启动时，会自动执行 `deploy/database/mysql/` 目录下的初始化脚本，创建 `opendataworks` / `dataagent` 数据库和用户权限。DataAgent 容器启动时会先执行 `alembic upgrade head`，再启动服务。
 
 ---
 
@@ -86,11 +87,13 @@ Use this method for isolated environments without internet access. You will use 
    ```
 
    DataAgent 默认地址：
-   - DataAgent Frontend: `http://localhost:3100/nl2sql`
+   - 主前端智能问数入口: `http://localhost:8081/intelligent-query`
    - DataAgent Backend: `http://localhost:8900`
-   - 离线包内同样保留 `dataagent/.claude/settings.json` 与 `dataagent/.claude/skills/`，可直接编辑
+   - 离线包内同样保留 `dataagent/.claude/skills/` 可直接编辑
+   - 大模型供应商、Token 与候选模型仍通过主前端配置页管理
+   - 动态元数据查询示例保留在 skill 的 `references/` / `scripts/` 中
 
-   > **💡 数据库自动初始化**: MySQL 容器首次启动时，会自动执行 `deploy/database/mysql/` 目录下的初始化脚本，创建数据库和用户。无需手动创建数据库。表结构由后端服务的 Flyway 自动创建。
+   > **💡 数据库自动初始化**: MySQL 容器首次启动时，会自动执行 `deploy/database/mysql/` 目录下的初始化脚本，创建 `opendataworks` / `dataagent` 数据库和用户权限。DataAgent 容器启动时会先执行 `alembic upgrade head`，再启动服务。
 
 ---
 

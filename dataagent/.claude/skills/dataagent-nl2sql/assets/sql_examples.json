@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0",
+  "items": [
+    {
+      "scene_key": "trend-order-amount",
+      "title": "订单金额趋势",
+      "engine": "doris",
+      "scenario": "趋势分析",
+      "question": "最近 7 天订单金额趋势",
+      "sql": "SELECT stat_date, SUM(total_amount) AS order_amount\nFROM dws_order_daily\nWHERE stat_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 6 DAY) AND CURRENT_DATE()\nGROUP BY stat_date\nORDER BY stat_date\nLIMIT 100;",
+      "notes": [
+        "先确认金额口径是否只看已支付订单。",
+        "优先使用日汇总表，避免直接扫明细事实表。"
+      ],
+      "related_terms": [
+        "订单金额",
+        "趋势分析"
+      ]
+    },
+    {
+      "scene_key": "compare-order-count",
+      "title": "订单数分组对比",
+      "engine": "doris",
+      "scenario": "对比分析",
+      "question": "本月各业务线订单数对比",
+      "sql": "SELECT biz_line, COUNT(order_id) AS order_cnt\nFROM ods_order\nWHERE order_time >= DATE_FORMAT(CURRENT_DATE(), '%Y-%m-01')\nGROUP BY biz_line\nORDER BY order_cnt DESC\nLIMIT 20;",
+      "notes": [
+        "若业务线字段不明确，先查元数据再决定维度字段。",
+        "对比分析默认使用相同时间范围和相同过滤条件。"
+      ],
+      "related_terms": [
+        "订单数",
+        "对比分析"
+      ]
+    },
+    {
+      "scene_key": "share-new-users",
+      "title": "新增用户来源占比",
+      "engine": "mysql",
+      "scenario": "占比分析",
+      "question": "昨日新增用户按来源分布",
+      "sql": "SELECT source, COUNT(DISTINCT user_id) AS new_user_cnt\nFROM ods_user\nWHERE DATE(register_time) = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)\nGROUP BY source\nORDER BY new_user_cnt DESC\nLIMIT 20;",
+      "notes": [
+        "若来源字段类别过多，优先回退为条形图或表格。",
+        "需要确认新增用户是否以注册时间为准。"
+      ],
+      "related_terms": [
+        "新增用户",
+        "来源分布"
+      ]
+    },
+    {
+      "scene_key": "detail-orders",
+      "title": "订单明细查询",
+      "engine": "mysql",
+      "scenario": "明细查询",
+      "question": "查看昨日支付成功订单明细",
+      "sql": "SELECT order_id, user_id, total_amount, pay_status, order_time\nFROM ods_order\nWHERE DATE(order_time) = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)\n  AND pay_status = 'paid'\nORDER BY order_time DESC\nLIMIT 100;",
+      "notes": [
+        "明细查询必须带 LIMIT。",
+        "若需要更多字段，先通过 inspect_metadata.py 确认字段含义。"
+      ],
+      "related_terms": [
+        "订单明细",
+        "支付订单"
+      ]
+    }
+  ]
+}

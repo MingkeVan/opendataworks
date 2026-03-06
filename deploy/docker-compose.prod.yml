@@ -61,7 +61,10 @@ services:
     ports:
       - "8081:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      dataagent-backend:
+        condition: service_healthy
     networks:
       - opendataworks-network
     healthcheck:
@@ -112,30 +115,6 @@ services:
     volumes:
       - ${DATAAGENT_LLM_JSON_FILE:-../dataagent/.claude/settings.json}:/app/.claude/settings.json
       - ${DATAAGENT_SKILLS_DIR:-../dataagent/.claude/skills}:/app/.claude/skills
-
-  # DataAgent 前端服务
-  dataagent-frontend:
-    image: ${OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE:-opendataworks-dataagent-frontend:latest}
-    build:
-      context: ../dataagent
-      dockerfile: dataagent-web/Dockerfile
-      args:
-        VITE_NL2SQL_BASE: ${DATAAGENT_NL2SQL_BASE_URL:-}
-    container_name: opendataworks-dataagent-frontend
-    restart: always
-    ports:
-      - "3100:80"
-    depends_on:
-      dataagent-backend:
-        condition: service_healthy
-    networks:
-      - opendataworks-network
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/nl2sql"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
 
 networks:
   opendataworks-network:

@@ -22,11 +22,11 @@
       <el-col :xs="24" :md="8">
         <el-card shadow="never" class="summary-card sync-card">
           <div>
-            <div class="summary-label">手动同步</div>
-            <div class="summary-subtext">从 `opendataworks` / `dataagent` 数据库重新生成技能文件。</div>
+            <div class="summary-label">刷新索引</div>
+            <div class="summary-subtext">重新扫描 Skills 目录并刷新运行时，不再从数据库导出 metadata 文件。</div>
           </div>
           <el-button type="warning" @click="triggerSync" :loading="syncLoading">
-            从 ODW 同步
+            刷新 Skills
           </el-button>
         </el-card>
       </el-col>
@@ -41,7 +41,7 @@
       @close="syncResult = null"
     >
       <template #title>
-        同步完成：共处理 {{ syncResult.document_count }} 个文件，变更 {{ syncResult.changed_documents?.length || 0 }} 个，
+        刷新完成：共处理 {{ syncResult.document_count }} 个文件，变更 {{ syncResult.changed_documents?.length || 0 }} 个，
         新收录 {{ syncResult.imported_documents?.length || 0 }} 个。
       </template>
     </el-alert>
@@ -426,11 +426,11 @@ const confirmRollback = async (version) => {
 const triggerSync = async () => {
   try {
     await ElMessageBox.confirm(
-      '确认从 opendataworks / dataagent 数据库重新同步技能文件吗？',
-      '手动同步',
+      '确认重新扫描 Skills 目录并刷新 DataAgent 运行时吗？',
+      '刷新 Skills',
       {
         type: 'warning',
-        confirmButtonText: '开始同步',
+        confirmButtonText: '开始刷新',
         cancelButtonText: '取消'
       }
     )
@@ -445,7 +445,7 @@ const triggerSync = async () => {
     if (selectedDocumentId.value) {
       await loadDocument(selectedDocumentId.value)
     }
-    ElMessage.success('技能文件同步完成')
+    ElMessage.success('技能文件刷新完成')
   } finally {
     syncLoading.value = false
   }
