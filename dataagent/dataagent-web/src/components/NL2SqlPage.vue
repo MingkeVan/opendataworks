@@ -21,9 +21,4 @@ const nl2sqlBase = ref(
   display: flex;
   overflow: hidden;
 }
-
-.nl2sql-view :deep(.nl2sql-chat) {
-  flex: 1;
-  min-height: 0;
-}
 </style>

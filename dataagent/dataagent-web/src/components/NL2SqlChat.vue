@@ -1,494 +1,569 @@
 <template>
-  <div class="nl2sql-chat">
-    <!-- 左侧侧边栏 -->
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="logo-area">
-          <span class="logo-icon">✦</span>
-          <span class="logo-text">智能问数助手</span>
-        </div>
-        <button class="btn-new" @click="handleNewSession">
-          <span class="icon-plus">+</span> 新建对话
-        </button>
+  <div class="v2-layout">
+    <aside class="v2-sidebar">
+      <div class="v2-sidebar-head">
+        <span class="v2-brand">DataAgent</span>
+        <button class="v2-btn-new" @click="handleNewSession">+ 新对话</button>
       </div>
-
-      <div class="search-box">
-        <input
-          v-model="searchKeyword"
-          type="text"
-          placeholder="搜索对话..."
-          class="search-input"
-        />
+      <div class="v2-sidebar-search">
+        <input v-model="searchKeyword" class="v2-search-input" type="text" placeholder="搜索会话..." />
       </div>
-
-      <div class="session-list">
-        <div
-          v-for="session in filteredSessions"
-          :key="session.session_id"
-          class="session-item"
-          :class="{ active: session.session_id === activeSessionId }"
-          @click="handleSelectSession(session.session_id)"
+      <div class="v2-session-list">
+        <button
+          v-for="s in filteredSessions"
+          :key="s.session_id"
+          class="v2-session-item"
+          :class="{ active: s.session_id === activeSessionId }"
+          @click="handleSelectSession(s.session_id)"
         >
-          <div class="session-info">
-            <div class="session-title">{{ truncate(session.title, 22) }}</div>
-            <div class="session-time">{{ formatTime(session.updated_at || session.created_at) }}</div>
-          </div>
-          <button class="btn-delete" @click.stop="handleDeleteSession(session.session_id)">×</button>
-        </div>
-        <div v-if="!filteredSessions.length" class="empty-sessions">
-          <span class="empty-icon">💬</span>
-          <span>暂无对话</span>
-        </div>
-      </div>
-
-      <!-- 侧边栏底部设置入口 -->
-      <div class="sidebar-footer">
-        <button class="btn-settings" @click="showSettings = !showSettings">
-          ⚙ 设置
+          <div class="v2-session-title">{{ truncate(s.title, 22) }}</div>
+          <div class="v2-session-meta">{{ formatTime(s.updated_at || s.created_at) }}</div>
         </button>
+        <div v-if="!filteredSessions.length" class="v2-empty-sessions">暂无会话</div>
       </div>
     </aside>
 
-    <!-- 右侧主聊天区域 -->
-    <main class="chat-main">
-      <!-- 顶部标题栏 -->
-      <header class="chat-header">
-        <div class="header-title">{{ activeSession?.title || '新会话' }}</div>
-        <div class="header-actions">
-          <select v-model="selectedModel" class="db-select model-select">
-            <option value="">默认模型</option>
-            <option value="glm-4">GLM-4</option>
-            <option value="glm-4-plus">GLM-4-Plus</option>
-            <option value="glm-5">GLM-5</option>
-            <option value="claude-sonnet-4-20250514">Claude 3.5 Sonnet</option>
-          </select>
-          <select v-model="selectedDatabase" class="db-select">
-            <option value="">选择数据库</option>
-            <option v-for="db in databases" :key="db" :value="db">{{ db }}</option>
-          </select>
-          <button class="btn-icon" title="刷新索引" @click="handleReload">🔄</button>
-        </div>
-      </header>
-
-      <!-- 消息流区域 -->
-      <div class="messages-container" ref="messagesRef" @scroll="handleMessagesScroll">
-        <div class="messages-inner">
-          <!-- 空状态 -->
-          <div v-if="!activeMessages.length" class="empty-chat">
-            <div class="empty-hero">
-              <span class="hero-icon">✦</span>
-              <h2>智能问数助手</h2>
-              <p>基于语义层的自然语言查询，输入你的数据问题</p>
-            </div>
-            <div class="suggestion-grid">
-              <div
-                v-for="(suggestion, index) in suggestions"
-                :key="index"
-                class="suggestion-card"
-                @click="handleSuggestion(suggestion)"
-              >
-                <span class="suggestion-icon">{{ suggestion.icon }}</span>
-                <span class="suggestion-text">{{ suggestion.text }}</span>
-              </div>
+    <main class="v2-main">
+      <div ref="messagesRef" class="v2-messages" @scroll="handleScroll">
+        <div class="v2-messages-inner">
+          <!-- Empty state -->
+          <div v-if="!activeMessages.length" class="v2-empty">
+            <div class="v2-empty-icon">💬</div>
+            <div class="v2-empty-title">有什么可以帮到你？</div>
+            <div class="v2-empty-sub">输入数据查询相关问题，我来帮你生成SQL</div>
+            <div class="v2-suggestions">
+              <button v-for="s in suggestions" :key="s" class="v2-suggestion" @click="handleSuggestion(s)">{{ s }}</button>
             </div>
           </div>
 
-          <!-- 消息列表 -->
-          <template v-for="(msg, idx) in activeMessages" :key="idx">
-            <!-- 用户消息 -->
-            <div v-if="msg.role === 'user'" class="message user-message">
-              <div class="message-avatar user-avatar">你</div>
-              <div class="message-body">
-                <div class="message-content">{{ msg.content }}</div>
-              </div>
+          <!-- Messages -->
+          <template v-for="msg in activeMessages" :key="msg.id">
+            <!-- User -->
+            <div v-if="msg.role === 'user'" class="v2-msg-row v2-msg-user">
+              <div class="v2-user-bubble">{{ msg.content }}</div>
             </div>
+            <!-- Assistant -->
+            <div v-else class="v2-msg-row v2-msg-assistant">
+              <div class="v2-assistant-body">
+                <!-- Thinking -->
+                <div v-if="msg.thinkingText" class="v2-step-row">
+                  <details class="v2-thinking-details">
+                    <summary class="v2-step-summary">
+                      <span class="v2-step-icon">{{ msg.status === 'streaming' ? '⏳' : '💭' }}</span>
+                      <span>{{ msg.status === 'streaming' ? '思考中...' : '已完成思考' }}</span>
+                      <span class="v2-step-chevron">›</span>
+                    </summary>
+                    <div class="v2-thinking-content">{{ msg.thinkingText }}</div>
+                  </details>
+                </div>
 
-            <!-- 助手消息 -->
-            <div v-else class="message assistant-message">
-              <div class="message-avatar assistant-avatar">AI</div>
-              <div class="message-body">
-                <!-- 思考过程 -->
-                <div v-if="msg.thinking_steps?.length" class="thinking-section">
-                  <div
-                    class="thinking-header"
-                    @click="toggleThinking(thinkingKey(msg, idx))"
-                  >
-                    <span class="thinking-icon">{{ isThinkingExpanded(thinkingKey(msg, idx)) ? '▼' : '▶' }}</span>
-                    <span class="thinking-label">思考过程</span>
-                    <span class="thinking-count">{{ msg.thinking_steps.length }} 步</span>
+                <!-- Tool calls (grouped) -->
+                <div v-if="readTools(msg).length" class="v2-step-row">
+                  <details class="v2-tool-details">
+                    <summary class="v2-step-summary">
+                      <span class="v2-step-icon">📄</span>
+                      <span>已浏览 {{ readTools(msg).length }} 个文件</span>
+                      <span class="v2-step-chevron">›</span>
+                    </summary>
+                    <div class="v2-tool-file-list">
+                      <div v-for="f in readTools(msg)" :key="f.id" class="v2-tool-file-item">{{ extractFileName(f) }}</div>
+                    </div>
+                  </details>
+                </div>
+                <div v-for="tool in skillTools(msg)" :key="tool.id" class="v2-step-row">
+                  <div class="v2-step-summary v2-step-static">
+                    <span class="v2-step-icon">{{ tool.status === 'streaming' ? '⏳' : '🔧' }}</span>
+                    <span>{{ extractSkillLabel(tool) }}</span>
                   </div>
-                  <div v-if="isThinkingExpanded(thinkingKey(msg, idx))" class="thinking-steps">
-                    <div
-                      v-for="(step, si) in msg.thinking_steps"
-                      :key="si"
-                      class="step-item"
-                    >
-                      <span class="step-status" :class="step.status">
-                        {{ stepIcon(step.status) }}
-                      </span>
-                      <div class="step-content">
-                        <div class="step-name">{{ step.step_name }}</div>
-                        <div class="step-summary" v-if="step.summary">{{ step.summary }}</div>
-                      </div>
+                </div>
+
+                <!-- Main text -->
+                <div v-if="cleanMainText(msg)" class="v2-main-text">
+                  <div v-html="renderMarkdown(cleanMainText(msg))"></div>
+                  <span v-if="msg.status === 'streaming'" class="v2-cursor">▋</span>
+                </div>
+
+                <!-- Citations -->
+                <div v-if="msg.citations.length" class="v2-citations">
+                  <a v-for="(c, ci) in msg.citations" :key="ci" :href="c.url || '#'" target="_blank" rel="noopener" class="v2-citation-chip">
+                    <span class="v2-citation-idx">{{ ci + 1 }}</span>
+                    <span>{{ c.title || c.url || '来源' }}</span>
+                  </a>
+                </div>
+
+                <!-- SQL -->
+                <div v-if="msg.sql" class="v2-sql-card">
+                  <div class="v2-sql-header">
+                    <span>SQL</span>
+                    <div class="v2-sql-actions">
+                      <button class="v2-btn-sm" @click="copyText(msg.sql)">复制</button>
+                      <button class="v2-btn-sm v2-btn-exec" @click="handleExecSql(msg)">执行</button>
                     </div>
                   </div>
+                  <pre class="v2-sql-code"><code>{{ msg.sql }}</code></pre>
                 </div>
 
-                <!-- 解释文本 -->
-                <div v-if="msg.explanation" class="explanation-text">{{ msg.explanation }}</div>
-                <div
-                  v-else-if="showAssistantContentFallback(msg)"
-                  class="explanation-text explanation-fallback"
-                >
-                  {{ msg.content }}
-                </div>
-                <div
-                  v-else-if="showAssistantEmptyState(msg)"
-                  class="assistant-empty"
-                >
-                  已完成分析，但未生成可展示结果，请换个问法重试。
-                </div>
-
-                <!-- SQL 代码块 -->
-                <div v-if="msg.sql" class="sql-block">
-                  <div class="sql-header">
-                    <span class="sql-label">生成 SQL</span>
-                    <div class="sql-actions">
-                      <button class="btn-sm" @click="copyText(msg.sql)">📋 复制</button>
-                      <button class="btn-sm btn-primary" @click="handleExecuteSql(msg.sql)">▶ 执行</button>
-                    </div>
+                <!-- Execution result -->
+                <div v-if="msg.execution" class="v2-exec-card">
+                  <div class="v2-exec-head">
+                    <span>执行结果</span>
+                    <span class="v2-exec-meta">{{ msg.execution.row_count || 0 }} 行 · {{ msg.execution.duration_ms || 0 }}ms</span>
                   </div>
-                  <pre class="sql-code"><code>{{ msg.sql }}</code></pre>
-                </div>
-
-                <!-- 查询结果 -->
-                <div v-if="msg.execution" class="result-block">
-                  <div class="result-header">
-                    <span class="result-label">查询结果</span>
-                    <span class="result-meta">
-                      {{ msg.execution.row_count }} 行
-                      <template v-if="msg.execution.has_more">（已截断）</template>
-                      · {{ msg.execution.duration_ms }}ms
-                    </span>
-                  </div>
-                  <div v-if="msg.execution.error" class="result-error">
-                    ❌ {{ msg.execution.error }}
-                  </div>
-                  <div v-else-if="msg.execution.rows?.length" class="result-table-wrapper">
-                    <table class="result-table">
-                      <thead>
-                        <tr>
-                          <th v-for="col in msg.execution.columns" :key="col">{{ col }}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr v-for="(row, ri) in msg.execution.rows" :key="ri">
-                          <td v-for="col in msg.execution.columns" :key="col">{{ row[col] }}</td>
-                        </tr>
-                      </tbody>
+                  <div v-if="msg.execution.error" class="v2-exec-error">{{ msg.execution.error }}</div>
+                  <div v-else-if="execColumns(msg.execution).length && msg.execution.rows?.length" class="v2-table-wrap">
+                    <table class="v2-table">
+                      <thead><tr><th v-for="col in execColumns(msg.execution)" :key="col">{{ col }}</th></tr></thead>
+                      <tbody><tr v-for="(row, ri) in msg.execution.rows" :key="ri"><td v-for="col in execColumns(msg.execution)" :key="col">{{ row[col] }}</td></tr></tbody>
                     </table>
                   </div>
+                  <div v-else class="v2-exec-empty">无数据</div>
                 </div>
 
-                <!-- 匹配信息 -->
-                <div v-if="msg.matched_tables?.length || msg.matched_rules?.length" class="match-info">
-                  <span v-for="t in msg.matched_tables" :key="t" class="match-tag table-tag">📊 {{ t }}</span>
-                  <span v-for="r in msg.matched_rules" :key="r" class="match-tag rule-tag">📏 {{ r }}</span>
-                  <span v-if="msg.confidence" class="confidence-badge">
-                    置信度 {{ Math.round(msg.confidence * 100) }}%
-                  </span>
+                <!-- Error -->
+                <div v-if="msg.error" class="v2-error-card">
+                  <span class="v2-error-icon">⚠</span>
+                  <span>{{ msg.error }}</span>
                 </div>
+
+                <!-- Persistent thinking indicator (always shows during streaming) -->
+                <div v-if="msg.status === 'streaming'" class="v2-loading">
+                  <span class="v2-loading-text">正在思考</span>
+                  <span class="v2-loading-dots"><span>.</span><span>.</span><span>.</span></span>
+                </div>
+
               </div>
             </div>
           </template>
-
-          <!-- 生成中指示 -->
-          <div v-if="generating" class="message assistant-message">
-            <div class="message-avatar assistant-avatar">AI</div>
-            <div class="message-body">
-              <div class="generating-indicator">
-                <span class="dot-flashing"></span>
-                <span class="generating-text">正在分析并生成 SQL...</span>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
-      <!-- 底部输入区域 -->
-      <div class="input-area">
-        <div class="input-wrapper">
-          <textarea
-            v-model="inputText"
-            class="input-textarea"
-            placeholder="输入你的数据问题...（Ctrl+Enter 发送）"
-            rows="3"
-            @keydown.ctrl.enter.prevent="handleSend"
-            @keydown.meta.enter.prevent="handleSend"
-          ></textarea>
-          <div class="input-actions">
-            <span class="input-hint">Ctrl + Enter 发送</span>
-            <button
-              class="btn-send"
-              :disabled="!inputText.trim() || generating"
-              @click="handleSend"
-            >
-              <span class="send-icon">➤</span> 发送
+      <!-- Composer -->
+      <div class="v2-composer-wrap">
+        <div class="v2-composer">
+          <div class="v2-composer-top">
+            <div class="v2-composer-ctrl">
+              <select v-model="selectedProvider" class="v2-select">
+                <option v-for="p in settings.providers" :key="p.provider_id" :value="p.provider_id">{{ p.display_name }}</option>
+              </select>
+            </div>
+            <div class="v2-composer-ctrl">
+              <select v-model="selectedModel" class="v2-select">
+                <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="v2-composer-input-row">
+            <textarea
+              v-model="inputText"
+              class="v2-textarea"
+              placeholder="输入你的问题..."
+              rows="2"
+              @keydown.ctrl.enter.prevent="handleSend"
+              @keydown.meta.enter.prevent="handleSend"
+            />
+            <button class="v2-btn-send" :disabled="!inputText.trim() || generating" @click="handleSend">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
             </button>
           </div>
         </div>
       </div>
     </main>
-
-    <!-- 设置面板 -->
-    <div v-if="showSettings" class="settings-overlay" @click.self="showSettings = false">
-      <div class="settings-panel">
-        <h3>⚙ 服务设置</h3>
-        <div class="setting-group">
-          <label>Anthropic API Key</label>
-          <input
-            v-model="settingsForm.anthropic_api_key"
-            type="password"
-            placeholder="sk-ant-..."
-            class="setting-input"
-          />
-        </div>
-        <div class="setting-group">
-          <label>Claude 模型</label>
-          <select v-model="settingsForm.claude_model" class="setting-input">
-            <option value="claude-sonnet-4-20250514">claude-sonnet-4</option>
-            <option value="claude-opus-4-20250514">claude-opus-4</option>
-            <option value="claude-3-5-sonnet-20241022">claude-3.5-sonnet</option>
-            <option value="claude-3-5-haiku-20241022">claude-3.5-haiku</option>
-          </select>
-        </div>
-        <div class="setting-group">
-          <label>MySQL 主机</label>
-          <input v-model="settingsForm.mysql_host" class="setting-input" placeholder="localhost" />
-        </div>
-        <div class="setting-group">
-          <label>MySQL 端口</label>
-          <input v-model.number="settingsForm.mysql_port" type="number" class="setting-input" />
-        </div>
-        <div class="setting-group">
-          <label>元数据 Schema（只读）</label>
-          <input v-model="settingsForm.mysql_database" class="setting-input" placeholder="opendataworks" />
-        </div>
-        <div class="setting-group">
-          <label>知识 Schema（dataagent）</label>
-          <input v-model="settingsForm.knowledge_mysql_database" class="setting-input" placeholder="dataagent" />
-        </div>
-        <div class="setting-group">
-          <label>会话 Schema（dataagent）</label>
-          <input v-model="settingsForm.session_mysql_database" class="setting-input" placeholder="dataagent" />
-        </div>
-        <div class="setting-group">
-          <label>Doris 主机</label>
-          <input v-model="settingsForm.doris_host" class="setting-input" placeholder="localhost" />
-        </div>
-        <div class="setting-group">
-          <label>Doris 端口</label>
-          <input v-model.number="settingsForm.doris_port" type="number" class="setting-input" />
-        </div>
-        <div class="setting-group">
-          <label>Tool Runtime</label>
-          <select v-model="settingsForm.tool_runtime_mode" class="setting-input">
-            <option value="native">native（内置 tool use）</option>
-            <option value="mcp_http">mcp_http（外部 MCP 网关）</option>
-          </select>
-        </div>
-        <div class="setting-group">
-          <label>MCP HTTP Endpoint</label>
-          <input v-model="settingsForm.mcp_http_endpoint" class="setting-input" placeholder="http://localhost:8800/tools/invoke" />
-        </div>
-        <div class="setting-group">
-          <label>Skills 输出目录</label>
-          <input v-model="settingsForm.skills_output_dir" class="setting-input" placeholder="../skills/dataagent" />
-        </div>
-        <div class="setting-actions">
-          <button class="btn-cancel" @click="showSettings = false">取消</button>
-          <button class="btn-save" @click="handleSaveSettings">保存</button>
-        </div>
-        <div v-if="settingsStatus" class="settings-status" :class="settingsStatusType">
-          {{ settingsStatus }}
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, triggerRef, watch } from 'vue'
+import { marked } from 'marked'
 import { createNl2SqlApiClient } from '../api/nl2sqlApi'
-import { useNl2SqlSession } from '../composables/useNl2SqlSession'
+
+marked.setOptions({ breaks: true, gfm: true })
 
 const props = defineProps({
-  nl2sqlBase: {
-    type: String,
-    default: 'http://localhost:8900'
-  }
+  nl2sqlBase: { type: String, default: 'http://localhost:8900' }
 })
 
-const emit = defineEmits(['sql-generated', 'sql-executed'])
+const api = createNl2SqlApiClient({ baseURL: props.nl2sqlBase, timeout: 300000 })
 
-const nl2sqlApi = createNl2SqlApiClient({ baseURL: props.nl2sqlBase })
-
-const {
-  loading,
-  sessions,
-  activeSessionId,
-  activeSession,
-  activeMessages,
-  generating,
-  loadSessions,
-  createSession,
-  selectSession,
-  deleteSession,
-  sendMessage,
-  executeSql
-} = useNl2SqlSession(nl2sqlApi)
-
+// ─── State ───
+const sessions = ref([])
+const activeSessionId = ref('')
+const generating = ref(false)
 const inputText = ref('')
 const searchKeyword = ref('')
-const selectedModel = ref('')
-const selectedDatabase = ref('')
-const databases = ref([])
-const showSettings = ref(false)
 const messagesRef = ref(null)
-const expandedThinking = reactive({})
-const shouldAutoScroll = ref(true)
-const settingsForm = reactive({
-  anthropic_api_key: '',
-  claude_model: 'claude-sonnet-4-20250514',
-  mysql_host: '',
-  mysql_port: 3306,
-  mysql_database: '',
-  knowledge_mysql_database: 'dataagent',
-  session_mysql_database: 'dataagent',
-  doris_host: '',
-  doris_port: 9030,
-  tool_runtime_mode: 'native',
-  mcp_http_endpoint: '',
-  skills_output_dir: '../skills/dataagent'
+const autoScroll = ref(true)
+const hydratedIds = new Set()
+
+const settings = reactive({
+  default_provider_id: 'openrouter',
+  default_model: 'anthropic/claude-sonnet-4.5',
+  providers: []
 })
-const settingsStatus = ref('')
-const settingsStatusType = ref('')
+const selectedProvider = ref(settings.default_provider_id)
+const selectedModel = ref(settings.default_model)
 
-const suggestions = [
-  { icon: '📊', text: '查询今日活跃用户数' },
-  { icon: '📈', text: '按产品分类统计收入' },
-  { icon: '🔍', text: '最近7天订单趋势' },
-  { icon: '👥', text: '查看用户增长情况' },
-]
+const suggestions = ['查询今日活跃用户数', '最近7天订单趋势', '各业务线本月收入对比', '昨日新增用户按来源分布']
 
+// ─── Computed ───
+const activeSession = computed(() => sessions.value.find(s => s.session_id === activeSessionId.value) || null)
+const activeMessages = computed(() => activeSession.value?.messages || [])
 const filteredSessions = computed(() => {
   const kw = searchKeyword.value.trim().toLowerCase()
   if (!kw) return sessions.value
-  return sessions.value.filter(s =>
-    (s.title || '').toLowerCase().includes(kw)
-  )
+  return sessions.value.filter(s => String(s.title || '').toLowerCase().includes(kw))
+})
+const activeProviderConfig = computed(() => {
+  const list = Array.isArray(settings.providers) ? settings.providers : []
+  return list.find(p => p.provider_id === selectedProvider.value) || list[0] || null
+})
+const availableModels = computed(() => {
+  const p = activeProviderConfig.value
+  const models = Array.isArray(p?.models) ? [...p.models] : []
+  const fb = p?.default_model || settings.default_model
+  if (fb && !models.includes(fb)) models.unshift(fb)
+  return models
 })
 
-const truncate = (text, len) => {
-  if (!text) return '新会话'
-  return text.length > len ? text.slice(0, len) + '...' : text
-}
-
-const formatTime = (value) => {
-  if (!value) return ''
-  const d = new Date(value)
-  const now = new Date()
-  if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-  }
+// ─── Helpers ───
+const truncate = (v, max) => { const t = String(v || '新会话'); return t.length > max ? t.slice(0, max) + '...' : t }
+const formatTime = (v) => {
+  if (!v) return ''
+  const d = new Date(v), now = new Date()
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
 }
+const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+const copyText = async (v) => { try { await navigator.clipboard.writeText(String(v || '')) } catch (_) {} }
+const execColumns = (exec) => {
+  if (Array.isArray(exec?.columns) && exec.columns.length) return exec.columns
+  const row = Array.isArray(exec?.rows) ? exec.rows[0] : null
+  return row && typeof row === 'object' ? Object.keys(row) : []
+}
 
-const stepIcon = (status) => {
-  switch (status) {
-    case 'success': return '✅'
-    case 'failed': return '❌'
-    case 'running': return '⏳'
-    case 'skipped': return '⏭'
-    default: return '⬜'
+// Tool categorization helpers
+const readTools = (msg) => (msg.tools || []).filter(t => {
+  const n = String(t.name || '').toLowerCase()
+  return n === 'read' || n === 'read_file' || n === 'readfile'
+})
+const skillTools = (msg) => (msg.tools || []).filter(t => {
+  const n = String(t.name || '').toLowerCase()
+  return n === 'skill' || n === 'launch_skill'
+})
+const extractFileName = (tool) => {
+  const inp = tool.input
+  let fp = ''
+  if (typeof inp === 'string') {
+    const parsed = parseMaybeJson(inp)
+    fp = parsed?.file_path || inp
+  } else if (inp && typeof inp === 'object') {
+    fp = inp.file_path || inp.path || ''
   }
+  const parts = String(fp || 'file').split('/')
+  return parts[parts.length - 1] || 'file'
+}
+const cleanMainText = (msg) => {
+  let t = String(msg.mainText || '')
+  // Strip skill preamble: "Base directory for this skill:..." through "ARGUMENTS: ..." line
+  t = t.replace(/Base directory for this skill:[\s\S]*?(?:ARGUMENTS:\s*[^\n]*\n?)/gi, '')
+  // Also strip standalone "ARGUMENTS: ..." lines
+  t = t.replace(/^ARGUMENTS:\s*[^\n]*\n?/gm, '')
+  return t.replace(/^\s+/, '')
 }
 
-const thinkingKey = (msg, idx) => {
-  const stamp = msg?.timestamp || msg?.created_at || ''
-  const role = msg?.role || ''
-  const tail = (msg?.content || msg?.sql || '').slice(0, 30)
-  return `${idx}-${role}-${stamp}-${tail}`
-}
-
-const toggleThinking = (key) => {
-  expandedThinking[key] = !isThinkingExpanded(key)
-}
-
-const isThinkingExpanded = (key) => {
-  return expandedThinking[key] !== false
-}
-
-const showAssistantContentFallback = (msg) => {
-  if (!msg || msg.role !== 'assistant') return false
-  const hasExplanation = !!msg.explanation
-  const hasSql = !!msg.sql
-  const hasExecution = !!msg.execution
-  const content = typeof msg.content === 'string' ? msg.content.trim() : ''
-  return !hasExplanation && !hasSql && !hasExecution && !!content
-}
-
-const showAssistantEmptyState = (msg) => {
-  if (!msg || msg.role !== 'assistant') return false
-  const hasExplanation = !!msg.explanation
-  const hasSql = !!msg.sql
-  const hasExecution = !!msg.execution
-  const hasContent = !!(typeof msg.content === 'string' && msg.content.trim())
-  return !hasExplanation && !hasSql && !hasExecution && !hasContent
-}
-
-const isNearBottom = () => {
-  const el = messagesRef.value
-  if (!el) return true
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 56
-}
-
-const handleMessagesScroll = () => {
-  shouldAutoScroll.value = isNearBottom()
-}
-
-const scrollToBottom = (force = false) => {
-  if (!force && !shouldAutoScroll.value) return
-  nextTick(() => {
-    const el = messagesRef.value
-    if (el) {
-      el.scrollTop = el.scrollHeight
-    }
-  })
-}
-
-const copyText = async (text) => {
+const renderMarkdown = (text) => {
+  if (!text) return ''
   try {
-    await navigator.clipboard.writeText(text)
-  } catch (e) {
-    console.error('Copy failed:', e)
+    // Strip SQL fenced blocks (they are displayed separately in SQL card)
+    let clean = text.replace(/```sql[\s\S]*?```/gi, '')
+    return marked.parse(clean)
+  } catch (_) { return text }
+}
+
+const extractSkillLabel = (tool) => {
+  let skill = ''
+  // Try from input
+  const inp = tool.input
+  if (typeof inp === 'string') {
+    const parsed = parseMaybeJson(inp)
+    skill = parsed?.skill || ''
+    if (!skill) { const m = inp.match(/"skill"\s*:\s*"([^"]+)"/); if (m) skill = m[1] }
+  } else if (inp && typeof inp === 'object') {
+    skill = inp.skill || ''
   }
+  // Try from output (e.g. "Launching skill: dataagent-nl2sql")
+  if (!skill && tool.output) {
+    const out = typeof tool.output === 'string' ? tool.output : String(tool.output)
+    const m = out.match(/Launching skill:\s*(\S+)/i)
+    if (m) skill = m[1]
+  }
+  const name = skill ? skill.replace(/^.*\//, '') : ''
+  return name ? `${name} skill` : String(tool.name || 'Skill')
+}
+
+const sortSessions = () => {
+  sessions.value.sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))
+}
+
+const normSession = (s) => ({
+  session_id: String(s?.session_id || ''),
+  title: String(s?.title || '新会话'),
+  message_count: Number(s?.message_count || 0),
+  created_at: String(s?.created_at || new Date().toISOString()),
+  updated_at: String(s?.updated_at || new Date().toISOString()),
+  messages: []
+})
+
+const makeAssistantMsg = () => reactive({
+  id: `a_${uid()}`, role: 'assistant', content: '', status: 'streaming',
+  mainText: '', thinkingText: '', sql: '', tools: [], citations: [],
+  execution: null, error: null, stop_reason: '',
+  resolved_database: null, provider_id: null, model: null,
+  _blocks: {}, _partials: {},
+  created_at: new Date().toISOString()
+})
+
+// ─── SSE Event Processing (reimplemented) ───
+const appendStr = (base, delta) => {
+  const d = String(delta || ''); if (!d) return base || ''
+  const b = String(base || ''); if (!b) return d
+  if (d === b) return b; if (d.startsWith(b)) return d
+  return b + d
+}
+
+const parseMaybeJson = (t) => { try { return JSON.parse(String(t || '').trim()) } catch (_) { return null } }
+
+const ensureClaudeBlock = (msg, index, claudeType) => {
+  const key = `cb-${index}`
+  if (!msg._blocks[key]) msg._blocks[key] = { type: claudeType, text: '', status: 'streaming', tool_name: '', tool_id: '', input: null, output: null, partial_json: '' }
+  return msg._blocks[key]
+}
+
+const processEvent = (msg, evt) => {
+  if (!evt || typeof evt !== 'object') return
+  const type = String(evt.type || '')
+  const payload = evt.payload && typeof evt.payload === 'object' ? evt.payload : {}
+
+  if (evt.message_id) msg.id = String(evt.message_id)
+  if (payload.provider_id) msg.provider_id = String(payload.provider_id)
+  if (payload.model) msg.model = String(payload.model)
+  if (payload.resolved_database) msg.resolved_database = String(payload.resolved_database)
+
+  // Claude protocol
+  if (type === 'message_start') {
+    const m = evt.message || payload.message || {}
+    if (m.id) msg.id = String(m.id)
+    if (m.model) msg.model = String(m.model)
+    msg.status = 'streaming'
+    return
+  }
+  if (type === 'ping') return
+
+  if (type === 'content_block_start') {
+    const idx = evt.index ?? payload.index
+    const cb = evt.content_block || payload.content_block || {}
+    const cType = String(cb.type || 'unknown')
+    const block = ensureClaudeBlock(msg, idx, cType)
+    block.type = cType; block.status = 'streaming'
+    if (cType === 'text' && cb.text) { block.text = cb.text; msg.mainText = appendStr(msg.mainText, cb.text) }
+    if (cType === 'thinking' && cb.thinking) block.text = cb.thinking
+    if (cType === 'tool_use') {
+      if (cb.id) block.tool_id = String(cb.id)
+      if (cb.name) block.tool_name = String(cb.name)
+      if ('input' in cb) block.input = cb.input
+      msg.tools.push({ id: block.tool_id || `t_${uid()}`, name: block.tool_name, status: 'streaming', input: block.input, output: null, _blockKey: `cb-${idx}` })
+    }
+    return
+  }
+
+  if (type === 'content_block_delta') {
+    const idx = evt.index ?? payload.index
+    const delta = evt.delta || payload.delta || {}
+    const dType = String(delta.type || '')
+    const block = ensureClaudeBlock(msg, idx, 'unknown')
+    block.status = 'streaming'
+
+    if (dType === 'text_delta') {
+      block.type = 'text'; block.text = appendStr(block.text, delta.text)
+      msg.mainText = appendStr(msg.mainText, delta.text)
+      msg.content = appendStr(msg.content, delta.text)
+    } else if (dType === 'thinking_delta') {
+      block.type = 'thinking'; block.text = appendStr(block.text, delta.thinking)
+      msg.thinkingText = appendStr(msg.thinkingText, delta.thinking)
+    } else if (dType === 'thinking_summary_delta') {
+      block.type = 'thinking'
+    } else if (dType === 'input_json_delta') {
+      block.partial_json = appendStr(block.partial_json, delta.partial_json || '')
+      const parsed = parseMaybeJson(block.partial_json)
+      const cType = block.type
+      if (cType === 'tool_use') {
+        block.input = parsed !== null ? parsed : block.partial_json
+        const tool = msg.tools.find(t => t._blockKey === `cb-${idx}`)
+        if (tool) tool.input = block.input
+      }
+    } else if (dType === 'citation_start_delta' && delta.citation) {
+      msg.citations.push(delta.citation)
+    }
+    return
+  }
+
+  if (type === 'content_block_stop') {
+    const idx = evt.index ?? payload.index
+    const block = ensureClaudeBlock(msg, idx, 'unknown')
+    block.status = 'success'
+    if (block.partial_json) {
+      const parsed = parseMaybeJson(block.partial_json)
+      if (parsed !== null && block.type === 'tool_use') block.input = parsed
+    }
+    const tool = msg.tools.find(t => t._blockKey === `cb-${idx}`)
+    if (tool) { tool.status = 'success'; tool.input = block.input }
+    return
+  }
+
+  if (type === 'message_delta') {
+    const d = evt.delta || payload.delta || {}
+    if (d.stop_reason != null) msg.stop_reason = String(d.stop_reason)
+    return
+  }
+
+  if (type === 'message_stop') {
+    msg.status = msg.status === 'failed' ? 'failed' : 'success'
+    msg.tools.forEach(t => { if (t.status === 'streaming') t.status = 'success' })
+    return
+  }
+
+  // DataAgent custom protocol
+  if (type === 'text.delta') {
+    msg.mainText = appendStr(msg.mainText, payload.text)
+    msg.content = appendStr(msg.content, payload.text)
+    return
+  }
+  if (type === 'text.complete') {
+    if (typeof payload.text === 'string') { msg.mainText = payload.text; msg.content = payload.text }
+    return
+  }
+  if (type === 'thinking.delta') {
+    msg.thinkingText = appendStr(msg.thinkingText, payload.text)
+    return
+  }
+  if (type === 'thinking.complete') {
+    if (typeof payload.text === 'string') msg.thinkingText = payload.text
+    return
+  }
+  if (type.startsWith('tool.')) {
+    const toolId = String(payload.tool_id || payload.block_id || `t_${uid()}`)
+    let tool = msg.tools.find(t => t.id === toolId)
+    if (!tool) { tool = { id: toolId, name: String(payload.tool_name || 'Tool'), status: 'streaming', input: null, output: null }; msg.tools.push(tool) }
+    if (payload.tool_name) tool.name = String(payload.tool_name)
+    if ('input' in payload) tool.input = payload.input
+    if ('output' in payload) tool.output = payload.output
+    if (type === 'tool.pending') tool.status = 'pending'
+    if (type === 'tool.in_progress' || type === 'tool.streaming') tool.status = 'streaming'
+    if (type === 'tool.complete') { tool.status = 'success'; tool.output = payload.output ?? tool.output }
+    return
+  }
+
+  if (type === 'error') {
+    msg.status = 'failed'
+    msg.error = String(payload.message || '请求失败')
+    return
+  }
+
+  if (type === 'done') {
+    msg.status = String(payload.status || msg.status || 'success')
+    if (payload.content) msg.content = String(payload.content)
+    if (payload.sql) msg.sql = String(payload.sql)
+    if (payload.execution) msg.execution = payload.execution
+    if (payload.error) msg.error = typeof payload.error === 'object' ? String(payload.error.message || '请求失败') : String(payload.error)
+    if (payload.resolved_database) msg.resolved_database = String(payload.resolved_database)
+    if (payload.model) msg.model = String(payload.model)
+    // If main text not set from streaming, try to fill from content
+    if (!msg.mainText && msg.content) msg.mainText = msg.content
+  }
+}
+
+// ─── Session & Message Actions ───
+const loadSettings = async () => {
+  try {
+    const p = await api.getSettings()
+    settings.default_provider_id = p?.default_provider_id || settings.default_provider_id
+    settings.default_model = p?.default_model || settings.default_model
+    settings.providers = Array.isArray(p?.providers) ? p.providers : []
+    selectedProvider.value = settings.default_provider_id || settings.providers[0]?.provider_id || 'openrouter'
+    const prov = settings.providers.find(x => x.provider_id === selectedProvider.value)
+    selectedModel.value = prov?.default_model || settings.default_model || ''
+  } catch (e) { console.warn('load settings failed', e) }
+}
+
+const hydrateSession = async (sid) => {
+  if (!sid || hydratedIds.has(sid)) return
+  try {
+    const detail = await api.getSession(sid)
+    const target = sessions.value.find(s => s.session_id === sid)
+    if (target && detail) {
+      target.title = String(detail.title || target.title)
+      target.updated_at = String(detail.updated_at || target.updated_at)
+      const rawMsgs = Array.isArray(detail.messages) ? detail.messages : []
+      target.messages = rawMsgs.map(m => {
+        if (!m) return null
+        const role = String(m.role || 'assistant')
+        if (role === 'user') return { id: String(m.message_id || uid()), role: 'user', content: String(m.content || ''), created_at: m.created_at }
+        // assistant
+        const am = makeAssistantMsg()
+        am.id = String(m.message_id || am.id)
+        am.content = String(m.content || '')
+        am.mainText = am.content
+        am.sql = String(m.sql || '')
+        am.execution = m.execution || null
+        am.status = String(m.status || 'success')
+        am.resolved_database = m.resolved_database || null
+        am.stop_reason = String(m.stop_reason || '')
+        am.created_at = m.created_at || am.created_at
+        // reconstruct blocks
+        if (Array.isArray(m.blocks)) {
+          for (const b of m.blocks) {
+            if (!b) continue
+            const bt = String(b.type || '')
+            if (bt === 'thinking') am.thinkingText = String(b.text || '')
+            if (bt === 'main_text' && b.text) am.mainText = String(b.text)
+            if (bt === 'tool_use' || bt === 'tool_result' || bt === 'tool') {
+              am.tools.push({ id: String(b.block_id || uid()), name: String(b.tool_name || 'Tool'), status: String(b.status || 'success'), input: b.input, output: b.output })
+            }
+            if (bt === 'error') am.error = String(b.text || '请求失败')
+            if (b.payload?.citations) am.citations.push(...(Array.isArray(b.payload.citations) ? b.payload.citations : []))
+          }
+        }
+        return am
+      }).filter(Boolean)
+      target.message_count = target.messages.length
+    }
+    hydratedIds.add(sid)
+  } catch (e) { console.warn('hydrate failed', e) }
+}
+
+const loadSessions = async () => {
+  try {
+    const list = await api.listSessions()
+    sessions.value = (Array.isArray(list) ? list : []).map(normSession)
+    sortSessions()
+    if (!activeSessionId.value && sessions.value.length) activeSessionId.value = sessions.value[0].session_id
+    if (activeSessionId.value) await hydrateSession(activeSessionId.value)
+  } catch (e) { console.warn('load sessions failed', e) }
 }
 
 const handleNewSession = async () => {
-  await createSession()
-  shouldAutoScroll.value = true
+  const s = normSession(await api.createSession())
+  sessions.value.unshift(s)
+  hydratedIds.add(s.session_id)
+  activeSessionId.value = s.session_id
+  autoScroll.value = true
   scrollToBottom(true)
 }
 
-const handleSelectSession = async (sessionId) => {
-  await selectSession(sessionId)
-  shouldAutoScroll.value = true
+const handleSelectSession = async (sid) => {
+  activeSessionId.value = sid
+  await hydrateSession(sid)
+  autoScroll.value = true
   scrollToBottom(true)
-}
-
-const handleDeleteSession = async (sessionId) => {
-  await deleteSession(sessionId)
 }
 
 const handleSend = async () => {
@@ -497,1027 +572,239 @@ const handleSend = async () => {
   inputText.value = ''
   scrollToBottom()
 
-  try {
-    const response = await sendMessage(text, selectedDatabase.value || null, selectedModel.value || null)
-    emit('sql-generated', response)
-    scrollToBottom(true)
-  } catch (error) {
-    console.error('Send failed:', error)
+  if (!activeSessionId.value) {
+    const s = normSession(await api.createSession(text.length > 20 ? text.slice(0, 20) + '...' : text))
+    sessions.value.unshift(s)
+    hydratedIds.add(s.session_id)
+    activeSessionId.value = s.session_id
   }
-}
+  await hydrateSession(activeSessionId.value)
 
-const handleSuggestion = (suggestion) => {
-  inputText.value = suggestion.text
-  handleSend()
-}
+  const session = activeSession.value
+  if (!session) return
+  if (!Array.isArray(session.messages)) session.messages = []
 
-const handleExecuteSql = async (sql) => {
-  try {
-    const result = await executeSql(sql, selectedDatabase.value || null)
-    emit('sql-executed', result)
-  } catch (error) {
-    console.error('Execute SQL failed:', error)
-  }
-}
-
-const handleReload = async () => {
-  try {
-    const res = await nl2sqlApi.reloadSemantic(selectedDatabase.value || null)
-    if (res?.skills_sync) {
-      console.info('Skills synced:', res.skills_sync)
-    }
-  } catch (error) {
-    console.error('Reload failed:', error)
-  }
-}
-
-const handleSaveSettings = async () => {
-  try {
-    settingsStatus.value = '保存中...'
-    settingsStatusType.value = ''
-    const patch = {}
-    Object.entries(settingsForm).forEach(([k, v]) => {
-      if (v !== '' && v !== null && v !== undefined) {
-        patch[k] = v
-      }
-    })
-    await nl2sqlApi.updateSettings(patch)
-    settingsStatus.value = '✅ 保存成功'
-    settingsStatusType.value = 'success'
-    setTimeout(() => { settingsStatus.value = '' }, 2000)
-  } catch (error) {
-    settingsStatus.value = `❌ 保存失败: ${error.message}`
-    settingsStatusType.value = 'error'
-  }
-}
-
-const loadSettings = async () => {
-  try {
-    const cfg = await nl2sqlApi.getSettings()
-    if (cfg) {
-      settingsForm.claude_model = cfg.claude_model || settingsForm.claude_model
-      settingsForm.mysql_host = cfg.mysql_host || ''
-      settingsForm.mysql_port = cfg.mysql_port || 3306
-      settingsForm.mysql_database = cfg.mysql_database || ''
-      settingsForm.knowledge_mysql_database = cfg.knowledge_mysql_database || 'dataagent'
-      settingsForm.session_mysql_database = cfg.session_mysql_database || 'dataagent'
-      settingsForm.doris_host = cfg.doris_host || ''
-      settingsForm.doris_port = cfg.doris_port || 9030
-      settingsForm.tool_runtime_mode = cfg.tool_runtime_mode || 'native'
-      settingsForm.mcp_http_endpoint = cfg.mcp_http_endpoint || ''
-      settingsForm.skills_output_dir = cfg.skills_output_dir || '../skills/dataagent'
-    }
-  } catch (e) {
-    console.warn('Failed to load settings', e)
-  }
-}
-
-watch(() => activeMessages.value.length, () => {
-  activeMessages.value.forEach((msg, idx) => {
-    if (msg?.role === 'assistant' && Array.isArray(msg.thinking_steps) && msg.thinking_steps.length > 0) {
-      const key = thinkingKey(msg, idx)
-      if (expandedThinking[key] === undefined) {
-        expandedThinking[key] = true
-      }
-    }
-  })
+  session.messages.push({ id: `u_${uid()}`, role: 'user', content: text, created_at: new Date().toISOString() })
+  const assistantMsg = makeAssistantMsg()
+  session.messages.push(assistantMsg)
+  generating.value = true
   scrollToBottom()
-})
 
-watch(() => activeSessionId.value, () => {
-  shouldAutoScroll.value = true
-  scrollToBottom(true)
+  const abortCtrl = new AbortController()
+  const fetchTimer = setTimeout(() => abortCtrl.abort(), 300000) // 5 min
+  try {
+    await api.streamMessage(activeSessionId.value, {
+      content: text,
+      provider_id: selectedProvider.value,
+      model: selectedModel.value,
+      debug: true,
+      stream: true
+    }, {
+      onEvent: (evt) => { processEvent(assistantMsg, evt); triggerRef(sessions); scrollToBottom() },
+      signal: abortCtrl.signal
+    })
+    if (assistantMsg.status === 'streaming') assistantMsg.status = 'success'
+    session.updated_at = new Date().toISOString()
+    session.message_count = session.messages.length
+    if (session.title === '新会话') session.title = text.length > 30 ? text.slice(0, 30) + '...' : text
+    sortSessions()
+    scrollToBottom(true)
+  } catch (err) {
+    assistantMsg.status = 'failed'
+    assistantMsg.error = String(err?.message || '请求失败')
+  } finally {
+    clearTimeout(fetchTimer)
+    generating.value = false
+  }
+}
+
+const handleSuggestion = (v) => { inputText.value = v; handleSend() }
+
+const handleExecSql = async (msg) => {
+  if (!msg?.sql) return
+  try {
+    msg.execution = await api.executeSql({ sql: msg.sql, database: msg.resolved_database || null })
+  } catch (e) {
+    msg.execution = { error: String(e?.message || '执行失败'), row_count: 0, duration_ms: 0, rows: [], columns: [] }
+  }
+}
+
+// ─── Scroll ───
+const isNearBottom = () => { const el = messagesRef.value; if (!el) return true; return el.scrollHeight - el.scrollTop - el.clientHeight < 60 }
+const handleScroll = () => { autoScroll.value = isNearBottom() }
+const scrollToBottom = (force = false) => {
+  if (!force && !autoScroll.value) return
+  nextTick(() => { const el = messagesRef.value; if (el) el.scrollTop = el.scrollHeight })
+}
+
+// ─── Watchers ───
+watch(() => [selectedProvider.value, availableModels.value.join('|')], () => {
+  if (!availableModels.value.includes(selectedModel.value)) selectedModel.value = availableModels.value[0] || settings.default_model || ''
 })
 
 onMounted(async () => {
-  await loadSessions()
   await loadSettings()
+  await loadSessions()
   scrollToBottom(true)
 })
 </script>
 
 <style scoped>
-/* ---- 根布局 ---- */
-.nl2sql-chat {
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  height: 100%;
-  min-height: 0;
-  background: #ffffff;
+/* ═══ Layout ═══ */
+.v2-layout {
+  --bg: #faf8f5; --bg-sidebar: #f5f3ef; --bg-card: #ffffff;
+  --text: #1a1a1a; --text-muted: #7a7670; --text-light: #a09a92;
+  --border: #e8e2d9; --border-light: #f0ece6;
+  --accent: #1a73e8; --accent-soft: #e8f0fe;
+  --user-bg: #2c2c2c; --user-text: #ffffff;
+  height: 100vh; width: 100vw; display: grid; grid-template-columns: 260px 1fr;
+  background: var(--bg); color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
-  color: #1a1f36;
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.08);
 }
 
-/* ---- 侧边栏 ---- */
-.sidebar {
-  background: linear-gradient(180deg, #0f1629 0%, #1a1f36 100%);
-  color: #c9d1e3;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.sidebar-header {
-  padding: 20px 16px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.logo-area {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.logo-icon {
-  font-size: 20px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.logo-text {
-  font-size: 15px;
-  font-weight: 700;
-  color: #e8ecf4;
-  letter-spacing: 0.5px;
-}
-
-.btn-new {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 9px 14px;
-  border: 1px solid rgba(99, 102, 241, 0.4);
-  border-radius: 10px;
-  background: rgba(99, 102, 241, 0.1);
-  color: #a5b4fc;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-new:hover {
-  background: rgba(99, 102, 241, 0.2);
-  border-color: #6366f1;
-  color: #c7d2fe;
-}
-
-.icon-plus {
-  font-size: 16px;
-  font-weight: 300;
-}
-
-.search-box {
-  padding: 0 16px 8px;
-}
-
-.search-input {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #c9d1e3;
-  font-size: 13px;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.search-input::placeholder {
-  color: #5b6584;
-}
-
-.search-input:focus {
-  border-color: rgba(99, 102, 241, 0.4);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.session-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 12px;
-}
-
-.session-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  margin-bottom: 4px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.session-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.session-item.active {
-  background: rgba(99, 102, 241, 0.15);
-  border-left: 3px solid #6366f1;
-}
-
-.session-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.session-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: #e0e5f0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.session-time {
-  font-size: 11px;
-  color: #5b6584;
-  margin-top: 2px;
-}
-
-.btn-delete {
-  opacity: 0;
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 6px;
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.15s;
-  flex-shrink: 0;
-}
-
-.session-item:hover .btn-delete {
-  opacity: 1;
-}
-
-.btn-delete:hover {
-  background: rgba(239, 68, 68, 0.3);
-}
-
-.empty-sessions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 40px 0;
-  color: #5b6584;
-  font-size: 13px;
-}
-
-.empty-icon {
-  font-size: 28px;
-  opacity: 0.5;
-}
-
-.sidebar-footer {
-  padding: 12px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.btn-settings {
-  width: 100%;
-  padding: 8px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: #7c8aaa;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.btn-settings:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #a5b4fc;
-}
-
-/* ---- 主聊天区 ---- */
-.chat-main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: #fafbfe;
-}
-
-.chat-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 20px;
-  background: #fff;
-  border-bottom: 1px solid #edf0f7;
-}
-
-.header-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #1a1f36;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.db-select {
-  padding: 6px 10px;
-  border: 1px solid #dde3ef;
-  border-radius: 8px;
-  font-size: 13px;
-  color: #3d4663;
-  background: #fff;
-  outline: none;
-}
-
-.model-select {
-  width: 140px;
-}
-
-.btn-icon {
-  width: 32px;
-  height: 32px;
-  border: 1px solid #dde3ef;
-  border-radius: 8px;
-  background: #fff;
-  cursor: pointer;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
-}
-
-.btn-icon:hover {
-  background: #f0f3fa;
-}
-
-/* ---- 消息流 ---- */
-.messages-container {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  background: linear-gradient(180deg, #f5f7fd 0%, #fafbfe 100%);
-}
-
-.messages-inner {
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 20px 24px 28px;
-}
-
-.empty-chat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 400px;
-  gap: 32px;
-}
-
-.empty-hero {
-  text-align: center;
-}
-
-.hero-icon {
-  font-size: 48px;
-  display: block;
-  margin-bottom: 12px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6, #a78bfa);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.empty-hero h2 {
-  font-size: 22px;
-  font-weight: 700;
-  color: #1a1f36;
-  margin: 0 0 8px;
-}
-
-.empty-hero p {
-  font-size: 14px;
-  color: #7c8aaa;
-  margin: 0;
-}
-
-.suggestion-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  width: 100%;
-  max-width: 500px;
-}
-
-.suggestion-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 16px;
-  border: 1px solid #e5e9f5;
-  border-radius: 12px;
-  background: #fff;
-  cursor: pointer;
-  transition: all 0.2s;
-  font-size: 13px;
-  color: #3d4663;
-}
-
-.suggestion-card:hover {
-  border-color: #a5b4fc;
-  background: #f5f3ff;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.1);
-}
-
-.suggestion-icon {
-  font-size: 18px;
-}
-
-/* ---- 消息 ---- */
-.message {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.message-avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.user-avatar {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  color: #fff;
-}
-
-.assistant-avatar {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  color: #fff;
-}
-
-.message-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.user-message {
-  flex-direction: row-reverse;
-}
-
-.user-message .message-content {
-  background: linear-gradient(135deg, #eef2ff, #e0e7ff);
-  border: 1px solid #c7d2fe;
-  border-radius: 16px 16px 4px 16px;
-  padding: 12px 16px;
-  font-size: 14px;
-  line-height: 1.6;
-  color: #312e81;
-  max-width: 70%;
-  margin-left: auto;
-}
-
-.assistant-message .message-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* ---- 思考过程 ---- */
-.thinking-section {
-  background: linear-gradient(135deg, #fffbeb, #fef3c7);
-  border: 1px solid #fde68a;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.thinking-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.thinking-icon {
-  font-size: 10px;
-  color: #92400e;
-}
-
-.thinking-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #92400e;
-}
-
-.thinking-count {
-  font-size: 11px;
-  color: #b45309;
-  margin-left: auto;
-}
-
-.thinking-steps {
-  border-top: 1px solid #fde68a;
-  padding: 8px 14px;
-}
-
-.step-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 6px 0;
-}
-
-.step-status {
-  font-size: 14px;
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-
-.step-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: #78350f;
-}
-
-.step-summary {
-  font-size: 12px;
-  color: #a16207;
-  margin-top: 2px;
-}
-
-/* ---- 解释文本 ---- */
-.explanation-text {
-  font-size: 14px;
-  line-height: 1.7;
-  color: #374151;
-  padding: 2px 0;
-  white-space: pre-wrap;
-}
-
-.explanation-fallback {
-  white-space: pre-wrap;
-}
-
-.assistant-empty {
-  font-size: 13px;
-  color: #9a3412;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  border-radius: 10px;
-  padding: 10px 12px;
-}
-
-/* ---- SQL 块 ---- */
-.sql-block {
-  background: #1e1e2e;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.sql-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.sql-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #a5b4fc;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.sql-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.btn-sm {
-  padding: 4px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #c9d1e3;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.btn-sm:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.btn-sm.btn-primary {
-  background: rgba(99, 102, 241, 0.3);
-  border-color: rgba(99, 102, 241, 0.5);
-  color: #c7d2fe;
-}
-
-.btn-sm.btn-primary:hover {
-  background: rgba(99, 102, 241, 0.5);
-}
-
-.sql-code {
-  margin: 0;
-  padding: 14px 16px;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #e2e8f0;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* ---- 查询结果 ---- */
-.result-block {
-  background: #fff;
-  border: 1px solid #e5e9f5;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.result-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  background: #f8faff;
-  border-bottom: 1px solid #e5e9f5;
-}
-
-.result-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #1a1f36;
-}
-
-.result-meta {
-  font-size: 12px;
-  color: #7c8aaa;
-}
-
-.result-error {
-  padding: 12px 14px;
-  font-size: 13px;
-  color: #dc2626;
-  background: #fef2f2;
-}
-
-.result-table-wrapper {
-  max-height: 360px;
-  overflow: auto;
-}
-
-.result-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.result-table th {
-  padding: 8px 12px;
-  text-align: left;
-  font-weight: 600;
-  color: #3d4663;
-  background: #f8faff;
-  border-bottom: 2px solid #e5e9f5;
-  white-space: nowrap;
-  position: sticky;
-  top: 0;
-}
-
-.result-table td {
-  padding: 7px 12px;
-  border-bottom: 1px solid #f0f3fa;
-  color: #4b5563;
-  white-space: nowrap;
-}
-
-.result-table tbody tr:hover {
-  background: #f5f7fd;
-}
-
-.result-table tbody tr:nth-child(even) {
-  background: #fafbfe;
-}
-
-/* ---- 匹配信息 ---- */
-.match-info {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 4px 0;
-}
-
-.match-tag {
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.table-tag {
-  background: #eff6ff;
-  color: #1d4ed8;
-  border: 1px solid #bfdbfe;
-}
-
-.rule-tag {
-  background: #f0fdf4;
-  color: #15803d;
-  border: 1px solid #bbf7d0;
-}
-
-.confidence-badge {
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fde68a;
-}
-
-/* ---- 生成指示器 ---- */
-.generating-indicator {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 0;
-}
-
-.dot-flashing {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #6366f1;
-  animation: dot-flashing 1s infinite alternate;
-}
-
-@keyframes dot-flashing {
-  0% { opacity: 0.2; transform: scale(0.8); }
-  100% { opacity: 1; transform: scale(1.2); }
-}
-
-.generating-text {
-  font-size: 13px;
-  color: #7c8aaa;
-  font-style: italic;
-}
-
-/* ---- 底部输入 ---- */
-.input-area {
-  padding: 16px 24px 20px;
-  background: #fff;
-  border-top: 1px solid #edf0f7;
-}
-
-.input-wrapper {
-  max-width: 860px;
-  margin: 0 auto;
-}
-
-.input-textarea {
-  width: 100%;
-  padding: 12px 14px;
-  border: 2px solid #e5e9f5;
-  border-radius: 12px;
-  font-size: 14px;
-  line-height: 1.5;
-  resize: none;
-  outline: none;
-  transition: border-color 0.2s;
-  font-family: inherit;
-  color: #1a1f36;
-  background: #fafbfe;
-  box-sizing: border-box;
-}
-
-.input-textarea::placeholder {
-  color: #9ca3af;
-}
-
-.input-textarea:focus {
-  border-color: #6366f1;
-  background: #fff;
-}
-
-.input-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 8px;
-}
-
-.input-hint {
-  font-size: 12px;
-  color: #9ca3af;
-}
-
-.btn-send {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 20px;
-  border: none;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #6366f1, #4f46e5);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
-}
-
-.btn-send:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
-}
-
-.btn-send:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.send-icon {
-  font-size: 14px;
-}
-
-/* ---- 设置面板 ---- */
-.settings-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-}
-
-.settings-panel {
-  background: #fff;
-  border-radius: 16px;
-  padding: 28px;
-  width: 420px;
-  max-height: 80vh;
-  overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
-}
-
-.settings-panel h3 {
-  font-size: 17px;
-  font-weight: 700;
-  margin: 0 0 20px;
-  color: #1a1f36;
-}
-
-.setting-group {
-  margin-bottom: 14px;
-}
-
-.setting-group label {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  color: #6b7280;
-  margin-bottom: 5px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.setting-input {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  font-size: 13px;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.setting-input:focus {
-  border-color: #6366f1;
-}
-
-.setting-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 20px;
-}
-
-.btn-cancel {
-  padding: 8px 18px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  background: #fff;
-  color: #374151;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.btn-save {
-  padding: 8px 18px;
-  border: none;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #6366f1, #4f46e5);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.settings-status {
-  margin-top: 12px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  text-align: center;
-}
-
-.settings-status.success {
-  background: #f0fdf4;
-  color: #15803d;
-}
-
-.settings-status.error {
-  background: #fef2f2;
-  color: #dc2626;
-}
-
-/* ---- 滚动条美化 ---- */
-.messages-container::-webkit-scrollbar,
-.session-list::-webkit-scrollbar,
-.result-table-wrapper::-webkit-scrollbar {
-  width: 6px;
-}
-
-.messages-container::-webkit-scrollbar-track,
-.session-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.messages-container::-webkit-scrollbar-thumb,
-.session-list::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 3px;
-}
-
-.result-table-wrapper::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 3px;
-}
-
-/* ---- 响应式 ---- */
-@media (max-width: 768px) {
-  .nl2sql-chat {
-    grid-template-columns: 1fr;
-  }
-
-  .sidebar {
-    display: none;
-  }
-
-  .suggestion-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .user-message .message-content {
-    max-width: 90%;
-  }
+/* ═══ Sidebar ═══ */
+.v2-sidebar { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; background: var(--bg-sidebar); }
+.v2-sidebar-head { padding: 16px 16px 10px; display: flex; align-items: center; justify-content: space-between; }
+.v2-brand { font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -0.01em; }
+.v2-btn-new { border: 1px solid var(--border); background: var(--bg-card); color: var(--text); border-radius: 20px; height: 32px; padding: 0 14px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+.v2-btn-new:hover { background: var(--border-light); border-color: #d5cfc6; }
+.v2-sidebar-search { padding: 0 16px 12px; }
+.v2-search-input { width: 100%; border: 1px solid var(--border); border-radius: 10px; height: 34px; padding: 0 12px; background: var(--bg-card); outline: none; font-size: 13px; color: var(--text); transition: border-color 0.15s; box-sizing: border-box; }
+.v2-search-input:focus { border-color: var(--accent); }
+.v2-session-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 10px 14px; }
+.v2-session-item { width: 100%; border: none; border-radius: 10px; background: transparent; text-align: left; padding: 10px 12px; margin-bottom: 4px; cursor: pointer; transition: background 0.12s; display: block; }
+.v2-session-item:hover { background: #ece8e1; }
+.v2-session-item.active { background: #e4dfd7; }
+.v2-session-title { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.4; }
+.v2-session-meta { margin-top: 3px; font-size: 11px; color: var(--text-muted); }
+.v2-empty-sessions { color: var(--text-light); font-size: 13px; text-align: center; padding: 28px 0; }
+
+/* ═══ Main ═══ */
+.v2-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+
+/* ═══ Messages area ═══ */
+.v2-messages { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.v2-messages-inner { max-width: 860px; margin: 0 auto; padding: 28px 24px 36px; }
+
+/* ═══ Empty state ═══ */
+.v2-empty { min-height: 360px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+.v2-empty-icon { font-size: 40px; margin-bottom: 12px; }
+.v2-empty-title { font-size: 22px; font-weight: 700; color: var(--text); }
+.v2-empty-sub { margin-top: 8px; color: var(--text-muted); font-size: 14px; }
+.v2-suggestions { margin-top: 22px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.v2-suggestion { border: 1px solid var(--border); border-radius: 20px; background: var(--bg-card); height: 36px; padding: 0 16px; color: var(--text); cursor: pointer; font-size: 13px; transition: all 0.15s; }
+.v2-suggestion:hover { background: var(--border-light); border-color: #d5cfc6; }
+
+/* ═══ Message rows ═══ */
+.v2-msg-row { margin-bottom: 22px; display: flex; }
+.v2-msg-user { justify-content: flex-end; }
+.v2-msg-assistant { justify-content: flex-start; }
+
+/* ═══ User bubble ═══ */
+.v2-user-bubble { max-width: 70%; border-radius: 18px 18px 4px 18px; background: var(--user-bg); color: var(--user-text); padding: 12px 16px; white-space: pre-wrap; line-height: 1.6; font-size: 14px; }
+
+/* ═══ Assistant body ═══ */
+.v2-assistant-body { max-width: 100%; width: 100%; }
+
+/* ═══ Steps (thinking / tool) ═══ */
+.v2-step-row { margin-bottom: 8px; }
+.v2-step-summary { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; list-style: none; color: var(--text-muted); font-size: 13px; padding: 6px 0; }
+.v2-step-summary::-webkit-details-marker { display: none; }
+.v2-step-summary::marker { display: none; content: ''; }
+.v2-step-icon { font-size: 14px; flex-shrink: 0; }
+.v2-step-chevron { margin-left: auto; font-size: 16px; font-weight: 300; color: var(--text-light); transition: transform 0.2s; }
+details[open] > .v2-step-summary .v2-step-chevron { transform: rotate(90deg); }
+.v2-thinking-content { margin: 4px 0 6px 24px; padding: 10px 14px; background: #f7f5f1; border-radius: 10px; white-space: pre-wrap; line-height: 1.6; color: #5a554d; font-size: 13px; max-height: 300px; overflow-y: auto; }
+
+/* ═══ Loading indicator ═══ */
+.v2-loading { display: flex; align-items: center; padding: 8px 0; }
+.v2-loading-text { font-size: 14px; color: var(--text-muted); }
+.v2-loading-dots { display: inline-flex; margin-left: 2px; }
+.v2-loading-dots span { font-size: 14px; color: var(--text-muted); animation: v2dot 1.4s ease-in-out infinite; }
+.v2-loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.v2-loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes v2dot { 0%, 20% { opacity: 0.2; } 50% { opacity: 1; } 80%, 100% { opacity: 0.2; } }
+.v2-step-static { cursor: default; }
+.v2-tool-file-list { margin: 4px 0 6px 24px; }
+.v2-tool-file-item { font-size: 12px; color: var(--text-muted); padding: 3px 0; line-height: 1.4; }
+.v2-tool-file-item::before { content: '· '; color: var(--text-light); }
+
+/* ═══ Main text (markdown) ═══ */
+.v2-main-text { line-height: 1.75; color: var(--text); font-size: 14.5px; }
+.v2-main-text :deep(p) { margin: 0 0 10px; }
+.v2-main-text :deep(p:last-child) { margin-bottom: 0; }
+.v2-main-text :deep(strong) { font-weight: 600; color: var(--text); }
+.v2-main-text :deep(ul), .v2-main-text :deep(ol) { margin: 6px 0 10px 18px; padding: 0; }
+.v2-main-text :deep(li) { margin-bottom: 4px; }
+.v2-main-text :deep(code) { background: #f0ece6; border-radius: 4px; padding: 1px 5px; font-size: 13px; color: #8b4513; }
+.v2-main-text :deep(pre) { background: #1e1e1e; color: #d4d4d4; border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 10px 0; font-size: 13px; line-height: 1.55; }
+.v2-main-text :deep(pre code) { background: none; color: inherit; padding: 0; font-size: inherit; }
+.v2-main-text :deep(blockquote) { border-left: 3px solid var(--border); margin: 8px 0; padding: 4px 12px; color: var(--text-muted); }
+.v2-main-text :deep(h1), .v2-main-text :deep(h2), .v2-main-text :deep(h3) { margin: 16px 0 8px; font-weight: 600; }
+.v2-main-text :deep(h1) { font-size: 18px; }
+.v2-main-text :deep(h2) { font-size: 16px; }
+.v2-main-text :deep(h3) { font-size: 15px; }
+.v2-main-text :deep(a) { color: var(--accent); text-decoration: none; }
+.v2-main-text :deep(a:hover) { text-decoration: underline; }
+.v2-main-text :deep(table) { width: 100%; border-collapse: collapse; font-size: 13px; margin: 10px 0; }
+.v2-main-text :deep(th), .v2-main-text :deep(td) { border: 1px solid var(--border-light); padding: 6px 10px; text-align: left; }
+.v2-main-text :deep(th) { background: #f7f5f1; font-weight: 600; }
+.v2-cursor { color: var(--accent); animation: v2blink 1s ease-in-out infinite; }
+.v2-citations { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+.v2-citation-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; font-size: 12px; color: var(--text-muted); text-decoration: none; background: var(--bg-card); transition: border-color 0.15s; }
+.v2-citation-chip:hover { border-color: var(--accent); color: var(--accent); }
+.v2-citation-idx { background: var(--border-light); border-radius: 4px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; }
+
+/* ═══ SQL card ═══ */
+.v2-sql-card { margin-top: 14px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg-card); }
+.v2-sql-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--border-light); }
+.v2-sql-header span { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.v2-sql-actions { display: flex; gap: 6px; }
+.v2-btn-sm { height: 26px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--text); padding: 0 10px; cursor: pointer; font-size: 11px; transition: all 0.12s; }
+.v2-btn-sm:hover { background: var(--border-light); }
+.v2-btn-exec { border-color: var(--accent); color: var(--accent); }
+.v2-btn-exec:hover { background: var(--accent-soft); }
+.v2-sql-code { margin: 0; padding: 14px 16px; background: #1e1e1e; color: #d4d4d4; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+
+/* ═══ Execution card ═══ */
+.v2-exec-card { margin-top: 10px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg-card); }
+.v2-exec-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--border-light); }
+.v2-exec-head span:first-child { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
+.v2-exec-meta { font-size: 11px; color: var(--text-light); }
+.v2-exec-error { padding: 12px 14px; color: #c4321c; font-size: 13px; white-space: pre-wrap; }
+.v2-table-wrap { overflow-x: auto; }
+.v2-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.v2-table th, .v2-table td { border-bottom: 1px solid var(--border-light); padding: 7px 10px; text-align: left; white-space: nowrap; }
+.v2-table th { background: #faf8f5; color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+.v2-exec-empty { padding: 12px 14px; color: var(--text-light); font-size: 12px; }
+
+/* ═══ Error ═══ */
+.v2-error-card { margin-top: 10px; display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px; background: #fef2f0; border: 1px solid #f5d5cf; border-radius: 10px; color: #9a2c18; font-size: 13px; line-height: 1.5; }
+.v2-error-icon { flex-shrink: 0; font-size: 15px; }
+
+/* ═══ Done marker ═══ */
+
+/* ═══ Composer ═══ */
+.v2-composer-wrap { padding: 12px 24px 18px; flex-shrink: 0; background: var(--bg); }
+.v2-composer { max-width: 860px; margin: 0 auto; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-card); box-shadow: 0 1px 6px rgba(0,0,0,0.05); overflow: hidden; }
+.v2-composer-top { display: flex; gap: 8px; padding: 8px 14px 4px; flex-wrap: wrap; }
+.v2-composer-ctrl { display: flex; align-items: center; }
+.v2-select { border: 1px solid var(--border); border-radius: 8px; height: 28px; padding: 0 8px; background: var(--bg); font-size: 12px; color: var(--text); outline: none; }
+.v2-composer-input-row { display: flex; align-items: flex-end; padding: 4px 10px 10px 14px; gap: 8px; }
+.v2-textarea { flex: 1; border: none; resize: none; outline: none; font-size: 14px; line-height: 1.6; color: var(--text); background: transparent; min-height: 40px; max-height: 120px; font-family: inherit; }
+.v2-textarea::placeholder { color: var(--text-light); }
+.v2-btn-send { width: 36px; height: 36px; border-radius: 50%; border: none; background: var(--user-bg); color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: opacity 0.15s; }
+.v2-btn-send:disabled { opacity: 0.3; cursor: not-allowed; }
+.v2-btn-send:not(:disabled):hover { opacity: 0.85; }
+
+/* ═══ Animations ═══ */
+@keyframes v2blink { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+
+/* ═══ Responsive ═══ */
+@media (max-width: 900px) {
+  .v2-layout { grid-template-columns: 1fr; }
+  .v2-sidebar { display: none; }
+  .v2-messages-inner, .v2-composer { max-width: 100%; }
+  .v2-user-bubble { max-width: 88%; }
 }
 </style>

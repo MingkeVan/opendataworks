@@ -15,16 +15,12 @@ export default defineConfig(({ mode }) => {
           fileName: 'dataagent-web'
         },
         rollupOptions: {
-          external: ['vue', 'element-plus', 'echarts', 'dayjs', 'axios', '@element-plus/icons-vue'],
+          external: ['vue', 'axios'],
           output: {
             exports: 'named',
             globals: {
               vue: 'Vue',
-              'element-plus': 'ElementPlus',
-              echarts: 'echarts',
-              dayjs: 'dayjs',
-              axios: 'axios',
-              '@element-plus/icons-vue': 'ElementPlusIconsVue'
+              axios: 'axios'
             }
           }
         }

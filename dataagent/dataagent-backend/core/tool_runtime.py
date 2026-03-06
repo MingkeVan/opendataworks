@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 """
-Tool Runtime
-- native: 本地直接执行 MySQL / Doris 工具
-- mcp_http: 通过 HTTP 转发到 MCP 网关
+Tool Runtime（单一路径）
+- 仅保留内置 mysql.query / doris.query
+- 数据库 -> 引擎 映射来自 skills metadata/source_mapping.json
 """
 
-import json
 import logging
 import time
-import urllib.error
-import urllib.request
 from typing import Any
 
 import pymysql
 
 from config import get_settings
+from core.semantic_layer import get_semantic_layer
 
 logger = logging.getLogger(__name__)
 
@@ -52,14 +50,6 @@ def list_tools() -> list[dict[str, Any]]:
 
 def invoke_tool(tool_name: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = payload or {}
-    cfg = get_settings()
-    mode = (cfg.tool_runtime_mode or "native").strip().lower()
-
-    if mode == "mcp_http":
-        return _invoke_via_mcp_http(tool_name, payload)
-    if mode != "native":
-        raise ToolRuntimeError(f"Unsupported tool_runtime_mode: {cfg.tool_runtime_mode}")
-
     if tool_name == "mysql.query":
         return _native_mysql_query(payload)
     if tool_name == "doris.query":
@@ -67,46 +57,19 @@ def invoke_tool(tool_name: str, payload: dict[str, Any] | None = None) -> dict[s
     raise ToolRuntimeError(f"Unknown tool: {tool_name}")
 
 
-def _invoke_via_mcp_http(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-    cfg = get_settings()
-    endpoint = (cfg.mcp_http_endpoint or "").strip()
-    if not endpoint:
-        raise ToolRuntimeError("mcp_http_endpoint is empty")
-
-    req_body = json.dumps(
-        {"tool_name": tool_name, "input": payload},
-        ensure_ascii=False,
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        endpoint,
-        data=req_body,
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-
-    start = time.time()
-    try:
-        with urllib.request.urlopen(req, timeout=cfg.mcp_http_timeout_seconds) as resp:
-            content = resp.read().decode("utf-8")
-        duration_ms = int((time.time() - start) * 1000)
-        body = json.loads(content) if content else {}
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="ignore") if hasattr(e, "read") else str(e)
-        raise ToolRuntimeError(f"MCP HTTP error: {e.code} {detail}") from e
-    except Exception as e:
-        raise ToolRuntimeError(f"MCP invoke failed: {e}") from e
-
-    if isinstance(body, dict):
-        if body.get("ok") is False or body.get("success") is False:
-            raise ToolRuntimeError(body.get("error") or body.get("message") or "MCP tool failed")
-        data = body.get("data", body.get("result", body))
-    else:
-        data = body
-
-    logger.info("Tool invoke via mcp_http, tool=%s, duration_ms=%d", tool_name, duration_ms)
-    if isinstance(data, dict):
-        return data
-    return {"result": data, "duration_ms": duration_ms}
+def run_query(sql: str, database: str | None = None, limit: int | None = None) -> dict[str, Any]:
+    sl = get_semantic_layer()
+    if not sl._loaded:
+        sl.load()
+    engine = sl.resolve_engine(database)
+    payload = {"database": database, "sql": sql}
+    if limit is not None:
+        payload["limit"] = limit
+    tool_name = "mysql.query" if engine == "mysql" else "doris.query"
+    result = invoke_tool(tool_name, payload)
+    result["engine"] = engine
+    result["tool_name"] = tool_name
+    return result
 
 
 def _native_mysql_query(payload: dict[str, Any]) -> dict[str, Any]:
@@ -187,10 +150,7 @@ def _native_doris_query(payload: dict[str, Any]) -> dict[str, Any]:
         )
         with conn.cursor() as cur:
             cur.execute(sql)
-            if limit:
-                rows = cur.fetchmany(limit)
-            else:
-                rows = cur.fetchall()
+            rows = cur.fetchmany(limit) if limit else cur.fetchall()
 
         return {
             "rows": rows,
@@ -219,6 +179,6 @@ def _to_positive_int(value: Any) -> int | None:
         return None
     try:
         iv = int(value)
-        return iv if iv > 0 else None
     except Exception:
         return None
+    return iv if iv > 0 else None

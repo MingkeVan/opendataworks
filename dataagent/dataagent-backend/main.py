@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import router
 from config import get_settings
+from core.skills_loader import resolve_agent_project_cwd, resolve_skills_root_dir, validate_skills_bundle
+from core.skills_sync import ensure_static_skills_bundle
 
 # 配置日志
 logging.basicConfig(
@@ -48,29 +50,47 @@ async def root():
 
 @app.on_event("startup")
 async def startup():
-    """启动时尝试预加载语义层"""
+    """启动检查：skills 路径、语义加载、会话 schema"""
     cfg = get_settings()
     logger.info(
-        "Starting DataAgent Backend on %s:%d (model=%s)",
-        cfg.host, cfg.port, cfg.claude_model,
+        "Starting DataAgent Backend on %s:%d provider=%s model=%s",
+        cfg.host,
+        cfg.port,
+        cfg.llm_provider,
+        cfg.claude_model,
     )
 
-    # 尝试预加载（失败也不阻塞启动）
+    try:
+        ensure_static_skills_bundle()
+        skills_root = resolve_skills_root_dir()
+        agent_cwd = resolve_agent_project_cwd()
+        skills_state = validate_skills_bundle(force_reload=True)
+        logger.info(
+            "Skills ready root=%s agent_cwd=%s tables=%s rules=%s few_shots=%s",
+            skills_root,
+            agent_cwd,
+            skills_state.get("metadata_tables"),
+            skills_state.get("business_rules"),
+            skills_state.get("few_shots"),
+        )
+    except Exception as e:
+        logger.exception("Skills bootstrap failed: %s", e)
+
     try:
         from core.semantic_layer import get_semantic_layer
-        sl = get_semantic_layer()
-        sl.load()
-        logger.info("Semantic layer pre-loaded successfully")
-    except Exception as e:
-        logger.warning("Failed to pre-load semantic layer: %s (can be loaded later via /reload)", e)
 
-    # 初始化会话持久化 schema（独立于业务元数据 schema）
+        get_semantic_layer().load()
+        logger.info("Semantic layer loaded")
+    except Exception as e:
+        logger.warning("Semantic layer preload failed: %s", e)
+
     try:
         from core.session_store import get_session_store
+
         get_session_store().init_schema()
-        logger.info("Session store schema initialized")
+        logger.info("Session schema initialized in `%s`", cfg.session_mysql_database)
     except Exception as e:
-        logger.warning("Failed to init session store schema: %s", e)
+        logger.exception("Session schema init failed: %s", e)
 
 
 if __name__ == "__main__":
