@@ -10,6 +10,10 @@ CREATE DATABASE IF NOT EXISTS `opendataworks`
   DEFAULT CHARACTER SET utf8mb4 
   COLLATE utf8mb4_unicode_ci;
 
+CREATE DATABASE IF NOT EXISTS `dataagent`
+  DEFAULT CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+
 -- 使用数据库
 USE `opendataworks`;
 
@@ -19,6 +23,7 @@ CREATE USER IF NOT EXISTS 'opendataworks'@'%' IDENTIFIED BY 'opendataworks123';
 
 -- 授予权限
 GRANT ALL PRIVILEGES ON `opendataworks`.* TO 'opendataworks'@'%';
+GRANT ALL PRIVILEGES ON `dataagent`.* TO 'opendataworks'@'%';
 
 -- 刷新权限
 FLUSH PRIVILEGES;

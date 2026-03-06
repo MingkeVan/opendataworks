@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from config import get_settings
 from core.skill_admin_service import (
     compare_document_versions,
     current_settings_payload,
     get_document_detail,
     list_documents,
+    list_provider_configs,
     persist_admin_settings,
-    resolve_claude_settings_path,
     rollback_document,
     save_document_content,
     sync_from_opendataworks,
@@ -31,61 +30,7 @@ router = APIRouter(prefix="/api/v1/dataagent")
 
 
 def _provider_catalog() -> list[ProviderConfig]:
-    cfg = get_settings()
-    anthropic_models = [
-        "claude-opus-4-6",
-        "claude-sonnet-4-20250514",
-        "claude-3-7-sonnet-20250219",
-    ]
-    openrouter_models = [
-        "anthropic/claude-sonnet-4.5",
-        "anthropic/claude-sonnet-4.6",
-        "anthropic/claude-opus-4.1",
-    ]
-    anyrouter_models = [
-        "claude-opus-4-6",
-        "claude-sonnet-4-20250514",
-        "claude-3-7-sonnet-20250219",
-    ]
-    compatible_models = [cfg.claude_model] if cfg.claude_model else []
-    return [
-        ProviderConfig(
-            provider_id="anthropic",
-            display_name="Anthropic",
-            base_url="https://api.anthropic.com",
-            api_key_set=bool(cfg.anthropic_api_key),
-            auth_token_set=bool(cfg.anthropic_auth_token),
-            models=anthropic_models,
-            default_model="claude-sonnet-4-20250514",
-        ),
-        ProviderConfig(
-            provider_id="openrouter",
-            display_name="OpenRouter (Anthropic Compatible)",
-            base_url="https://openrouter.ai/api",
-            api_key_set=bool(cfg.anthropic_api_key),
-            auth_token_set=bool(cfg.anthropic_auth_token),
-            models=openrouter_models,
-            default_model="anthropic/claude-sonnet-4.5",
-        ),
-        ProviderConfig(
-            provider_id="anyrouter",
-            display_name="AnyRouter (Anthropic Compatible)",
-            base_url=cfg.anthropic_base_url or "https://a-ocnfniawgw.cn-shanghai.fcapp.run",
-            api_key_set=bool(cfg.anthropic_api_key),
-            auth_token_set=bool(cfg.anthropic_auth_token),
-            models=anyrouter_models,
-            default_model=cfg.claude_model or "claude-opus-4-6",
-        ),
-        ProviderConfig(
-            provider_id="anthropic_compatible",
-            display_name="Custom Anthropic Compatible",
-            base_url=cfg.anthropic_base_url or "",
-            api_key_set=bool(cfg.anthropic_api_key),
-            auth_token_set=bool(cfg.anthropic_auth_token),
-            models=compatible_models,
-            default_model=cfg.claude_model or "",
-        ),
-    ]
+    return [ProviderConfig.model_validate(item) for item in list_provider_configs(enabled_only=False)]
 
 
 def _build_admin_settings_response(updated_at: str = "") -> AdminSettingsResponse:
@@ -94,22 +39,23 @@ def _build_admin_settings_response(updated_at: str = "") -> AdminSettingsRespons
         provider_id=str(payload.get("provider_id") or ""),
         model=str(payload.get("model") or ""),
         providers=_provider_catalog(),
-        anthropic_api_key=str(payload.get("anthropic_api_key") or ""),
-        anthropic_auth_token=str(payload.get("anthropic_auth_token") or ""),
+        anthropic_api_key="",
+        anthropic_auth_token="",
         anthropic_base_url=str(payload.get("anthropic_base_url") or ""),
         mysql_host=str(payload.get("mysql_host") or ""),
         mysql_port=int(payload.get("mysql_port") or 3306),
         mysql_user=str(payload.get("mysql_user") or ""),
-        mysql_password=str(payload.get("mysql_password") or ""),
+        mysql_password="",
         mysql_database=str(payload.get("mysql_database") or ""),
         doris_host=str(payload.get("doris_host") or ""),
         doris_port=int(payload.get("doris_port") or 9030),
         doris_user=str(payload.get("doris_user") or ""),
-        doris_password=str(payload.get("doris_password") or ""),
+        doris_password="",
         doris_database=str(payload.get("doris_database") or ""),
         skills_output_dir=str(payload.get("skills_output_dir") or ""),
         session_mysql_database=str(payload.get("session_mysql_database") or ""),
-        settings_file_path=str(resolve_claude_settings_path()),
+        settings_file_path="",
+        settings_local_file_path="",
         skills_root_dir=str(resolve_skills_root_dir()),
         updated_at=updated_at,
     )

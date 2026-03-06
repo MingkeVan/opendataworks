@@ -24,9 +24,6 @@ frontend/.DS_Store
 frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*
-dataagent/dataagent-web/node_modules/
-dataagent/dataagent-web/dist/
-dataagent/dataagent-web/.vite/
 
 # Python
 dolphinscheduler-service/__pycache__/

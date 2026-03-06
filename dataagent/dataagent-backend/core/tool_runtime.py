@@ -3,7 +3,7 @@ from __future__ import annotations
 """
 Tool Runtime（单一路径）
 - 仅保留内置 mysql.query / doris.query
-- 数据库 -> 引擎 映射来自 skills metadata/source_mapping.json
+- 执行连接信息来自 opendataworks 平台表
 """
 
 import logging
@@ -12,8 +12,11 @@ from typing import Any
 
 import pymysql
 
-from config import get_settings
-from core.semantic_layer import get_semantic_layer
+from core.datasource_resolver import (
+    DatasourceResolutionError,
+    resolve_engine_for_database,
+    resolve_query_datasource,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +33,7 @@ def list_tools() -> list[dict[str, Any]]:
             "name": "mysql.query",
             "description": "查询 MySQL（只读）",
             "input": {
-                "database": "schema 名称",
+                "database": "schema 名称（必填）",
                 "sql": "SELECT/SHOW/DESC/EXPLAIN 语句",
                 "params": "SQL 参数列表（可选）",
                 "limit": "结果上限（可选）",
@@ -40,7 +43,7 @@ def list_tools() -> list[dict[str, Any]]:
             "name": "doris.query",
             "description": "查询 Doris（只读）",
             "input": {
-                "database": "database 名称（可选）",
+                "database": "database 名称（必填）",
                 "sql": "SELECT 语句",
                 "limit": "fetch 行数上限（可选）",
             },
@@ -58,10 +61,12 @@ def invoke_tool(tool_name: str, payload: dict[str, Any] | None = None) -> dict[s
 
 
 def run_query(sql: str, database: str | None = None, limit: int | None = None) -> dict[str, Any]:
-    sl = get_semantic_layer()
-    if not sl._loaded:
-        sl.load()
-    engine = sl.resolve_engine(database)
+    if not str(database or "").strip():
+        raise ToolRuntimeError("database is required")
+    try:
+        engine = resolve_engine_for_database(database)
+    except DatasourceResolutionError as e:
+        raise ToolRuntimeError(str(e)) from e
     payload = {"database": database, "sql": sql}
     if limit is not None:
         payload["limit"] = limit
@@ -73,25 +78,25 @@ def run_query(sql: str, database: str | None = None, limit: int | None = None) -
 
 
 def _native_mysql_query(payload: dict[str, Any]) -> dict[str, Any]:
-    cfg = get_settings()
     sql = str(payload.get("sql") or "").strip()
     if not sql:
         raise ToolRuntimeError("mysql.query sql is empty")
     _ensure_read_only(sql)
 
-    database = str(payload.get("database") or cfg.mysql_database or "").strip()
+    database = str(payload.get("database") or "").strip()
     params = payload.get("params") or []
     limit = _to_positive_int(payload.get("limit"))
+    datasource = _resolve_datasource("mysql", database)
 
     conn = None
     start = time.time()
     try:
         conn = pymysql.connect(
-            host=cfg.mysql_host,
-            port=cfg.mysql_port,
-            user=cfg.mysql_user,
-            password=cfg.mysql_password,
-            database=database if database else None,
+            host=datasource.host,
+            port=datasource.port,
+            user=datasource.user,
+            password=datasource.password,
+            database=datasource.database or None,
             charset="utf8mb4",
             cursorclass=pymysql.cursors.DictCursor,
             connect_timeout=10,
@@ -124,24 +129,24 @@ def _native_mysql_query(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _native_doris_query(payload: dict[str, Any]) -> dict[str, Any]:
-    cfg = get_settings()
     sql = str(payload.get("sql") or "").strip()
     if not sql:
         raise ToolRuntimeError("doris.query sql is empty")
     _ensure_read_only(sql)
 
-    database = str(payload.get("database") or cfg.doris_database or "").strip()
+    database = str(payload.get("database") or "").strip()
     limit = _to_positive_int(payload.get("limit"))
+    datasource = _resolve_datasource("doris", database)
 
     conn = None
     start = time.time()
     try:
         conn = pymysql.connect(
-            host=cfg.doris_host,
-            port=cfg.doris_port,
-            user=cfg.doris_user,
-            password=cfg.doris_password,
-            database=database if database else None,
+            host=datasource.host,
+            port=datasource.port,
+            user=datasource.user,
+            password=datasource.password,
+            database=datasource.database or None,
             charset="utf8mb4",
             cursorclass=pymysql.cursors.DictCursor,
             connect_timeout=10,
@@ -182,3 +187,10 @@ def _to_positive_int(value: Any) -> int | None:
     except Exception:
         return None
     return iv if iv > 0 else None
+
+
+def _resolve_datasource(engine: str, database: str) -> Any:
+    try:
+        return resolve_query_datasource(engine, database)
+    except DatasourceResolutionError as e:
+        raise ToolRuntimeError(str(e)) from e

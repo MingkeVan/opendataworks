@@ -51,8 +51,10 @@ services:
 
   # 前端服务
   frontend:
-    image: mikefan2019/opendataworks-frontend:latest
-    pull_policy: always
+    image: opendataworks-frontend:dev
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
     container_name: opendataworks-frontend
     restart: always
     env_file:
@@ -60,7 +62,10 @@ services:
     ports:
       - "8081:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+      dataagent-backend:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost"]
       interval: 30s
@@ -75,7 +80,7 @@ services:
     env_file:
       - ./.env
     working_dir: /workspace/dataagent/dataagent-backend
-    command: 'sh -c "pip install --cache-dir /root/.cache/pip -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8900"'
+    command: 'sh -c "pip install --cache-dir /root/.cache/pip -r requirements.txt && alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8900"'
     environment:
       PYTHONUNBUFFERED: "1"
       HOST: 0.0.0.0
@@ -109,37 +114,10 @@ services:
       - ${DATAAGENT_SKILLS_DIR:-../dataagent/.claude/skills}:/workspace/dataagent/.claude/skills
       - dataagent-backend-pip-cache:/root/.cache/pip
 
-  # DataAgent 前端服务
-  dataagent-frontend:
-    image: node:20-alpine
-    container_name: opendataworks-dataagent-frontend
-    restart: always
-    working_dir: /workspace/dataagent/dataagent-web
-    command: 'sh -c "if [ ! -f node_modules/.package-lock.json ]; then npm ci; fi && npm run dev -- --host 0.0.0.0 --port 3100"'
-    environment:
-      VITE_NL2SQL_BASE: ${DATAAGENT_NL2SQL_BASE_URL:-}
-      VITE_DEV_PROXY_TARGET: ${DATAAGENT_DEV_PROXY_TARGET:-http://dataagent-backend:8900}
-    ports:
-      - "3100:3100"
-    depends_on:
-      dataagent-backend:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3100').then((r)=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 120s
-    volumes:
-      - ../dataagent/dataagent-web:/workspace/dataagent/dataagent-web
-      - dataagent-web-node-modules:/workspace/dataagent/dataagent-web/node_modules
-
 volumes:
   mysql-data:
     driver: local
   backend-logs:
     driver: local
   dataagent-backend-pip-cache:
-    driver: local
-  dataagent-web-node-modules:
     driver: local

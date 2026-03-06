@@ -25,11 +25,16 @@
 - 任务依赖关系
 - 血缘图可视化
 
+### 4. 智能问数（Intelligent Query）
+- 主前端内置 NL2SQL 智能问数工作台
+- 会话管理、SSE 流式回复、SQL 回显与执行结果展示
+- 通过 `/api/v1/nl2sql` 与 DataAgent 后端交互
+
 ## 快速开始
 
 ### 前置要求
 
-- Node.js >= 16
+- Node.js >= 18
 - npm >= 8
 
 ### 安装依赖
@@ -44,7 +49,7 @@ npm install
 npm run dev
 ```
 
-访问：http://localhost:5173
+访问：http://localhost:3000
 
 ### 构建生产版本
 
@@ -54,16 +59,6 @@ npm run build
 
 ## 环境配置
 
-### API 地址配置
-
-编辑 `src/config/index.js`：
-
-```javascript
-export default {
-  apiBaseUrl: 'http://localhost:8080',  // 后端 API 地址
-}
-```
-
 ### 代理配置（开发环境）
 
 编辑 `vite.config.js`：
@@ -72,7 +67,7 @@ export default {
 export default defineConfig({
   server: {
     proxy: {
-      '/v1': {
+      '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       }

@@ -40,7 +40,7 @@ ARGS="-u $DOCKER_USERNAME -p $DOCKER_PASSWORD"
 [ "$PUSH_TO_REGISTRY" = "true" ] && ARGS="$ARGS --push"
 [ "$BUILD_FRONTEND" = "false" ] && ARGS="$ARGS --no-frontend"
 [ "$BUILD_BACKEND" = "false" ] && ARGS="$ARGS --no-backend"
-[ "$BUILD_DOLPHIN" = "false" ] && ARGS="$ARGS --no-dolphin"
+[ "$BUILD_DATAAGENT_BACKEND" = "false" ] && ARGS="$ARGS --no-dataagent-backend"
 
 # 执行构建
 echo "执行构建命令:"

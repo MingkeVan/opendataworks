@@ -16,6 +16,10 @@ export default defineConfig({
         target: 'http://localhost:8900',
         changeOrigin: true
       },
+      '/api/v1/nl2sql': {
+        target: 'http://localhost:8900',
+        changeOrigin: true
+      },
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true

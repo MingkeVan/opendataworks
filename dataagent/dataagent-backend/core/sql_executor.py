@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 """
-SQL 执行器 — 连接 Doris 执行生成的 SQL 并返回结果
+SQL 执行器 — 按目标数据源执行生成的 SQL 并返回结果
 """
 
 import logging
 from typing import Any
 
-from config import get_settings
 from core.tool_runtime import ToolRuntimeError, run_query
 from models.schemas import SqlExecutionResult
 
@@ -20,12 +19,13 @@ def execute_sql(
     limit: int | None = None,
 ) -> SqlExecutionResult:
     """按 skills 映射选择 MySQL / Doris 执行 SQL 并返回结果"""
-    cfg = get_settings()
-    db = database or cfg.doris_database
-    max_rows = limit or cfg.query_result_limit
+    db = str(database or "").strip()
+    max_rows = limit or 100
 
     if not sql.strip():
         return SqlExecutionResult(sql=sql, error="SQL 为空")
+    if not db:
+        return SqlExecutionResult(sql=sql, error="未提供目标 database，请让 Skill 或调用方显式指定库名")
 
     # 安全检查 — 禁止 DDL / DML
     sql_upper = sql.strip().upper()

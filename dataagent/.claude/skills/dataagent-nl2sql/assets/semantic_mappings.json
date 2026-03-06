@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "items": [
+    {
+      "business_name": "订单数",
+      "table_name": "ods_order",
+      "field_name": "order_id",
+      "synonyms": [
+        "订单量",
+        "下单数"
+      ],
+      "description": "默认使用订单主键计数，若涉及支付订单需切到支付口径。"
+    },
+    {
+      "business_name": "订单金额",
+      "table_name": "ods_order",
+      "field_name": "total_amount",
+      "synonyms": [
+        "GMV",
+        "成交额",
+        "销售额"
+      ],
+      "description": "金额类指标默认使用求和；是否只看已支付订单需要确认。"
+    },
+    {
+      "business_name": "注册用户数",
+      "table_name": "ods_user",
+      "field_name": "user_id",
+      "synonyms": [
+        "新增用户",
+        "新注册用户"
+      ],
+      "description": "通常结合注册时间字段按时间粒度做新增统计。"
+    },
+    {
+      "business_name": "活跃用户数",
+      "table_name": null,
+      "field_name": null,
+      "synonyms": [
+        "活跃用户",
+        "DAU",
+        "MAU"
+      ],
+      "description": "活跃口径不固定，必须先确认事件定义与时间粒度。"
+    }
+  ]
+}

@@ -134,9 +134,6 @@ if [[ -d "$REPO_ROOT/dataagent" ]]; then
         --exclude='dataagent-backend/.venv' \
         --exclude='dataagent-backend/.pytest_cache' \
         --exclude='dataagent-backend/__pycache__' \
-        --exclude='dataagent-web/node_modules' \
-        --exclude='dataagent-web/.vite' \
-        --exclude='dataagent-web/dist' \
         -cf - . | tar -C "$PACKAGED_DATAAGENT_DIR" -xf -
 fi
 
@@ -211,11 +208,6 @@ if [[ -f "$_env_file" ]]; then
     grep -q '^OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE=' "$_env_file" 2>/dev/null || \
         echo "OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE=opendataworks-dataagent-backend:${PARSER_TAG}" >> "$_env_file"
 
-    sed -e "s|^# *OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE=.*|OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE=opendataworks-dataagent-frontend:${PARSER_TAG}|" \
-        -e "s|^OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE=.*|OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE=opendataworks-dataagent-frontend:${PARSER_TAG}|" \
-        "$_env_file" > "${_env_file}.tmp" && mv "${_env_file}.tmp" "$_env_file"
-    grep -q '^OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE=' "$_env_file" 2>/dev/null || \
-        echo "OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE=opendataworks-dataagent-frontend:${PARSER_TAG}" >> "$_env_file"
 fi
 
 declare -a MANIFEST_RAW=()
@@ -283,7 +275,6 @@ EXTRA_IMAGES=(
 
 DATAAGENT_IMAGES=(
     "opendataworks-dataagent-backend.tar|$REPO_ROOT/dataagent/dataagent-backend/Dockerfile|$REPO_ROOT/dataagent|opendataworks-dataagent-backend:${OP_TAG}"
-    "opendataworks-dataagent-frontend.tar|$REPO_ROOT/dataagent/dataagent-web/Dockerfile|$REPO_ROOT/dataagent|opendataworks-dataagent-frontend:${OP_TAG}"
 )
 
 log "Pulling application images from ${PARSER_REGISTRY}/${PARSER_NAMESPACE} tag ${OP_TAG}"
@@ -313,13 +304,8 @@ done
 log "Building DataAgent images from local source"
 for entry in "${DATAAGENT_IMAGES[@]}"; do
     IFS='|' read -r archive dockerfile context target <<<"$entry"
-    if [[ "$archive" == "opendataworks-dataagent-frontend.tar" ]]; then
-        log "Building $target"
-        build_image "$dockerfile" "$context" "$target" --build-arg "VITE_NL2SQL_BASE=${DATAAGENT_NL2SQL_BASE_URL:-}"
-    else
-        log "Building $target"
-        build_image "$dockerfile" "$context" "$target"
-    fi
+    log "Building $target"
+    build_image "$dockerfile" "$context" "$target"
     log "Saving $target to deploy/docker-images/$archive"
     save_image "$target" "$archive"
     MANIFEST_RAW+=("$archive|local-build:${dockerfile#$REPO_ROOT/}|$target|")

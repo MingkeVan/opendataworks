@@ -90,20 +90,12 @@ async def startup():
         logger.exception("Skills bootstrap failed: %s", e)
 
     try:
-        from core.semantic_layer import get_semantic_layer
-
-        get_semantic_layer().load()
-        logger.info("Semantic layer loaded")
-    except Exception as e:
-        logger.warning("Semantic layer preload failed: %s", e)
-
-    try:
         from core.session_store import get_session_store
 
         get_session_store().init_schema()
-        logger.info("Session schema initialized in `%s`", cfg.session_mysql_database)
+        logger.info("Session store ready for schema `%s`", cfg.session_mysql_database)
     except Exception as e:
-        logger.exception("Session schema init failed: %s", e)
+        logger.exception("Session store bootstrap failed: %s", e)
 
 
 if __name__ == "__main__":

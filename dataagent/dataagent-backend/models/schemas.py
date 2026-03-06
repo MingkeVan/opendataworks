@@ -56,6 +56,16 @@ class SendMessageRequest(BaseModel):
     database: Optional[str] = None
 
 
+class ProviderSettingsUpdate(BaseModel):
+    provider_id: str
+    enabled: Optional[bool] = None
+    enabled_models: List[str] = Field(default_factory=list)
+    custom_models: List[str] = Field(default_factory=list)
+    api_key: Optional[str] = None
+    auth_token: Optional[str] = None
+    base_url: Optional[str] = None
+
+
 class SettingsUpdateRequest(BaseModel):
     provider_id: Optional[str] = None
     model: Optional[str] = None
@@ -73,6 +83,7 @@ class SettingsUpdateRequest(BaseModel):
     doris_password: Optional[str] = None
     doris_database: Optional[str] = None
     skills_output_dir: Optional[str] = None
+    providers: Optional[List[ProviderSettingsUpdate]] = None
 
 
 class SqlExecutionResult(BaseModel):
@@ -104,10 +115,7 @@ class SessionMessage(BaseModel):
     status: str = "success"
     run_id: Optional[str] = None
     blocks: List[MessageBlock] = Field(default_factory=list)
-    sql: str = ""
-    execution: Optional[SqlExecutionResult] = None
     error: Optional[Dict[str, Any]] = None
-    resolved_database: Optional[str] = None
     provider_id: Optional[str] = None
     model: Optional[str] = None
     created_at: str = ""
@@ -120,10 +128,7 @@ class AssistantMessageResponse(BaseModel):
     status: str = "success"
     content: str
     blocks: List[MessageBlock] = Field(default_factory=list)
-    sql: str = ""
-    execution: Optional[SqlExecutionResult] = None
     error: Optional[Dict[str, Any]] = None
-    resolved_database: Optional[str] = None
     provider_id: str
     model: str
     created_at: str = ""
@@ -132,11 +137,17 @@ class AssistantMessageResponse(BaseModel):
 class ProviderConfig(BaseModel):
     provider_id: str
     display_name: str
+    provider_group: str = ""
     base_url: str = ""
     api_key_set: bool = False
     auth_token_set: bool = False
     models: List[str] = Field(default_factory=list)
+    supported_models: List[str] = Field(default_factory=list)
+    custom_models: List[str] = Field(default_factory=list)
     default_model: str = ""
+    enabled: bool = False
+    validation_status: str = "unverified"
+    validation_message: str = ""
 
 
 class SettingsResponse(BaseModel):
@@ -172,6 +183,7 @@ class AdminSettingsResponse(BaseModel):
     skills_output_dir: str = ""
     session_mysql_database: str = ""
     settings_file_path: str = ""
+    settings_local_file_path: str = ""
     skills_root_dir: str = ""
     updated_at: str = ""
 
@@ -193,6 +205,7 @@ class AdminSettingsUpdateRequest(BaseModel):
     doris_password: Optional[str] = None
     doris_database: Optional[str] = None
     skills_output_dir: Optional[str] = None
+    providers: Optional[List[ProviderSettingsUpdate]] = None
 
 
 class SkillDocumentVersionSummary(BaseModel):

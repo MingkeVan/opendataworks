@@ -13,4 +13,4 @@ COPY .claude /app/.claude
 
 EXPOSE 8900
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8900"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8900"]

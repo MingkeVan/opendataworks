@@ -87,10 +87,7 @@ class _FakeStore:
         content: str,
         status: str,
         blocks: list[dict],
-        sql: str,
-        execution: dict | None,
         error: dict | None,
-        resolved_database: str | None,
         provider_id: str,
         model: str,
     ):
@@ -102,10 +99,7 @@ class _FakeStore:
             "content": content,
             "status": status,
             "blocks": blocks,
-            "sql": sql,
-            "execution": execution,
             "error": error,
-            "resolved_database": resolved_database,
             "provider_id": provider_id,
             "model": model,
             "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -137,7 +131,7 @@ async def _fake_stream_agent_reply(run_input):
         "payload": {
             "provider_id": run_input.provider_id,
             "model": run_input.model,
-            "resolved_database": run_input.resolved_database,
+            "database_hint": run_input.database_hint,
         },
     }
     yield {
@@ -145,34 +139,23 @@ async def _fake_stream_agent_reply(run_input):
         "session_id": run_input.session_id,
         "message_id": run_input.message_id,
         "seq": 2,
-        "type": "text.start",
-        "ts": datetime.now().isoformat(timespec="seconds"),
-        "payload": {"block_id": "main-text"},
-    }
-    yield {
-        "run_id": run_input.run_id,
-        "session_id": run_input.session_id,
-        "message_id": run_input.message_id,
-        "seq": 3,
-        "type": "text.delta",
-        "ts": datetime.now().isoformat(timespec="seconds"),
-        "payload": {"block_id": "main-text", "text": "你好"},
-    }
-    yield {
-        "run_id": run_input.run_id,
-        "session_id": run_input.session_id,
-        "message_id": run_input.message_id,
-        "seq": 4,
         "type": "done",
         "ts": datetime.now().isoformat(timespec="seconds"),
         "payload": {
             "status": "success",
             "content": "你好",
-            "blocks": [{"block_id": "main-text", "type": "main_text", "status": "success", "text": "你好"}],
-            "sql": "",
-            "execution": None,
+            "blocks": [
+                {"block_id": "main-text", "type": "main_text", "status": "success", "text": "你好"},
+                {
+                    "block_id": "tool-1",
+                    "type": "tool_result",
+                    "status": "success",
+                    "tool_name": "Bash",
+                    "tool_id": "tool-1",
+                    "output": "{\"kind\":\"python_execution\",\"summary\":\"ok\"}",
+                },
+            ],
             "error": None,
-            "resolved_database": "opendataworks",
             "provider_id": run_input.provider_id,
             "model": run_input.model,
         },
@@ -197,7 +180,17 @@ def test_session_message_stream_and_non_stream_contract(monkeypatch):
 
     monkeypatch.setattr(routes, "get_session_store", lambda: fake_store)
     monkeypatch.setattr(routes, "stream_agent_reply", _fake_stream_agent_reply)
-    monkeypatch.setattr(routes, "_resolve_database", lambda **kwargs: "opendataworks")
+    monkeypatch.setattr(
+        routes,
+        "resolve_runtime_provider_selection",
+        lambda provider_id, model: {
+            "provider_id": provider_id or "openrouter",
+            "model": model or "anthropic/claude-sonnet-4.5",
+            "api_key": "",
+            "auth_token": "token",
+            "base_url": "https://openrouter.ai/api",
+        },
+    )
 
     client = TestClient(app)
 
@@ -235,15 +228,15 @@ def test_session_message_stream_and_non_stream_contract(monkeypatch):
         "status",
         "content",
         "blocks",
-        "sql",
-        "execution",
         "error",
-        "resolved_database",
         "provider_id",
         "model",
         "created_at",
     }
     assert expected_keys.issubset(set(non_stream_data.keys()))
+    assert "sql" not in non_stream_data
+    assert "execution" not in non_stream_data
+    assert "resolved_database" not in non_stream_data
     assert non_stream_data["content"] == stream_done["content"]
     assert non_stream_data["status"] == stream_done["status"]
     assert non_stream_data["provider_id"] == stream_done["provider_id"]
@@ -253,4 +246,10 @@ def test_session_message_stream_and_non_stream_contract(monkeypatch):
 def test_ask_endpoint_removed():
     client = TestClient(app)
     response = client.post("/api/v1/nl2sql/ask", json={"content": "hello"})
+    assert response.status_code == 404
+
+
+def test_execute_endpoint_removed():
+    client = TestClient(app)
+    response = client.post("/api/v1/nl2sql/execute", json={"sql": "select 1"})
     assert response.status_code == 404
