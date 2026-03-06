@@ -7,8 +7,11 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.admin_routes import router as admin_router
 from api.routes import router
 from config import get_settings
+from core.skill_admin_service import bootstrap_admin_settings, sync_documents_from_disk
+from core.skill_admin_store import get_skill_admin_store
 from core.skills_loader import resolve_agent_project_cwd, resolve_skills_root_dir, validate_skills_bundle
 from core.skills_sync import ensure_static_skills_bundle
 
@@ -37,6 +40,7 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(router)
+app.include_router(admin_router)
 
 
 @app.get("/")
@@ -51,6 +55,13 @@ async def root():
 @app.on_event("startup")
 async def startup():
     """启动检查：skills 路径、语义加载、会话 schema"""
+    try:
+        get_skill_admin_store().init_schema()
+        bootstrap_admin_settings()
+        logger.info("Admin settings initialized")
+    except Exception as e:
+        logger.exception("Admin settings bootstrap failed: %s", e)
+
     cfg = get_settings()
     logger.info(
         "Starting DataAgent Backend on %s:%d provider=%s model=%s",
@@ -73,6 +84,8 @@ async def startup():
             skills_state.get("business_rules"),
             skills_state.get("few_shots"),
         )
+        changed = sync_documents_from_disk()
+        logger.info("Skill documents indexed changed=%s", len(changed))
     except Exception as e:
         logger.exception("Skills bootstrap failed: %s", e)
 

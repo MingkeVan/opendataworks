@@ -12,6 +12,10 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
+      '/api/v1/dataagent': {
+        target: 'http://localhost:8900',
+        changeOrigin: true
+      },
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true

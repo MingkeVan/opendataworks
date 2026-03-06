@@ -47,12 +47,6 @@ if [ ! -f "$ENV_FILE" ]; then
     fi
 fi
 
-# 检查 Docker 是否运行
-if ! docker info > /dev/null 2>&1; then
-    echo "❌ 错误: Docker 未运行，请先启动 Docker"
-    exit 1
-fi
-
 USE_ENV_FLAG=false
 if command -v docker-compose &> /dev/null; then
     COMPOSE_CMD=(docker-compose)
@@ -62,6 +56,14 @@ elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
 else
     echo "❌ 错误: 未找到 docker-compose 或 docker compose"
     exit 1
+fi
+
+# 检查容器运行时是否可用
+if command -v docker &> /dev/null; then
+    if ! docker info > /dev/null 2>&1; then
+        echo "❌ 错误: Docker 未运行，请先启动 Docker"
+        exit 1
+    fi
 fi
 
 echo "🚀 启动 OpenDataWorks 服务..."
@@ -106,6 +108,8 @@ echo ""
 echo "📝 服务访问地址："
 echo "  前端: http://localhost"
 echo "  后端: http://localhost:8080"
+echo "  DataAgent 前端: http://localhost:3100/nl2sql"
+echo "  DataAgent 后端: http://localhost:8900"
 echo "  MySQL: localhost:3306"
 echo ""
 echo "📋 常用命令："

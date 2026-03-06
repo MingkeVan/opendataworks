@@ -9,7 +9,7 @@ import { ref } from 'vue'
 import NL2SqlChat from './NL2SqlChat.vue'
 
 const nl2sqlBase = ref(
-  import.meta.env.VITE_NL2SQL_BASE || 'http://localhost:8900'
+  import.meta.env.VITE_NL2SQL_BASE ?? ''
 )
 </script>
 

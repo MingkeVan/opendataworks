@@ -111,10 +111,12 @@ mkdir -p "$PACKAGE_ROOT"
 # 定义包内目录结构
 PACKAGED_DEPLOY_DIR="$PACKAGE_ROOT/deploy"
 PACKAGED_SCRIPTS_DIR="$PACKAGE_ROOT/scripts"
+PACKAGED_DATAAGENT_DIR="$PACKAGE_ROOT/dataagent"
 DEPLOY_IMAGE_DIR="$PACKAGED_DEPLOY_DIR/docker-images"
 
 mkdir -p "$PACKAGED_DEPLOY_DIR"
 mkdir -p "$PACKAGED_SCRIPTS_DIR"
+mkdir -p "$PACKAGED_DATAAGENT_DIR"
 mkdir -p "$DEPLOY_IMAGE_DIR"
 
 # 1. 复制 deploy/ 下的内容
@@ -125,7 +127,20 @@ tar -C "$REPO_ROOT/deploy" --exclude='docker-images/*.tar' -cf - . | tar -C "$PA
 log "Copying scripts/ content to package scripts/"
 tar -C "$REPO_ROOT/scripts" --exclude='build' -cf - . | tar -C "$PACKAGED_SCRIPTS_DIR" -xf -
 
-# 2. 清理旧的 tar 包（如果不知何故被复制了）
+# 3. 复制 DataAgent 目录（保留 .claude 可编辑配置，排除大体积开发产物）
+if [[ -d "$REPO_ROOT/dataagent" ]]; then
+    log "Copying dataagent/ sources and editable runtime config"
+    tar -C "$REPO_ROOT/dataagent" \
+        --exclude='dataagent-backend/.venv' \
+        --exclude='dataagent-backend/.pytest_cache' \
+        --exclude='dataagent-backend/__pycache__' \
+        --exclude='dataagent-web/node_modules' \
+        --exclude='dataagent-web/.vite' \
+        --exclude='dataagent-web/dist' \
+        -cf - . | tar -C "$PACKAGED_DATAAGENT_DIR" -xf -
+fi
+
+# 4. 清理旧的 tar 包（如果不知何故被复制了）
 rm -f "$DEPLOY_IMAGE_DIR/"*.tar 2>/dev/null || true
 
 if [[ -d "$REPO_ROOT/database/mysql" ]]; then
@@ -138,7 +153,7 @@ if [[ -d "$REPO_ROOT/database/mysql" ]]; then
     fi
 fi
 
-# 3. 复制文档
+# 5. 复制文档
 cp "$REPO_ROOT/deploy/README.md" "$PACKAGE_ROOT/README.md"
 if [[ -f "$REPO_ROOT/docs/handbook/operations-guide.md" ]]; then
     cp "$REPO_ROOT/docs/handbook/operations-guide.md" "$PACKAGE_ROOT/OPERATIONS_GUIDE.md"
@@ -147,7 +162,7 @@ if [[ -f "$REPO_ROOT/docs/handbook/testing-guide.md" ]]; then
     cp "$REPO_ROOT/docs/handbook/testing-guide.md" "$PACKAGE_ROOT/TESTING_GUIDE.md"
 fi
 
-# 4. 处理 .env 文件
+# 6. 处理 .env 文件
 # 优先使用 deploy/.env（若已存在），否则尝试仓库根 .env，最后回退到示例
 ROOT_ENV_FILE="$REPO_ROOT/.env"
 ROOT_ENV_EXAMPLE="$REPO_ROOT/deploy/.env.example"
@@ -189,6 +204,18 @@ if [[ -f "$_env_file" ]]; then
         "$_env_file" > "${_env_file}.tmp" && mv "${_env_file}.tmp" "$_env_file"
     grep -q '^OPENDATAWORKS_FRONTEND_IMAGE=' "$_env_file" 2>/dev/null || \
         echo "OPENDATAWORKS_FRONTEND_IMAGE=opendataworks-frontend:${PARSER_TAG}" >> "$_env_file"
+
+    sed -e "s|^# *OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE=.*|OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE=opendataworks-dataagent-backend:${PARSER_TAG}|" \
+        -e "s|^OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE=.*|OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE=opendataworks-dataagent-backend:${PARSER_TAG}|" \
+        "$_env_file" > "${_env_file}.tmp" && mv "${_env_file}.tmp" "$_env_file"
+    grep -q '^OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE=' "$_env_file" 2>/dev/null || \
+        echo "OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE=opendataworks-dataagent-backend:${PARSER_TAG}" >> "$_env_file"
+
+    sed -e "s|^# *OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE=.*|OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE=opendataworks-dataagent-frontend:${PARSER_TAG}|" \
+        -e "s|^OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE=.*|OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE=opendataworks-dataagent-frontend:${PARSER_TAG}|" \
+        "$_env_file" > "${_env_file}.tmp" && mv "${_env_file}.tmp" "$_env_file"
+    grep -q '^OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE=' "$_env_file" 2>/dev/null || \
+        echo "OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE=opendataworks-dataagent-frontend:${PARSER_TAG}" >> "$_env_file"
 fi
 
 declare -a MANIFEST_RAW=()
@@ -206,6 +233,18 @@ save_image() {
     local image="$1"
     local archive="$2"
     "$CONTAINER_CMD" save -o "$DEPLOY_IMAGE_DIR/$archive" "$image"
+}
+
+build_image() {
+    local dockerfile="$1"
+    local context="$2"
+    local target="$3"
+    shift 3
+    if [[ -n "$PARSER_PLATFORM" ]]; then
+        "$CONTAINER_CMD" build --platform "$PARSER_PLATFORM" -f "$dockerfile" -t "$target" "$@" "$context"
+    else
+        "$CONTAINER_CMD" build -f "$dockerfile" -t "$target" "$@" "$context"
+    fi
 }
 
 retag_image() {
@@ -242,6 +281,11 @@ EXTRA_IMAGES=(
     "mysql-8.0.tar|docker.io/library/mysql:8.0|mysql:8.0"
 )
 
+DATAAGENT_IMAGES=(
+    "opendataworks-dataagent-backend.tar|$REPO_ROOT/dataagent/dataagent-backend/Dockerfile|$REPO_ROOT/dataagent|opendataworks-dataagent-backend:${OP_TAG}"
+    "opendataworks-dataagent-frontend.tar|$REPO_ROOT/dataagent/dataagent-web/Dockerfile|$REPO_ROOT/dataagent|opendataworks-dataagent-frontend:${OP_TAG}"
+)
+
 log "Pulling application images from ${PARSER_REGISTRY}/${PARSER_NAMESPACE} tag ${OP_TAG}"
 for entry in "${MAIN_IMAGES[@]}"; do
     IFS='|' read -r archive source target <<<"$entry"
@@ -264,6 +308,21 @@ for entry in "${EXTRA_IMAGES[@]}"; do
     save_image "$target" "$archive"
     digest=$(get_digest "$source")
     MANIFEST_RAW+=("$archive|$source|$target|$digest")
+done
+
+log "Building DataAgent images from local source"
+for entry in "${DATAAGENT_IMAGES[@]}"; do
+    IFS='|' read -r archive dockerfile context target <<<"$entry"
+    if [[ "$archive" == "opendataworks-dataagent-frontend.tar" ]]; then
+        log "Building $target"
+        build_image "$dockerfile" "$context" "$target" --build-arg "VITE_NL2SQL_BASE=${DATAAGENT_NL2SQL_BASE_URL:-}"
+    else
+        log "Building $target"
+        build_image "$dockerfile" "$context" "$target"
+    fi
+    log "Saving $target to deploy/docker-images/$archive"
+    save_image "$target" "$archive"
+    MANIFEST_RAW+=("$archive|local-build:${dockerfile#$REPO_ROOT/}|$target|")
 done
 
 MANIFEST_FILE="$DEPLOY_IMAGE_DIR/manifest.json"

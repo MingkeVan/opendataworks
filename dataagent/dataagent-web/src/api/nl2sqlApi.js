@@ -2,8 +2,18 @@ import axios from 'axios'
 
 const DEFAULT_TIMEOUT = 120000
 
+function getDefaultBaseUrl() {
+  if (typeof window === 'undefined') {
+    return 'http://localhost:8900'
+  }
+  return ''
+}
+
 function normalizeBaseUrl(baseURL) {
-  return String(baseURL || 'http://localhost:8900').replace(/\/+$/, '')
+  if (baseURL === undefined || baseURL === null) {
+    return getDefaultBaseUrl()
+  }
+  return String(baseURL).replace(/\/+$/, '')
 }
 
 function unwrapResponse(response) {
