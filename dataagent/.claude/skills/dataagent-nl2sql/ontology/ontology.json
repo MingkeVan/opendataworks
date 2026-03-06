@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "items": [
+    {
+      "entity": "订单",
+      "tables": [
+        "ods_order",
+        "dws_order_daily"
+      ],
+      "description": "订单业务对象"
+    },
+    {
+      "entity": "用户",
+      "tables": [
+        "ods_user"
+      ],
+      "description": "用户业务对象"
+    }
+  ]
+}

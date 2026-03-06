@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "items": [
+    {
+      "concept": "订单数",
+      "description": "订单记录数量",
+      "mapping": {
+        "table": "ods_order",
+        "field": "order_id",
+        "aggregation": "count"
+      }
+    },
+    {
+      "concept": "订单金额",
+      "description": "订单总金额",
+      "mapping": {
+        "table": "ods_order",
+        "field": "total_amount",
+        "aggregation": "sum"
+      }
+    },
+    {
+      "concept": "注册用户数",
+      "description": "用户注册数量",
+      "mapping": {
+        "table": "ods_user",
+        "field": "user_id",
+        "aggregation": "count"
+      }
+    }
+  ]
+}

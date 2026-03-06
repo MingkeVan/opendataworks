@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-03-06T03:25:50.900921+00:00",
+  "description": "DataAgent static skill bundle manifest",
+  "entrypoint": "SKILL.md",
+  "workflow": "methodology/nl2semantic2lf2sql.md",
+  "files": {
+    "ontology": [
+      "ontology/ontology.json",
+      "ontology/business_concepts.json",
+      "ontology/metrics.json",
+      "ontology/constraints.json"
+    ],
+    "knowledge": [
+      "knowledge/few_shots.json",
+      "knowledge/business_rules.json"
+    ],
+    "metadata": [
+      "metadata/semantic_mappings.json",
+      "metadata/metadata_catalog.json",
+      "metadata/lineage_catalog.json",
+      "metadata/source_mapping.json"
+    ],
+    "governance": [
+      "governance/policies.json"
+    ]
+  }
+}
