@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from config import get_settings
-from core.tool_runtime import ToolRuntimeError, invoke_tool
+from core.tool_runtime import ToolRuntimeError, run_query
 from models.schemas import SqlExecutionResult
 
 logger = logging.getLogger(__name__)
@@ -19,9 +19,7 @@ def execute_sql(
     database: str | None = None,
     limit: int | None = None,
 ) -> SqlExecutionResult:
-    """
-    在 Doris 集群上执行 SQL 并返回结果
-    """
+    """按 skills 映射选择 MySQL / Doris 执行 SQL 并返回结果"""
     cfg = get_settings()
     db = database or cfg.doris_database
     max_rows = limit or cfg.query_result_limit
@@ -40,14 +38,11 @@ def execute_sql(
             )
 
     try:
-        tool_result = invoke_tool(
-            "doris.query",
-            {
-                "database": db,
-                "sql": sql,
-                # 多取 1 行用于判断 has_more
-                "limit": max_rows + 1,
-            },
+        tool_result = run_query(
+            sql=sql,
+            database=db,
+            # 多取 1 行用于判断 has_more
+            limit=max_rows + 1,
         )
         rows = tool_result.get("rows", [])
         duration_ms = int(tool_result.get("duration_ms", 0))

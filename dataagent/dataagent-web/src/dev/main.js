@@ -1,16 +1,21 @@
 import { createApp } from 'vue'
+import { createRouter, createWebHistory } from 'vue-router'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
-import DataAgentHost from '../components/DataAgentHost.vue'
+import NL2SqlPage from '../components/NL2SqlPage.vue'
+import NL2SqlPageV2 from '../components/NL2SqlPageV2.vue'
+import App from './App.vue'
 
-const App = {
-  components: { DataAgentHost },
-  template: `
-    <div style="height: 100vh; background: #f5f7fb;">
-      <div style="padding: 20px; color: #334155;">dataagent-web standalone playground</div>
-      <DataAgentHost :entry-visible="true" api-base="/api" stream-base="/api" />
-    </div>
-  `
-}
+const routes = [
+  { path: '/', redirect: '/nl2sql' },
+  { path: '/nl2sql', component: NL2SqlPage },
+  { path: '/nl2sql-v2', component: NL2SqlPageV2 },
+  { path: '/:pathMatch(.*)*', redirect: '/nl2sql' }
+]
 
-createApp(App).use(ElementPlus).mount('#app')
+const router = createRouter({
+  history: createWebHistory(),
+  routes
+})
+
+createApp(App).use(router).use(ElementPlus).mount('#app')
