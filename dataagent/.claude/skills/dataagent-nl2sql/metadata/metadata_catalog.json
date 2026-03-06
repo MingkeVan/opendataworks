@@ -1,0 +1,4989 @@
+{
+  "schema_version": "1.0",
+  "items": [
+    {
+      "table_id": null,
+      "table_name": "aq_chat_message",
+      "table_comment": "",
+      "db_name": "dataagent",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "session_id",
+          "field_type": "varchar(64)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "role",
+          "field_type": "varchar(16)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "content",
+          "field_type": "longtext",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "payload_json",
+          "field_type": "longtext",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "aq_chat_session",
+      "table_comment": "",
+      "db_name": "dataagent",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "session_id",
+          "field_type": "varchar(64)",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "title",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "aq_knowledge_business",
+      "table_comment": "",
+      "db_name": "dataagent",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "term",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "synonyms",
+          "field_type": "text",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "definition",
+          "field_type": "text",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "enabled",
+          "field_type": "tinyint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "aq_knowledge_qa",
+      "table_comment": "",
+      "db_name": "dataagent",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "question",
+          "field_type": "text",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "answer",
+          "field_type": "longtext",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "tags",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "enabled",
+          "field_type": "tinyint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "aq_knowledge_semantic",
+      "table_comment": "",
+      "db_name": "dataagent",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "business_name",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_name",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "field_name",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "synonyms",
+          "field_type": "text",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "description",
+          "field_type": "text",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "enabled",
+          "field_type": "tinyint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 4,
+      "table_name": "dwd_order",
+      "table_comment": "è®¢å•æ˜Žç»†æ•°æ®è¡¨",
+      "db_name": "doris_dwd",
+      "layer": "DWD",
+      "business_domain": "tech",
+      "data_domain": "ops",
+      "fields": [
+        {
+          "field_name": "order_id",
+          "field_type": "bigint",
+          "field_comment": "è®¢å•ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "user_id",
+          "field_type": "bigint",
+          "field_comment": "ç”¨æˆ·ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "order_no",
+          "field_type": "varchar",
+          "field_comment": "è®¢å•å·",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "product_id",
+          "field_type": "bigint",
+          "field_comment": "å•†å“ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "product_name",
+          "field_type": "varchar",
+          "field_comment": "å•†å“åç§°",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "quantity",
+          "field_type": "int",
+          "field_comment": "è´­ä¹°æ•°é‡",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "price",
+          "field_type": "decimal",
+          "field_comment": "å•ä»·",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "total_amount",
+          "field_type": "decimal",
+          "field_comment": "è®¢å•æ€»é‡‘é¢",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "order_status_name",
+          "field_type": "varchar",
+          "field_comment": "è®¢å•çŠ¶æ€åç§°",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "payment_type_name",
+          "field_type": "varchar",
+          "field_comment": "æ”¯ä»˜æ–¹å¼åç§°",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "order_date",
+          "field_type": "date",
+          "field_comment": "ä¸‹å•æ—¥æœŸ",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "payment_date",
+          "field_type": "date",
+          "field_comment": "æ”¯ä»˜æ—¥æœŸ",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "åˆ›å»ºæ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "æ›´æ–°æ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 3,
+      "table_name": "dwd_user",
+      "table_comment": "ç”¨æˆ·æ˜Žç»†æ•°æ®è¡¨",
+      "db_name": "doris_dwd",
+      "layer": "DWD",
+      "business_domain": "tech",
+      "data_domain": "dev",
+      "fields": [
+        {
+          "field_name": "user_id",
+          "field_type": "bigint",
+          "field_comment": "ç”¨æˆ·ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "username",
+          "field_type": "varchar",
+          "field_comment": "ç”¨æˆ·å",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "email",
+          "field_type": "varchar",
+          "field_comment": "é‚®ç®±",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "phone",
+          "field_type": "varchar",
+          "field_comment": "æ‰‹æœºå·",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "gender",
+          "field_type": "varchar",
+          "field_comment": "æ€§åˆ«",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "age",
+          "field_type": "int",
+          "field_comment": "å¹´é¾„",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "register_date",
+          "field_type": "date",
+          "field_comment": "æ³¨å†Œæ—¥æœŸ",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "last_login_date",
+          "field_type": "date",
+          "field_comment": "æœ€åŽç™»å½•æ—¥æœŸ",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "user_status",
+          "field_type": "varchar",
+          "field_comment": "ç”¨æˆ·çŠ¶æ€",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "åˆ›å»ºæ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "æ›´æ–°æ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 19,
+      "table_name": "dws_order_daily",
+      "table_comment": "è®¢å•æ—¥ç»Ÿè®¡è¡¨",
+      "db_name": "doris_dws",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "stat_date",
+          "field_type": "date",
+          "field_comment": "ç»Ÿè®¡æ—¥æœŸ",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "total_orders",
+          "field_type": "bigint",
+          "field_comment": "æ€»è®¢å•æ•°",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "paid_orders",
+          "field_type": "bigint",
+          "field_comment": "å·²æ”¯ä»˜è®¢å•æ•°",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "total_amount",
+          "field_type": "decimal",
+          "field_comment": "æ€»é‡‘é¢",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "paid_amount",
+          "field_type": "decimal",
+          "field_comment": "å·²æ”¯ä»˜é‡‘é¢",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "avg_order_amount",
+          "field_type": "decimal",
+          "field_comment": "å¹³å‡è®¢å•é‡‘é¢",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "åˆ›å»ºæ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "æ›´æ–°æ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 5,
+      "table_name": "dws_user_daily",
+      "table_comment": "ç”¨æˆ·æ—¥ç»Ÿè®¡è¡¨",
+      "db_name": "doris_dws",
+      "layer": "DWS",
+      "business_domain": "tech",
+      "data_domain": "ops",
+      "fields": [
+        {
+          "field_name": "stat_date",
+          "field_type": "date",
+          "field_comment": "ç»Ÿè®¡æ—¥æœŸ",
+          "is_primary": true,
+          "is_partition": true
+        },
+        {
+          "field_name": "total_users",
+          "field_type": "bigint",
+          "field_comment": "æ€»ç”¨æˆ·æ•°",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "new_users",
+          "field_type": "bigint",
+          "field_comment": "æ–°å¢žç”¨æˆ·æ•°",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "active_users",
+          "field_type": "bigint",
+          "field_comment": "æ´»è·ƒç”¨æˆ·æ•°",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "male_users",
+          "field_type": "bigint",
+          "field_comment": "ç”·æ€§ç”¨æˆ·æ•°",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "female_users",
+          "field_type": "bigint",
+          "field_comment": "å¥³æ€§ç”¨æˆ·æ•°",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "avg_age",
+          "field_type": "decimal",
+          "field_comment": "å¹³å‡å¹´é¾„",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "åˆ›å»ºæ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "æ›´æ–°æ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 2,
+      "table_name": "ods_order",
+      "table_comment": "è®¢å•åŽŸå§‹æ•°æ®è¡¨",
+      "db_name": "doris_ods",
+      "layer": "ODS",
+      "business_domain": "tech",
+      "data_domain": "public",
+      "fields": [
+        {
+          "field_name": "order_id",
+          "field_type": "bigint",
+          "field_comment": "è®¢å•ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "user_id",
+          "field_type": "bigint",
+          "field_comment": "ç”¨æˆ·ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "order_no",
+          "field_type": "varchar",
+          "field_comment": "è®¢å•å·",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "product_id",
+          "field_type": "bigint",
+          "field_comment": "å•†å“ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "product_name",
+          "field_type": "varchar",
+          "field_comment": "å•†å“åç§°",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "quantity",
+          "field_type": "int",
+          "field_comment": "è´­ä¹°æ•°é‡",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "price",
+          "field_type": "decimal",
+          "field_comment": "å•ä»·",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "total_amount",
+          "field_type": "decimal",
+          "field_comment": "è®¢å•æ€»é‡‘é¢",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "order_status",
+          "field_type": "tinyint",
+          "field_comment": "è®¢å•çŠ¶æ€ï¼š0-å¾…æ”¯ä»˜ï¼Œ1-å·²æ”¯ä»˜ï¼Œ2-å·²å‘è´§ï¼Œ3-å·²å®Œæˆï¼Œ4-å·²å–æ¶ˆ",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "payment_type",
+          "field_type": "tinyint",
+          "field_comment": "æ”¯ä»˜æ–¹å¼ï¼š1-æ”¯ä»˜å®ï¼Œ2-å¾®ä¿¡ï¼Œ3-é“¶è¡Œå¡",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "order_time",
+          "field_type": "datetime",
+          "field_comment": "ä¸‹å•æ—¶é—´",
+          "is_primary": false,
+          "is_partition": true
+        },
+        {
+          "field_name": "payment_time",
+          "field_type": "datetime",
+          "field_comment": "æ”¯ä»˜æ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "åˆ›å»ºæ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "æ›´æ–°æ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 1,
+      "table_name": "ods_user",
+      "table_comment": "ç”¨æˆ·åŽŸå§‹æ•°æ®è¡¨",
+      "db_name": "doris_ods",
+      "layer": "ODS",
+      "business_domain": "tech",
+      "data_domain": "public",
+      "fields": [
+        {
+          "field_name": "user_id",
+          "field_type": "bigint",
+          "field_comment": "ç”¨æˆ·ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "username",
+          "field_type": "varchar",
+          "field_comment": "ç”¨æˆ·å",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "email",
+          "field_type": "varchar",
+          "field_comment": "é‚®ç®±",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "phone",
+          "field_type": "varchar",
+          "field_comment": "æ‰‹æœºå·",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "gender",
+          "field_type": "tinyint",
+          "field_comment": "æ€§åˆ«ï¼š0-æœªçŸ¥ï¼Œ1-ç”·ï¼Œ2-å¥³",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "birthday",
+          "field_type": "date",
+          "field_comment": "ç”Ÿæ—¥",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "register_time",
+          "field_type": "datetime",
+          "field_comment": "æ³¨å†Œæ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "last_login_time",
+          "field_type": "datetime",
+          "field_comment": "æœ€åŽç™»å½•æ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "tinyint",
+          "field_comment": "çŠ¶æ€ï¼š0-ç¦ç”¨ï¼Œ1-æ­£å¸¸",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "åˆ›å»ºæ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "æ›´æ–°æ—¶é—´",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "aq_knowledge_business",
+      "table_comment": "",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "version_tag",
+          "field_type": "varchar(64)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "term",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "synonyms",
+          "field_type": "text",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "definition",
+          "field_type": "mediumtext",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "enabled",
+          "field_type": "tinyint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "aq_knowledge_qa",
+      "table_comment": "",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "version_tag",
+          "field_type": "varchar(64)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "question",
+          "field_type": "text",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "answer",
+          "field_type": "mediumtext",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "tags",
+          "field_type": "varchar(512)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "enabled",
+          "field_type": "tinyint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "aq_knowledge_semantic",
+      "table_comment": "",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "version_tag",
+          "field_type": "varchar(64)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "domain_name",
+          "field_type": "varchar(128)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_name",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "field_name",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "business_name",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "synonyms",
+          "field_type": "text",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "description",
+          "field_type": "text",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "enabled",
+          "field_type": "tinyint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "aq_knowledge_version",
+      "table_comment": "",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "version_tag",
+          "field_type": "varchar(64)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "meta_hash",
+          "field_type": "varchar(128)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "semantic_hash",
+          "field_type": "varchar(128)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "business_hash",
+          "field_type": "varchar(128)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "qa_hash",
+          "field_type": "varchar(128)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "source",
+          "field_type": "varchar(64)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "aq_meta_field",
+      "table_comment": "",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "snapshot_version",
+          "field_type": "varchar(64)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "field_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "field_name",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "field_type",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "field_comment",
+          "field_type": "text",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "payload_json",
+          "field_type": "mediumtext",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "aq_meta_lineage_edge",
+      "table_comment": "",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "snapshot_version",
+          "field_type": "varchar(64)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "lineage_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "upstream_table_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "downstream_table_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "lineage_type",
+          "field_type": "varchar(32)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "payload_json",
+          "field_type": "mediumtext",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "aq_meta_table",
+      "table_comment": "",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "snapshot_version",
+          "field_type": "varchar(64)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "cluster_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "db_name",
+          "field_type": "varchar(128)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_name",
+          "field_type": "varchar(255)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_comment",
+          "field_type": "text",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "payload_json",
+          "field_type": "mediumtext",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "assistant_artifact",
+      "table_comment": "智能助理产物表",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "run_id",
+          "field_type": "varchar(64)",
+          "field_comment": "运行ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "artifact_type",
+          "field_type": "varchar(32)",
+          "field_comment": "产物类型(sql/query_result/chart/task_draft)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "title",
+          "field_type": "varchar(255)",
+          "field_comment": "产物标题",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "content_json",
+          "field_type": "mediumtext",
+          "field_comment": "产物JSON",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "assistant_message",
+      "table_comment": "智能助理消息表",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "session_id",
+          "field_type": "varchar(64)",
+          "field_comment": "会话ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "run_id",
+          "field_type": "varchar(64)",
+          "field_comment": "关联运行ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "role_type",
+          "field_type": "varchar(16)",
+          "field_comment": "角色(user/assistant/system)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "content",
+          "field_type": "text",
+          "field_comment": "消息内容",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "intent",
+          "field_type": "varchar(32)",
+          "field_comment": "识别意图",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "metadata_json",
+          "field_type": "mediumtext",
+          "field_comment": "消息附加信息",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "assistant_policy_profile",
+      "table_comment": "智能助理策略配置表",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "user_id",
+          "field_type": "varchar(64)",
+          "field_comment": "用户ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "mode",
+          "field_type": "varchar(16)",
+          "field_comment": "策略模式",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "assistant_query_flyway_schema_history",
+      "table_comment": "",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "installed_rank",
+          "field_type": "int",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "version",
+          "field_type": "varchar(50)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "description",
+          "field_type": "varchar(200)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "type",
+          "field_type": "varchar(20)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "script",
+          "field_type": "varchar(1000)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "checksum",
+          "field_type": "int",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "installed_by",
+          "field_type": "varchar(100)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "installed_on",
+          "field_type": "timestamp",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "execution_time",
+          "field_type": "int",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "success",
+          "field_type": "tinyint(1)",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "assistant_run",
+      "table_comment": "智能助理运行表",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "run_id",
+          "field_type": "varchar(64)",
+          "field_comment": "运行ID(UUID)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "session_id",
+          "field_type": "varchar(64)",
+          "field_comment": "会话ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "user_id",
+          "field_type": "varchar(64)",
+          "field_comment": "用户ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "varchar(24)",
+          "field_comment": "状态",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "intent",
+          "field_type": "varchar(32)",
+          "field_comment": "意图",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "policy_mode",
+          "field_type": "varchar(16)",
+          "field_comment": "策略模式",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "request_context_json",
+          "field_type": "mediumtext",
+          "field_comment": "请求上下文",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "pending_payload_json",
+          "field_type": "mediumtext",
+          "field_comment": "待审批执行载荷",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "error_message",
+          "field_type": "text",
+          "field_comment": "错误信息",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "started_at",
+          "field_type": "datetime",
+          "field_comment": "启动时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "completed_at",
+          "field_type": "datetime",
+          "field_comment": "完成时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "assistant_run_step",
+      "table_comment": "智能助理运行步骤表",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "run_id",
+          "field_type": "varchar(64)",
+          "field_comment": "运行ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "step_order",
+          "field_type": "int",
+          "field_comment": "步骤序号",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "step_key",
+          "field_type": "varchar(64)",
+          "field_comment": "步骤编码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "step_name",
+          "field_type": "varchar(128)",
+          "field_comment": "步骤名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "varchar(24)",
+          "field_comment": "步骤状态",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "summary",
+          "field_type": "text",
+          "field_comment": "摘要",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "detail_json",
+          "field_type": "mediumtext",
+          "field_comment": "详情JSON",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "assistant_session",
+      "table_comment": "智能助理会话表",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "session_id",
+          "field_type": "varchar(64)",
+          "field_comment": "会话ID(UUID)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "user_id",
+          "field_type": "varchar(64)",
+          "field_comment": "用户ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "title",
+          "field_type": "varchar(255)",
+          "field_comment": "会话标题",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "source_id",
+          "field_type": "bigint",
+          "field_comment": "上下文数据源ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "database_name",
+          "field_type": "varchar(128)",
+          "field_comment": "上下文数据库",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "limit_profile",
+          "field_type": "varchar(32)",
+          "field_comment": "限流配置档位",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "manual_limit",
+          "field_type": "int",
+          "field_comment": "手动limit",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "mode",
+          "field_type": "varchar(16)",
+          "field_comment": "执行模式",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "varchar(20)",
+          "field_comment": "会话状态",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "last_message_at",
+          "field_type": "datetime",
+          "field_comment": "最近消息时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "assistant_skill_rule",
+      "table_comment": "智能助理技能规则表",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "user_id",
+          "field_type": "varchar(64)",
+          "field_comment": "用户ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "skill_key",
+          "field_type": "varchar(64)",
+          "field_comment": "技能Key",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "enabled",
+          "field_type": "tinyint",
+          "field_comment": "是否启用",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "threshold_json",
+          "field_type": "text",
+          "field_comment": "阈值配置JSON",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "version",
+          "field_type": "int",
+          "field_comment": "版本号",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 272,
+      "table_name": "business_domain",
+      "table_comment": "业务域配置表",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "domain_code",
+          "field_type": "varchar",
+          "field_comment": "业务域代码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "domain_name",
+          "field_type": "varchar",
+          "field_comment": "业务域名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "description",
+          "field_type": "varchar",
+          "field_comment": "描述",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 273,
+      "table_name": "data_domain",
+      "table_comment": "数据域配置表",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "domain_code",
+          "field_type": "varchar",
+          "field_comment": "数据域代码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "domain_name",
+          "field_type": "varchar",
+          "field_comment": "数据域名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "business_domain",
+          "field_type": "varchar",
+          "field_comment": "所属业务域",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "description",
+          "field_type": "varchar",
+          "field_comment": "描述",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 274,
+      "table_name": "data_field",
+      "table_comment": "字段定义",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_id",
+          "field_type": "bigint",
+          "field_comment": "所属表ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "field_name",
+          "field_type": "varchar",
+          "field_comment": "字段名",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "field_type",
+          "field_type": "varchar",
+          "field_comment": "字段类型",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "field_comment",
+          "field_type": "text",
+          "field_comment": "字段描述",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "is_nullable",
+          "field_type": "tinyint",
+          "field_comment": "是否可为空",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "is_partition",
+          "field_type": "tinyint",
+          "field_comment": "是否分区字段",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "is_primary",
+          "field_type": "tinyint",
+          "field_comment": "是否主键",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "default_value",
+          "field_type": "varchar",
+          "field_comment": "默认值",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "field_order",
+          "field_type": "int",
+          "field_comment": "字段排序",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 275,
+      "table_name": "data_lineage",
+      "table_comment": "血缘关系",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_id",
+          "field_type": "bigint",
+          "field_comment": "任务ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "upstream_table_id",
+          "field_type": "bigint",
+          "field_comment": "上游表ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "downstream_table_id",
+          "field_type": "bigint",
+          "field_comment": "下游表ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "lineage_type",
+          "field_type": "enum",
+          "field_comment": "血缘类型",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 276,
+      "table_name": "data_query_history",
+      "table_comment": "SQL 查询历史记录",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "cluster_id",
+          "field_type": "bigint",
+          "field_comment": "Doris 集群ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "cluster_name",
+          "field_type": "varchar",
+          "field_comment": "集群名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "database_name",
+          "field_type": "varchar",
+          "field_comment": "数据库名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "sql_text",
+          "field_type": "text",
+          "field_comment": "执行 SQL",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "preview_row_count",
+          "field_type": "int",
+          "field_comment": "返回的预览行数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "duration_ms",
+          "field_type": "bigint",
+          "field_comment": "执行耗时（毫秒）",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "has_more",
+          "field_type": "tinyint",
+          "field_comment": "是否存在更多数据",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "result_preview",
+          "field_type": "mediumtext",
+          "field_comment": "结果预览(JSON)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "executed_at",
+          "field_type": "datetime",
+          "field_comment": "执行时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "executed_by",
+          "field_type": "varchar",
+          "field_comment": "执行用户ID",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 277,
+      "table_name": "data_table",
+      "table_comment": "数据表元信息",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_name",
+          "field_type": "varchar",
+          "field_comment": "表名",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_comment",
+          "field_type": "varchar",
+          "field_comment": "表描述",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "layer",
+          "field_type": "enum",
+          "field_comment": "数据层级",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "business_domain",
+          "field_type": "varchar",
+          "field_comment": "业务域",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "data_domain",
+          "field_type": "varchar",
+          "field_comment": "数据域",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "custom_identifier",
+          "field_type": "varchar",
+          "field_comment": "自定义表标识",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "statistics_cycle",
+          "field_type": "varchar",
+          "field_comment": "统计周期(如: 10m, 1h, 1d)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "update_type",
+          "field_type": "varchar",
+          "field_comment": "更新类型(di/df/hi/hf/ri)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_model",
+          "field_type": "varchar",
+          "field_comment": "Doris表模型(DUPLICATE/AGGREGATE/UNIQUE)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "bucket_num",
+          "field_type": "int",
+          "field_comment": "分桶数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "replica_num",
+          "field_type": "int",
+          "field_comment": "副本数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "partition_column",
+          "field_type": "varchar",
+          "field_comment": "分区字段",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "distribution_column",
+          "field_type": "varchar",
+          "field_comment": "分桶字段",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "key_columns",
+          "field_type": "varchar",
+          "field_comment": "主键列(逗号分隔)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "doris_ddl",
+          "field_type": "text",
+          "field_comment": "生成的Doris DDL",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "is_synced",
+          "field_type": "tinyint",
+          "field_comment": "是否已同步到Doris(0-未同步,1-已同步)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "sync_time",
+          "field_type": "datetime",
+          "field_comment": "Doris同步时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "db_name",
+          "field_type": "varchar",
+          "field_comment": "数据库名",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "owner",
+          "field_type": "varchar",
+          "field_comment": "负责人",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "enum",
+          "field_comment": "状态",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "lifecycle_days",
+          "field_type": "int",
+          "field_comment": "生命周期(天)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "partition_field",
+          "field_type": "varchar",
+          "field_comment": "分区字段",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "storage_size",
+          "field_type": "bigint",
+          "field_comment": "存储大小(字节)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "row_count",
+          "field_type": "bigint",
+          "field_comment": "行数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "last_updated",
+          "field_type": "datetime",
+          "field_comment": "最后更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "doris_create_time",
+          "field_type": "datetime",
+          "field_comment": "Doris中的创建时间",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 278,
+      "table_name": "data_task",
+      "table_comment": "任务定义",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_name",
+          "field_type": "varchar",
+          "field_comment": "任务名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_code",
+          "field_type": "varchar",
+          "field_comment": "任务编码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_type",
+          "field_type": "enum",
+          "field_comment": "任务类型",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "engine",
+          "field_type": "enum",
+          "field_comment": "执行引擎",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_sql",
+          "field_type": "text",
+          "field_comment": "任务SQL",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_desc",
+          "field_type": "varchar",
+          "field_comment": "任务描述",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "schedule_cron",
+          "field_type": "varchar",
+          "field_comment": "调度CRON表达式",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "priority",
+          "field_type": "int",
+          "field_comment": "优先级(1-10)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "timeout_seconds",
+          "field_type": "int",
+          "field_comment": "超时时间(分钟)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "retry_times",
+          "field_type": "int",
+          "field_comment": "重试次数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "retry_interval",
+          "field_type": "int",
+          "field_comment": "重试间隔(分钟)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "owner",
+          "field_type": "varchar",
+          "field_comment": "负责人",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "enum",
+          "field_comment": "状态",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "dolphin_process_code",
+          "field_type": "bigint",
+          "field_comment": "DolphinScheduler流程编码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "dolphin_schedule_id",
+          "field_type": "bigint",
+          "field_comment": "DolphinScheduler调度ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "dolphin_task_code",
+          "field_type": "bigint",
+          "field_comment": "DolphinScheduler任务编码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "dolphin_task_version",
+          "field_type": "int",
+          "field_comment": "DolphinScheduler任务版本",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "dolphin_node_type",
+          "field_type": "varchar",
+          "field_comment": "Dolphin节点类型(SHELL/SQL/PYTHON/SPARK/FLINK)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "datasource_name",
+          "field_type": "varchar",
+          "field_comment": "SQL节点数据源名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "datasource_type",
+          "field_type": "varchar",
+          "field_comment": "数据源类型(MYSQL/DORIS等)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "dinky_job_id",
+          "field_type": "bigint",
+          "field_comment": "Dinky作业ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "target_datasource_name",
+          "field_type": "varchar",
+          "field_comment": "Target datasource name for DataX tasks",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "source_table",
+          "field_type": "varchar",
+          "field_comment": "Source table name for DataX tasks",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "target_table",
+          "field_type": "varchar",
+          "field_comment": "Target table name for DataX tasks",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "column_mapping",
+          "field_type": "text",
+          "field_comment": "Column mapping configuration for DataX tasks (optional JSON format)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_group_name",
+          "field_type": "varchar",
+          "field_comment": "任务组名称(空表示继承工作流默认任务组)",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 293,
+      "table_name": "data_workflow",
+      "table_comment": "平台工作流定义",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "workflow_code",
+          "field_type": "bigint",
+          "field_comment": "Dolphin workflow code",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "project_code",
+          "field_type": "bigint",
+          "field_comment": "Dolphin project code",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "workflow_name",
+          "field_type": "varchar",
+          "field_comment": "工作流名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "varchar",
+          "field_comment": "平台状态 draft/ready/online/offline/archived",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "publish_status",
+          "field_type": "varchar",
+          "field_comment": "最近一次发布状态 never/published/failed",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "current_version_id",
+          "field_type": "bigint",
+          "field_comment": "当前版本ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "last_published_version_id",
+          "field_type": "bigint",
+          "field_comment": "最近一次发布版本",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "definition_json",
+          "field_type": "json",
+          "field_comment": "当前 DAG 定义",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "entry_task_ids",
+          "field_type": "json",
+          "field_comment": "入口任务ID集合",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "exit_task_ids",
+          "field_type": "json",
+          "field_comment": "出口任务ID集合",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "description",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_by",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_by",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "global_params",
+          "field_type": "text",
+          "field_comment": "Global parameters for the workflow",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_group_name",
+          "field_type": "varchar",
+          "field_comment": "默认任务组名称(用于 DolphinScheduler 任务组)",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 294,
+      "table_name": "dolphin_config",
+      "table_comment": "DolphinScheduler配置表",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "url",
+          "field_type": "varchar",
+          "field_comment": "DolphinScheduler API地址",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "token",
+          "field_type": "varchar",
+          "field_comment": "访问令牌",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "project_name",
+          "field_type": "varchar",
+          "field_comment": "项目名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "project_code",
+          "field_type": "varchar",
+          "field_comment": "项目编码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "tenant_code",
+          "field_type": "varchar",
+          "field_comment": "租户编码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "worker_group",
+          "field_type": "varchar",
+          "field_comment": "Worker分组",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "execution_type",
+          "field_type": "varchar",
+          "field_comment": "执行类型",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "is_active",
+          "field_type": "tinyint",
+          "field_comment": "是否启用",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 295,
+      "table_name": "dolphin_workflow_config",
+      "table_comment": "DolphinScheduler工作流配置",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "workflow_code",
+          "field_type": "bigint",
+          "field_comment": "工作流编码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "workflow_name",
+          "field_type": "varchar",
+          "field_comment": "工作流名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "project_code",
+          "field_type": "bigint",
+          "field_comment": "项目编码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "description",
+          "field_type": "text",
+          "field_comment": "描述",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "is_default",
+          "field_type": "tinyint",
+          "field_comment": "是否默认工作流",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "release_state",
+          "field_type": "varchar",
+          "field_comment": "发布状态",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_count",
+          "field_type": "int",
+          "field_comment": "任务数量",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 279,
+      "table_name": "doris_cluster",
+      "table_comment": "Doris集群配置表",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "cluster_name",
+          "field_type": "varchar",
+          "field_comment": "集群名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "source_type",
+          "field_type": "varchar",
+          "field_comment": "数据源类型(DORIS/MYSQL)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "fe_host",
+          "field_type": "varchar",
+          "field_comment": "FE Host",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "fe_port",
+          "field_type": "int",
+          "field_comment": "FE MySQL端口",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "username",
+          "field_type": "varchar",
+          "field_comment": "用户名",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "password",
+          "field_type": "varchar",
+          "field_comment": "密码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "is_default",
+          "field_type": "tinyint",
+          "field_comment": "是否默认集群",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "varchar",
+          "field_comment": "状态",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "auto_sync",
+          "field_type": "tinyint",
+          "field_comment": "是否开启元数据自动同步(0-否,1-是)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "sync_cron",
+          "field_type": "varchar",
+          "field_comment": "元数据同步 Cron 表达式",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "last_sync_time",
+          "field_type": "datetime",
+          "field_comment": "最近一次自动同步时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 296,
+      "table_name": "doris_database_users",
+      "table_comment": "Doris数据库用户配置表",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "cluster_id",
+          "field_type": "bigint",
+          "field_comment": "Doris集群ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "database_name",
+          "field_type": "varchar",
+          "field_comment": "数据库名",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "readonly_username",
+          "field_type": "varchar",
+          "field_comment": "只读用户名",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "readonly_password",
+          "field_type": "varchar",
+          "field_comment": "只读用户密码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "readwrite_username",
+          "field_type": "varchar",
+          "field_comment": "读写用户名",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "readwrite_password",
+          "field_type": "varchar",
+          "field_comment": "读写用户密码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 287,
+      "table_name": "dwd_tech_dev_inspection_rule_cnt_di",
+      "table_comment": "",
+      "db_name": "opendataworks",
+      "layer": "DWD",
+      "business_domain": "tech",
+      "data_domain": "dev",
+      "fields": [
+        {
+          "field_name": "test",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": true
+        }
+      ]
+    },
+    {
+      "table_id": 297,
+      "table_name": "flyway_schema_history",
+      "table_comment": "",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "installed_rank",
+          "field_type": "int",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "version",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "description",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "type",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "script",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "checksum",
+          "field_type": "int",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "installed_by",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "installed_on",
+          "field_type": "timestamp",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "execution_time",
+          "field_type": "int",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "success",
+          "field_type": "tinyint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 280,
+      "table_name": "inspection_issue",
+      "table_comment": "巡检问题表",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "record_id",
+          "field_type": "bigint",
+          "field_comment": "巡检记录ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "issue_type",
+          "field_type": "varchar",
+          "field_comment": "问题类型",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "severity",
+          "field_type": "varchar",
+          "field_comment": "严重程度: critical, high, medium, low",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "resource_type",
+          "field_type": "varchar",
+          "field_comment": "资源类型: table, task",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "resource_id",
+          "field_type": "bigint",
+          "field_comment": "资源ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "resource_name",
+          "field_type": "varchar",
+          "field_comment": "资源名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "issue_description",
+          "field_type": "text",
+          "field_comment": "问题描述",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "current_value",
+          "field_type": "varchar",
+          "field_comment": "当前值",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "expected_value",
+          "field_type": "varchar",
+          "field_comment": "期望值",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "suggestion",
+          "field_type": "text",
+          "field_comment": "建议",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "varchar",
+          "field_comment": "状态: open, acknowledged, resolved, ignored",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "resolved_by",
+          "field_type": "varchar",
+          "field_comment": "解决人",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "resolved_time",
+          "field_type": "datetime",
+          "field_comment": "解决时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "resolution_note",
+          "field_type": "text",
+          "field_comment": "解决说明",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_time",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_time",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 281,
+      "table_name": "inspection_record",
+      "table_comment": "巡检记录表",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "inspection_type",
+          "field_type": "varchar",
+          "field_comment": "巡检类型: table_naming, replica_count, tablet_count, task_failure, best_practice",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "inspection_time",
+          "field_type": "datetime",
+          "field_comment": "巡检时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "trigger_type",
+          "field_type": "varchar",
+          "field_comment": "触发类型: manual, schedule",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "total_items",
+          "field_type": "int",
+          "field_comment": "检查项总数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "issue_count",
+          "field_type": "int",
+          "field_comment": "问题数量",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "varchar",
+          "field_comment": "状态: running, completed, failed",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "duration_seconds",
+          "field_type": "int",
+          "field_comment": "执行时长(秒)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_by",
+          "field_type": "varchar",
+          "field_comment": "创建人",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_time",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_time",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 282,
+      "table_name": "inspection_rule",
+      "table_comment": "巡检规则配置表",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "rule_code",
+          "field_type": "varchar",
+          "field_comment": "规则代码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "rule_name",
+          "field_type": "varchar",
+          "field_comment": "规则名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "rule_type",
+          "field_type": "varchar",
+          "field_comment": "规则类型",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "severity",
+          "field_type": "varchar",
+          "field_comment": "严重程度",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "description",
+          "field_type": "text",
+          "field_comment": "规则描述",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "rule_config",
+          "field_type": "json",
+          "field_comment": "规则配置(JSON格式)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "enabled",
+          "field_type": "tinyint",
+          "field_comment": "是否启用",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_by",
+          "field_type": "varchar",
+          "field_comment": "创建人",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_time",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_time",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "metadata_sync_history",
+      "table_comment": "元数据同步历史",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "cluster_id",
+          "field_type": "bigint",
+          "field_comment": "数据源ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "cluster_name",
+          "field_type": "varchar(100)",
+          "field_comment": "数据源名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "source_type",
+          "field_type": "varchar(20)",
+          "field_comment": "数据源类型",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "trigger_type",
+          "field_type": "enum('manual','auto')",
+          "field_comment": "触发方式",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "scope_type",
+          "field_type": "enum('all','database','table')",
+          "field_comment": "同步范围类型",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "scope_target",
+          "field_type": "varchar(255)",
+          "field_comment": "范围标识(库名/表名)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "enum('SUCCESS','PARTIAL','FAILED')",
+          "field_comment": "同步状态",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "started_at",
+          "field_type": "datetime",
+          "field_comment": "开始时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "finished_at",
+          "field_type": "datetime",
+          "field_comment": "结束时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "duration_ms",
+          "field_type": "bigint",
+          "field_comment": "耗时毫秒",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "new_tables",
+          "field_type": "int",
+          "field_comment": "新增表数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_tables",
+          "field_type": "int",
+          "field_comment": "更新表数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted_tables",
+          "field_type": "int",
+          "field_comment": "删除表数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "blocked_deleted_tables",
+          "field_type": "int",
+          "field_comment": "阻断删除表数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "inactivated_tables",
+          "field_type": "int",
+          "field_comment": "失活表数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "new_fields",
+          "field_type": "int",
+          "field_comment": "新增字段数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_fields",
+          "field_type": "int",
+          "field_comment": "更新字段数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted_fields",
+          "field_type": "int",
+          "field_comment": "删除字段数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "error_count",
+          "field_type": "int",
+          "field_comment": "错误数量",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "error_summary",
+          "field_type": "varchar(500)",
+          "field_comment": "错误摘要",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "error_details",
+          "field_type": "mediumtext",
+          "field_comment": "错误明细(JSON)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "change_details",
+          "field_type": "mediumtext",
+          "field_comment": "变更明细(JSON)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "minio_config",
+      "table_comment": "MinIO环境配置表",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "config_name",
+          "field_type": "varchar(100)",
+          "field_comment": "环境名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "endpoint",
+          "field_type": "varchar(255)",
+          "field_comment": "MinIO Endpoint",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "region",
+          "field_type": "varchar(64)",
+          "field_comment": "Region",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "access_key",
+          "field_type": "varchar(200)",
+          "field_comment": "AccessKey",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "secret_key",
+          "field_type": "varchar(200)",
+          "field_comment": "SecretKey",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "use_path_style",
+          "field_type": "tinyint",
+          "field_comment": "是否启用Path Style(1-是,0-否)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "description",
+          "field_type": "varchar(500)",
+          "field_comment": "备注说明",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "is_default",
+          "field_type": "tinyint",
+          "field_comment": "是否默认环境",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "varchar(20)",
+          "field_comment": "状态(active/inactive)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 298,
+      "table_name": "platform_users",
+      "table_comment": "平台用户表",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "varchar",
+          "field_comment": "用户ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "oauth_user_id",
+          "field_type": "varchar",
+          "field_comment": "OAuth用户ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "username",
+          "field_type": "varchar",
+          "field_comment": "用户名",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "email",
+          "field_type": "varchar",
+          "field_comment": "邮箱",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "schema_backup_config",
+      "table_comment": "Schema备份配置表",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "cluster_id",
+          "field_type": "bigint",
+          "field_comment": "数据源ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "schema_name",
+          "field_type": "varchar(128)",
+          "field_comment": "Schema名称",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "repository_name",
+          "field_type": "varchar(128)",
+          "field_comment": "Doris仓库名",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "minio_config_id",
+          "field_type": "bigint",
+          "field_comment": "关联的MinIO环境ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "minio_endpoint",
+          "field_type": "varchar(255)",
+          "field_comment": "MinIO Endpoint",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "minio_region",
+          "field_type": "varchar(64)",
+          "field_comment": "MinIO Region",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "minio_access_key",
+          "field_type": "varchar(200)",
+          "field_comment": "MinIO AccessKey",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "minio_secret_key",
+          "field_type": "varchar(200)",
+          "field_comment": "MinIO SecretKey",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "minio_bucket",
+          "field_type": "varchar(128)",
+          "field_comment": "MinIO Bucket",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "minio_base_path",
+          "field_type": "varchar(255)",
+          "field_comment": "Bucket下备份路径",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "use_path_style",
+          "field_type": "tinyint",
+          "field_comment": "是否启用Path Style(1-是,0-否)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "backup_enabled",
+          "field_type": "tinyint",
+          "field_comment": "是否开启每日定时备份(1-是,0-否)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "backup_time",
+          "field_type": "varchar(5)",
+          "field_comment": "每日备份时间(HH:mm)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "last_backup_time",
+          "field_type": "datetime",
+          "field_comment": "最近一次触发备份时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "varchar(20)",
+          "field_comment": "状态(active/inactive)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 283,
+      "table_name": "table_statistics_history",
+      "table_comment": "表统计历史记录",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_id",
+          "field_type": "bigint",
+          "field_comment": "关联的表ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "cluster_id",
+          "field_type": "bigint",
+          "field_comment": "Doris集群ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "database_name",
+          "field_type": "varchar",
+          "field_comment": "数据库名",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_name",
+          "field_type": "varchar",
+          "field_comment": "表名",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "row_count",
+          "field_type": "bigint",
+          "field_comment": "数据行数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "data_size",
+          "field_type": "bigint",
+          "field_comment": "数据大小(字节)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "partition_count",
+          "field_type": "int",
+          "field_comment": "分区数量",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "replication_num",
+          "field_type": "int",
+          "field_comment": "副本数量",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "bucket_num",
+          "field_type": "int",
+          "field_comment": "分桶数量",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_last_update_time",
+          "field_type": "datetime",
+          "field_comment": "表最后更新时间(来自Doris)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "statistics_time",
+          "field_type": "datetime",
+          "field_comment": "统计时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "记录创建时间",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 284,
+      "table_name": "table_task_relation",
+      "table_comment": "表与任务关联关系表",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "table_id",
+          "field_type": "bigint",
+          "field_comment": "表ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_id",
+          "field_type": "bigint",
+          "field_comment": "任务ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "relation_type",
+          "field_type": "varchar",
+          "field_comment": "关联类型(read-读取/write-写入)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "deleted",
+          "field_type": "tinyint",
+          "field_comment": "逻辑删除标记",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 285,
+      "table_name": "task_execution_log",
+      "table_comment": "任务执行日志",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_id",
+          "field_type": "bigint",
+          "field_comment": "任务ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "execution_id",
+          "field_type": "varchar",
+          "field_comment": "外部执行ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "enum",
+          "field_comment": "执行状态",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "start_time",
+          "field_type": "datetime",
+          "field_comment": "开始时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "end_time",
+          "field_type": "datetime",
+          "field_comment": "结束时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "duration_seconds",
+          "field_type": "int",
+          "field_comment": "执行时长(秒)",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "rows_output",
+          "field_type": "bigint",
+          "field_comment": "输出行数",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "error_message",
+          "field_type": "text",
+          "field_comment": "错误信息",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "log_url",
+          "field_type": "varchar",
+          "field_comment": "日志链接",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "trigger_type",
+          "field_type": "enum",
+          "field_comment": "触发方式",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "更新时间",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 299,
+      "table_name": "user_database_permissions",
+      "table_comment": "用户数据库权限表",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "user_id",
+          "field_type": "varchar",
+          "field_comment": "用户ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "cluster_id",
+          "field_type": "bigint",
+          "field_comment": "Doris集群ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "database_name",
+          "field_type": "varchar",
+          "field_comment": "数据库名",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "permission_level",
+          "field_type": "enum",
+          "field_comment": "权限级别",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "granted_at",
+          "field_type": "datetime",
+          "field_comment": "授权时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "granted_by",
+          "field_type": "varchar",
+          "field_comment": "授权人",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "expires_at",
+          "field_type": "datetime",
+          "field_comment": "权限过期时间",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 300,
+      "table_name": "workflow_instance_cache",
+      "table_comment": "工作流执行历史缓存（最近N次）",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "workflow_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "instance_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "state",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "start_time",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "end_time",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "trigger_type",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "duration_ms",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "extra",
+          "field_type": "json",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 301,
+      "table_name": "workflow_publish_record",
+      "table_comment": "工作流发布记录",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "workflow_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "version_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "target_engine",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "operation",
+          "field_type": "varchar",
+          "field_comment": "deploy/online/offline",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "engine_workflow_code",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "log",
+          "field_type": "json",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "operator",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": null,
+      "table_name": "workflow_runtime_sync_record",
+      "table_comment": "运行态反向同步记录",
+      "db_name": "opendataworks",
+      "layer": "MYSQL",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "主键ID",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "workflow_id",
+          "field_type": "bigint",
+          "field_comment": "本地工作流ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "project_code",
+          "field_type": "bigint",
+          "field_comment": "Dolphin项目编码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "workflow_code",
+          "field_type": "bigint",
+          "field_comment": "Dolphin工作流编码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "snapshot_hash",
+          "field_type": "varchar(64)",
+          "field_comment": "快照哈希",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "snapshot_json",
+          "field_type": "longtext",
+          "field_comment": "运行态规范化快照JSON",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "diff_json",
+          "field_type": "longtext",
+          "field_comment": "差异结果JSON",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "status",
+          "field_type": "varchar(20)",
+          "field_comment": "状态: success/failed",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "error_code",
+          "field_type": "varchar(64)",
+          "field_comment": "失败码",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "error_message",
+          "field_type": "varchar(2000)",
+          "field_comment": "失败原因",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "operator",
+          "field_type": "varchar(100)",
+          "field_comment": "操作人",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "创建时间",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "version_id",
+          "field_type": "bigint",
+          "field_comment": "关联生成的版本ID",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "ingest_mode",
+          "field_type": "varchar(32)",
+          "field_comment": "运行态定义采集模式: legacy/export_shadow/export_only",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "raw_definition_json",
+          "field_type": "longtext",
+          "field_comment": "原始导出定义JSON",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 302,
+      "table_name": "workflow_task_relation",
+      "table_comment": "任务与工作流关联",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "workflow_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "task_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "node_attrs",
+          "field_type": "json",
+          "field_comment": "节点属性（worker group、优先级等）",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "is_entry",
+          "field_type": "tinyint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "is_exit",
+          "field_type": "tinyint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "version_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "upstream_task_count",
+          "field_type": "int",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "downstream_task_count",
+          "field_type": "int",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "updated_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    },
+    {
+      "table_id": 303,
+      "table_name": "workflow_version",
+      "table_comment": "工作流版本记录",
+      "db_name": "opendataworks",
+      "layer": "ODS",
+      "business_domain": null,
+      "data_domain": null,
+      "fields": [
+        {
+          "field_name": "id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": true,
+          "is_partition": false
+        },
+        {
+          "field_name": "workflow_id",
+          "field_type": "bigint",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "version_no",
+          "field_type": "int",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "structure_snapshot",
+          "field_type": "json",
+          "field_comment": "完整结构快照",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "change_summary",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "trigger_source",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_by",
+          "field_type": "varchar",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        },
+        {
+          "field_name": "created_at",
+          "field_type": "datetime",
+          "field_comment": "",
+          "is_primary": false,
+          "is_partition": false
+        }
+      ]
+    }
+  ]
+}
