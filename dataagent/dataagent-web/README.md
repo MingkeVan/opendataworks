@@ -11,14 +11,13 @@ DataAgent 前端组件包（NL2SQL 专用）。
 
 ```js
 import { createApp } from 'vue'
-import ElementPlus from 'element-plus'
 import { NL2SqlPage } from 'dataagent-web'
 import 'dataagent-web/style.css'
 
 createApp({
   components: { NL2SqlPage },
   template: '<NL2SqlPage />'
-}).use(ElementPlus).mount('#app')
+}).mount('#app')
 ```
 
 ## 本地开发

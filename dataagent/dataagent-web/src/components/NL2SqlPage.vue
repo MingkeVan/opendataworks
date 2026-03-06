@@ -1,12 +1,12 @@
 <template>
   <div class="nl2sql-view">
-    <NL2SqlChatV2 :nl2sql-base="nl2sqlBase" />
+    <NL2SqlChat :nl2sql-base="nl2sqlBase" />
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
-import NL2SqlChatV2 from './NL2SqlChatV2.vue'
+import NL2SqlChat from './NL2SqlChat.vue'
 
 const nl2sqlBase = ref(
   import.meta.env.VITE_NL2SQL_BASE || 'http://localhost:8900'
