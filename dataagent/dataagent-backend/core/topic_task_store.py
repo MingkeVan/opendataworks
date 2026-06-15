@@ -206,6 +206,33 @@ def _project_sdk_records(records: list[dict[str, Any]]) -> dict[str, Any]:
                 block["note"] = str(data.get("note") or "")
                 block["decided_at"] = str(data.get("decided_at") or "")
 
+        elif record_type == "question_request":
+            request_id = str(data.get("request_id") or "")
+            questions = data.get("questions")
+            block = {
+                "type": "question_request",
+                "request_id": request_id,
+                "questions": questions if isinstance(questions, list) else [],
+                "answers": [],
+                "answered": False,
+                "answered_at": "",
+                "_idx": len(ordered_blocks),
+            }
+            ordered_blocks.append(block)
+            if current_turn_blocks is not None:
+                current_turn_blocks.append(block)
+            if request_id:
+                perm_blocks_by_request_id[request_id] = block
+
+        elif record_type == "question_answer":
+            request_id = str(data.get("request_id") or "")
+            block = perm_blocks_by_request_id.get(request_id)
+            if block is not None and block.get("type") == "question_request":
+                answers = data.get("answers")
+                block["answers"] = answers if isinstance(answers, list) else []
+                block["answered"] = True
+                block["answered_at"] = str(data.get("answered_at") or "")
+
         elif record_type == "tool_result":
             tool_use_id = str(data.get("tool_use_id") or "")
             if tool_use_id and tool_use_id in blocks_by_tool_id:
@@ -1546,6 +1573,77 @@ class TopicTaskStore:
                 "decision": normalized,
                 "note": str(note or ""),
                 "decided_at": decided_at or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            },
+        )
+        return True
+
+    def get_pending_question_request_id(self, task_id: str) -> str | None:
+        """Return the request_id of the latest ``question_request`` record for a
+        task that has no corresponding ``question_answer`` yet, or None."""
+        pending = self.get_pending_question_request(task_id)
+        return str(pending.get("request_id") or "") if pending else None
+
+    def get_pending_question_request(self, task_id: str) -> dict[str, Any] | None:
+        """Return the latest ask-user question that has not been answered yet."""
+        self._ensure_ready()
+        conn = self._connect(database=self._schema_name())
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, topic_id, turn_index, record_type, data
+                    FROM da_agent_sdk_record
+                    WHERE task_id = %s
+                      AND record_type IN ('question_request', 'question_answer')
+                    ORDER BY id DESC
+                    LIMIT 200
+                    """,
+                    (task_id,),
+                )
+                rows = cur.fetchall() or []
+        finally:
+            conn.close()
+
+        closed: set[str] = set()
+        for row in rows:
+            data = _safe_json_load(row.get("data")) or {}
+            request_id = str(data.get("request_id") or "")
+            if not request_id:
+                continue
+            record_type = str(row.get("record_type") or "")
+            if record_type == "question_answer":
+                closed.add(request_id)
+                continue
+            if record_type == "question_request" and request_id not in closed:
+                return {
+                    "request_id": request_id,
+                    "topic_id": str(row.get("topic_id") or ""),
+                    "turn_index": int(row.get("turn_index") or 0),
+                }
+        return None
+
+    def append_question_answer_record(
+        self,
+        *,
+        task_id: str,
+        request_id: str,
+        answers: Any,
+        answered_at: str = "",
+    ) -> bool:
+        """Append a durable ``question_answer`` SDK record if the request is still pending."""
+        pending = self.get_pending_question_request(task_id)
+        if not pending or str(pending.get("request_id") or "") != str(request_id or ""):
+            return False
+        self.append_sdk_record(
+            task_id=task_id,
+            topic_id=str(pending.get("topic_id") or ""),
+            turn_index=int(pending.get("turn_index") or 0),
+            record_type="question_answer",
+            event_type=None,
+            data={
+                "request_id": str(request_id),
+                "answers": answers if isinstance(answers, list) else [],
+                "answered_at": answered_at or datetime.now(timezone.utc).isoformat(timespec="seconds"),
             },
         )
         return True

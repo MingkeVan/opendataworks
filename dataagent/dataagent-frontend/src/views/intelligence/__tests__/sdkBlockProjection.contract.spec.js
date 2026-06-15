@@ -31,6 +31,14 @@ function toCanonical(blocks) {
         summary: block.summary ?? null,
         decision: block.decision ?? null,
       })
+    } else if (block.type === 'question_request') {
+      canonical.push({
+        kind: 'question_request',
+        request_id: block.requestId ?? null,
+        questions: block.questions ?? [],
+        answered: Boolean(block.answered),
+        answers: block.answers ?? [],
+      })
     } else {
       const text = String(block.content ?? '')
       if (!text.trim()) continue

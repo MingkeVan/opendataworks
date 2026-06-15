@@ -204,6 +204,12 @@ export function createNl2SqlApiClient(options = {}) {
         note,
       })
     },
+    submitQuestionAnswer(taskId, requestId, answers = []) {
+      return runtimeRequest.post(`/tasks/${taskId}/question-answer`, {
+        request_id: requestId,
+        answers,
+      })
+    },
     async streamSdkEvents(taskId, options = {}) {
       const { onRecord, signal, afterId = 0 } = options
       const response = await fetch(

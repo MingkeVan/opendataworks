@@ -16,6 +16,7 @@ import httpx
 
 from config import get_settings
 from core.agent_profile_service import DEFAULT_AGENT_ID, normalize_agent_snapshot, normalize_permission_mode
+from core.ask_user_question import ASK_USER_MCP_SERVER_NAME, build_ask_user_mcp_server
 from core.permission_gate import is_high_risk_tool, plan_denies_tool, requires_confirmation
 from core.permission_wait import wait_for_decision
 from core.agent_runtime import (
@@ -810,6 +811,23 @@ async def _execute_task_stream_local(
         )
     else:
         permission_mode = _resolve_sdk_permission_mode(requested_permission_mode)
+
+    # Mount the in-process ask_user_question tool so the agent can surface a
+    # multiple-choice question card and resume the same run with the user's
+    # selection. The tool handler owns the pause/wait/resume round-trip.
+    if bool(getattr(cfg, "dataagent_ask_user_question_enabled", True)):
+        ask_server, ask_tool_name = build_ask_user_mcp_server(
+            sdk_writer=sdk_writer,
+            store=get_topic_task_store(),
+            task_id=params.task_id,
+            wait_seconds=int(getattr(cfg, "task_permission_wait_seconds", 600) or 600),
+            is_cancel_requested=is_cancel_requested,
+        )
+        if ask_server is not None:
+            mcp_servers = {**mcp_servers, ASK_USER_MCP_SERVER_NAME: ask_server}
+            if ask_tool_name not in allowed_tools:
+                allowed_tools = [*allowed_tools, ask_tool_name]
+
     options_kwargs = dict(
         system_prompt=system_prompt,
         model=model,

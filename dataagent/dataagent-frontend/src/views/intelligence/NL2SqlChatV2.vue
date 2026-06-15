@@ -224,6 +224,14 @@
                         @decide="(payload) => handlePermissionDecision(msg, payload)"
                       />
 
+                      <!-- AskUserQuestion selection card -->
+                      <QuestionSelectionCard
+                        v-else-if="block.type === 'question_request'"
+                        :block="block"
+                        :disabled="msg._v2state.status !== 'streaming'"
+                        @answer="(payload) => handleQuestionAnswer(msg, payload)"
+                      />
+
                       <!-- Text block (inline chart_spec rendered as a real chart) -->
                       <div v-else-if="block.type === 'text' && block.content" class="v2-text-block">
                         <template v-for="(seg, si) in answerSegments(block.content)" :key="si">
@@ -522,6 +530,7 @@ import { dataagentApi } from '@/api/dataagent'
 import ToolOutputRenderer from './ToolOutputRenderer.vue'
 import ChartSpecView from './ChartSpecView.vue'
 import PermissionConfirmationCard from './PermissionConfirmationCard.vue'
+import QuestionSelectionCard from './QuestionSelectionCard.vue'
 import { blockToToolProp } from './v2StreamParser'
 import { splitChartSpecText, stripChartSpecsFromText } from './chartSpec'
 import { topicStatusKind } from './topicStatus'
@@ -1107,6 +1116,25 @@ async function handlePermissionDecision(msg, payload) {
     )
     if (block && block.decision === 'pending') {
       block.summary = (block.summary || '') + '\n[提交失败，请重试]'
+      block._submitFailed = Date.now()
+    }
+  }
+}
+
+// AskUserQuestion: post the user's selection for a run paused in waiting_input.
+// The streamed question_answer record reconciles the card into its answered state.
+async function handleQuestionAnswer(msg, payload) {
+  const taskId = String(msg?.task_id || activeTaskId.value || '').trim()
+  const requestId = String(payload?.requestId || '').trim()
+  const answers = Array.isArray(payload?.answers) ? payload.answers : []
+  if (!taskId || !requestId) return
+  try {
+    await api.taskApi.submitQuestionAnswer(taskId, requestId, answers)
+  } catch (err) {
+    const block = (msg?._v2state?.blocks || []).find(
+      (b) => b.type === 'question_request' && b.requestId === requestId,
+    )
+    if (block && !block.answered) {
       block._submitFailed = Date.now()
     }
   }
