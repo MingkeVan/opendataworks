@@ -16,7 +16,13 @@ import httpx
 
 from config import get_settings
 from core.agent_profile_service import DEFAULT_AGENT_ID, normalize_agent_snapshot, normalize_permission_mode
-from core.permission_gate import is_high_risk_tool, plan_denies_tool, requires_confirmation
+from core.permission_gate import (
+    is_high_risk_tool,
+    is_write_tool,
+    plan_denies_tool,
+    requires_confirmation,
+    strip_card_annotations,
+)
 from core.permission_wait import wait_for_decision
 from core.agent_runtime import (
     _build_allowed_tools,
@@ -496,10 +502,15 @@ def _build_can_use_tool_callback(
 
     async def can_use_tool(tool_name: str, tool_input: dict[str, Any] | None = None, context: Any = None):
         tool_input = dict(tool_input or {})
+        # For write tools the skill may attach card-annotation keys (title/summary)
+        # that no downstream tool schema accepts; the card reads them from the raw
+        # input, but the forwarded input must drop them or the MCP call is rejected
+        # after approval.
+        forwarded_input = strip_card_annotations(tool_input) if is_write_tool(tool_name) else tool_input
         if permission_mode == "plan" and plan_denies_tool(tool_name):
             return _deny_result("当前为规划(plan)模式，不允许执行写操作。")
         if not requires_confirmation(tool_name, permission_mode):
-            return _allow_result(tool_input)
+            return _allow_result(forwarded_input)
 
         request_id = uuid.uuid4().hex
         bare = tool_name.split("__")[-1] if tool_name.startswith("mcp__") else tool_name
@@ -549,7 +560,7 @@ def _build_can_use_tool_callback(
             logger.exception("can_use_tool: failed to record permission decision task_id=%s", task_id)
 
         if decision == "allow":
-            return _allow_result(tool_input)
+            return _allow_result(forwarded_input)
         if decision == "timeout":
             return _deny_result("等待确认超时，已自动拒绝该操作。")
         return _deny_result("用户拒绝了该操作。")

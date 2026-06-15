@@ -49,3 +49,15 @@ def test_legacy_mode_normalizes_to_default() -> None:
     # legacy 'inherit' / unknown -> default policy
     assert pg.requires_confirmation(CREATE_TASK, "inherit") is True
     assert pg.requires_confirmation(CREATE_TASK, "junk") is True
+
+
+def test_strip_card_annotations_drops_only_annotation_keys() -> None:
+    raw = {"workflow_id": 7, "operation": "deploy", "preview_token": "tok", "title": "t", "summary": "s"}
+    assert pg.strip_card_annotations(raw) == {
+        "workflow_id": 7,
+        "operation": "deploy",
+        "preview_token": "tok",
+    }
+    # No annotation keys -> unchanged copy.
+    payload = {"workflow_id": 1, "operation": "offline"}
+    assert pg.strip_card_annotations(payload) == payload
