@@ -95,6 +95,7 @@
         <template v-if="kind === 'sql_execution'">
           <SqlCodePanel
             v-if="sqlText"
+            :key="`sql-${toolInstanceKey}-${payloadDatabase}-${payloadEngine}`"
             :sql="sqlText"
             :database="payloadDatabase"
             :engine="payloadEngine"
@@ -114,6 +115,7 @@
         <template v-else-if="kind === 'sql_export'">
           <SqlCodePanel
             v-if="sqlText"
+            :key="`sql-export-${toolInstanceKey}-${payloadDatabase}-${payloadEngine}`"
             :sql="sqlText"
             :database="payloadDatabase"
             :engine="payloadEngine"

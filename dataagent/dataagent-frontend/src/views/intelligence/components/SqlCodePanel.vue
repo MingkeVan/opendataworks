@@ -21,20 +21,20 @@
           data-action="revert"
           @click="revertSql"
         >还原</button>
-        <template v-if="executable">
-          <select v-model.number="limit" class="sql-panel-limit" aria-label="返回行数上限">
-            <option :value="100">100 行</option>
-            <option :value="500">500 行</option>
-            <option :value="1000">1000 行</option>
-          </select>
-          <button
-            type="button"
-            class="sql-panel-btn sql-panel-btn-primary"
-            data-action="execute"
-            :disabled="running || !currentSql.trim()"
-            @click="executeSql"
-          >{{ running ? '执行中…' : '执行' }}</button>
-        </template>
+        <select v-model.number="limit" class="sql-panel-limit" :disabled="!executable || running" aria-label="返回行数上限">
+          <option :value="100">100 行</option>
+          <option :value="500">500 行</option>
+          <option :value="1000">1000 行</option>
+        </select>
+        <button
+          type="button"
+          class="sql-panel-btn sql-panel-btn-primary"
+          data-action="execute"
+          :disabled="running || !currentSql.trim() || !executable"
+          :title="!executable ? '缺少 database，无法执行' : ''"
+          @click="executeSql"
+        >{{ running ? '执行中…' : '执行' }}</button>
+        <span v-if="!executable" class="sql-panel-hint">缺少 database</span>
       </div>
     </div>
 
@@ -53,7 +53,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { EditorView, keymap, placeholder } from '@codemirror/view'
 import { Compartment, EditorState } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -62,6 +62,9 @@ import { MySQL, sql } from '@codemirror/lang-sql'
 import { copyText } from '@/utils/clipboard'
 import { createNl2SqlApiClient } from '@/api/nl2sql'
 import ResultDataTable from './ResultDataTable.vue'
+
+const injectedApi = inject('nl2sqlApi', null)
+const injectedTopicId = inject('nl2sqlTopicId', ref(''))
 
 const props = defineProps({
   sql: { type: String, default: '' },
@@ -95,6 +98,7 @@ const executeResultMeta = computed(() => ({
 }))
 
 const getApi = () => {
+  if (injectedApi) return injectedApi
   if (!apiClient) apiClient = createNl2SqlApiClient({ timeout: 150000 })
   return apiClient
 }
@@ -181,11 +185,13 @@ const executeSql = async () => {
   running.value = true
   executeError.value = ''
   try {
+    const topicId = typeof injectedTopicId === 'object' && injectedTopicId !== null ? injectedTopicId.value : (injectedTopicId || '')
     const result = await getApi().queryApi.executeSql({
       sql: currentSql.value,
       database: props.database,
       engine: props.engine || undefined,
-      limit: limit.value
+      limit: limit.value,
+      topicId: topicId || undefined
     })
     executeResult.value = result
     if (result?.error) {
@@ -200,8 +206,8 @@ const executeSql = async () => {
 }
 
 watch(
-  () => props.sql,
-  (value) => {
+  () => [props.sql, props.database, props.engine],
+  ([value]) => {
     if (editing.value) return
     currentSql.value = String(value || '')
     setEditorDoc(currentSql.value)
@@ -286,6 +292,17 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #31567a;
   background: #fff;
+}
+
+.sql-panel-limit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sql-panel-hint {
+  font-size: 12px;
+  color: #8da0b3;
+  white-space: nowrap;
 }
 
 .sql-panel-editor {

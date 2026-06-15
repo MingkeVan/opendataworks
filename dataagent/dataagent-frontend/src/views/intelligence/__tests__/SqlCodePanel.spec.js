@@ -33,7 +33,7 @@ const successResult = {
   error: null
 }
 
-const mountPanel = (props = {}) => mount(SqlCodePanel, {
+const mountPanel = (props = {}, options = {}) => mount(SqlCodePanel, {
   props: {
     sql: 'SELECT COUNT(*) AS cnt FROM demo.t',
     database: 'demo',
@@ -41,6 +41,7 @@ const mountPanel = (props = {}) => mount(SqlCodePanel, {
     ...props
   },
   global: {
+    provide: options.provide || {},
     stubs: {
       ResultDataTable: {
         props: ['columns', 'rows', 'title', 'meta'],
@@ -72,9 +73,14 @@ describe('SqlCodePanel', () => {
     expect(wrapper.find('[data-action="edit"]').exists()).toBe(true)
   })
 
-  it('hides execute controls without a database', () => {
+  it('disables execute controls without a database and explains why', () => {
     const wrapper = mountPanel({ database: '' })
-    expect(wrapper.find('[data-action="execute"]').exists()).toBe(false)
+    const execute = wrapper.find('[data-action="execute"]')
+    expect(execute.exists()).toBe(true)
+    expect(execute.attributes('disabled')).toBeDefined()
+    expect(execute.attributes('title')).toBe('缺少 database，无法执行')
+    expect(wrapper.find('.sql-panel-limit').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('缺少 database')
   })
 
   it('executes sql and renders the result table', async () => {
@@ -93,6 +99,28 @@ describe('SqlCodePanel', () => {
     expect(wrapper.find('.sql-panel-error').exists()).toBe(false)
   })
 
+  it('uses injected api client and topic id when provided', async () => {
+    const injectedExecuteSql = vi.fn().mockResolvedValue(successResult)
+    const wrapper = mountPanel({}, {
+      provide: {
+        nl2sqlApi: { queryApi: { executeSql: injectedExecuteSql } },
+        nl2sqlTopicId: { value: 'topic-42' }
+      }
+    })
+
+    await wrapper.find('[data-action="execute"]').trigger('click')
+    await flushPromises()
+
+    expect(injectedExecuteSql).toHaveBeenCalledWith({
+      sql: 'SELECT COUNT(*) AS cnt FROM demo.t',
+      database: 'demo',
+      engine: 'mysql',
+      limit: 100,
+      topicId: 'topic-42'
+    })
+    expect(apiMocks.executeSql).not.toHaveBeenCalled()
+  })
+
   it('passes the selected limit', async () => {
     apiMocks.executeSql.mockResolvedValue(successResult)
     const wrapper = mountPanel()
@@ -100,6 +128,18 @@ describe('SqlCodePanel', () => {
     await wrapper.find('[data-action="execute"]').trigger('click')
     await flushPromises()
     expect(apiMocks.executeSql.mock.calls[0][0].limit).toBe(500)
+  })
+
+  it('resets execution state when the query context changes', async () => {
+    apiMocks.executeSql.mockResolvedValue(successResult)
+    const wrapper = mountPanel()
+    await wrapper.find('[data-action="execute"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.result-table-stub').exists()).toBe(true)
+
+    await wrapper.setProps({ database: 'demo_2' })
+    await flushPromises()
+    expect(wrapper.find('.result-table-stub').exists()).toBe(false)
   })
 
   it('shows the error message when execution fails', async () => {
