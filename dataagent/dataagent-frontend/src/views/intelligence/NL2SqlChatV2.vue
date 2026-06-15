@@ -340,15 +340,6 @@
               class="v2-file-input"
               @change="handleFilesSelected"
             />
-            <button
-              type="button"
-              class="v2-attach-btn"
-              :disabled="isStreaming"
-              title="上传文件"
-              @click="triggerFilePicker"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 12.5 12.5 21a4 4 0 0 1-5.66-5.66l8.49-8.49a2.5 2.5 0 0 1 3.54 3.54l-8.49 8.49a1 1 0 0 1-1.41-1.41l7.78-7.78" /></svg>
-            </button>
             <textarea
               ref="textareaRef"
               v-model="inputText"
@@ -359,16 +350,19 @@
               @keydown.enter="onEnterKey"
               @input="autoResize"
             />
-            <button
-              type="button"
-              class="v2-send-btn"
-              :class="{ 'v2-cancel-btn': activeTaskId }"
-              :disabled="activeTaskId ? false : !canSendV2"
-              @click="activeTaskId ? handleCancel() : handleSend()"
-            >
-              <svg v-if="activeTaskId" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><rect x="8" y="8" width="8" height="8" rx="1.5" /></svg>
-              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
-            </button>
+            <div class="v2-composer-inline">
+              <span class="v2-composer-hint">Enter 发送，Shift + Enter 换行</span>
+              <button
+                type="button"
+                class="v2-send-btn"
+                :class="{ 'v2-cancel-btn': activeTaskId }"
+                :disabled="activeTaskId ? false : !canSendV2"
+                @click="activeTaskId ? handleCancel() : handleSend()"
+              >
+                <svg v-if="activeTaskId" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><rect x="8" y="8" width="8" height="8" rx="1.5" /></svg>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
+              </button>
+            </div>
           </div>
           <!-- Bottom toolbar -->
           <div class="v2-composer-toolbar">
@@ -389,7 +383,15 @@
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
-              <span class="v2-composer-hint">Enter 发送，Shift + Enter 换行</span>
+              <button
+                type="button"
+                class="v2-attach-btn"
+                :disabled="isStreaming"
+                title="上传文件"
+                @click="triggerFilePicker"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+              </button>
             </div>
             <div class="v2-composer-toolbar-right">
               <el-dropdown trigger="click" @command="handleModelCommand">
@@ -541,10 +543,10 @@ const agentSelectValue = ref('')
 // Session permission mode (latest selection). Default per design: 'default'.
 const permissionMode = ref('default')
 const PERMISSION_MODE_OPTIONS = [
-  { value: 'default', label: '逐步确认' },
-  { value: 'acceptEdits', label: '草稿自动·发布确认' },
-  { value: 'plan', label: '仅规划' },
-  { value: 'bypassPermissions', label: '全自动' },
+  { value: 'default', label: 'Default' },
+  { value: 'acceptEdits', label: 'Accept edits' },
+  { value: 'plan', label: 'Plan mode' },
+  { value: 'bypassPermissions', label: 'Bypass permissions' },
 ]
 const searchKeyword = ref('')
 const autoScroll = ref(true)
@@ -1501,8 +1503,9 @@ onBeforeUnmount(() => {
 .v2-file-input { display: none; }
 .v2-attach-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; flex: none; border: none; border-radius: 8px;
-  background: transparent; color: #6B7280; cursor: pointer;
+  width: 26px; height: 26px; flex: none; border: 1px solid #dbe3ef; border-radius: 9px;
+  background: #f4f7fb; color: #4a5568; cursor: pointer;
+  transition: background var(--odw-transition), color var(--odw-transition);
 }
 .v2-attach-btn:hover:not(:disabled) { background: #EEF1F5; color: #111827; }
 .v2-attach-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -2138,14 +2141,22 @@ onBeforeUnmount(() => {
 
 .v2-composer {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 10px 10px 18px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 12px 14px 10px 16px;
   border: 1px solid #dde2ea;
   border-radius: 16px;
   background: #ffffff;
   transition: border-color var(--odw-transition), box-shadow var(--odw-transition);
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+}
+
+.v2-composer-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .v2-composer:focus-within {
@@ -2154,8 +2165,10 @@ onBeforeUnmount(() => {
 }
 
 .v2-textarea {
-  flex: 1;
+  flex: none;
+  width: 100%;
   min-width: 0;
+  box-sizing: border-box;
   border: none;
   outline: none;
   background: transparent;
