@@ -17,7 +17,7 @@ from core.provider_runtime import build_provider_env as _build_provider_env
 from core.provider_runtime import normalize_provider_id as _normalize_provider_id
 from core.provider_runtime import safe_base_url_for_log as _safe_base_url_for_log
 from core.agent_profile_service import normalize_permission_mode
-from core.permission_gate import WRITE_TOOL_NAMES, plan_denies_tool
+from core.permission_gate import WRITE_TOOL_NAMES, plan_denies_tool, requires_confirmation
 from core.data_scope import encode_scope_header, normalize_data_scope
 from core.skill_admin_service import resolve_enabled_skill_runtime, resolve_runtime_provider_selection
 from core.skill_discovery import (
@@ -411,10 +411,9 @@ def _is_running_as_root() -> bool:
 
 
 def _resolve_sdk_permission_mode(permission_mode: str | None = None) -> str:
-    # Per-mode enforcement (plan strips write tools; default/acceptEdits route
-    # high-risk tools through can_use_tool) lands with the confirmation flow.
-    # Until then, allowed_tools remains the real capability boundary, so every
-    # mode runs effectively bypassPermissions, with the root fallback preserved.
+    # Per-mode enforcement is handled by the mounted allowed_tools set. MCP write
+    # tools requiring confirmation are withheld because SDK can_use_tool is not a
+    # reliable gate for those calls.
     normalize_permission_mode(permission_mode)
     if _is_running_as_root():
         # Claude Code rejects bypassPermissions under root/sudo. Fall back to the
@@ -472,9 +471,11 @@ def _build_allowed_tools(
         tool_names = list(PORTAL_MCP_TOOL_NAMES) + sorted(WRITE_TOOL_NAMES)
         for tool_name in tool_names:
             qualified = f"mcp__{PORTAL_MCP_SERVER_NAME}__{tool_name}"
-            # plan mode is read-only: never mount write tools (defense in depth
-            # alongside the can_use_tool denial).
-            if mode == "plan" and plan_denies_tool(qualified):
+            # SDK can_use_tool is not a reliable gate for MCP write tools, so the
+            # mounted tool set remains the hard capability boundary. Tools that
+            # would require confirmation in the current mode are withheld rather
+            # than exposed and then approved later.
+            if (mode == "plan" and plan_denies_tool(qualified)) or requires_confirmation(qualified, mode):
                 continue
             allowed.append(qualified)
 

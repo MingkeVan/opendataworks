@@ -114,6 +114,14 @@
                         <ToolOutputRenderer :tool="blockToToolProp(block)" :file-url-resolver="resolveWorkspaceFileHref" />
                       </div>
 
+                      <!-- Generic Chat V2 permission confirmation card -->
+                      <PermissionConfirmationCard
+                        v-else-if="block.type === 'permission_request'"
+                        :block="block"
+                        :disabled="msg._v2state.status !== 'streaming'"
+                        @decide="(payload) => handlePermissionDecision(msg, payload)"
+                      />
+
                       <!-- Text block (inline chart_spec rendered as a real chart) -->
                       <div v-else-if="block.type === 'text' && block.content" class="query-main-text">
                         <template v-for="(seg, si) in answerSegments(block.content)" :key="si">
@@ -241,6 +249,17 @@
           <div class="query-composer-toolbar">
             <div class="query-composer-hint">Enter 发送，Shift + Enter 换行</div>
             <div class="query-model-selector">
+              <select
+                :value="permissionMode"
+                class="query-model-select query-permission-select"
+                :disabled="isBusy"
+                title="会话权限模式"
+                @change="changePermissionMode($event.target.value)"
+              >
+                <option v-for="opt in PERMISSION_MODE_OPTIONS" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
               <select v-model="selectedProvider" class="query-model-select" :disabled="!providers.length || isBusy" title="切换提供商">
                 <option v-for="provider in providers" :key="provider.provider_id" :value="provider.provider_id">
                   {{ provider.display_name || provider.provider_id }}
@@ -278,6 +297,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, triggerRe
 import { createNl2SqlApiClient } from '@/api/nl2sql'
 import ToolOutputRenderer from '@/views/intelligence/ToolOutputRenderer.vue'
 import ChartSpecView from '@/views/intelligence/ChartSpecView.vue'
+import PermissionConfirmationCard from '@/views/intelligence/PermissionConfirmationCard.vue'
 import { splitChartSpecText, stripChartSpecsFromText } from '@/views/intelligence/chartSpec'
 import { blockToToolProp, processV2Record } from '@/views/intelligence/v2StreamParser'
 import { extractErrorText, isPlainEnterSubmit, renderMarkdown as renderMarkdownBase } from '@/views/intelligence/chatMessage'
@@ -314,6 +334,13 @@ const TOPIC_STATUS_REFRESH_INTERVAL_MS = 3000
 const agentPresetQuestions = ref([])
 const agentName = ref('智能数据助手')
 const suggestions = computed(() => agentPresetQuestions.value.length ? agentPresetQuestions.value : DEFAULT_SUGGESTIONS)
+const permissionMode = ref('default')
+const PERMISSION_MODE_OPTIONS = [
+  { value: 'default', label: '逐步确认' },
+  { value: 'acceptEdits', label: '草稿自动·发布确认' },
+  { value: 'plan', label: '仅规划' },
+  { value: 'bypassPermissions', label: '全自动' },
+]
 
 // widget-only UI state
 const inputSource = ref('typed')
@@ -328,6 +355,7 @@ const agentId = computed(() => String(props.config.agentId || '').trim())
 const chat = useNl2SqlChat({
   api,
   getAgentId: () => agentId.value,
+  getPermissionMode: () => permissionMode.value || '',
   messagePageSize: 500,
   topicTitleLength: 60,
   listTopicsParams: () => ({ page: 1, page_size: 50, agent_id: agentId.value || undefined }),
@@ -404,6 +432,28 @@ const formatTime = (value) => {
   return fmtDate(date, { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
+const currentTopic = computed(() => topics.value.find((topic) => topic.topic_id === topicId.value) || null)
+watch(currentTopic, (topic) => {
+  if (topic && topic.permission_mode) permissionMode.value = topic.permission_mode
+}, { immediate: true })
+
+const changePermissionMode = async (mode) => {
+  const next = String(mode || '').trim()
+  if (!PERMISSION_MODE_OPTIONS.some((opt) => opt.value === next)) return
+  const previous = permissionMode.value
+  permissionMode.value = next
+  if (!topicId.value || next === previous) return
+  try {
+    const topic = await api.topicApi.updateTopic(topicId.value, { permission_mode: next })
+    if (topic?.permission_mode) permissionMode.value = topic.permission_mode
+    const target = topics.value.find((item) => item.topic_id === topicId.value)
+    if (target) target.permission_mode = permissionMode.value
+  } catch (_err) {
+    permissionMode.value = previous
+    errorText.value = '切换权限模式失败'
+  }
+}
+
 const formatMessageTime = (value) => {
   const date = value ? new Date(value) : null
   if (!date || Number.isNaN(date.getTime())) return ''
@@ -433,6 +483,25 @@ const formatBytes = (size) => {
 // Split answer prose into ordered text/chart segments so an inline chart_spec
 // (fenced, tagged, or raw JSON) renders as a real chart instead of leaking JSON.
 const answerSegments = (content) => splitChartSpecText(String(content || ''))
+
+// Generic Chat V2 permission confirmation handler (shared with NL2SqlChatV2).
+const handlePermissionDecision = async (msg, payload) => {
+  const taskId = String(msg?.task_id || activeTaskId.value || '').trim()
+  const requestId = String(payload?.requestId || '').trim()
+  const decision = payload?.decision
+  if (!taskId || !requestId || (decision !== 'allow' && decision !== 'deny')) return
+  try {
+    await api.taskApi.submitPermissionDecision(taskId, requestId, decision)
+  } catch (_err) {
+    const block = (msg?._v2state?.blocks || []).find(
+      (b) => b.type === 'permission_request' && b.requestId === requestId,
+    )
+    if (block && block.decision === 'pending') {
+      block.summary = (block.summary || '') + '\n[提交失败，请重试]'
+      block._submitFailed = Date.now()
+    }
+  }
+}
 
 let copyNoticeTimer = null
 const showCopyNotice = (message) => {

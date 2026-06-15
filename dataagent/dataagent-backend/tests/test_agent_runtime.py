@@ -229,11 +229,27 @@ _PORTAL_MCP = {
 }
 
 
-def test_build_allowed_tools_mounts_write_tools_in_default_mode():
+def test_build_allowed_tools_default_mode_keeps_mcp_writes_unmounted():
     allowed = agent_runtime._build_allowed_tools(_PORTAL_MCP, permission_mode="default")
-    assert "mcp__portal__portal_create_task" in allowed
-    assert "mcp__portal__portal_publish_workflow" in allowed
     assert "mcp__portal__portal_search_tables" in allowed
+    assert "mcp__portal__portal_create_task" not in allowed
+    assert "mcp__portal__portal_publish_workflow" not in allowed
+
+
+def test_build_allowed_tools_accept_edits_mounts_only_draft_writes():
+    allowed = agent_runtime._build_allowed_tools(_PORTAL_MCP, permission_mode="acceptEdits")
+    assert "mcp__portal__portal_search_tables" in allowed
+    assert "mcp__portal__portal_create_workflow" in allowed
+    assert "mcp__portal__portal_upsert_schedule" in allowed
+    assert "mcp__portal__portal_publish_workflow" not in allowed
+    assert "mcp__portal__portal_workflow_schedule_online" not in allowed
+
+
+def test_build_allowed_tools_bypass_permissions_mounts_all_writes():
+    allowed = agent_runtime._build_allowed_tools(_PORTAL_MCP, permission_mode="bypassPermissions")
+    assert "mcp__portal__portal_create_workflow" in allowed
+    assert "mcp__portal__portal_publish_workflow" in allowed
+    assert "mcp__portal__portal_workflow_schedule_online" in allowed
 
 
 def test_build_allowed_tools_plan_mode_strips_write_tools():

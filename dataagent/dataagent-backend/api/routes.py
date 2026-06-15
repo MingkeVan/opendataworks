@@ -632,12 +632,24 @@ async def api_submit_permission_decision(task_id: str, payload: PermissionDecisi
     decision = str(payload.decision or "").strip().lower()
     if decision not in {"allow", "deny"}:
         raise HTTPException(status_code=400, detail="decision must be allow or deny")
-    # Only a run paused at a confirmation can accept a decision.
     if str(task.get("task_status") or "") != "waiting_permission":
         raise HTTPException(status_code=409, detail="task is not awaiting a permission decision")
-    # Signal the waiting executor; first decision wins (idempotent). The executor
-    # writes the durable permission_decision record when it observes this.
-    effective = await get_task_coordinator().submit_permission_decision(task_id, request_id, decision)
+    pending_request_id = store.get_pending_permission_request_id(task_id)
+    if pending_request_id and pending_request_id != request_id:
+        raise HTTPException(status_code=409, detail="request_id does not match the current pending permission request")
+    coordinator = get_task_coordinator()
+    if not pending_request_id:
+        existing = await coordinator.read_permission_decision(task_id, request_id)
+        if not existing:
+            raise HTTPException(status_code=409, detail="task has no pending permission request")
+    effective = await coordinator.submit_permission_decision(task_id, request_id, decision)
+    if pending_request_id:
+        store.append_permission_decision_record(
+            task_id=task_id,
+            request_id=request_id,
+            decision=effective,
+            note=str(payload.note or ""),
+        )
     return PermissionDecisionResponse.model_validate(
         {"task_id": task_id, "request_id": request_id, "decision": effective}
     )

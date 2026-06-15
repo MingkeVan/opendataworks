@@ -141,6 +141,48 @@ class _FakeStore:
         topic = self.topics.get(topic_id) or {}
         return normalize_permission_mode(topic.get("permission_mode"))
 
+    def get_pending_permission_request_id(self, task_id: str) -> str | None:
+        pending = self.get_pending_permission_request(task_id)
+        return str(pending.get("request_id") or "") if pending else None
+
+    def get_pending_permission_request(self, task_id: str) -> dict | None:
+        closed = set()
+        for rec in reversed(self.sdk_records.get(task_id, [])):
+            data = rec.get("data") or {}
+            request_id = str(data.get("request_id") or "")
+            if not request_id:
+                continue
+            if rec.get("record_type") == "permission_decision":
+                closed.add(request_id)
+                continue
+            if rec.get("record_type") == "permission_request" and request_id not in closed:
+                return {
+                    "request_id": request_id,
+                    "topic_id": rec.get("topic_id") or "",
+                    "turn_index": int(rec.get("turn_index") or 0),
+                }
+        return None
+
+    def append_permission_decision_record(self, *, task_id: str, request_id: str, decision: str, note: str = "", decided_at: str = ""):
+        pending = self.get_pending_permission_request(task_id)
+        if not pending or pending.get("request_id") != request_id:
+            return False
+        normalized = {"allow": "allowed", "deny": "denied"}.get(decision, decision)
+        self.append_sdk_record(
+            task_id=task_id,
+            topic_id=pending.get("topic_id") or "",
+            turn_index=int(pending.get("turn_index") or 0),
+            record_type="permission_decision",
+            event_type=None,
+            data={
+                "request_id": request_id,
+                "decision": normalized,
+                "note": note,
+                "decided_at": decided_at or _now(),
+            },
+        )
+        return True
+
     def delete_topic(self, topic_id: str, context=None):
         self.topics.pop(topic_id, None)
         self.topic_messages.pop(topic_id, None)
@@ -299,6 +341,19 @@ class _FakeStore:
         rows = [row for row in self.sdk_records.get(task_id, []) if int(row["seq_id"]) > after_id]
         rows.sort(key=lambda row: int(row["seq_id"]))
         return rows[:limit]
+
+    def append_sdk_record(self, *, task_id: str, topic_id: str, turn_index: int, record_type: str, event_type, data: dict):
+        records = self.sdk_records.setdefault(task_id, [])
+        records.append({
+            "seq_id": len(records) + 1,
+            "topic_id": topic_id,
+            "task_id": task_id,
+            "turn_index": turn_index,
+            "record_type": record_type,
+            "event_type": event_type,
+            "data": data,
+            "created_at": _now(),
+        })
 
     def request_task_cancel(self, task_id: str, context=None):
         task = self.tasks.get(task_id)
@@ -503,6 +558,10 @@ class _FakeCoordinator:
         self.__init_decisions()
         # first decision wins (idempotent)
         return self.decisions.setdefault((task_id, request_id), decision)
+
+    async def read_permission_decision(self, task_id: str, request_id: str) -> str | None:
+        self.__init_decisions()
+        return self.decisions.get((task_id, request_id))
 
 
 def _submit_message_task_factory(store: _FakeStore, calls: list[dict]):
@@ -761,20 +820,42 @@ def test_permission_decision_endpoint(monkeypatch):
 
         # Move the run into the waiting state.
         store.tasks[task_id]["task_status"] = "waiting_permission"
+        store.append_sdk_record(
+            task_id=task_id,
+            topic_id=topic_id,
+            turn_index=1,
+            record_type="permission_request",
+            event_type=None,
+            data={"request_id": "req-1", "tool_name": "portal_publish_workflow"},
+        )
 
         # Invalid decision value -> 400.
         assert client.post(base, json={"request_id": "req-1", "decision": "maybe"}).status_code == 400
         # Missing request_id -> 400.
         assert client.post(base, json={"request_id": "", "decision": "allow"}).status_code == 400
+        # Different request_id while a request is pending -> 409.
+        assert client.post(base, json={"request_id": "req-2", "decision": "allow"}).status_code == 409
 
         # Valid allow.
         ok = client.post(base, json={"request_id": "req-1", "decision": "allow"})
         assert ok.status_code == 200
         assert ok.json() == {"task_id": task_id, "request_id": "req-1", "decision": "allow"}
+        decisions = [
+            rec for rec in store.sdk_records[task_id]
+            if rec["record_type"] == "permission_decision"
+        ]
+        assert len(decisions) == 1
+        assert decisions[0]["data"]["decision"] == "allowed"
 
         # Idempotent: a later deny for the same request_id returns the first decision.
         again = client.post(base, json={"request_id": "req-1", "decision": "deny"})
         assert again.json()["decision"] == "allow"
+        decisions = [
+            rec for rec in store.sdk_records[task_id]
+            if rec["record_type"] == "permission_decision"
+        ]
+        assert len(decisions) == 1
+        assert client.post(base, json={"request_id": "req-2", "decision": "allow"}).status_code == 409
 
         # Unknown task -> 404.
         assert client.post(

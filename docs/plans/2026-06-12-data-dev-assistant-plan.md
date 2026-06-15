@@ -22,7 +22,7 @@
 2. `models/schemas.py`:topic 创建/更新/详情/列表模型增加 `permission_mode`;`deliver-message` 请求模型增加可选 `permission_mode`(携带时更新所属 topic 最新值);admin profile 模型移除 `permission_mode` 与 `permission_modes` 枚举。
 3. `api/routes.py`:`POST /topics`、`PUT /topics/{id}`(支持改模式)、`POST /tasks/deliver-message` 接收并校验模式取值(`default|acceptEdits|plan|bypassPermissions`)。
 4. `core/topic_task_store.py`:topic 读写链路携带 `permission_mode`;`PUT /topics` 更新最新值;`TaskExecutionInput` 组装时读取 topic 当前模式(任务创建时刻快照该值,不新增 task 列)。
-5. `core/agent_runtime.py`:`_resolve_sdk_permission_mode` 改为校验 SDK 合法值,`inherit`/未知值归一化 `default`;新增高危/写工具清单常量;`_build_allowed_tools` 按模式裁剪(`plan` 不挂写工具)。
+5. `core/agent_runtime.py`:`_resolve_sdk_permission_mode` 改为校验 SDK 合法值,`inherit`/未知值归一化 `default`;新增高危/写工具清单常量;`_build_allowed_tools` 按模式裁剪确认型 MCP 写工具(`plan`/`default` 不直接挂写工具,`acceptEdits` 只直接挂草稿写工具,`bypassPermissions` 全量挂载)。
 6. `core/task_executor.py`:`permission_mode` 来源改为 TaskExecutionInput(不再读 agent_snapshot)。
 7. `core/agent_profile_service.py` / `api/admin_routes.py`:删除 permission_mode 字段、校验、upsert 列与枚举接口。
 
@@ -73,7 +73,7 @@
 
 1. `core/sdk_block_writer.py`(或同路径 ingest 辅助):新增 `permission_request` / `permission_decision` 两个 record_type 的写入,与 `tool_result` 走同一持久化路径落 `da_agent_sdk_record`。
 2. `core/topic_task_store.py _project_sdk_records()`:新增两类 record 的投影分支,产出通用块 `{type: 'permission_request', request_id, tool_name, risk_level, title, summary, payload_preview, decision, decided_at}`,decision record 合并更新终态。
-3. `core/task_executor.py`:构造 `can_use_tool` 回调传入 `ClaudeAgentOptions`;命中高危清单且模式要求确认时:生成 `request_id` → 写 `permission_request` SDK record → task 状态置 `waiting_permission` → 轮询 Redis 决策键(间隔 1s,总等待 `task_permission_wait_seconds` 默认 600s)→ 超时/deny 返回拒绝,allow 放行 → 状态恢复 `running`。
+3. `core/task_executor.py`:构造 `can_use_tool` 回调传入 `ClaudeAgentOptions`;命中写工具清单且当前模式要求确认时:生成 `request_id` → 写 `permission_request` SDK record → task 状态置 `waiting_permission` → 轮询 Redis 决策键(间隔 1s,总等待 `task_permission_wait_seconds` 默认 600s)→ 超时/deny 返回拒绝,allow 放行 → 状态恢复 `running`。确认型 MCP 写工具不得直接挂入 `allowed_tools`,否则 SDK 会把它视为已授权工具而跳过确认。
 4. `core/topic_task_store.py`:`waiting_permission` 状态读写(非终态,`TERMINAL_TASK_STATUSES` 不变);topic `current_task_status` 同步。
 5. `api/routes.py`:新增 `POST /tasks/{task_id}/permission-decision`(request_id 幂等、不匹配 409),**双写** Redis `da:task:permission:{task_id}:{request_id}`(TTL ≈ 等待超时 + 60s)与 `permission_decision` SDK record。
 6. sandbox 路径:`sandbox_runner_main.py` / `sandbox_task_main.py` 中执行 SDK 的进程同样注册回调并可访问 Redis(确认 runner 容器具备 Redis 连接配置;若 runner 无 Redis,则该阶段开始前先补通配置)。

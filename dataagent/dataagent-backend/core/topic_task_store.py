@@ -5,7 +5,7 @@ import logging
 import re
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import pymysql
@@ -1398,6 +1398,86 @@ class TopicTaskStore:
         finally:
             conn.close()
         return self.get_task(task_id)
+
+    def get_pending_permission_request_id(self, task_id: str) -> str | None:
+        """Return the request_id of the latest permission_request record for a task
+        that has no corresponding permission_decision yet, or None."""
+        pending = self.get_pending_permission_request(task_id)
+        return str(pending.get("request_id") or "") if pending else None
+
+    def get_pending_permission_request(self, task_id: str) -> dict[str, Any] | None:
+        """Return the latest permission request that has not been decided yet."""
+        self._ensure_ready()
+        conn = self._connect(database=self._schema_name())
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, topic_id, turn_index, record_type, data
+                    FROM da_agent_sdk_record
+                    WHERE task_id = %s
+                      AND record_type IN ('permission_request', 'permission_decision')
+                    ORDER BY id DESC
+                    LIMIT 200
+                    """,
+                    (task_id,),
+                )
+                rows = cur.fetchall() or []
+        finally:
+            conn.close()
+
+        closed: set[str] = set()
+        for row in rows:
+            data = _safe_json_load(row.get("data")) or {}
+            request_id = str(data.get("request_id") or "")
+            if not request_id:
+                continue
+            record_type = str(row.get("record_type") or "")
+            if record_type == "permission_decision":
+                closed.add(request_id)
+                continue
+            if record_type == "permission_request" and request_id not in closed:
+                return {
+                    "request_id": request_id,
+                    "topic_id": str(row.get("topic_id") or ""),
+                    "turn_index": int(row.get("turn_index") or 0),
+                }
+        return None
+
+    def append_permission_decision_record(
+        self,
+        *,
+        task_id: str,
+        request_id: str,
+        decision: str,
+        note: str = "",
+        decided_at: str = "",
+    ) -> bool:
+        """Append a durable permission_decision SDK record if the request is still pending."""
+        pending = self.get_pending_permission_request(task_id)
+        if not pending or str(pending.get("request_id") or "") != str(request_id or ""):
+            return False
+        normalized = {
+            "allow": "allowed",
+            "allowed": "allowed",
+            "deny": "denied",
+            "denied": "denied",
+            "timeout": "timeout",
+        }.get(str(decision or "").strip().lower(), "denied")
+        self.append_sdk_record(
+            task_id=task_id,
+            topic_id=str(pending.get("topic_id") or ""),
+            turn_index=int(pending.get("turn_index") or 0),
+            record_type="permission_decision",
+            event_type=None,
+            data={
+                "request_id": str(request_id),
+                "decision": normalized,
+                "note": str(note or ""),
+                "decided_at": decided_at or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            },
+        )
+        return True
 
     def heartbeat_task(self, task_id: str):
         self._ensure_ready()

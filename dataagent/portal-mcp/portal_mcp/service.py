@@ -42,10 +42,10 @@ class PortalToolService:
         return await self._wrap(self.backend_client.list_tasks(**payload))
 
     async def create_workflow(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self._wrap(self.backend_client.create_workflow(payload))
+        return await self._wrap(self.backend_client.create_workflow(_wrap_payload(payload, "workflow")))
 
     async def update_workflow(self, workflow_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self._wrap(self.backend_client.update_workflow(workflow_id, payload))
+        return await self._wrap(self.backend_client.update_workflow(workflow_id, _wrap_payload(payload, "workflow")))
 
     async def get_workflow(self, workflow_id: int) -> dict[str, Any]:
         return await self._wrap(self.backend_client.get_workflow(workflow_id))
@@ -60,7 +60,10 @@ class PortalToolService:
         return await self._wrap(self.backend_client.publish_workflow(workflow_id, payload))
 
     async def upsert_schedule(self, workflow_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self._wrap(self.backend_client.upsert_schedule(workflow_id, payload))
+        schedule_payload = _wrap_payload(payload, "schedule")
+        schedule = dict(schedule_payload.get("schedule") or {})
+        schedule.pop("enabled", None)
+        return await self._wrap(self.backend_client.upsert_schedule(workflow_id, {"schedule": schedule}))
 
     async def schedule_online(self, workflow_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._wrap(self.backend_client.schedule_online(workflow_id, payload))
@@ -76,3 +79,9 @@ class PortalToolService:
             return await awaitable
         except BackendApiError as exc:
             raise RuntimeError(str(exc)) from exc
+
+
+def _wrap_payload(payload: dict[str, Any], field: str) -> dict[str, Any]:
+    if field in payload:
+        return payload
+    return {field: payload}

@@ -35,6 +35,17 @@ def test_resolve_topic_workspace_uses_topic_id_only(monkeypatch, tmp_path: Path)
     assert workspace == tmp_path / "topics" / "topic-unsafe-id" / "workspace"
 
 
+def test_resolve_topic_workspace_uses_configured_runtime_root(tmp_path: Path):
+    original_root = get_settings().dataagent_host_root
+    update_settings({"dataagent_host_root": str(tmp_path / "configured-runtime")})
+    try:
+        workspace = resolve_topic_workspace("topic_1")
+    finally:
+        update_settings({"dataagent_host_root": original_root})
+
+    assert workspace == tmp_path / "configured-runtime" / "topic_1" / "workspace"
+
+
 def test_prepare_topic_workspace_copies_enabled_skills(monkeypatch, tmp_path: Path):
     original_skills = get_settings().skills_output_dir
     original_skills_root = getattr(get_settings(), "skills_root_dir", "")

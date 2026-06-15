@@ -16,6 +16,6 @@ public class AgentApiConfiguration implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(agentApiAuthInterceptor)
-                .addPathPatterns("/v1/ai/metadata/**", "/v1/ai/query/**");
+                .addPathPatterns("/v1/ai/**");
     }
 }
