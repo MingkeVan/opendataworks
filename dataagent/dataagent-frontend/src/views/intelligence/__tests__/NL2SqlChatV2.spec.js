@@ -145,13 +145,26 @@ const mountChat = () => mount(NL2SqlChatV2, {
         template: '<div class="el-scrollbar-stub"><slot /></div>'
       },
       ElSelect: {
+        inheritAttrs: false,
         props: ['modelValue', 'disabled'],
         emits: ['update:modelValue', 'change'],
-        template: '<div class="el-select-stub"><slot name="prefix" /><slot /></div>'
+        template: `
+          <label class="el-select-wrapper" :class="$attrs.class">
+            <slot name="prefix" />
+            <select
+              class="el-select-stub"
+              :disabled="disabled"
+              :value="modelValue"
+              @change="$emit('update:modelValue', $event.target.value); $emit('change', $event.target.value)"
+            >
+              <slot />
+            </select>
+          </label>
+        `
       },
       ElOption: {
         props: ['label', 'value'],
-        template: '<span class="el-option-stub" :data-value="value">{{ label }}</span>'
+        template: '<option class="el-option-stub" :data-value="value" :value="value">{{ label }}</option>'
       },
       ElDropdown: {
         template: '<div class="el-dropdown-stub"><slot /><slot name="dropdown" /></div>'
@@ -386,6 +399,47 @@ describe('NL2SqlChatV2 URL location', () => {
       query: {
         tab: 'chat-v2',
         topic_id: 'topic-2'
+      }
+    })
+  })
+
+  it('clears the active conversation and removes stale topic query when switching assistants', async () => {
+    routeState.query = {
+      tab: 'chat-v2',
+      agent_id: 'agent_default',
+      topic_id: 'topic-1',
+      message_id: 'a1'
+    }
+    apiMocks.agentApi.listAgents.mockResolvedValue([
+      {
+        agent_id: 'agent_default',
+        name: 'Default agent',
+        is_default: true
+      },
+      {
+        agent_id: 'agent_sales',
+        name: 'Sales agent',
+        is_default: false
+      }
+    ])
+
+    const wrapper = mountChat()
+
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.text()).toContain('first answer')
+
+    await wrapper.find('.v2-agent-select .el-select-stub').setValue('agent_sales')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('first answer')
+    expect(wrapper.find('.v2-session-item.active').exists()).toBe(false)
+    expect(routerReplace).toHaveBeenLastCalledWith({
+      path: '/intelligent-query',
+      query: {
+        tab: 'chat-v2',
+        agent_id: 'agent_sales'
       }
     })
   })
