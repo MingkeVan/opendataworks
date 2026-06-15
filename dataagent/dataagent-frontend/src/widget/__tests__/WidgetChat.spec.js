@@ -755,6 +755,50 @@ describe('WidgetChat history conversations', () => {
     }))
   })
 
+  it('keeps a trailing activity cue visible between streamed blocks while the run is still working', async () => {
+    let streamControls
+    apiMocks.taskApi.streamSdkEvents.mockImplementation((taskId, options) => new Promise((resolve) => {
+      streamControls = { options, resolve }
+    }))
+
+    const { wrapper } = mountChat({ config: { displayMode: 'inline' } })
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('最近发布趋势')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const { options } = streamControls
+
+    // Run started, no block yet → the initial typing indicator shows.
+    options.onRecord({ record_type: 'stream', data: { type: 'message_start', usage: {} } })
+    await flushPromises()
+    expect(wrapper.find('.query-typing-indicator').exists()).toBe(true)
+
+    // A tool settled (block stopped, result delivered) but the run keeps going:
+    // the trailing dots fill the dead air before the next block appears.
+    options.onRecord({ record_type: 'stream', data: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tool-1', name: 'Bash' } } })
+    options.onRecord({ record_type: 'stream', data: { type: 'content_block_stop', index: 0 } })
+    options.onRecord({ record_type: 'tool_result', data: { tool_use_id: 'tool-1', content: 'ok' } })
+    await flushPromises()
+    expect(wrapper.find('.query-typing-indicator-trailing').exists()).toBe(true)
+
+    // While a text block streams, the inline cursor conveys progress, so the
+    // trailing dots step aside to avoid a doubled indicator.
+    options.onRecord({ record_type: 'stream', data: { type: 'content_block_start', index: 1, content_block: { type: 'text' } } })
+    options.onRecord({ record_type: 'stream', data: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '正在分析' } } })
+    await flushPromises()
+    expect(wrapper.find('.query-cursor').exists()).toBe(true)
+    expect(wrapper.find('.query-typing-indicator-trailing').exists()).toBe(false)
+
+    // Run completes → every activity cue disappears.
+    options.onRecord({ record_type: 'stream', data: { type: 'content_block_stop', index: 1 } })
+    options.onRecord({ record_type: 'done', data: {} })
+    streamControls.resolve()
+    await flushPromises()
+    expect(wrapper.find('.query-typing-indicator').exists()).toBe(false)
+  })
+
   it('renders a tool-produced chart inline below its tool-call block (no conclusion duplicate)', async () => {
     const chartSpec = JSON.stringify({
       kind: 'chart_spec',
