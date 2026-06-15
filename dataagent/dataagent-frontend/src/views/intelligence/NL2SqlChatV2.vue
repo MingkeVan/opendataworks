@@ -1503,11 +1503,11 @@ onBeforeUnmount(() => {
 .v2-file-input { display: none; }
 .v2-attach-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px; flex: none; border: 1px solid #dbe3ef; border-radius: 9px;
-  background: #f4f7fb; color: #4a5568; cursor: pointer;
+  width: 26px; height: 26px; flex: none; border: none; border-radius: 6px;
+  background: transparent; color: #8a96a6; cursor: pointer;
   transition: background var(--odw-transition), color var(--odw-transition);
 }
-.v2-attach-btn:hover:not(:disabled) { background: #EEF1F5; color: #111827; }
+.v2-attach-btn:hover:not(:disabled) { background: #EEF1F5; color: #4a5568; }
 .v2-attach-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Artifacts toggle (top bar) ──────────────────────────────────────────── */
@@ -2202,13 +2202,18 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid #dbe3ef;
-  background: #f4f7fb;
-  border-radius: 12px;
-  padding: 2px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  padding: 3px 8px;
   font-size: 12px;
-  color: #4a5568;
+  color: #8a96a6;
   cursor: pointer;
+  transition: color var(--odw-transition), background var(--odw-transition);
+}
+.v2-perm-pill:hover {
+  color: #4a5568;
+  background: #eef1f5;
 }
 .v2-perm-pill-dot {
   width: 8px;
