@@ -248,6 +248,10 @@ echo ""
 
 ensure_dataagent_cli_executable
 
+# 预建日志收集目录（log-collector sidecar 把各服务日志实时写到这里）。
+# 先建好宿主机目录，避免 Docker 以 root 自动创建后产生属主困惑。
+mkdir -p "$DEPLOY_DIR/logs" 2>/dev/null || true
+
 # 统一 DataAgent 运行时根目录为宿主机绝对路径，保证 backend 卷挂载与 runner 反查的
 # child bind 源指向同一目录，支持用户在 .env 中自定义（含相对于 deploy/ 的相对路径）。
 DATAAGENT_HOST_ROOT="$(resolve_dataagent_host_root)"

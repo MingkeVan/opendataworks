@@ -1,3 +1,12 @@
+# 统一容器日志驱动：json-file + 轮转。
+# 所有服务日志稳定落在宿主机 docker 数据目录、容器重启不丢，单服务最多保留 20m*5=100MB，
+# 避免默认无轮转把磁盘撑爆。导出成宿主机包目录文件见 scripts/dump-logs.sh。
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   # Note: opendataagent is intentionally deployed via opendataagent/deploy/docker-compose.yml
   # and is not part of the root portal compose stack.
@@ -5,6 +14,7 @@ services:
   mysql:
     image: mysql:8.0
     container_name: opendataworks-mysql
+    logging: *default-logging
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
@@ -32,6 +42,7 @@ services:
   redis:
     image: redis:7.2-alpine
     container_name: opendataworks-redis
+    logging: *default-logging
     restart: always
     command: ["redis-server", "--appendonly", "yes"]
     ports:
@@ -48,6 +59,7 @@ services:
   backend:
     image: ${OPENDATAWORKS_BACKEND_IMAGE:-mikefan2019/opendataworks-backend:1.3.0}
     container_name: opendataworks-backend
+    logging: *default-logging
     restart: always
     env_file:
       - ./.env
@@ -75,6 +87,7 @@ services:
   frontend:
     image: ${OPENDATAWORKS_FRONTEND_IMAGE:-mikefan2019/opendataworks-frontend:1.3.0}
     container_name: opendataworks-frontend
+    logging: *default-logging
     restart: always
     env_file:
       - ./.env
@@ -96,6 +109,7 @@ services:
   dataagent-frontend:
     image: ${OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE:-mikefan2019/opendataworks-dataagent-frontend:1.3.0}
     container_name: opendataworks-dataagent-frontend
+    logging: *default-logging
     restart: always
     ports:
       - "8901:80"
@@ -114,6 +128,7 @@ services:
   dataagent-home-init:
     image: ${OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE:-mikefan2019/opendataworks-dataagent-backend:1.3.0}
     container_name: opendataworks-dataagent-home-init
+    logging: *default-logging
     user: "0:0"
     restart: "no"
     command:
@@ -133,6 +148,7 @@ services:
   dataagent-backend:
     image: ${OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE:-mikefan2019/opendataworks-dataagent-backend:1.3.0}
     container_name: opendataworks-dataagent-backend
+    logging: *default-logging
     restart: always
     user: "${DATAAGENT_RUNTIME_UID:-1000}:${DATAAGENT_RUNTIME_GID:-1000}"
     env_file:
@@ -200,6 +216,7 @@ services:
   dataagent-sandbox-runner:
     image: ${OPENDATAWORKS_DATAAGENT_RUNNER_IMAGE:-mikefan2019/opendataworks-dataagent-runner:1.3.0}
     container_name: opendataworks-dataagent-sandbox-runner
+    logging: *default-logging
     restart: always
     user: "${DATAAGENT_RUNNER_UID:-0}:${DATAAGENT_RUNNER_GID:-0}"
     env_file:
@@ -251,6 +268,7 @@ services:
   portal-mcp:
     image: ${OPENDATAWORKS_PORTAL_MCP_IMAGE:-mikefan2019/opendataworks-portal-mcp:1.3.0}
     container_name: opendataworks-portal-mcp
+    logging: *default-logging
     restart: always
     env_file:
       - ./.env
@@ -276,6 +294,43 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+
+  # 日志收集 sidecar：复用 runner 镜像自带的 docker CLI，只读挂 docker socket，
+  # 对每个目标容器实时 `docker logs --follow` 写到宿主机 deploy/logs/<container>.log。
+  # 只收集应用服务（backend / dataagent-backend / sandbox-runner / portal-mcp），无需改业务镜像、无各服务挂卷权限问题。
+  # 不收集 mysql/redis 基础设施与两个 nginx 前端；如需可在 .env 用 LOG_COLLECTOR_CONTAINERS 增减。
+  # task child 日志由 runner 另行落盘在 <HOST_ROOT>/<topic>/logs/。
+  log-collector:
+    image: ${OPENDATAWORKS_DATAAGENT_RUNNER_IMAGE:-mikefan2019/opendataworks-dataagent-runner:1.3.0}
+    container_name: opendataworks-log-collector
+    logging: *default-logging
+    restart: always
+    user: "${DATAAGENT_RUNNER_UID:-0}:${DATAAGENT_RUNNER_GID:-0}"
+    environment:
+      # 目标容器列表（仅应用服务），可在 .env 覆盖 LOG_COLLECTOR_CONTAINERS 增减
+      LOG_COLLECTOR_CONTAINERS: ${LOG_COLLECTOR_CONTAINERS:-opendataworks-backend opendataworks-dataagent-backend opendataworks-dataagent-sandbox-runner opendataworks-portal-mcp}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -u
+        mkdir -p /logs
+        echo "[log-collector] following: $$LOG_COLLECTOR_CONTAINERS"
+        for c in $$LOG_COLLECTOR_CONTAINERS; do
+          (
+            while true; do
+              # --tail 0：仅从挂接点起的新日志，避免重连后重复回灌历史。
+              # 历史完整日志由 json-file 轮转与 scripts/dump-logs.sh 兜底。
+              docker logs --follow --timestamps --tail 0 "$$c" >> "/logs/$$c.log" 2>>"/logs/_collector.err" || true
+              sleep 3
+            done
+          ) &
+        done
+        wait
+    networks:
+      - opendataworks-network
+    volumes:
+      - ./logs:/logs
+      - ${DATAAGENT_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
 
 networks:
   opendataworks-network:
