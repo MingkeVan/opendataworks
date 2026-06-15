@@ -947,6 +947,7 @@ export const WIDGET_STYLES = `
 }
 
 .query-composer {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -957,6 +958,78 @@ export const WIDGET_STYLES = `
   background: #fff;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+/* Slash-command menu (also styled scoped in SlashCommandMenu.vue for the portal;
+   the widget renders inside a shadow root, so the rules are mirrored here). */
+.slash-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  max-height: 260px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #E3E8F0;
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(20, 33, 61, 0.12);
+  padding: 6px;
+  z-index: 30;
+}
+
+.slash-menu-title {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #9AA4B2;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.slash-menu-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: #2B3445;
+}
+
+.slash-menu-item:hover,
+.slash-menu-item.is-active {
+  background: #EEF3FB;
+}
+
+.slash-menu-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3B6FE0;
+  white-space: nowrap;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slash-menu-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: #5A6473;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slash-menu-hint {
+  font-size: 11px;
+  color: #A0AABF;
+  white-space: nowrap;
 }
 
 .query-composer:focus-within {

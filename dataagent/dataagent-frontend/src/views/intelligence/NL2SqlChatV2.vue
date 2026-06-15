@@ -333,6 +333,13 @@
 
           <!-- Input bar -->
           <div class="v2-composer" :class="{ 'is-focused': inputText }">
+            <SlashCommandMenu
+              :visible="slash.visible.value"
+              :commands="slash.filtered.value"
+              :active-index="slash.activeIndex.value"
+              @select="slash.select"
+              @hover="slash.setActive"
+            />
             <input
               ref="fileInputRef"
               type="file"
@@ -344,11 +351,11 @@
               ref="textareaRef"
               v-model="inputText"
               class="v2-textarea"
-              placeholder="输入数据问题…"
+              placeholder="输入数据问题…（输入 / 调用命令）"
               :disabled="!availableModels.length"
               rows="1"
-              @keydown.enter="onEnterKey"
-              @input="autoResize"
+              @keydown="onComposerKeydown"
+              @input="onComposerInput"
             />
             <div class="v2-composer-inline">
               <span class="v2-composer-hint">Enter 发送，Shift + Enter 换行</span>
@@ -528,6 +535,8 @@ import { topicStatusKind } from './topicStatus'
 import { hydrateMessageFromApi, isPlainEnterSubmit, renderMarkdown as renderMarkdownBase } from './chatMessage'
 import { useNl2SqlChat } from './useNl2SqlChat'
 import { useChatMessageActions } from './useChatMessageActions'
+import SlashCommandMenu from './SlashCommandMenu.vue'
+import { useSlashCommands, buildSkillCommands } from './useSlashCommands'
 
 const route = useRoute()
 const router = useRouter()
@@ -706,6 +715,34 @@ function autoResize() {
   el.style.height = Math.min(el.scrollHeight, 160) + 'px'
 }
 
+// ── Slash commands ─────────────────────────────────────────────────────────
+// Typing "/" opens a menu: the active agent's skills (insert a "use this skill"
+// directive) plus a couple of built-in session actions.
+const slashCommands = computed(() => {
+  const agent = agents.value.find((a) => a.agent_id === agentSelectValue.value)
+  const commands = buildSkillCommands(agent?.skill_folders)
+  commands.push(
+    { id: '/new', type: 'builtin', label: '新建话题', hint: '操作', run: () => handleNewTopic() },
+    { id: '/clear', type: 'builtin', label: '清空输入', hint: '操作', run: () => { inputText.value = '' } },
+  )
+  return commands
+})
+const slash = useSlashCommands({
+  getCommands: () => slashCommands.value,
+  inputText,
+  focusInput: () => nextTick(() => { textareaRef.value?.focus(); autoResize() }),
+})
+
+function onComposerInput() {
+  slash.syncFromInput()
+  autoResize()
+}
+
+function onComposerKeydown(event) {
+  if (slash.handleKeydown(event)) return
+  if (event.key === 'Enter' || event.keyCode === 13) onEnterKey(event)
+}
+
 // ── Scroll ─────────────────────────────────────────────────────────────────
 function scrollToBottom(force = false) {
   if (!force && !autoScroll.value) return
@@ -820,6 +857,7 @@ async function loadAgents() {
       name: String(a?.name || '默认助手'),
       is_default: Boolean(a?.is_default),
       preset_questions: Array.isArray(a?.preset_questions) ? a.preset_questions.filter(Boolean) : [],
+      skill_folders: Array.isArray(a?.skill_folders) ? a.skill_folders.filter(Boolean) : [],
     })).filter((a) => a.agent_id)
     agents.value = normalized.length
       ? normalized
@@ -1071,6 +1109,7 @@ function handleModelCommand(command) {
 // refresh (reloadTopicsAfterRun), and error toasts (notifyError) are wired
 // through the engine options at setup.
 async function handleSend() {
+  slash.close()
   if (isWidgetMode.value) return
   if (isStreaming.value || isUploading.value) return
   const ready = pendingAttachments.value.filter((a) => a.rel_path && !a.uploading)
@@ -2140,6 +2179,7 @@ onBeforeUnmount(() => {
 }
 
 .v2-composer {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;

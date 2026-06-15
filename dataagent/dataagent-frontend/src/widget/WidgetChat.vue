@@ -229,13 +229,21 @@
 
           <!-- Input pill -->
           <div class="query-composer">
+            <SlashCommandMenu
+              :visible="slash.visible.value"
+              :commands="slash.filtered.value"
+              :active-index="slash.activeIndex.value"
+              @select="slash.select"
+              @hover="slash.setActive"
+            />
             <textarea
+              ref="textareaRef"
               v-model="inputText"
               class="query-textarea"
               rows="1"
-              placeholder="输入数据问题…"
-              @keydown.enter="onEnterKey"
-              @input="autoResizeTextarea"
+              placeholder="输入数据问题…（输入 / 调用命令）"
+              @keydown="onComposerKeydown"
+              @input="onComposerInput"
             />
             <div class="query-composer-actions">
               <div class="query-composer-hint">Enter 发送，Shift + Enter 换行</div>
@@ -315,6 +323,8 @@ import { blockToToolProp, processV2Record } from '@/views/intelligence/v2StreamP
 import { extractErrorText, isPlainEnterSubmit, renderMarkdown as renderMarkdownBase } from '@/views/intelligence/chatMessage'
 import { useNl2SqlChat } from '@/views/intelligence/useNl2SqlChat'
 import { useChatMessageActions } from '@/views/intelligence/useChatMessageActions'
+import SlashCommandMenu from '@/views/intelligence/SlashCommandMenu.vue'
+import { useSlashCommands, buildSkillCommands } from '@/views/intelligence/useSlashCommands'
 
 const props = defineProps({
   config: {
@@ -344,6 +354,7 @@ const DEFAULT_SUGGESTIONS = [
 const TOPIC_STATUS_REFRESH_INTERVAL_MS = 3000
 
 const agentPresetQuestions = ref([])
+const agentSkillFolders = ref([])
 const agentName = ref('智能数据助手')
 const suggestions = computed(() => agentPresetQuestions.value.length ? agentPresetQuestions.value : DEFAULT_SUGGESTIONS)
 const permissionMode = ref('default')
@@ -691,6 +702,7 @@ const runMockSend = async (text) => {
 
 // Track the send, then dispatch to the demo/mock flow or the shared engine.
 const send = async () => {
+  slash.close()
   const text = inputText.value.trim()
   if (!text || isBusy.value) return
   const currentInputSource = inputSource.value
@@ -728,13 +740,40 @@ const handleSuggestion = (suggestion) => {
 }
 
 
-const autoResizeTextarea = (event) => {
-  const el = event.target
+const textareaRef = ref(null)
+
+const resizeTextarea = () => {
+  const el = textareaRef.value
+  if (!el) return
   el.style.height = 'auto'
   el.style.height = `${Math.min(el.scrollHeight, 160)}px`
 }
 
+// ── Slash commands ─────────────────────────────────────────────────────────
+// Typing "/" opens a menu: the agent's skills (insert a "use this skill"
+// directive) plus the /clear built-in.
+const slashCommands = computed(() => {
+  const commands = buildSkillCommands(agentSkillFolders.value)
+  commands.push({ id: '/clear', type: 'builtin', label: '清空输入', hint: '操作', run: () => { inputText.value = '' } })
+  return commands
+})
+const slash = useSlashCommands({
+  getCommands: () => slashCommands.value,
+  inputText,
+  focusInput: () => nextTick(() => { textareaRef.value?.focus(); resizeTextarea() }),
+})
+
+const onComposerInput = () => {
+  slash.syncFromInput()
+  resizeTextarea()
+}
+
 // Enter 发送，Shift + Enter 换行;输入法组合输入期间的回车用于确认候选词,不发送。
+const onComposerKeydown = (event) => {
+  if (slash.handleKeydown(event)) return
+  if (event.key === 'Enter' || event.keyCode === 13) onEnterKey(event)
+}
+
 const onEnterKey = (event) => {
   if (!isPlainEnterSubmit(event)) return
   event.preventDefault()
@@ -848,6 +887,7 @@ onMounted(async () => {
       if (agentProfile?.name) agentName.value = String(agentProfile.name)
       const questions = Array.isArray(agentProfile?.preset_questions) ? agentProfile.preset_questions.filter(Boolean) : []
       agentPresetQuestions.value = questions.slice(0, 3)
+      agentSkillFolders.value = Array.isArray(agentProfile?.skill_folders) ? agentProfile.skill_folders.filter(Boolean) : []
     } catch {
       // non-fatal, fall back to defaults
     }
