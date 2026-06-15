@@ -195,7 +195,10 @@ public class BackendAgentQueryService implements AgentQueryService {
                     AgentDataScopeContext.requireSqlSchemaAllowed(schema);
                 }
             }
-        } catch (JSQLParserException ignored) {
+        } catch (JSQLParserException | UnsupportedOperationException ignored) {
+            // TablesNamesFinder 对 SHOW 等非 DML 语句会抛 UnsupportedOperationException
+            // （如 "Finding tables from ShowTablesStatement is not supported"）。这类语句没有
+            // 可解析的 schema 引用，应回退到词法范围校验，而不是把内部异常当成执行失败抛出。
             validateSqlReferencesInScopeLexically(sql);
         }
     }

@@ -18,6 +18,15 @@
 - 已确认 SQL 时，先通过 `validate_sql.py` 校验，再通过 `run_sql.py` 必须拿到真实只读结果后回答；不得只输出 SQL 或要求用户自行执行。
 - 看不到 run_sql.py 或 backend 查询不可用时，只说明缺少执行入口或 backend 查询能力，不要假装已执行。
 
+## 元数据发现不要用 SQL 探库
+
+- 表/库/字段/结构的**发现**走元数据工具，不走只读 SQL 执行通道。
+- 表与库发现：`inspect_metadata.py`（或 `mcp__portal__portal_search_tables`）。
+- 字段与结构发现：`get_table_ddl.py`（或 `mcp__portal__portal_get_table_ddl`）。
+- 禁止用 `SHOW TABLES` / `SHOW DATABASES` / `SHOW COLUMNS` 等 SHOW 语句，或查询 `information_schema`、`performance_schema`、`mysql`、`sys` 等系统库来发现元数据。
+- 原因：数据范围生效时，后端无法对 SHOW 做范围校验（报 `Finding tables from ShowTablesStatement is not supported`），系统库也不在授权范围（报 `数据范围限制: SQL 引用了未授权 schema`）。
+- 这两类失败都**不可重试**：是用错工具，不是可改写的 SQL。`run_sql.py` / `portal_query_readonly` 执行后会把后端报错原样回传（`result_state=failed`、`retryable=false`），收到上述报错就立刻改用元数据/DDL 工具，不要换库换表反复试探。
+
 ## portal-mcp 首选工具
 
 - 元数据检索：`mcp__portal__portal_search_tables`
