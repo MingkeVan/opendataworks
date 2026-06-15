@@ -119,6 +119,7 @@ class ClaudeAgentOptions:
 class QueryCapture:
     last_prompt = None
     last_options = None
+    calls = []
 
 
 class StreamEvent:
@@ -191,13 +192,39 @@ def _configured_skills_root(tmp_path: Path):
 
 
 def _install_fake_sdk(monkeypatch, messages, *, final_exception=None):
+    QueryCapture.last_prompt = None
+    QueryCapture.last_options = None
+    QueryCapture.calls = []
+
     async def fake_query(*, prompt, options):
         QueryCapture.last_prompt = prompt
         QueryCapture.last_options = options
+        QueryCapture.calls.append({"prompt": prompt, "options": options})
         for message in messages:
             yield message
         if final_exception is not None:
             raise final_exception
+
+    monkeypatch.setitem(
+        sys.modules,
+        "claude_agent_sdk",
+        SimpleNamespace(ClaudeAgentOptions=ClaudeAgentOptions, query=fake_query),
+    )
+
+
+def _install_fake_sdk_runs(monkeypatch, runs):
+    QueryCapture.last_prompt = None
+    QueryCapture.last_options = None
+    QueryCapture.calls = []
+
+    async def fake_query(*, prompt, options):
+        QueryCapture.last_prompt = prompt
+        QueryCapture.last_options = options
+        QueryCapture.calls.append({"prompt": prompt, "options": options})
+        index = len(QueryCapture.calls) - 1
+        messages = runs[index] if index < len(runs) else runs[-1]
+        for message in messages:
+            yield message
 
     monkeypatch.setitem(
         sys.modules,
@@ -1028,7 +1055,7 @@ def test_execute_task_stream_resumes_sdk_session_without_replaying_history(monke
     _install_fake_sdk(
         monkeypatch,
         [
-            ResultMessage("success", session_id="sdk-session-continued"),
+            ResultMessage("success", "继续回答", session_id="sdk-session-continued"),
         ],
     )
     monkeypatch.setattr(
@@ -1278,24 +1305,67 @@ def test_execute_task_stream_marks_pseudo_tool_call_drift_as_error_when_nothing_
     assert result.error["code"] == "tool_call_format_drift"
 
 
-def test_execute_task_stream_marks_thinking_only_empty_finish_as_error(monkeypatch, tmp_path: Path):
+def test_execute_task_stream_recovers_thinking_only_empty_finish_once(monkeypatch, tmp_path: Path):
     # A clean (success) run that produced only a thinking block — no visible
-    # answer, no tool_use, no leaked pseudo tag — used to fall back to a silent
-    # "finished" + "已完成。". It must instead surface as a retryable task error
-    # so the chat shows the error card / retry button instead of ending quietly.
-    _install_fake_sdk(
+    # answer, no tool_use, no leaked pseudo tag — is safe to resume once. The
+    # recovery prompt stays inside the SDK session and should turn the same task
+    # into a normal finished answer when the model continues correctly.
+    _install_fake_sdk_runs(
         monkeypatch,
         [
-            StreamEvent({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
-            StreamEvent(
-                {
-                    "type": "content_block_delta",
-                    "index": 0,
-                    "delta": {"type": "thinking_delta", "thinking": "Let me think about how to answer this question."},
-                }
-            ),
-            StreamEvent({"type": "content_block_stop", "index": 0}),
-            ResultMessage("success", session_id="sdk-empty-1"),
+            [
+                StreamEvent({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
+                StreamEvent(
+                    {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "thinking_delta", "thinking": "Let me think about how to answer this question."},
+                    }
+                ),
+                StreamEvent({"type": "content_block_stop", "index": 0}),
+                ResultMessage("success", session_id="sdk-empty-1"),
+            ],
+            [
+                StreamEvent({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+                StreamEvent({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "恢复后的回答"}}),
+                StreamEvent({"type": "content_block_stop", "index": 0}),
+                ResultMessage("success", session_id="sdk-empty-1"),
+            ],
+        ],
+    )
+    _patch_default_provider(monkeypatch)
+    _patch_skill_runtime(monkeypatch, tmp_path)
+
+    async def _run():
+        return await task_executor.execute_task_stream(_build_input(), emit=lambda record: None)
+
+    result = asyncio.run(_run())
+
+    assert result.task_status == "finished"
+    assert result.error is None
+    assert result.content == "恢复后的回答"
+    assert len(QueryCapture.calls) == 2
+    assert QueryCapture.calls[1]["options"].kwargs["resume"] == "sdk-empty-1"
+    assert "上一轮已经以 end_turn 结束" in QueryCapture.calls[1]["prompt"]
+    assert "最近 30 天工作流发布次数趋势" in QueryCapture.calls[1]["prompt"]
+
+
+def test_execute_task_stream_marks_empty_finish_as_error_after_recovery_still_empty(monkeypatch, tmp_path: Path):
+    _install_fake_sdk_runs(
+        monkeypatch,
+        [
+            [
+                StreamEvent({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
+                StreamEvent({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Thinking only."}}),
+                StreamEvent({"type": "content_block_stop", "index": 0}),
+                ResultMessage("success", session_id="sdk-empty-1"),
+            ],
+            [
+                StreamEvent({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+                StreamEvent({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "\n\n"}}),
+                StreamEvent({"type": "content_block_stop", "index": 0}),
+                ResultMessage("success", session_id="sdk-empty-1"),
+            ],
         ],
     )
     _patch_default_provider(monkeypatch)
@@ -1311,6 +1381,7 @@ def test_execute_task_stream_marks_thinking_only_empty_finish_as_error(monkeypat
     assert result.error["code"] == "empty_completion"
     assert "请重试" in result.error["message"]
     assert result.content != "已完成。"
+    assert len(QueryCapture.calls) == 2
 
 
 def test_execute_task_stream_keeps_empty_finish_with_tool_use_as_finished(monkeypatch, tmp_path: Path):
@@ -1353,3 +1424,4 @@ def test_execute_task_stream_keeps_empty_finish_with_tool_use_as_finished(monkey
     assert result.task_status == "finished"
     assert result.error is None
     assert result.content == "已完成。"
+    assert len(QueryCapture.calls) == 1

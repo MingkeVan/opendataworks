@@ -127,3 +127,46 @@ python3 -m pytest tests/test_task_executor.py tests/test_agent_runtime.py -q
 `tool_call_format_drift` 仅为新增返回值，回退后不再产生。2026-06-15 迭代同理：回退
 `core/task_executor.py` 即移除 `not content and not self._saw_tool_use` 窄分支、恢复无条件
 `content or "已完成。"`，错误码 `empty_completion` 不再产生。
+
+## 2026-06-15 追加迭代任务（empty_completion 自动恢复一次）
+
+### 影响栈
+
+- DataAgent 后端（`dataagent/dataagent-backend`）：task executor 运行时收口、单测。
+- 前端无改动：恢复成功时仍是同一个 task 的 SDK records；恢复失败时继续复用既有
+  `error` 终止记录和错误卡片。
+- 部署无改动：不新增配置项、不新增 schema。
+
+### 任务与改动文件
+
+1. `docs/design/2026-06-11-nl2sql-tool-call-format-drift-design.md`
+   - 将 `empty_completion` 的处理从「直接标错」升级为「自动 resume 一次，失败再标错」。
+   - 明确只覆盖无真实 `tool_use` 的空回答，最多一次恢复，不向模型注入日志。
+2. `core/task_executor.py`
+   - 抽出单次 SDK turn 执行 helper，初次执行和恢复 turn 复用取消、异常、SDK record 写入。
+   - 新增 `_build_empty_completion_recovery_prompt(...)`：只包含最小诊断事实和原始问题。
+   - 新增 `_empty_completion_recovery_timeout(...)`：从当前 task timeout 推导短恢复超时，限制在
+     `10-120s`。
+   - 当 `build_result()` 返回 `error.code == "empty_completion"` 且 `session_id` 存在时，使用
+     同一 session 自动恢复一次；恢复成功返回 `finished`，恢复仍为空才写 `empty_completion`
+     终止错误。
+3. `tests/test_task_executor.py`
+   - 调整既有纯思考空回答测试：首次空回复后第二次 resume 返回文本，最终应 `finished`。
+   - 增加恢复仍为空的测试：最终仍为 `error: empty_completion`，且不会无限重试。
+   - 保留「有真实 `tool_use` 的空回答不自动恢复、不标错」测试。
+
+### 验证
+
+- 后端：
+  - `.venv-py313/bin/python -m py_compile core/task_executor.py`
+  - `.venv-py313/bin/python -m pytest tests/test_task_executor.py tests/test_task_coordinator.py tests/test_topic_task_store.py tests/test_sandbox_task_main.py tests/test_sandbox_runner_main.py`
+- 端到端：
+  - whitespace-only assistant response 是非确定性模型行为，自动恢复以合成 SDK 流覆盖为主。
+  - 如本地 provider/容器环境可用，再补一次真实 NL2SQL 冒烟；无法稳定复现空回复时不把该场景
+    描述为端到端已验证。
+
+### 回滚
+
+回退 `core/task_executor.py` 中自动恢复 helper 和调用逻辑即可恢复到「`empty_completion`
+直接标错」；再按上一节回退可恢复到旧的 `finished + "已完成。"` 行为。无 schema、API 或部署
+回滚步骤。

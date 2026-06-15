@@ -434,6 +434,7 @@ class TopicTaskStore:
         chat_topic_id = _new_id("chat_topic")
         chat_conversation_id = _new_id("chat_conv")
         conn = self._connect(database=self._schema_name())
+        affected = 0
         try:
             with conn.cursor() as cur:
                 cur.execute(
@@ -820,9 +821,16 @@ class TopicTaskStore:
                     """,
                     (value, topic_id),
                 )
+                affected = cur.rowcount
             conn.commit()
         finally:
             conn.close()
+        logger.info(
+            "topic.conversation_id.updated topic_id=%s affected=%s conversation_id_set=%s",
+            topic_id,
+            affected,
+            bool(value),
+        )
         return self.get_topic(topic_id)
 
     def get_resumable_conversation_id(self, topic_id: str) -> str | None:
@@ -964,6 +972,14 @@ class TopicTaskStore:
         existing = self.get_assistant_message(task_id)
         if existing:
             if status and existing.get("status") != status:
+                logger.info(
+                    "message.assistant.ensure_update task_id=%s topic_id=%s old_status=%s new_status=%s message_id=%s",
+                    task_id,
+                    topic_id,
+                    str(existing.get("status") or ""),
+                    status,
+                    str(existing.get("message_id") or ""),
+                )
                 self.update_assistant_message(
                     topic_id=topic_id,
                     task_id=task_id,
@@ -993,6 +1009,14 @@ class TopicTaskStore:
             conn.commit()
         finally:
             conn.close()
+        logger.info(
+            "message.assistant.created task_id=%s topic_id=%s message_id=%s status=%s seq_id=%s",
+            task_id,
+            topic_id,
+            message_id,
+            status,
+            seq_id,
+        )
         return self.get_message(message_id) or {}
 
     def update_assistant_message(
@@ -1021,6 +1045,7 @@ class TopicTaskStore:
             params.append(attachments_json)
         params.extend([topic_id, task_id])
         conn = self._connect(database=self._schema_name())
+        affected = 0
         try:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1041,9 +1066,22 @@ class TopicTaskStore:
                     """,
                     params,
                 )
+                affected = cur.rowcount
             conn.commit()
         finally:
             conn.close()
+        logger.info(
+            "message.assistant.updated task_id=%s topic_id=%s status=%s affected=%s content_len=%s usage_set=%s error_code=%s attachments_update=%s attachments_count=%s",
+            task_id,
+            topic_id,
+            status,
+            affected,
+            len(str(content or "")),
+            bool(usage),
+            str((error or {}).get("code") or ""),
+            set_attachments,
+            len(attachments or []) if set_attachments else 0,
+        )
         return self.get_assistant_message(task_id) or {}
 
     def get_assistant_message(self, task_id: str) -> dict[str, Any] | None:
@@ -1224,6 +1262,18 @@ class TopicTaskStore:
             conn.commit()
         finally:
             conn.close()
+        logger.info(
+            "task.store.created task_id=%s topic_id=%s agent_id=%s provider=%s model=%s timeout=%s sql_read_timeout=%s source_queue_id=%s source_schedule_id=%s",
+            task_id,
+            topic_id,
+            agent_id,
+            provider_id or "",
+            model or "",
+            int(timeout_seconds or 0),
+            int(sql_read_timeout_seconds or 0),
+            bool(source_queue_id),
+            bool(source_schedule_id),
+        )
         return self.get_task(task_id) or {}
 
     def get_task(self, task_id: str, context: dict[str, Any] | None = None) -> dict[str, Any] | None:
@@ -1332,6 +1382,8 @@ class TopicTaskStore:
     def mark_task_running(self, task_id: str) -> dict[str, Any] | None:
         self._ensure_ready()
         conn = self._connect(database=self._schema_name())
+        task_affected = 0
+        topic_affected = 0
         try:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1345,6 +1397,7 @@ class TopicTaskStore:
                     """,
                     (task_id,),
                 )
+                task_affected = cur.rowcount
                 cur.execute(
                     """
                     UPDATE da_agent_topic t
@@ -1356,9 +1409,16 @@ class TopicTaskStore:
                     """,
                     (task_id,),
                 )
+                topic_affected = cur.rowcount
             conn.commit()
         finally:
             conn.close()
+        logger.info(
+            "task.store.running task_id=%s task_affected=%s topic_affected=%s",
+            task_id,
+            task_affected,
+            topic_affected,
+        )
         return self.get_task(task_id)
 
     def set_task_status(self, task_id: str, status: str) -> dict[str, Any] | None:
@@ -1371,6 +1431,8 @@ class TopicTaskStore:
         self._ensure_ready()
         safe_status = str(status or "running")
         conn = self._connect(database=self._schema_name())
+        task_affected = 0
+        topic_affected = 0
         try:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1383,6 +1445,7 @@ class TopicTaskStore:
                     """,
                     (safe_status, task_id),
                 )
+                task_affected = cur.rowcount
                 cur.execute(
                     """
                     UPDATE da_agent_topic t
@@ -1394,9 +1457,17 @@ class TopicTaskStore:
                     """,
                     (safe_status, task_id),
                 )
+                topic_affected = cur.rowcount
             conn.commit()
         finally:
             conn.close()
+        logger.info(
+            "task.store.status_set task_id=%s status=%s task_affected=%s topic_affected=%s",
+            task_id,
+            safe_status,
+            task_affected,
+            topic_affected,
+        )
         return self.get_task(task_id)
 
     def get_pending_permission_request_id(self, task_id: str) -> str | None:
@@ -1503,6 +1574,11 @@ class TopicTaskStore:
         error_message = str((error or {}).get("message") or "").strip() or None
         downstream_status = "completed" if task_status == "finished" else ("suspended" if task_status == "suspended" else "failed")
         conn = self._connect(database=self._schema_name())
+        task_affected = 0
+        topic_affected = 0
+        source_queue_id = None
+        source_schedule_id = None
+        source_schedule_log_id = None
         try:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1517,6 +1593,7 @@ class TopicTaskStore:
                     """,
                     (task_status, error_json, task_id),
                 )
+                task_affected = cur.rowcount
                 cur.execute(
                     """
                     UPDATE da_agent_topic t
@@ -1528,6 +1605,7 @@ class TopicTaskStore:
                     """,
                     (task_status, task_id),
                 )
+                topic_affected = cur.rowcount
                 cur.execute(
                     """
                     SELECT source_queue_id, source_schedule_id, source_schedule_log_id
@@ -1583,15 +1661,31 @@ class TopicTaskStore:
             conn.commit()
         finally:
             conn.close()
+        logger.info(
+            "task.store.finished task_id=%s task_status=%s error_code=%s task_affected=%s topic_affected=%s queue_link=%s schedule_link=%s schedule_log_link=%s downstream_status=%s",
+            task_id,
+            task_status,
+            str((error or {}).get("code") or ""),
+            task_affected,
+            topic_affected,
+            bool(source_queue_id),
+            bool(source_schedule_id),
+            bool(source_schedule_log_id),
+            downstream_status,
+        )
         return self.get_task(task_id)
 
     def request_task_cancel(self, task_id: str, context: dict[str, Any] | None = None) -> dict[str, Any] | None:
         self._ensure_ready()
         if not self.get_task(task_id, context=context):
+            logger.warning("task.cancel.missing task_id=%s", task_id)
             return None
         cancel_error = {"code": "task_cancelled", "message": "任务已取消"}
         cancel_error_json = json.dumps(cancel_error, ensure_ascii=False, default=_json_default)
         conn = self._connect(database=self._schema_name())
+        previous_status = ""
+        topic_id = ""
+        waiting_cancelled = False
         try:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1613,6 +1707,8 @@ class TopicTaskStore:
                     (task_id,),
                 )
                 row = cur.fetchone() or {}
+                previous_status = str(row.get("task_status") or "")
+                topic_id = str(row.get("topic_id") or "")
                 if str(row.get("task_status") or "") == "waiting":
                     cur.execute(
                         """
@@ -1626,6 +1722,7 @@ class TopicTaskStore:
                         """,
                         (cancel_error_json, task_id),
                     )
+                    waiting_cancelled = True
                     cur.execute(
                         """
                         UPDATE da_agent_topic
@@ -1676,6 +1773,13 @@ class TopicTaskStore:
             conn.commit()
         finally:
             conn.close()
+        logger.info(
+            "task.cancel.requested task_id=%s topic_id=%s previous_status=%s waiting_cancelled=%s",
+            task_id,
+            topic_id,
+            previous_status,
+            waiting_cancelled,
+        )
         return self.get_task(task_id, context=context)
 
     def is_task_cancel_requested(self, task_id: str) -> bool:
