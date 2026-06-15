@@ -267,8 +267,29 @@ scripts/restart.sh
 scripts/restart.sh
 ```
 
-### Check Logs
+### Check Logs / 日志排障
+
+所有服务统一使用 `json-file` 日志驱动并轮转（单服务上限 `20m × 5 = 100MB`），容器重启不丢、磁盘不被撑爆：
+
 ```bash
-# View logs for a specific service (e.g., backend)
+# 实时查看某个服务日志（例如 backend）
 docker-compose -f docker-compose.prod.yml logs -f backend
 ```
+
+#### 宿主机日志文件（方便排障/打包带走）
+
+- **服务日志（实时落盘）**：`log-collector` sidecar 自动把各服务日志实时写到包目录
+  `deploy/logs/<container>.log`，打开目录即可查看，无需敲命令。
+  - 默认只覆盖 4 个应用服务：`backend`、`dataagent-backend`、`dataagent-sandbox-runner`、`portal-mcp`。
+  - 不收集 mysql/redis 基础设施与两个 nginx 前端；如需增减，在 `deploy/.env` 设置 `LOG_COLLECTOR_CONTAINERS`（空格分隔容器名）。
+  - 收集器复用 runner 镜像自带的 docker CLI，离线包不新增镜像；只读挂载 docker socket。
+- **task child 日志（已落盘）**：DataAgent 每个 `--rm` task child 的输出由 runner 实时写在挂载卷上
+  `<DATAAGENT_HOST_ROOT>/<topic_id>/logs/<task_id>.log`，`--rm` 删容器不影响留存。
+- **一键汇总/导出**：需要把全部服务日志 + 所有 task child 日志固化到一处时，运行：
+  ```bash
+  scripts/dump-logs.sh
+  # 产物：
+  #   deploy/logs/services/<service>.log     各服务日志快照
+  #   deploy/logs/task-child/<topic>/*.log   所有 task child 日志
+  # 打包带走：tar -czf odw-logs.tgz -C deploy logs
+  ```
