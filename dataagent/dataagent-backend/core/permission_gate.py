@@ -55,6 +55,27 @@ def strip_card_annotations(tool_input: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in tool_input.items() if k not in CARD_ANNOTATION_KEYS}
 
 
+# Canonical permission-decision values persisted in SDK records and surfaced to
+# clients. The request side accepts the bare ``allow``/``deny`` verbs; both the
+# stored record and the API response use these normalized forms so the immediate
+# response and the later streamed/reloaded record never diverge.
+_PERMISSION_DECISION_NORMALIZATION = {
+    "allow": "allowed",
+    "allowed": "allowed",
+    "deny": "denied",
+    "denied": "denied",
+    "timeout": "timeout",
+}
+
+
+def normalize_permission_decision(decision: Any) -> str:
+    """Coerce a permission decision to its canonical persisted form.
+
+    ``allow`` -> ``allowed``, ``deny`` -> ``denied``, ``timeout`` stays; anything
+    unknown collapses to ``denied`` (fail-closed)."""
+    return _PERMISSION_DECISION_NORMALIZATION.get(str(decision or "").strip().lower(), "denied")
+
+
 def permission_decision_redis_key(task_id: str, request_id: str) -> str:
     """Redis key carrying a user's permission decision for a waiting run.
 

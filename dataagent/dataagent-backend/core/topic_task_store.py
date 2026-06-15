@@ -18,6 +18,7 @@ from core.agent_profile_service import (
     normalize_agent_snapshot,
     normalize_permission_mode,
 )
+from core.permission_gate import normalize_permission_decision
 from core.topic_workspace import delete_topic_workspace
 
 logger = logging.getLogger(__name__)
@@ -1528,13 +1529,7 @@ class TopicTaskStore:
         pending = self.get_pending_permission_request(task_id)
         if not pending or str(pending.get("request_id") or "") != str(request_id or ""):
             return False
-        normalized = {
-            "allow": "allowed",
-            "allowed": "allowed",
-            "deny": "denied",
-            "denied": "denied",
-            "timeout": "timeout",
-        }.get(str(decision or "").strip().lower(), "denied")
+        normalized = normalize_permission_decision(decision)
         self.append_sdk_record(
             task_id=task_id,
             topic_id=str(pending.get("topic_id") or ""),

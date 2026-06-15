@@ -108,7 +108,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { copyText } from '@/utils/clipboard'
+import { useCopyFeedback } from '@/utils/useCopyFeedback'
 import { buildMarkdownTable, buildTsvContent, downloadCsv } from '@/utils/tableExport'
 
 const props = defineProps({
@@ -129,8 +129,7 @@ const columnValueFilters = reactive({})
 const columnTextFilters = reactive({})
 const page = ref(1)
 const pageSize = ref(20)
-const copiedAction = ref('')
-let copiedTimer = 0
+const { copiedKey: copiedAction, copyWithFeedback } = useCopyFeedback()
 
 const cellText = (value) => (value === null || value === undefined ? '' : String(value))
 
@@ -173,23 +172,32 @@ const filteredRows = computed(() => {
   return rows
 })
 
-const isNumericColumn = (column) => {
-  let hasNumber = false
-  for (const row of props.rows) {
-    const value = row?.[column]
-    if (value === null || value === undefined || value === '') continue
-    if (typeof value === 'number') {
-      hasNumber = true
-      continue
+// Memoize numeric detection per column so repeated sorts/paging don't rescan
+// every row on each recompute; only recomputed when the underlying data changes.
+const numericColumnCache = computed(() => {
+  const result = {}
+  for (const column of props.columns) {
+    let hasNumber = false
+    let numeric = true
+    for (const row of props.rows) {
+      const value = row?.[column]
+      if (value === null || value === undefined || value === '') continue
+      if (typeof value === 'number') {
+        hasNumber = true
+        continue
+      }
+      if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+        hasNumber = true
+        continue
+      }
+      numeric = false
+      break
     }
-    if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
-      hasNumber = true
-      continue
-    }
-    return false
+    result[column] = numeric && hasNumber
   }
-  return hasNumber
-}
+  return result
+})
+const isNumericColumn = (column) => numericColumnCache.value[column] || false
 
 const sortedRows = computed(() => {
   if (!sortColumn.value || !sortDirection.value) return filteredRows.value
@@ -302,23 +310,12 @@ const exportCsv = () => {
   downloadCsv(exportBaseName.value, props.columns, filteredRows.value)
 }
 
-const markCopied = (action) => {
-  copiedAction.value = action
-  if (copiedTimer && typeof window !== 'undefined') window.clearTimeout(copiedTimer)
-  if (typeof window !== 'undefined') {
-    copiedTimer = window.setTimeout(() => {
-      copiedAction.value = ''
-    }, 1500)
-  }
-}
-
 const copyAs = async (format) => {
   const content = format === 'markdown'
     ? buildMarkdownTable(props.columns, filteredRows.value)
     : buildTsvContent(props.columns, filteredRows.value)
   try {
-    await copyText(content)
-    markCopied(format)
+    await copyWithFeedback(content, format)
   } catch (_error) {
     // 剪贴板不可用时静默失败，按钮状态不变化即可感知
   }
@@ -338,7 +335,6 @@ onBeforeUnmount(() => {
   if (typeof document !== 'undefined') {
     document.removeEventListener('click', handleDocumentClick)
   }
-  if (copiedTimer && typeof window !== 'undefined') window.clearTimeout(copiedTimer)
 })
 </script>
 

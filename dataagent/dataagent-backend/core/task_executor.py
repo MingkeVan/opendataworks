@@ -19,6 +19,7 @@ from core.agent_profile_service import DEFAULT_AGENT_ID, normalize_agent_snapsho
 from core.permission_gate import (
     is_high_risk_tool,
     is_write_tool,
+    normalize_permission_decision,
     plan_denies_tool,
     requires_confirmation,
     strip_card_annotations,
@@ -537,7 +538,7 @@ def _build_can_use_tool_callback(
             timeout_seconds=wait_seconds,
             is_cancel_requested=is_cancel_requested,
         )
-        recorded = "allowed" if decision == "allow" else ("timeout" if decision == "timeout" else "denied")
+        recorded = normalize_permission_decision(decision)
         try:
             append_decision = getattr(store, "append_permission_decision_record", None)
             if callable(append_decision):

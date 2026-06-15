@@ -59,7 +59,7 @@ import { Compartment, EditorState } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { MySQL, sql } from '@codemirror/lang-sql'
-import { copyText } from '@/utils/clipboard'
+import { useCopyFeedback } from '@/utils/useCopyFeedback'
 import { createNl2SqlApiClient } from '@/api/nl2sql'
 import ResultDataTable from './ResultDataTable.vue'
 
@@ -75,7 +75,8 @@ const props = defineProps({
 
 const editorRef = ref(null)
 const editing = ref(false)
-const copied = ref(false)
+const { copiedKey, copyWithFeedback } = useCopyFeedback()
+const copied = computed(() => copiedKey.value === 'sql')
 const running = ref(false)
 const limit = ref(100)
 const currentSql = ref(String(props.sql || ''))
@@ -83,7 +84,6 @@ const executeResult = ref(null)
 const executeError = ref('')
 
 let view = null
-let copiedTimer = 0
 let apiClient = null
 const editableCompartment = new Compartment()
 
@@ -167,14 +167,7 @@ const revertSql = () => {
 
 const copySql = async () => {
   try {
-    await copyText(currentSql.value)
-    copied.value = true
-    if (copiedTimer && typeof window !== 'undefined') window.clearTimeout(copiedTimer)
-    if (typeof window !== 'undefined') {
-      copiedTimer = window.setTimeout(() => {
-        copied.value = false
-      }, 1500)
-    }
+    await copyWithFeedback(currentSql.value, 'sql')
   } catch (_error) {
     // 剪贴板不可用时静默失败
   }
@@ -221,7 +214,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (copiedTimer && typeof window !== 'undefined') window.clearTimeout(copiedTimer)
   if (view) {
     view.destroy()
     view = null

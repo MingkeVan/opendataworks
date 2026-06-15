@@ -131,8 +131,8 @@ public class BackendAgentWorkflowService implements AgentWorkflowService {
                 continue;
             }
             Object ds = ((Map<String, Object>) item).get("datasourceName");
-            if (ds instanceof String && StringUtils.hasText((String) ds)) {
-                AgentDataScopeContext.requireDatabaseNameAllowed((String) ds);
+            if (ds instanceof String) {
+                AgentDataScopeContext.requireDatabaseNameAllowedIfPresent((String) ds);
             }
         }
     }
