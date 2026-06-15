@@ -224,6 +224,22 @@ class TestExecuteReadonlyQuery:
         assert captured["scope_header"] == explicit_scope
 
     @pytest.mark.anyio
+    async def test_explicit_empty_data_scope_header_does_not_fallback_to_env(self, monkeypatch):
+        configure_proxy_env(monkeypatch, env={
+            **PROXY_ENV,
+            "DATAAGENT_DATA_SCOPE_JSON": json.dumps({"allowed_scopes": [{"database": "env_db", "source_type": "MYSQL", "cluster_id": 1}]}),
+        })
+        captured = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["scope_header"] = request.headers.get("X-Agent-Data-Scope")
+            return httpx.Response(200, json={"rows": [{"x": 1}], "row_count": 1, "has_more": False})
+
+        install_upstream(monkeypatch, handler)
+        await execute_readonly_query("SELECT 1", "demo", data_scope_header="")
+        assert captured["scope_header"] is None
+
+    @pytest.mark.anyio
     async def test_missing_config_raises(self, monkeypatch):
         configure_proxy_env(monkeypatch, env={})
         with pytest.raises(QueryProxyConfigError):
@@ -312,6 +328,7 @@ class TestExecuteQueryRoute:
     def test_execute_route_passes_topic_scope(self, monkeypatch):
         configure_proxy_env(monkeypatch)
         captured = {}
+        contexts = []
 
         def handler(request: httpx.Request) -> httpx.Response:
             captured["scope_header"] = request.headers.get("X-Agent-Data-Scope", "")
@@ -329,12 +346,10 @@ class TestExecuteQueryRoute:
             "agent_snapshot": {"data_scope": fake_scope},
         }
 
-        from api.routes import _get_store
-        original_get_store = _get_store
-
         class FakeStore:
             def get_topic(self, topic_id, context=None):
-                if topic_id == "t-123":
+                contexts.append(context)
+                if topic_id == "t-123" and context and context.get("source") == "portal":
                     return fake_topic
                 return None
 
@@ -351,6 +366,52 @@ class TestExecuteQueryRoute:
         decoded = base64.urlsafe_b64decode(captured["scope_header"] + "==").decode()
         scope = json.loads(decoded)
         assert scope["allowed_scopes"][0]["database"] == "scoped_db"
+        assert contexts == [{
+            "source": "portal",
+            "website_id": "",
+            "external_user_id": "",
+            "visitor_id": "",
+        }]
+
+    def test_execute_route_rejects_topic_outside_request_context(self, monkeypatch):
+        configure_proxy_env(monkeypatch)
+        upstream_called = False
+        contexts = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal upstream_called
+            upstream_called = True
+            return httpx.Response(200, json={"rows": [{"x": 1}], "row_count": 1, "has_more": False})
+
+        install_upstream(monkeypatch, handler)
+
+        class FakeStore:
+            def get_topic(self, topic_id, context=None):
+                contexts.append(context)
+                return None
+
+        import api.routes as routes_mod
+        monkeypatch.setattr(routes_mod, "_get_store", lambda: FakeStore())
+        monkeypatch.setattr(routes_mod, "_allowed_widget_sites", lambda: [{"website_id": "site-a"}])
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/nl2sql/query/execute",
+            headers={
+                "X-ODW-Client": "widget",
+                "X-ODW-Website-Id": "site-a",
+                "X-ODW-User-Id": "user-a",
+            },
+            json={"sql": "SELECT 1", "database": "demo", "topic_id": "t-other"},
+        )
+        assert response.status_code == 404
+        assert not upstream_called
+        assert contexts == [{
+            "source": "widget",
+            "website_id": "site-a",
+            "external_user_id": "user-a",
+            "visitor_id": "",
+        }]
 
     def test_execute_route_upstream_failure_maps_status(self, monkeypatch):
         configure_proxy_env(monkeypatch)

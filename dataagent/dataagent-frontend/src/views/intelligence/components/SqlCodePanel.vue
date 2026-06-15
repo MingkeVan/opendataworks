@@ -21,20 +21,20 @@
           data-action="revert"
           @click="revertSql"
         >还原</button>
-        <template v-if="executable">
-          <select v-model.number="limit" class="sql-panel-limit" aria-label="返回行数上限">
-            <option :value="100">100 行</option>
-            <option :value="500">500 行</option>
-            <option :value="1000">1000 行</option>
-          </select>
-          <button
-            type="button"
-            class="sql-panel-btn sql-panel-btn-primary"
-            data-action="execute"
-            :disabled="running || !currentSql.trim()"
-            @click="executeSql"
-          >{{ running ? '执行中…' : '执行' }}</button>
-        </template>
+        <select v-model.number="limit" class="sql-panel-limit" :disabled="!executable || running" aria-label="返回行数上限">
+          <option :value="100">100 行</option>
+          <option :value="500">500 行</option>
+          <option :value="1000">1000 行</option>
+        </select>
+        <button
+          type="button"
+          class="sql-panel-btn sql-panel-btn-primary"
+          data-action="execute"
+          :disabled="running || !currentSql.trim() || !executable"
+          :title="!executable ? '缺少 database，无法执行' : ''"
+          @click="executeSql"
+        >{{ running ? '执行中…' : '执行' }}</button>
+        <span v-if="!executable" class="sql-panel-hint">缺少 database</span>
       </div>
     </div>
 
@@ -206,8 +206,8 @@ const executeSql = async () => {
 }
 
 watch(
-  () => props.sql,
-  (value) => {
+  () => [props.sql, props.database, props.engine],
+  ([value]) => {
     if (editing.value) return
     currentSql.value = String(value || '')
     setEditorDoc(currentSql.value)
@@ -292,6 +292,17 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #31567a;
   background: #fff;
+}
+
+.sql-panel-limit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sql-panel-hint {
+  font-size: 12px;
+  color: #8da0b3;
+  white-space: nowrap;
 }
 
 .sql-panel-editor {

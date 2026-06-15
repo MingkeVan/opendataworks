@@ -841,7 +841,7 @@ async def api_list_message_schedule_logs(schedule_id: str, payload: MessageSched
 
 @query_router.post("/execute")
 async def api_execute_readonly_query(http_request: Request, request: ExecuteQueryRequest):
-    _request_context(http_request)
+    context = _request_context(http_request)
 
     sql = str(request.sql or "").strip()
     database = str(request.database or "").strip()
@@ -853,7 +853,7 @@ async def api_execute_readonly_query(http_request: Request, request: ExecuteQuer
     data_scope_header: str | None = None
     topic_id = str(request.topic_id or "").strip()
     if topic_id:
-        data_scope_header = _resolve_topic_data_scope_header(topic_id)
+        data_scope_header = _resolve_topic_data_scope_header(topic_id, context=context)
 
     try:
         return await execute_readonly_query(
@@ -870,13 +870,13 @@ async def api_execute_readonly_query(http_request: Request, request: ExecuteQuer
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
-def _resolve_topic_data_scope_header(topic_id: str) -> str:
+def _resolve_topic_data_scope_header(topic_id: str, *, context: dict[str, str]) -> str:
     from core.data_scope import encode_scope_header, normalize_data_scope
 
     store = _get_store()
-    topic = store.get_topic(topic_id)
+    topic = store.get_topic(topic_id, context=context)
     if not topic:
-        return ""
+        raise HTTPException(status_code=404, detail="Topic not found")
     snapshot = topic.get("agent_snapshot") or {}
     scope = normalize_data_scope(snapshot.get("data_scope") or {})
     if not scope.get("allowed_scopes"):

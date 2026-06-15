@@ -153,14 +153,16 @@ describe('createNl2SqlApiClient', () => {
       database: 'demo',
       engine: 'mysql',
       limit: 500,
-      timeoutSeconds: 30
+      timeoutSeconds: 30,
+      topicId: 'topic-1'
     })
     expect(clients[0].post).toHaveBeenLastCalledWith('/query/execute', {
       sql: 'select 1',
       database: 'demo',
       engine: 'mysql',
       limit: 500,
-      timeout_seconds: 30
+      timeout_seconds: 30,
+      topic_id: 'topic-1'
     })
   })
 })

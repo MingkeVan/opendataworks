@@ -136,7 +136,7 @@ async def execute_readonly_query(
     clamped_timeout = clamp_timeout_seconds(timeout_seconds)
 
     headers = {_service_token_header_name(): token}
-    data_scope = data_scope_header or runtime_data_scope_header()
+    data_scope = runtime_data_scope_header() if data_scope_header is None else str(data_scope_header).strip()
     if data_scope:
         headers[DATA_SCOPE_HEADER_NAME] = data_scope
 
