@@ -946,9 +946,10 @@ export const WIDGET_STYLES = `
 
 .query-composer {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 8px 10px 8px 16px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px 12px 8px 16px;
   border: 1px solid #dde2ea;
   border-radius: 16px;
   background: #fff;
@@ -962,7 +963,8 @@ export const WIDGET_STYLES = `
 }
 
 .query-textarea {
-  flex: 1;
+  flex: none;
+  width: 100%;
   min-width: 0;
   min-height: 22px;
   max-height: 160px;
@@ -988,8 +990,8 @@ export const WIDGET_STYLES = `
 .query-composer-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .query-composer-toolbar {
@@ -1001,12 +1003,22 @@ export const WIDGET_STYLES = `
   padding-inline: 4px;
 }
 
+.query-composer-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .query-composer-hint {
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-width: 0;
   color: #9aa5b1;
   font-size: 11px;
   line-height: 1.4;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .query-model-selector {
@@ -1043,7 +1055,7 @@ export const WIDGET_STYLES = `
   cursor: not-allowed;
 }
 
-.query-workbench.is-floating .query-model-selector {
+.query-workbench.is-floating .query-composer-toolbar {
   display: none;
 }
 

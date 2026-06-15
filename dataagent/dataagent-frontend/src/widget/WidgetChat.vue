@@ -229,26 +229,28 @@
               @keydown.enter="onEnterKey"
               @input="autoResizeTextarea"
             />
-            <button
-              type="button"
-              class="query-send-btn"
-              :class="{ 'query-cancel-btn': activeTaskId }"
-              :disabled="activeTaskId ? false : !canSend"
-              :aria-label="activeTaskId ? '取消当前任务' : '发送消息'"
-              @click="activeTaskId ? cancel() : send()"
-            >
-              <svg v-if="activeTaskId" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
-                <rect x="8" y="8" width="8" height="8" rx="1.5" />
-              </svg>
-              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
-                <line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" />
-              </svg>
-            </button>
+            <div class="query-composer-actions">
+              <div class="query-composer-hint">Enter 发送，Shift + Enter 换行</div>
+              <button
+                type="button"
+                class="query-send-btn"
+                :class="{ 'query-cancel-btn': activeTaskId }"
+                :disabled="activeTaskId ? false : !canSend"
+                :aria-label="activeTaskId ? '取消当前任务' : '发送消息'"
+                @click="activeTaskId ? cancel() : send()"
+              >
+                <svg v-if="activeTaskId" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
+                  <rect x="8" y="8" width="8" height="8" rx="1.5" />
+                </svg>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
+                  <line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" />
+                </svg>
+              </button>
+            </div>
           </div>
           <!-- Toolbar row -->
           <div class="query-composer-toolbar">
-            <div class="query-composer-hint">Enter 发送，Shift + Enter 换行</div>
-            <div class="query-model-selector">
+            <div class="query-composer-toolbar-left">
               <select
                 :value="permissionMode"
                 class="query-model-select query-permission-select"
@@ -260,6 +262,8 @@
                   {{ opt.label }}
                 </option>
               </select>
+            </div>
+            <div class="query-model-selector">
               <select v-model="selectedProvider" class="query-model-select" :disabled="!providers.length || isBusy" title="切换提供商">
                 <option v-for="provider in providers" :key="provider.provider_id" :value="provider.provider_id">
                   {{ provider.display_name || provider.provider_id }}
@@ -336,10 +340,10 @@ const agentName = ref('智能数据助手')
 const suggestions = computed(() => agentPresetQuestions.value.length ? agentPresetQuestions.value : DEFAULT_SUGGESTIONS)
 const permissionMode = ref('default')
 const PERMISSION_MODE_OPTIONS = [
-  { value: 'default', label: '逐步确认' },
-  { value: 'acceptEdits', label: '草稿自动·发布确认' },
-  { value: 'plan', label: '仅规划' },
-  { value: 'bypassPermissions', label: '全自动' },
+  { value: 'default', label: 'Default' },
+  { value: 'acceptEdits', label: 'Accept edits' },
+  { value: 'plan', label: 'Plan mode' },
+  { value: 'bypassPermissions', label: 'Bypass permissions' },
 ]
 
 // widget-only UI state
