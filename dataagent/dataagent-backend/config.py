@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     followup_suggestions_timeout_seconds: int = 20
     run_events_stream_poll_interval_seconds: int = 1
     run_events_stream_ping_seconds: int = 10
-    task_max_concurrency: int = 4
+    task_max_concurrency: int = 8
     task_lease_ttl_seconds: int = 30
     task_heartbeat_seconds: int = 5
     task_recovery_scan_interval_seconds: int = 2

@@ -33,7 +33,7 @@ class TaskCoordinator:
         self._active_tasks: dict[str, asyncio.Task] = {}
         self._queued_task_ids: set[str] = set()
         self._closing = False
-        self._semaphore = asyncio.Semaphore(max(1, int(self.settings.task_max_concurrency or 4)))
+        self._semaphore = asyncio.Semaphore(max(1, int(self.settings.task_max_concurrency or 8)))
 
     async def start(self) -> None:
         if self._redis is not None:
