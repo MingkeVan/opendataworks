@@ -843,7 +843,8 @@ function currentAgentFilterId() {
   return normalizeQueryValue(route.query.agent_id) || String(agentSelectValue.value || '').trim()
 }
 
-async function loadTopics() {
+async function loadTopics(options = {}) {
+  const { selectDefault = true } = options
   if (sourceMode.value === 'widget') {
     await loadWidgetTopics()
     return
@@ -857,12 +858,20 @@ async function loadTopics() {
     const requestedTopicId = routeTopicId()
     if (requestedTopicId) {
       await selectTopic(requestedTopicId, { messageId: routeMessageId() })
-    } else if (topics.value.length && !activeTopicId.value) {
+    } else if (selectDefault && topics.value.length && !activeTopicId.value) {
       await selectTopic(topics.value[0].topic_id)
     }
   } catch {
     // non-fatal
   }
+}
+
+function resetActiveConversationView() {
+  activeTopicId.value = ''
+  messages.value = []
+  targetMessageId.value = ''
+  searchKeyword.value = ''
+  closeArtifactPreview()
 }
 
 // Read-only widget session list (admin endpoint). Unlike portal topics we never
@@ -1008,10 +1017,7 @@ async function handleNewTopic() {
   // Leaving a running conversation detaches it (the backend task keeps running,
   // recoverable from history) instead of blocking, matching the widget.
   if (isStreaming.value) detach()
-  activeTopicId.value = ''
-  messages.value = []
-  targetMessageId.value = ''
-  searchKeyword.value = ''
+  resetActiveConversationView()
   replaceRouteTopic('')
 }
 
@@ -1031,13 +1037,18 @@ async function handleSelectTopic(topicId) {
 function handleAgentChange(agentId) {
   agentSelectValue.value = agentId
   const value = String(agentId || '').trim()
-  if (String(route.query.agent_id || '').trim() === value) return
+  const previousValue = String(route.query.agent_id || '').trim()
+  if (previousValue === value) return
+  if (isStreaming.value) detach()
+  resetActiveConversationView()
   const query = { ...route.query }
   if (value) {
     query.agent_id = value
   } else {
     delete query.agent_id
   }
+  delete query.topic_id
+  delete query.message_id
   const navigation = router.replace({ path: route.path, query })
   if (navigation?.catch) {
     navigation.catch(() => {})
@@ -1309,9 +1320,8 @@ onMounted(async () => {
 
 watch(() => route.query.agent_id, async () => {
   // Re-query both sources: widget mode also honors the assistant filter.
-  activeTopicId.value = ''
-  messages.value = []
-  await loadTopics()
+  resetActiveConversationView()
+  await loadTopics({ selectDefault: false })
 })
 
 watch(
