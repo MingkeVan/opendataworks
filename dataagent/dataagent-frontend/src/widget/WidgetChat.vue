@@ -133,6 +133,14 @@
                     </template>
                   </template>
 
+                  <!-- Keep an activity cue visible whenever the run is still
+                       going but no block is currently streaming (between turns,
+                       before a new turn's first block, or after a tool/text
+                       block settled while the run continues). -->
+                  <div v-if="showTrailingActivity(msg)" class="query-typing-indicator query-typing-indicator-trailing">
+                    <span /><span /><span />
+                  </div>
+
                   <div v-if="msg._v2state.status === 'error'" class="query-error-card">
                     <span class="query-error-label">错误</span>
                     <span>{{ msg._v2state.errorText || '处理出错' }}</span>
@@ -487,6 +495,32 @@ const formatBytes = (size) => {
 // Split answer prose into ordered text/chart segments so an inline chart_spec
 // (fenced, tagged, or raw JSON) renders as a real chart instead of leaking JSON.
 const answerSegments = (content) => splitChartSpecText(String(content || ''))
+
+// A block conveys its own live progress: streaming text/thinking shows the
+// blinking cursor (or the "深度思考" badge dot), and a tool_use shows its
+// running state until its result lands. While one of these is the tail block,
+// the trailing dots would be redundant.
+const isBlockActivelyProgressing = (block) => {
+  if (!block) return false
+  if (block.type === 'text' || block.type === 'thinking') return block.status === 'streaming'
+  if (block.type === 'tool_use') return block.output == null
+  return false
+}
+
+// Show the trailing typing dots whenever the task is still running but the tail
+// block is not itself streaming — this fills the gaps the inline cursor leaves
+// (between turns, before a turn's first block, after a settled block). A pending
+// permission card means the run is waiting on the user, not working, so suppress.
+const showTrailingActivity = (msg) => {
+  if (!isActiveTask(msg)) return false
+  const state = msg._v2state
+  if (!state?.turns?.length) return false
+  if (state.status === 'done' || state.status === 'error') return false
+  const lastTurn = state.turns[state.turns.length - 1]
+  const lastBlock = lastTurn?.blocks?.[lastTurn.blocks.length - 1]
+  if (lastBlock?.type === 'permission_request' && lastBlock.decision === 'pending') return false
+  return !isBlockActivelyProgressing(lastBlock)
+}
 
 // Generic Chat V2 permission confirmation handler (shared with NL2SqlChatV2).
 const handlePermissionDecision = async (msg, payload) => {
