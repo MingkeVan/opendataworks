@@ -333,7 +333,7 @@ def test_execute_task_stream_logs_safe_runtime_base_url_and_preserves_env(monkey
     _install_fake_sdk(
         monkeypatch,
         [
-            ResultMessage("success", session_id="sdk-session-log"),
+            ResultMessage("success", "查询结果如下。", session_id="sdk-session-log"),
         ],
     )
     monkeypatch.setattr(
@@ -1068,7 +1068,7 @@ def test_execute_task_stream_injects_portal_mcp_servers(monkeypatch, tmp_path: P
     _install_fake_sdk(
         monkeypatch,
         [
-            ResultMessage("success", session_id="sdk-session-mcp"),
+            ResultMessage("success", "查询结果如下。", session_id="sdk-session-mcp"),
         ],
     )
     monkeypatch.setattr(
@@ -1276,3 +1276,80 @@ def test_execute_task_stream_marks_pseudo_tool_call_drift_as_error_when_nothing_
     assert result.task_status == "error"
     assert result.error is not None
     assert result.error["code"] == "tool_call_format_drift"
+
+
+def test_execute_task_stream_marks_thinking_only_empty_finish_as_error(monkeypatch, tmp_path: Path):
+    # A clean (success) run that produced only a thinking block — no visible
+    # answer, no tool_use, no leaked pseudo tag — used to fall back to a silent
+    # "finished" + "已完成。". It must instead surface as a retryable task error
+    # so the chat shows the error card / retry button instead of ending quietly.
+    _install_fake_sdk(
+        monkeypatch,
+        [
+            StreamEvent({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
+            StreamEvent(
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "thinking_delta", "thinking": "Let me think about how to answer this question."},
+                }
+            ),
+            StreamEvent({"type": "content_block_stop", "index": 0}),
+            ResultMessage("success", session_id="sdk-empty-1"),
+        ],
+    )
+    _patch_default_provider(monkeypatch)
+    _patch_skill_runtime(monkeypatch, tmp_path)
+
+    async def _run():
+        return await task_executor.execute_task_stream(_build_input(), emit=lambda record: None)
+
+    result = asyncio.run(_run())
+
+    assert result.task_status == "error"
+    assert result.error is not None
+    assert result.error["code"] == "empty_completion"
+    assert "请重试" in result.error["message"]
+    assert result.content != "已完成。"
+
+
+def test_execute_task_stream_keeps_empty_finish_with_tool_use_as_finished(monkeypatch, tmp_path: Path):
+    # Tools ran but the model ended the turn with no final text and no leaked
+    # tag. Only the no-tool thinking-only case is converted to an error; a run
+    # that actually invoked a tool keeps the prior finished behavior, because
+    # retrying it could repeat a write. So this stays finished, not empty_completion.
+    _install_fake_sdk(
+        monkeypatch,
+        [
+            StreamEvent(
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "tool_use", "id": "tool-bash-9", "name": "Bash", "input": {"command": "python run_sql.py"}},
+                }
+            ),
+            StreamEvent({"type": "content_block_stop", "index": 0}),
+            UserMessage([{"type": "tool_result", "tool_use_id": "tool-bash-9", "name": "Bash", "content": "2026-06-15"}]),
+            StreamEvent({"type": "content_block_start", "index": 1, "content_block": {"type": "thinking", "thinking": ""}}),
+            StreamEvent(
+                {
+                    "type": "content_block_delta",
+                    "index": 1,
+                    "delta": {"type": "thinking_delta", "thinking": "I now have the data and will summarize it."},
+                }
+            ),
+            StreamEvent({"type": "content_block_stop", "index": 1}),
+            ResultMessage("success", session_id="sdk-empty-2"),
+        ],
+    )
+    _patch_default_provider(monkeypatch)
+    _patch_skill_runtime(monkeypatch, tmp_path)
+
+    async def _run():
+        return await task_executor.execute_task_stream(_build_input(), emit=lambda record: None)
+
+    result = asyncio.run(_run())
+
+    assert result.task_status == "finished"
+    assert result.error is None
+    assert result.content == "已完成。"
