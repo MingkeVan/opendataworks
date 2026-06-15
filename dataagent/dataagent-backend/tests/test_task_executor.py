@@ -1313,10 +1313,11 @@ def test_execute_task_stream_marks_thinking_only_empty_finish_as_error(monkeypat
     assert result.content != "已完成。"
 
 
-def test_execute_task_stream_marks_empty_finish_with_tool_output_as_error(monkeypatch, tmp_path: Path):
-    # Tools ran and returned output, but the model ended the turn with no final
-    # text and no leaked tag. The run must terminate as a retryable error whose
-    # salvaged content points at the gathered tool output, not "已完成。".
+def test_execute_task_stream_keeps_empty_finish_with_tool_use_as_finished(monkeypatch, tmp_path: Path):
+    # Tools ran but the model ended the turn with no final text and no leaked
+    # tag. Only the no-tool thinking-only case is converted to an error; a run
+    # that actually invoked a tool keeps the prior finished behavior, because
+    # retrying it could repeat a write. So this stays finished, not empty_completion.
     _install_fake_sdk(
         monkeypatch,
         [
@@ -1349,8 +1350,6 @@ def test_execute_task_stream_marks_empty_finish_with_tool_output_as_error(monkey
 
     result = asyncio.run(_run())
 
-    assert result.task_status == "error"
-    assert result.error is not None
-    assert result.error["code"] == "empty_completion"
-    assert "工具输出" in result.content
-    assert result.content != "已完成。"
+    assert result.task_status == "finished"
+    assert result.error is None
+    assert result.content == "已完成。"

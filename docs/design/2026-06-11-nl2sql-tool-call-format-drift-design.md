@@ -95,7 +95,7 @@ ARCH_PERF_005）出现「工具/SQL 已经实际执行、却没有可用最终�
 范围说明：可发送消息的嵌入式 `WidgetChat.vue` 本次未加重试按钮（其既有错误卡片不变），
 如需可在后续迭代直接复用引擎的 `retryMessage`。
 
-## 2026-06-15 迭代：空回答（无伪标签）同样标错可重试
+## 2026-06-15 迭代：纯思考空回答（无 tool_use）标错可重试
 
 继漂移收口后，用户复现到另一类同源现象：深度思考结束后对话直接停住，任务落库为
 `task_status=finished`、`error` 为空、`content=已完成。`，前端无报错也无法感知，只能手动
@@ -115,29 +115,32 @@ ARCH_PERF_005）出现「工具/SQL 已经实际执行、却没有可用最终�
 
 调整：
 
-1. `build_result()` 成功分支不再使用 `content or "已完成。"` 兜底。可见回答非空时照常
-   `finished` 返回原文；**可见回答为空时一律 `task_status="error"`**，错误码
+1. `build_result()` 成功分支在返回前新增**单一窄分支**:**可见回答为空且本轮无真实
+   `tool_use`（`not content and not self._saw_tool_use`）时 `task_status="error"`**，错误码
    `empty_completion`，`error.message` 为面向用户的可重试提示。复用既有「`build_result`
    为 error 时 `sdk_writer.append_error(...)`」通道，使实时流必然带终止 `error` 记录；前端
    复用 06-12 已有的错误卡片与「重试」按钮（均对任意 `status=error` 生效，**前端无需改动**）。
+   其余情况保持原 `finished + content or "已完成。"` 行为不变。
 2. 漂移收口 `_build_format_drift_result` 与空回答收口 `_build_empty_completion_result`
    抽取共用私有方法 `_build_incomplete_run_result(content, reason, error_code, message,
    fallback)`，统一「合成 tool 输出标记 → `_recover_partial_content` 兜底文本 → 组装 `error`
-   结果」，避免重复 guard 分支（遵循「最小兜底、单层」）。空回答若此前有真实 `tool_use`，
-   兜底文本指向「上方思考过程中的工具输出」并保留在 `content` 供历史展示。
+   结果」，避免重复 guard 分支（遵循「最小兜底、单层」）。其中合成 tool 输出标记仅对**漂移**
+   路径有意义（漂移可发生在真实 `tool_use` 之后）；空回答路径因 `_saw_tool_use` 为假，兜底
+   恒为「无可重试内容」文案。
 
-取舍：对「有真实 `tool_use` 但无文字结论」的空回答同样标错，与漂移一致——只有 error 路径
-会把终止记录写入实时流，`finished + 兜底文本` 不进实时流会重演静默结束。写流程（data-dev）
-下空回答属模型异常静默而非操作失败，标错 + 用户手动重试比假「已完成。」更安全：现状文案会
-在模型实际异常时谎报完成、掩盖写操作是否真正生效。
+取舍（范围）：本次只收口「无真实 `tool_use` 的纯思考空回答」——这正是用户复现的场景，且
+重试安全。**有真实 `tool_use` 但无文字结论的空回答先保持原 `finished`（`content or
+"已完成。"`）不变**：这类运行已经实际执行过工具、可能含写操作，标错并引导重试有重复执行
+（如重复写）的风险，故暂不纳入本次收口。如后续需要，再单独评估更安全的收口方式（例如指向
+工具输出的非重试提示，而非走重试按钮）。
 
 ## 接口与契约变化
 
 - 任务错误码 `tool_call_format_drift`：2026-06-12 起对所有伪工具调用漂移返回
   （首版仅在无可兜底内容时返回）；兜底出的部分文本保留在任务 `content` 中。
-- 任务错误码 `empty_completion`：2026-06-15 起，非错误结束但无可见回答的运行返回
-  （取代原 `finished + "已完成。"` 静默兜底）；若此前有真实 `tool_use`，兜底文本指向工具输出
-  并保留在任务 `content` 中。
+- 任务错误码 `empty_completion`：2026-06-15 起，非错误结束、无可见回答**且无真实
+  `tool_use`**的运行返回（取代原纯思考空回答的 `finished + "已完成。"` 静默兜底）。有真实
+  `tool_use` 但无文字结论的空回答仍保持 `finished + "已完成。"`，本次不改。
 - 前端共享引擎新增动作 `retryMessage(failedMessage)`。
 - `_recover_partial_content` 复用，不改签名。
 - 新增内部辅助 `_contains_pseudo_tool_call` / `_strip_pseudo_tool_call_tags`

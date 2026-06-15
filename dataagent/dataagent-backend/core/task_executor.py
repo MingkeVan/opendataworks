@@ -293,12 +293,17 @@ class SdkResultAccumulator:
         if self._saw_pseudo_tool_call:
             return self._build_format_drift_result(content)
 
-        if not content:
+        # A clean run with no visible answer and no tool call is a thinking-only
+        # dead-end — surface it as a retryable error so the chat does not end
+        # silently on an empty answer. When a real tool ran, keep the prior
+        # finished behavior: re-running could repeat a write, so only the no-tool
+        # case is converted here.
+        if not content and not self._saw_tool_use:
             return self._build_empty_completion_result()
 
         return TaskExecutionResult(
             task_status="finished",
-            content=content,
+            content=content or "已完成。",
             usage=self.usage or None,
             provider_id=self.provider_id,
             model=self.model,
@@ -355,14 +360,15 @@ class SdkResultAccumulator:
         )
 
     def _build_empty_completion_result(self) -> TaskExecutionResult:
-        """Close out a clean run that ended with no visible answer at all.
+        """Close out a clean run that ended with no visible answer and no tool.
 
-        The turn ended without an SDK error and without leaking pseudo tool-call
-        tags, yet produced no final text — usually a thinking-only turn that
-        stopped early. This previously fell back to a silent ``finished`` with
-        "已完成。", so the chat ended on an empty answer with no way to retry.
-        Routing it through the shared error closeout makes the existing error
-        card and retry button surface instead.
+        A thinking-only turn that stopped early: no SDK error, no leaked pseudo
+        tool-call tag, no ``tool_use``, and no final text. This previously fell
+        back to a silent ``finished`` with "已完成。", so the chat ended on an
+        empty answer with no way to retry. Routing it through the shared error
+        closeout makes the existing error card and retry button surface instead.
+        Runs that did invoke a tool keep the prior finished behavior — see the
+        ``_saw_tool_use`` guard in ``build_result``.
         """
         return self._build_incomplete_run_result(
             content="",
