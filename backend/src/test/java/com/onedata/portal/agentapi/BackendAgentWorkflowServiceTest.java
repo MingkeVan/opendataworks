@@ -2,8 +2,10 @@ package com.onedata.portal.agentapi;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.agentapi.dto.AgentPublishRequest;
+import com.onedata.portal.agentapi.dto.AgentScheduleUpsertRequest;
 import com.onedata.portal.agentapi.service.AgentPreviewTokenSupport;
 import com.onedata.portal.agentapi.service.BackendAgentWorkflowService;
+import com.onedata.portal.dto.workflow.WorkflowScheduleRequest;
 import com.onedata.portal.dto.workflow.WorkflowDetailResponse;
 import com.onedata.portal.dto.workflow.WorkflowPublishRequest;
 import com.onedata.portal.entity.DataWorkflow;
@@ -15,6 +17,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -87,5 +92,18 @@ class BackendAgentWorkflowServiceTest {
 
         verify(previewTokenSupport, never()).verify(any(Long.class), any(), any());
         verify(workflowPublishService).publish(eq(12L), any(WorkflowPublishRequest.class));
+    }
+
+    @Test
+    void scheduleUpsertRejectsEnabledStateChange() {
+        BackendAgentWorkflowService svc = service();
+        AgentScheduleUpsertRequest req = new AgentScheduleUpsertRequest();
+        Map<String, Object> schedule = new HashMap<>();
+        schedule.put("scheduleCron", "0 0 * * * ? *");
+        schedule.put("enabled", Boolean.TRUE);
+        req.setSchedule(schedule);
+
+        assertThrows(IllegalArgumentException.class, () -> svc.upsertSchedule(12L, req, "agent:t"));
+        verify(workflowScheduleService, never()).upsertSchedule(any(), any(WorkflowScheduleRequest.class));
     }
 }

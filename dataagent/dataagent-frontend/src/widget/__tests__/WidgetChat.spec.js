@@ -36,6 +36,7 @@ const apiMocks = vi.hoisted(() => ({
     listTopics: vi.fn(),
     getTopicMessages: vi.fn(),
     deleteTopic: vi.fn(),
+    updateTopic: vi.fn(),
     updateMessageFeedback: vi.fn()
   },
   taskApi: {
@@ -132,6 +133,7 @@ describe('WidgetChat history conversations', () => {
     apiMocks.topicApi.getTopicMessages.mockImplementation(async (topicId) => messagePage(topicId, `${topicId} 历史回复`))
     apiMocks.topicApi.createTopic.mockResolvedValue(topic('topic-new', 'Widget 会话', { message_count: 0, last_message_preview: '' }))
     apiMocks.topicApi.deleteTopic.mockResolvedValue({ status: 'ok' })
+    apiMocks.topicApi.updateTopic.mockImplementation(async (topicId, payload) => topic(topicId, '已更新会话', payload))
     apiMocks.topicApi.updateMessageFeedback.mockImplementation(async (_topicId, messageId, feedback) => ({ message_id: messageId, feedback }))
     apiMocks.taskApi.deliverMessage.mockResolvedValue({ task_id: 'task-1' })
     apiMocks.taskApi.getTask.mockResolvedValue({ task_status: 'finished' })
@@ -379,7 +381,7 @@ describe('WidgetChat history conversations', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(apiMocks.topicApi.createTopic).toHaveBeenCalledWith('首次输入创建会话', { agent_id: 'agent_widget' })
+    expect(apiMocks.topicApi.createTopic).toHaveBeenCalledWith('首次输入创建会话', { agent_id: 'agent_widget', permission_mode: 'default' })
     expect(wrapper.findAll('.query-session-title').map((item) => item.text())).toEqual([
       '首次输入创建会话',
       '最近 30 天工作流发布趋势',
@@ -391,6 +393,34 @@ describe('WidgetChat history conversations', () => {
       content: '首次输入创建会话',
       agent_id: 'agent_widget'
     }))
+  })
+
+  it('passes the selected permission mode when creating and sending a widget topic', async () => {
+    const { wrapper } = mountChat({ config: { displayMode: 'inline' } })
+    await flushPromises()
+
+    await wrapper.get('.query-permission-select').setValue('plan')
+    await wrapper.get('textarea').setValue('只做规划')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(apiMocks.topicApi.createTopic).toHaveBeenCalledWith('只做规划', { agent_id: 'agent_widget', permission_mode: 'plan' })
+    expect(apiMocks.taskApi.deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+      content: '只做规划',
+      permission_mode: 'plan'
+    }))
+  })
+
+  it('persists permission mode switches for an existing widget topic', async () => {
+    const { wrapper } = mountChat({ config: { displayMode: 'inline' } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="history-topic-topic-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('.query-permission-select').setValue('acceptEdits')
+    await flushPromises()
+
+    expect(apiMocks.topicApi.updateTopic).toHaveBeenCalledWith('topic-1', { permission_mode: 'acceptEdits' })
   })
 
   it('keeps the first sent conversation at the top when initial history load resolves late', async () => {

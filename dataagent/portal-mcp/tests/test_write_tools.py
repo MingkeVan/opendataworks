@@ -43,7 +43,7 @@ async def test_write_service_methods_delegate_to_backend():
     await service.list_workflows({"limit": 5})
     await service.preview_publish(3)
     await service.publish_workflow(3, {"operation": "deploy", "previewToken": "tok"})
-    await service.upsert_schedule(3, {"scheduleCron": "0 0 * * *"})
+    await service.upsert_schedule(3, {"scheduleCron": "0 0 * * *", "enabled": True})
     await service.schedule_online(3, {"previewToken": "tok"})
     await service.schedule_offline(3)
     await service.analyze_sql({"sql": "select 1"})
@@ -65,6 +65,9 @@ async def test_write_service_methods_delegate_to_backend():
         "schedule_offline",
         "analyze_sql",
     ]
+    assert backend.calls[4] == ("create_workflow", ({"workflow": {"workflowName": "wf"}},), {})
+    assert backend.calls[5] == ("update_workflow", (3, {"workflow": {"workflowName": "wf2"}}), {})
+    assert backend.calls[10] == ("upsert_schedule", (3, {"schedule": {"scheduleCron": "0 0 * * *"}}), {})
 
 
 def test_publish_requires_preview_token():

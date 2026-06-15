@@ -424,11 +424,22 @@ def _build_can_use_tool_callback(
         )
         recorded = "allowed" if decision == "allow" else ("timeout" if decision == "timeout" else "denied")
         try:
-            sdk_writer.append_permission_decision(
-                request_id=request_id,
-                decision=recorded,
-                decided_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            )
+            append_decision = getattr(store, "append_permission_decision_record", None)
+            if callable(append_decision):
+                appended = append_decision(
+                    task_id=task_id,
+                    request_id=request_id,
+                    decision=recorded,
+                    decided_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                )
+                if not appended and decision == "timeout":
+                    logger.warning("can_use_tool: timeout decision was already recorded task_id=%s request_id=%s", task_id, request_id)
+            else:
+                sdk_writer.append_permission_decision(
+                    request_id=request_id,
+                    decision=recorded,
+                    decided_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                )
             store.set_task_status(task_id, "running")
         except Exception:
             logger.exception("can_use_tool: failed to record permission decision task_id=%s", task_id)
@@ -440,6 +451,13 @@ def _build_can_use_tool_callback(
         return _deny_result("用户拒绝了该操作。")
 
     return can_use_tool
+
+
+async def _single_user_prompt_stream(prompt: str):
+    yield {
+        "type": "user",
+        "message": {"role": "user", "content": prompt},
+    }
 
 
 async def execute_task_stream(
@@ -723,7 +741,8 @@ async def _execute_task_stream_local(
 
     try:
         with anyio.fail_after(timeout_seconds):
-            async for msg in claude_query(prompt=prompt, options=options):
+            sdk_prompt = _single_user_prompt_stream(prompt) if can_use_tool is not None else prompt
+            async for msg in claude_query(prompt=sdk_prompt, options=options):
                 if await _cancelled():
                     error = {"code": "task_cancelled", "message": "任务已取消"}
                     sdk_writer.append_error(**error)

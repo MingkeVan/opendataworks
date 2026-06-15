@@ -1,6 +1,6 @@
 # 工具配方（调用顺序与参数）
 
-全部为 portal MCP 工具。高危工具（`portal_publish_workflow`、`portal_workflow_schedule_online`）在 default/acceptEdits 权限模式下触发对话内确认。
+全部为 portal MCP 工具。`default` 权限模式下所有写工具都会触发对话内确认；`acceptEdits` 下草稿写操作自动执行，高危工具（`portal_publish_workflow`、`portal_workflow_schedule_online`）仍触发确认；`bypassPermissions` 下写工具自动执行，但 deploy/online/schedule-online 仍必须提供后端 preview token。
 
 ## 1. 探查表与 SQL
 

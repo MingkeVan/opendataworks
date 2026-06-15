@@ -100,6 +100,7 @@ public class BackendAgentWorkflowService implements AgentWorkflowService {
 
     @Override
     public Object upsertSchedule(Long workflowId, AgentScheduleUpsertRequest request, String operator) {
+        validateScheduleDoesNotChangeState(request);
         WorkflowScheduleRequest scheduleRequest =
                 objectMapper.convertValue(request.getSchedule(), WorkflowScheduleRequest.class);
         return workflowScheduleService.upsertSchedule(workflowId, scheduleRequest);
@@ -143,6 +144,15 @@ public class BackendAgentWorkflowService implements AgentWorkflowService {
             definition.setOperator(operator);
         }
         return definition;
+    }
+
+    private void validateScheduleDoesNotChangeState(AgentScheduleUpsertRequest request) {
+        if (request == null || request.getSchedule() == null) {
+            return;
+        }
+        if (request.getSchedule().containsKey("enabled")) {
+            throw new IllegalArgumentException("enabled 不允许出现在调度配置 upsert 中，请使用 schedule/online 或 schedule/offline 接口变更调度状态");
+        }
     }
 
     private Long currentVersionId(Long workflowId) {

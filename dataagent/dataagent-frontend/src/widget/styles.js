@@ -1012,6 +1012,7 @@ export const WIDGET_STYLES = `
 .query-model-selector {
   display: flex;
   gap: 4px;
+  min-width: 0;
 }
 
 .query-model-select {
@@ -1026,6 +1027,10 @@ export const WIDGET_STYLES = `
   outline: none;
   max-width: 120px;
   cursor: pointer;
+}
+
+.query-permission-select {
+  max-width: 92px;
 }
 
 .query-model-select:hover {

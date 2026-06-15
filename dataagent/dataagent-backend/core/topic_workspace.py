@@ -33,6 +33,13 @@ def sanitize_topic_id(topic_id: str) -> str:
 
 def _resolve_runtime_root(raw: str | None = None) -> Path:
     value = str(raw or "").strip()
+    if not value:
+        try:
+            from config import get_settings
+
+            value = str(get_settings().dataagent_host_root or "").strip()
+        except Exception:
+            value = ""
     if value:
         path = Path(value).expanduser()
         if path.is_absolute():

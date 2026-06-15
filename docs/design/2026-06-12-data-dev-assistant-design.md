@@ -113,8 +113,8 @@ DolphinScheduler(发布与调度执行)
 - `core/task_executor.py`:`permission_mode` 来源从 `agent_snapshot` 改为 `TaskExecutionInput` 携带的值,即**任务创建时刻 topic 的当前模式**;继续传给 `ClaudeAgentOptions.permission_mode`。
 - `core/agent_runtime.py`:
   - `_resolve_sdk_permission_mode` 改为只接受 SDK 合法值(`default|acceptEdits|plan|bypassPermissions`),`inherit` 与未知值归一化为 `default`。
-  - `_build_allowed_tools` 增加按 permission_mode 的工具裁剪:`plan` 模式不挂载写 MCP 工具(写工具名单来自 4.1 的配置常量);其余模式全量挂载,确认职责交给 `can_use_tool`。
-- 防御纵深:即使模型在 `plan` 模式尝试调用写工具,SDK 层因不在 allowed_tools 而拒绝;`bypassPermissions` 下 API 层仍要求 preview 凭证(见 6 节)。
+  - `_build_allowed_tools` 增加按 permission_mode 的工具裁剪:`plan` 不挂载写 MCP 工具;`default` 不挂载任何写 MCP 工具;`acceptEdits` 只挂载草稿类写工具、不挂载高危工具;`bypassPermissions` 才全量挂载。未挂载但模型尝试调用的确认型工具由 `can_use_tool` 动态产生确认请求并在 allow 后放行。
+- 防御纵深:确认型写工具不能直接出现在 `allowed_tools` 中,否则部分 MCP 调用会绕过 `can_use_tool`;`allowed_tools` 是硬能力边界,`can_use_tool` 只负责动态放行当前模式要求确认的工具。`bypassPermissions` 下 API 层仍要求 preview 凭证(见 6 节)。
 
 ## 5. 权限确认:Chat V2 通用交互块(新机制)
 
@@ -267,7 +267,7 @@ profile 更新:alembic 数据迁移将 `agent_opendataworks` 的 `skill_folders_
 
 三层防线,任何单层被绕过仍有约束:
 
-1. **SDK / 模式层**:`plan` 不挂载写工具;`default` / `acceptEdits` 高危工具经 `can_use_tool` 用户确认,决策事件全量落库。
+1. **SDK / 模式层**:`plan` 不挂载写工具;`default` 将所有写工具作为确认型工具从 `allowed_tools` 剥离;`acceptEdits` 只剥离高危工具;确认型工具经 `can_use_tool` 用户确认后动态放行,决策事件全量落库。
 2. **通道层**:portal-mcp → backend-agent-api 走服务 token + 私网限制 + data scope,写接口不对公网与浏览器暴露。
 3. **API 层**:deploy/online/schedule-online 强制 `previewToken`(短 TTL、版本一致性校验);operator 透传会话标识写入 `workflow_publish_record` / 任务审计字段。
 
@@ -278,7 +278,7 @@ profile 更新:alembic 数据迁移将 `agent_opendataworks` 的 `skill_folders_
 - **合并 vs 独立智能体**:选择合并。入口统一、用户无需切换;能力差异收敛到会话级权限模式,避免两个助手的提示词/技能重复维护。代价是平台助手 system prompt 变长、职责变宽,通过 skill 分层(问数/开发各自 playbook)控制。
 - **会话级 vs profile 级权限模式**:选择会话级并对齐 SDK 取值。profile 级无法表达同一用户不同会话的意图差异,且 `inherit` 为自造值;会话级与 SDK `permission_mode` 一一对应,执行链零翻译。
 - **MCP 写通道三选一**:选择 backend-agent-api 新增写 API。直调 Web API 需给 dataagent 配用户级 JWT,扩大安全面;portal-mcp 直接代理 Web API 则绕过 agent 专用鉴权层、需在 portal-mcp 重复实现权限收敛。
-- **确认机制:can_use_tool vs 自定义 confirmToken 对话协议**:选择 SDK 原生 `can_use_tool`。自定义协议需要模型"自觉"走确认流程,可被提示词注入绕过;`can_use_tool` 是运行时强制拦截,模型无法跳过。
+- **确认机制:can_use_tool vs 自定义 confirmToken 对话协议**:选择 SDK 原生 `can_use_tool`。自定义协议需要模型"自觉"走确认流程,可被提示词注入绕过;`can_use_tool` 是运行时强制拦截,模型无法跳过。实现上确认型 MCP 写工具必须先从 `allowed_tools` 剥离,再由回调按当前模式动态放行,避免"已授权工具"绕过确认。
 - **决策传递:Redis 键 vs runner 反向 HTTP**:选择 Redis 键,复用 cancel-flag 既有模式,进程内与 sandbox 两条执行路径统一,不新增网络拓扑。
 - **确认卡片:Chat V2 通用块 vs 数据开发专属事件**:选择通用块。Chat V2 块管线双侧投影 + 共享引擎,做成通用块后门户与 widget 自动同时支持、历史可重建,且本体建模等其他高危智能体可直接复用;专属事件会把交互能力锁死在单一功能里,且需要 widget 单独实现。
 - **权限模式存储:topic 最新值(可变)vs 逐任务/逐消息快照**:选择只存 topic 最新值。模式是用户当下意图,不属于"会话可复现性"(与 agent profile 快照不同),无需每消息冻结;任务在创建时刻读取当前值即可,简化存储与切换语义。

@@ -637,7 +637,19 @@ async def api_submit_permission_decision(task_id: str, payload: PermissionDecisi
     pending_request_id = store.get_pending_permission_request_id(task_id)
     if pending_request_id and pending_request_id != request_id:
         raise HTTPException(status_code=409, detail="request_id does not match the current pending permission request")
-    effective = await get_task_coordinator().submit_permission_decision(task_id, request_id, decision)
+    coordinator = get_task_coordinator()
+    if not pending_request_id:
+        existing = await coordinator.read_permission_decision(task_id, request_id)
+        if not existing:
+            raise HTTPException(status_code=409, detail="task has no pending permission request")
+    effective = await coordinator.submit_permission_decision(task_id, request_id, decision)
+    if pending_request_id:
+        store.append_permission_decision_record(
+            task_id=task_id,
+            request_id=request_id,
+            decision=effective,
+            note=str(payload.note or ""),
+        )
     return PermissionDecisionResponse.model_validate(
         {"task_id": task_id, "request_id": request_id, "decision": effective}
     )
