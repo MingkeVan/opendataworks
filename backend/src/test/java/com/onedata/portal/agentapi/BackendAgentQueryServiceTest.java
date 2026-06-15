@@ -346,6 +346,52 @@ class BackendAgentQueryServiceTest {
     }
 
     @Test
+    void readQueryAcceptsShowTablesWithinActiveDataScope() {
+        // 数据范围生效时，SHOW 语句无法被 TablesNamesFinder 解析出表名（会抛
+        // UnsupportedOperationException）。它没有 schema 引用，应回退到词法范围校验后放行，
+        // 而不是因内部异常直接失败。
+        AgentDataScopeContext.setEncodedScope("eyJhbGxvd2VkX3Njb3BlcyI6W3siY2x1c3Rlcl9pZCI6MywiZGF0YWJhc2UiOiJhZHNfdXNlciIsInNvdXJjZV90eXBlIjoiRE9SSVMifV19");
+        try {
+            AgentReadQueryRequest request = new AgentReadQueryRequest();
+            request.setDatabase("ads_user");
+            request.setSql("SHOW TABLES");
+
+            AgentDatasourceResolution datasource = new AgentDatasourceResolution();
+            datasource.setDatabase("ads_user");
+            datasource.setEngine("doris");
+            when(agentMetadataService.resolveDatasource("ads_user", null)).thenReturn(datasource);
+            when(agentJdbcExecutor.executeReadOnlyQuery(any(), eq("SHOW TABLES"), eq(1000), eq(30)))
+                    .thenReturn(new AgentJdbcExecutor.QueryExecutionResult());
+
+            backendAgentQueryService.readQuery(request);
+
+            verify(agentJdbcExecutor).executeReadOnlyQuery(datasource, "SHOW TABLES", 1000, 30);
+        } finally {
+            AgentDataScopeContext.clear();
+        }
+    }
+
+    @Test
+    void readQueryRejectsShowReferencingUnauthorizedSchemaWithinActiveDataScope() {
+        // 回退到词法范围校验后，仍必须拦住引用了未授权 schema 的 SHOW 语句。
+        AgentDataScopeContext.setEncodedScope("eyJhbGxvd2VkX3Njb3BlcyI6W3siY2x1c3Rlcl9pZCI6MywiZGF0YWJhc2UiOiJhZHNfdXNlciIsInNvdXJjZV90eXBlIjoiRE9SSVMifV19");
+        try {
+            AgentReadQueryRequest request = new AgentReadQueryRequest();
+            request.setDatabase("ads_user");
+            request.setSql("SHOW COLUMNS FROM ods_user.orders");
+
+            IllegalArgumentException exception = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> backendAgentQueryService.readQuery(request)
+            );
+
+            assertEquals("数据范围限制: SQL 引用了未授权 schema `ods_user`", exception.getMessage());
+        } finally {
+            AgentDataScopeContext.clear();
+        }
+    }
+
+    @Test
     void readQueryClampsLimitAndTimeout() {
         AgentReadQueryRequest request = new AgentReadQueryRequest();
         request.setDatabase("opendataworks");
