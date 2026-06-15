@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -78,7 +79,7 @@ def test_serve_loop_exits_on_idle_timeout(monkeypatch, tmp_path: Path):
     assert exit_code == 0
 
 
-def test_sandbox_task_main_uses_process_cwd_as_prepared_workspace(monkeypatch, tmp_path: Path, capsys):
+def test_sandbox_task_main_uses_process_cwd_as_prepared_workspace(monkeypatch, tmp_path: Path, capsys, caplog):
     captured: dict[str, object] = {}
 
     async def fake_execute(params, *, emit, is_cancel_requested=None, prepared_workspace_dir=None):
@@ -96,6 +97,7 @@ def test_sandbox_task_main_uses_process_cwd_as_prepared_workspace(monkeypatch, t
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sandbox_task_main, "_load_payload", _payload)
     monkeypatch.setattr(sandbox_task_main, "_execute_task_stream_local", fake_execute)
+    caplog.set_level(logging.INFO, logger=sandbox_task_main.__name__)
 
     exit_code = asyncio.run(sandbox_task_main._main())
 
@@ -106,3 +108,7 @@ def test_sandbox_task_main_uses_process_cwd_as_prepared_workspace(monkeypatch, t
     assert lines[0]["type"] == "record"
     assert lines[-1]["type"] == "result"
     assert lines[-1]["result"]["content"] == "sandbox-task-ok"
+    assert "sandbox.task.start task_id=task-1" in caplog.text
+    assert "sandbox.task.result task_id=task-1" in caplog.text
+    assert "task_status=finished" in caplog.text
+    assert "content_len=15" in caplog.text

@@ -68,15 +68,42 @@ class TaskCoordinator:
     async def submit_task(self, task_id: str) -> dict[str, Any] | None:
         task = self.store.get_task(task_id)
         if not task:
+            logger.warning("task.queue.missing task_id=%s", task_id)
             return None
         if str(task.get("task_status") or "") != "waiting":
+            logger.info(
+                "task.queue.skip_status task_id=%s topic_id=%s task_status=%s",
+                task_id,
+                str(task.get("topic_id") or ""),
+                str(task.get("task_status") or ""),
+            )
             return task
         if task_id in self._queued_task_ids or task_id in self._active_tasks:
+            logger.info(
+                "task.queue.skip_duplicate task_id=%s topic_id=%s queued=%s active=%s",
+                task_id,
+                str(task.get("topic_id") or ""),
+                task_id in self._queued_task_ids,
+                task_id in self._active_tasks,
+            )
             return task
         if not await self._acquire_lease(task_id):
+            logger.warning(
+                "task.queue.lease_unavailable task_id=%s topic_id=%s",
+                task_id,
+                str(task.get("topic_id") or ""),
+            )
             return task
         self._queued_task_ids.add(task_id)
         await self._queue.put(task_id)
+        logger.info(
+            "task.queue.enqueued task_id=%s topic_id=%s provider=%s model=%s agent_id=%s",
+            task_id,
+            str(task.get("topic_id") or ""),
+            str(task.get("provider_id") or ""),
+            str(task.get("model") or ""),
+            str(task.get("agent_id") or ""),
+        )
         return self.store.get_task(task_id) or task
 
     async def request_cancel(self, task_id: str) -> None:
@@ -141,16 +168,39 @@ class TaskCoordinator:
             async with self._semaphore:
                 task = self.store.get_task(task_id)
                 if not task:
+                    logger.warning("task.run.skip_missing task_id=%s", task_id)
                     return
                 if str(task.get("task_status") or "") not in {"waiting", "running"}:
+                    logger.info(
+                        "task.run.skip_status task_id=%s topic_id=%s task_status=%s",
+                        task_id,
+                        str(task.get("topic_id") or ""),
+                        str(task.get("task_status") or ""),
+                    )
                     return
                 if lease_lost.is_set():
                     # Lease was lost while queued; let the recovery loop re-pick the
                     # task up instead of running without a valid lease.
+                    logger.warning(
+                        "task.run.skip_lease_lost task_id=%s topic_id=%s",
+                        task_id,
+                        str(task.get("topic_id") or ""),
+                    )
                     return
 
                 topic_id = str(task.get("topic_id") or "")
                 resume_session_id = self.store.get_resumable_conversation_id(topic_id)
+                logger.info(
+                    "task.run.start task_id=%s topic_id=%s provider=%s model=%s agent_id=%s resume_session=%s timeout=%s sql_read_timeout=%s",
+                    task_id,
+                    topic_id,
+                    str(task.get("provider_id") or ""),
+                    str(task.get("model") or ""),
+                    str(task.get("agent_id") or ""),
+                    bool(resume_session_id),
+                    int(task.get("timeout_seconds") or 0),
+                    int(task.get("sql_read_timeout_seconds") or 0),
+                )
                 self.store.mark_task_running(task_id)
                 running.set()
                 self.store.ensure_assistant_message(topic_id=topic_id, task_id=task_id, status="running")
@@ -181,6 +231,17 @@ class TaskCoordinator:
                     ),
                     is_cancel_requested=lambda: self._should_stop_task(task_id, lease_lost),
                 )
+                logger.info(
+                    "task.run.result task_id=%s topic_id=%s task_status=%s error_code=%s content_len=%s session_id_set=%s usage_set=%s",
+                    task_id,
+                    topic_id,
+                    result.task_status,
+                    str((result.error or {}).get("code") or ""),
+                    len(str(result.content or "")),
+                    bool(result.session_id),
+                    bool(result.usage),
+                )
+                attachments = self._collect_generated_files(topic_id, task_id, workspace_before)
                 self.store.update_assistant_message(
                     topic_id=topic_id,
                     task_id=task_id,
@@ -188,11 +249,33 @@ class TaskCoordinator:
                     content=result.content,
                     usage=result.usage,
                     error=result.error,
-                    attachments=self._collect_generated_files(topic_id, task_id, workspace_before),
+                    attachments=attachments,
+                )
+                logger.info(
+                    "task.run.message_updated task_id=%s topic_id=%s status=%s content_len=%s attachments=%s error_code=%s",
+                    task_id,
+                    topic_id,
+                    result.task_status,
+                    len(str(result.content or "")),
+                    len(attachments),
+                    str((result.error or {}).get("code") or ""),
                 )
                 if result.session_id:
                     self.store.update_topic_conversation_id(topic_id, conversation_id=result.session_id)
+                    logger.info(
+                        "task.run.conversation_updated task_id=%s topic_id=%s session_id_set=%s",
+                        task_id,
+                        topic_id,
+                        True,
+                    )
                 self.store.finish_task(task_id=task_id, task_status=result.task_status, error=result.error)
+                logger.info(
+                    "task.run.finished task_id=%s topic_id=%s task_status=%s error_code=%s",
+                    task_id,
+                    topic_id,
+                    result.task_status,
+                    str((result.error or {}).get("code") or ""),
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -207,7 +290,19 @@ class TaskCoordinator:
                     usage=None,
                     error=error,
                 )
+                logger.info(
+                    "task.run.crash_message_updated task_id=%s topic_id=%s error_code=%s",
+                    task_id,
+                    topic_id,
+                    error["code"],
+                )
             self.store.finish_task(task_id=task_id, task_status="error", error=error)
+            logger.info(
+                "task.run.crash_finished task_id=%s topic_id=%s task_status=error error_code=%s",
+                task_id,
+                topic_id,
+                error["code"],
+            )
         finally:
             stop_heartbeat.set()
             heartbeat_task.cancel()
@@ -329,6 +424,12 @@ class TaskCoordinator:
 
     async def _recover_waiting_tasks(self, *, batch_size: int) -> None:
         for task in self.store.list_waiting_tasks(limit=batch_size):
+            logger.info(
+                "task.recovery.waiting_resubmit task_id=%s topic_id=%s updated_at=%s",
+                str(task.get("task_id") or ""),
+                str(task.get("topic_id") or ""),
+                str(task.get("updated_at") or ""),
+            )
             await self.submit_task(str(task.get("task_id") or ""))
 
     async def _recover_expired_tasks(self, *, batch_size: int) -> None:
@@ -338,8 +439,20 @@ class TaskCoordinator:
                 continue
             if await self._lease_exists(task_id):
                 continue
+            logger.warning(
+                "task.recovery.expired_running task_id=%s topic_id=%s heartbeat_at=%s",
+                task_id,
+                str(task.get("topic_id") or ""),
+                str(task.get("heartbeat_at") or ""),
+            )
             replacement = self.store.create_recovery_task(task_id)
             if replacement:
+                logger.info(
+                    "task.recovery.replacement_created old_task_id=%s new_task_id=%s topic_id=%s",
+                    task_id,
+                    str(replacement.get("task_id") or ""),
+                    str(replacement.get("topic_id") or ""),
+                )
                 await self.submit_task(str(replacement.get("task_id") or ""))
 
     async def _schedule_loop(self) -> None:
@@ -367,6 +480,12 @@ class TaskCoordinator:
         schedule_log = None
         queue = None
         try:
+            logger.info(
+                "task.schedule.fire_start schedule_id=%s topic_id=%s message_type=%s",
+                schedule_id,
+                str(schedule.get("topic_id") or ""),
+                str(schedule.get("message_type") or "text"),
+            )
             next_run_at = compute_next_run_at(
                 str(schedule.get("cron_expr") or ""),
                 str(schedule.get("timezone") or "Asia/Shanghai"),
@@ -389,6 +508,13 @@ class TaskCoordinator:
                 queue_id=str(queue.get("queue_id") or ""),
                 fired_at=fired_at,
                 next_run_at=next_run_at,
+            )
+            logger.info(
+                "task.schedule.queue_created schedule_id=%s schedule_log_id=%s queue_id=%s next_run_at=%s",
+                schedule_id,
+                str(schedule_log.get("schedule_log_id") or ""),
+                str(queue.get("queue_id") or ""),
+                next_run_at,
             )
             await submit_message_task(
                 topic_id=str(schedule.get("topic_id") or ""),

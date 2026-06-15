@@ -253,6 +253,17 @@ class SdkResultAccumulator:
         content = self.current_answer_text()
         if self.result_is_error or self.provider_error_message:
             reason = self.preferred_error_message("模型会话异常结束")
+            logger.warning(
+                "task.result.provider_error task_id=%s topic_id=%s provider=%s model=%s error_code=%s subtype=%s content_len=%s provider_error=%s",
+                self.params.task_id,
+                self.params.topic_id,
+                self.provider_id,
+                self.model,
+                self.preferred_error_code(),
+                self.result_subtype,
+                len(content),
+                bool(self.provider_error_message),
+            )
             return TaskExecutionResult(
                 task_status="error",
                 content=reason,
@@ -272,6 +283,16 @@ class SdkResultAccumulator:
                 reason=reason,
             )
             if recovered_content:
+                logger.warning(
+                    "task.result.recovered_subtype task_id=%s topic_id=%s provider=%s model=%s subtype=%s reason=%s content_len=%s",
+                    self.params.task_id,
+                    self.params.topic_id,
+                    self.provider_id,
+                    self.model,
+                    self.result_subtype,
+                    reason,
+                    len(recovered_content),
+                )
                 return TaskExecutionResult(
                     task_status="finished",
                     content=recovered_content,
@@ -280,6 +301,16 @@ class SdkResultAccumulator:
                     model=self.model,
                     session_id=self.session_id,
                 )
+            logger.warning(
+                "task.result.error_subtype task_id=%s topic_id=%s provider=%s model=%s subtype=%s reason=%s content_len=%s",
+                self.params.task_id,
+                self.params.topic_id,
+                self.provider_id,
+                self.model,
+                self.result_subtype,
+                reason,
+                len(content),
+            )
             return TaskExecutionResult(
                 task_status="error",
                 content=content or reason,
@@ -291,6 +322,15 @@ class SdkResultAccumulator:
             )
 
         if self._saw_pseudo_tool_call:
+            logger.warning(
+                "task.result.format_drift task_id=%s topic_id=%s provider=%s model=%s saw_tool_use=%s content_len=%s",
+                self.params.task_id,
+                self.params.topic_id,
+                self.provider_id,
+                self.model,
+                self._saw_tool_use,
+                len(content),
+            )
             return self._build_format_drift_result(content)
 
         # A clean run with no visible answer and no tool call is a thinking-only
@@ -299,8 +339,29 @@ class SdkResultAccumulator:
         # finished behavior: re-running could repeat a write, so only the no-tool
         # case is converted here.
         if not content and not self._saw_tool_use:
+            logger.warning(
+                "task.result.empty_completion task_id=%s topic_id=%s provider=%s model=%s saw_stream_event=%s result_subtype=%s session_id_set=%s",
+                self.params.task_id,
+                self.params.topic_id,
+                self.provider_id,
+                self.model,
+                self._saw_stream_event,
+                self.result_subtype,
+                bool(self.session_id),
+            )
             return self._build_empty_completion_result()
 
+        logger.info(
+            "task.result.finished task_id=%s topic_id=%s provider=%s model=%s content_len=%s saw_tool_use=%s fallback_content=%s session_id_set=%s",
+            self.params.task_id,
+            self.params.topic_id,
+            self.provider_id,
+            self.model,
+            len(content),
+            self._saw_tool_use,
+            not bool(content),
+            bool(self.session_id),
+        )
         return TaskExecutionResult(
             task_status="finished",
             content=content or "已完成。",
@@ -501,6 +562,32 @@ async def _single_user_prompt_stream(prompt: str):
         "type": "user",
         "message": {"role": "user", "content": prompt},
     }
+
+
+def _is_empty_completion_result(result: TaskExecutionResult) -> bool:
+    return (
+        result.task_status == "error"
+        and isinstance(result.error, dict)
+        and str(result.error.get("code") or "") == "empty_completion"
+    )
+
+
+def _empty_completion_recovery_timeout(timeout_seconds: int) -> int:
+    return max(10, min(120, max(10, int(timeout_seconds or 0)) // 2))
+
+
+def _build_empty_completion_recovery_prompt(question: str) -> str:
+    original_question = _clip_text(str(question or "").strip(), 2000)
+    if not original_question:
+        original_question = "见本会话上一轮用户问题。"
+    return (
+        "系统检测到你上一轮已经以 end_turn 结束，但最终只输出了空白文本，"
+        "没有调用工具，也没有给用户可见回答。\n"
+        "请继续完成用户的原始问题。必须输出可见回答；如果需要查询真实数据，"
+        "请继续使用当前已启用的工具。\n"
+        "不要解释本条系统检测信息。\n\n"
+        f"原始用户问题：\n{original_question}"
+    )
 
 
 async def execute_task_stream(
@@ -744,8 +831,6 @@ async def _execute_task_stream_local(
             str(line or "").rstrip(),
         ),
     )
-    if params.resume_session_id:
-        options_kwargs["resume"] = params.resume_session_id
     if permission_mode:
         options_kwargs["permission_mode"] = permission_mode
     if can_use_tool is not None:
@@ -753,8 +838,14 @@ async def _execute_task_stream_local(
     cli_path = resolve_claude_cli_path(cfg)
     if cli_path:
         options_kwargs["cli_path"] = cli_path
-    options = ClaudeAgentOptions(**options_kwargs)
     timeout_seconds = max(10, int(params.timeout_seconds or cfg.agent_timeout_seconds))
+
+    def _make_options(resume_session_id: str | None = None):
+        current_options = dict(options_kwargs)
+        resume_value = str(resume_session_id or "").strip()
+        if resume_value:
+            current_options["resume"] = resume_value
+        return ClaudeAgentOptions(**current_options)
 
     logger.info(
         "task.start task_id=%s topic_id=%s provider=%s model=%s cwd=%s setting_sources=%s allowed_tools=%s mcp_servers=%s max_turns=%s partial=%s base_url=%s env_base_url=%s auth_token_set=%s api_key_set=%s",
@@ -782,75 +873,161 @@ async def _execute_task_stream_local(
             return bool(await result)
         return bool(result)
 
-    try:
-        with anyio.fail_after(timeout_seconds):
-            sdk_prompt = _single_user_prompt_stream(prompt) if can_use_tool is not None else prompt
-            async for msg in claude_query(prompt=sdk_prompt, options=options):
-                if await _cancelled():
-                    error = {"code": "task_cancelled", "message": "任务已取消"}
-                    sdk_writer.append_error(**error)
+    terminal_error_record_written = False
+
+    async def _run_sdk_turn(
+        *,
+        turn_prompt: str,
+        turn_options: Any,
+        turn_timeout_seconds: int,
+        phase: str,
+    ) -> TaskExecutionResult:
+        nonlocal terminal_error_record_written
+        try:
+            with anyio.fail_after(turn_timeout_seconds):
+                sdk_prompt = _single_user_prompt_stream(turn_prompt) if can_use_tool is not None else turn_prompt
+                async for msg in claude_query(prompt=sdk_prompt, options=turn_options):
+                    if await _cancelled():
+                        error = {"code": "task_cancelled", "message": "任务已取消"}
+                        sdk_writer.append_error(**error)
+                        terminal_error_record_written = True
+                        return TaskExecutionResult(
+                            task_status="suspended",
+                            content=accumulator.current_answer_text(),
+                            usage=accumulator.usage or None,
+                            error=error,
+                            provider_id=provider_id,
+                            model=model,
+                            session_id=accumulator.session_id,
+                        )
+                    accumulator.ingest(msg)
+                    sdk_writer.ingest(msg)
+        except Exception as exc:
+            reason = _format_exception_reason(exc)
+            partial = accumulator.current_answer_text()
+            if _is_recoverable_timeout_reason(reason):
+                recovered_content = _recover_partial_content(
+                    question=params.question,
+                    main_text=partial,
+                    blocks={},
+                    reason=reason,
+                )
+                if recovered_content:
+                    sdk_writer.append_done(is_error=False, subtype="recovered_timeout")
+                    logger.warning(
+                        "task.exception.recovered_timeout task_id=%s topic_id=%s provider=%s model=%s phase=%s reason=%s partial_len=%s recovered_len=%s session_id_set=%s",
+                        params.task_id,
+                        params.topic_id,
+                        provider_id,
+                        model,
+                        phase,
+                        reason,
+                        len(partial),
+                        len(recovered_content),
+                        bool(accumulator.session_id),
+                    )
                     return TaskExecutionResult(
-                        task_status="suspended",
-                        content=accumulator.current_answer_text(),
+                        task_status="finished",
+                        content=recovered_content,
                         usage=accumulator.usage or None,
-                        error=error,
                         provider_id=provider_id,
                         model=model,
                         session_id=accumulator.session_id,
                     )
-                accumulator.ingest(msg)
-                sdk_writer.ingest(msg)
-    except Exception as exc:
-        reason = _format_exception_reason(exc)
-        partial = accumulator.current_answer_text()
-        if _is_recoverable_timeout_reason(reason):
-            recovered_content = _recover_partial_content(
-                question=params.question,
-                main_text=partial,
-                blocks={},
-                reason=reason,
+
+            error_message = accumulator.preferred_error_message(reason)
+            error_code = accumulator.preferred_error_code()
+            error = {
+                "code": error_code,
+                "message": error_message,
+                "exception_type": exc.__class__.__name__,
+            }
+            sdk_writer.append_error(**error)
+            terminal_error_record_written = True
+            logger.warning(
+                "task.exception.error_result task_id=%s topic_id=%s provider=%s model=%s phase=%s error_code=%s reason_len=%s partial_len=%s session_id_set=%s exception_type=%s",
+                params.task_id,
+                params.topic_id,
+                provider_id,
+                model,
+                phase,
+                error_code,
+                len(error_message),
+                len(partial),
+                bool(accumulator.session_id),
+                exc.__class__.__name__,
             )
-            if recovered_content:
-                sdk_writer.append_done(is_error=False, subtype="recovered_timeout")
-                return TaskExecutionResult(
-                    task_status="finished",
-                    content=recovered_content,
-                    usage=accumulator.usage or None,
-                    provider_id=provider_id,
-                    model=model,
-                    session_id=accumulator.session_id,
-                )
+            return TaskExecutionResult(
+                task_status="error",
+                content=error_message if error_code != "model_call_failed" else (partial or error_message),
+                usage=accumulator.usage or None,
+                error=error,
+                provider_id=provider_id,
+                model=model,
+                session_id=accumulator.session_id,
+            )
 
-        error_message = accumulator.preferred_error_message(reason)
-        error_code = accumulator.preferred_error_code()
-        error = {
-            "code": error_code,
-            "message": error_message,
-            "exception_type": exc.__class__.__name__,
-        }
-        sdk_writer.append_error(**error)
-        return TaskExecutionResult(
-            task_status="error",
-            content=error_message if error_code != "model_call_failed" else (partial or error_message),
-            usage=accumulator.usage or None,
-            error=error,
-            provider_id=provider_id,
-            model=model,
-            session_id=accumulator.session_id,
-        )
+        return accumulator.build_result()
 
-    result = accumulator.build_result()
-    if result.task_status == "error":
+    result = await _run_sdk_turn(
+        turn_prompt=prompt,
+        turn_options=_make_options(params.resume_session_id),
+        turn_timeout_seconds=timeout_seconds,
+        phase="initial",
+    )
+    if _is_empty_completion_result(result):
+        recovery_session_id = str(result.session_id or accumulator.session_id or params.resume_session_id or "").strip()
+        if recovery_session_id:
+            recovery_timeout = _empty_completion_recovery_timeout(timeout_seconds)
+            logger.warning(
+                "task.empty_completion.recover_start task_id=%s topic_id=%s provider=%s model=%s timeout=%s session_id_set=%s",
+                params.task_id,
+                params.topic_id,
+                provider_id,
+                model,
+                recovery_timeout,
+                bool(recovery_session_id),
+            )
+            result = await _run_sdk_turn(
+                turn_prompt=_build_empty_completion_recovery_prompt(params.question),
+                turn_options=_make_options(recovery_session_id),
+                turn_timeout_seconds=recovery_timeout,
+                phase="empty_completion_recovery",
+            )
+            logger.info(
+                "task.empty_completion.recover_result task_id=%s topic_id=%s provider=%s model=%s task_status=%s error_code=%s content_len=%s session_id_set=%s",
+                params.task_id,
+                params.topic_id,
+                provider_id,
+                model,
+                result.task_status,
+                str((result.error or {}).get("code") or ""),
+                len(str(result.content or "")),
+                bool(result.session_id),
+            )
+        else:
+            logger.warning(
+                "task.empty_completion.recover_skip task_id=%s topic_id=%s provider=%s model=%s reason=no_session",
+                params.task_id,
+                params.topic_id,
+                provider_id,
+                model,
+            )
+
+    if result.task_status == "error" and not terminal_error_record_written:
         sdk_writer.append_error(
             code=str((result.error or {}).get("code") or "model_error"),
             message=str((result.error or {}).get("message") or result.content or "模型会话异常结束"),
             detail=str((result.error or {}).get("detail") or ""),
         )
     logger.info(
-        "task.done task_id=%s task_status=%s provider=%s model=%s",
+        "task.done task_id=%s task_status=%s provider=%s model=%s error_code=%s content_len=%s session_id_set=%s",
         params.task_id,
         result.task_status,
         provider_id,
         model,
+        str((result.error or {}).get("code") or ""),
+        len(str(result.content or "")),
+        bool(result.session_id),
     )
     return result

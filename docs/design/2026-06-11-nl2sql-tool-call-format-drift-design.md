@@ -113,7 +113,7 @@ ARCH_PERF_005）出现「工具/SQL 已经实际执行、却没有可用最终�
 - 「继续就好了」是因为后续走 resume 路径（`resume_session_id`）重发同一会话，模型补出
   上一轮跳过的回答。空回合是模型/代理侧产物，不是后端崩溃。
 
-调整：
+初版调整：
 
 1. `build_result()` 成功分支在返回前新增**单一窄分支**:**可见回答为空且本轮无真实
    `tool_use`（`not content and not self._saw_tool_use`）时 `task_status="error"`**，错误码
@@ -134,12 +134,47 @@ ARCH_PERF_005）出现「工具/SQL 已经实际执行、却没有可用最终�
 （如重复写）的风险，故暂不纳入本次收口。如后续需要，再单独评估更安全的收口方式（例如指向
 工具输出的非重试提示，而非走重试按钮）。
 
+## 2026-06-15 追加迭代：空回答自动恢复一次
+
+后续通过导出的 child 容器挂载目录复盘到更精确证据：
+
+- Claude project JSONL 中，同一 `chatcmpl` 先产生 `thinking`，随后以 `stop_reason=end_turn`
+  结束，最终 `text` 仅为两个换行。
+- Claude CLI telemetry 记录 `tengu_model_whitespace_response`，metadata 标明
+  `length=2`，证明这是模型/CLI 层可识别的 whitespace-only assistant response。
+- 同会话下一轮用户追问时，模型能够意识到上一轮中断并继续回答，说明通过同一 session
+  追加一次恢复提示有实际修复价值。
+
+因此将「直接标错」升级为「先自动恢复一次，失败再标错」：
+
+1. 仍由 `SdkResultAccumulator.build_result()` 识别 `empty_completion`，识别条件不扩大：
+   非错误结束、无可见回答、无真实 `tool_use`、未命中伪工具调用漂移。
+2. `core/task_executor.py` 在把 `empty_completion` 写成终止错误前，若存在可 resume 的
+   `session_id`，自动发起**一次**内部恢复 turn，使用同一 SDK session、同一工具/权限/技能
+   配置，并给模型一条最小诊断提示：
+   「上一轮 `end_turn` 但最终只输出空白、未调用工具、未给用户可见回答；请继续完成原始问题，
+   必须输出可见回答」。
+3. 恢复提示不持久化为平台用户消息，只存在 Claude session JSONL 中；恢复过程产生的 SDK
+   records 仍写入当前 task，使实时流和历史投影可以看到恢复后的 assistant blocks。
+4. 恢复 turn 使用独立短超时，按当前任务超时的一半推导，范围为 `10-120s`，常见 `60s`
+   任务恢复超时为 `30s`，`180s` 为 `90s`，`420s` 为 `120s`。不新增部署配置，避免再引入一层
+   timeout knob。
+5. 若恢复 turn 产生可见回答，则当前任务最终为 `finished`；若仍为空、无 session、取消、
+   或恢复异常，则按既有错误路径返回 `empty_completion` 或具体异常错误。
+
+安全边界：
+
+- 只对**无真实 `tool_use`**的空回答自动恢复，避免重复执行已经发生过的工具调用，尤其是写操作。
+- 恢复最多一次，不做循环或级联 fallback。
+- 只向模型暴露最小诊断事实，不把 runner log、路径、token 状态、工具输出等运行时日志注入模型。
+
 ## 接口与契约变化
 
 - 任务错误码 `tool_call_format_drift`：2026-06-12 起对所有伪工具调用漂移返回
   （首版仅在无可兜底内容时返回）；兜底出的部分文本保留在任务 `content` 中。
 - 任务错误码 `empty_completion`：2026-06-15 起，非错误结束、无可见回答**且无真实
-  `tool_use`**的运行返回（取代原纯思考空回答的 `finished + "已完成。"` 静默兜底）。有真实
+  `tool_use`**的运行不再静默 `finished + "已完成。"`。追加迭代后该错误码只在一次自动
+  resume 恢复仍无法产生可见回答、缺少可 resume session、或恢复被取消/失败时返回。有真实
   `tool_use` 但无文字结论的空回答仍保持 `finished + "已完成。"`，本次不改。
 - 前端共享引擎新增动作 `retryMessage(failedMessage)`。
 - `_recover_partial_content` 复用，不改签名。
@@ -148,8 +183,9 @@ ARCH_PERF_005）出现「工具/SQL 已经实际执行、却没有可用最终�
 
 ## 取舍
 
-- 不采用「自动追加一次 continuation 收口」：需要重跑模型、额外轮次/超时预算，改动更大；
-  本次按用户选择采用更小、单分支的「兜底 + 标错」。
+- 自动追加一次 continuation 收口只用于 `empty_completion`，不用于伪工具调用漂移或有真实
+  `tool_use` 的空回答；这避免重复工具副作用，同时覆盖当前已证实的 whitespace-only
+  assistant response。
 - 不新增全局标签清洗器，也不做「答案是否引用 query_result」的收口门禁——超出本次范围。
 
 ## 范围外

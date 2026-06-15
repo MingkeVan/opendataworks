@@ -17,6 +17,13 @@ logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 logger = logging.getLogger(__name__)
 
 
+def _result_error_code(result: TaskExecutionResult) -> str:
+    error = result.error
+    if isinstance(error, dict):
+        return str(error.get("code") or "")
+    return ""
+
+
 def _load_payload() -> dict[str, Any]:
     raw = str(os.environ.get("DATAAGENT_TASK_PAYLOAD_B64") or "").strip()
     if raw:
@@ -32,6 +39,20 @@ async def _execute_and_emit(params: TaskExecutionInput) -> TaskExecutionResult:
         print(json.dumps({"type": "record", "record": record}, ensure_ascii=False), flush=True)
 
     try:
+        logger.info(
+            "sandbox.task.start task_id=%s topic_id=%s provider_id=%s model=%s "
+            "execution_mode=%s resume_session=%s timeout_seconds=%s "
+            "sql_read_timeout_seconds=%s workspace=%s",
+            params.task_id,
+            params.topic_id,
+            params.provider_id,
+            params.model,
+            params.execution_mode,
+            bool(params.resume_session_id),
+            params.timeout_seconds,
+            params.sql_read_timeout_seconds,
+            Path.cwd(),
+        )
         result = await _execute_task_stream_local(
             params,
             emit=emit,
@@ -48,6 +69,16 @@ async def _execute_and_emit(params: TaskExecutionInput) -> TaskExecutionResult:
             model=params.model,
         )
 
+    logger.info(
+        "sandbox.task.result task_id=%s topic_id=%s task_status=%s error_code=%s "
+        "content_len=%s session_id_set=%s",
+        params.task_id,
+        params.topic_id,
+        result.task_status,
+        _result_error_code(result),
+        len(result.content or ""),
+        bool(result.session_id),
+    )
     print(json.dumps({"type": "result", "result": asdict(result)}, ensure_ascii=False), flush=True)
     return result
 
@@ -100,6 +131,12 @@ async def _serve_loop() -> int:
             logger.warning("sandbox child received non-json payload line; skipping")
             continue
         params = TaskExecutionInput(**payload)
+        logger.info(
+            "sandbox.child.payload_received task_id=%s topic_id=%s execution_mode=%s",
+            params.task_id,
+            params.topic_id,
+            params.execution_mode,
+        )
         await _execute_and_emit(params)
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -10,6 +11,8 @@ from croniter import croniter
 from config import get_settings
 from core.skill_admin_service import resolve_runtime_provider_selection
 from core.topic_task_store import TopicTaskStore, get_topic_task_store
+
+logger = logging.getLogger(__name__)
 
 
 def current_utc_naive() -> datetime:
@@ -109,11 +112,32 @@ async def submit_message_task(
         source_schedule_log_id=source_schedule_log_id,
     )
     task_id = str(task.get("task_id") or "")
+    logger.info(
+        "task.submit.created task_id=%s topic_id=%s agent_id=%s provider=%s model=%s mode=%s prompt_len=%s timeout=%s sql_read_timeout=%s sql_write_timeout=%s",
+        task_id,
+        topic_id,
+        str(task.get("agent_id") or ""),
+        str(runtime_target.get("provider_id") or ""),
+        str(runtime_target.get("model") or ""),
+        str(execution_mode or ""),
+        len(prompt),
+        int(timeouts["timeout_seconds"]),
+        int(timeouts["sql_read_timeout_seconds"]),
+        int(timeouts["sql_write_timeout_seconds"]),
+    )
     user_message = store.append_user_message(topic_id=topic_id, task_id=task_id, content=prompt)
     assistant_message = store.ensure_assistant_message(topic_id=topic_id, task_id=task_id, status="waiting")
     if source_queue_id:
         store.mark_message_queue_submitted(queue_id=source_queue_id, task_id=task_id)
     task = await coordinator.submit_task(task_id) or task
+    logger.info(
+        "task.submit.enqueued task_id=%s topic_id=%s task_status=%s user_message_id=%s assistant_message_id=%s",
+        task_id,
+        topic_id,
+        str(task.get("task_status") or "waiting"),
+        str(user_message.get("message_id") or ""),
+        str(assistant_message.get("message_id") or ""),
+    )
     return {
         "accepted": True,
         "topic_id": topic_id,
