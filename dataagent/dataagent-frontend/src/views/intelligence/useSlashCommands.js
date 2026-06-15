@@ -34,17 +34,18 @@ export function filterCommands(commands, query) {
 }
 
 // Build a skill command from its folder name. The folder name is the canonical
-// identifier the agent and runtime use, so it doubles as both the slash token
-// and the directive subject — no admin-only description lookup required.
+// identifier the agent and runtime use, and is what gets displayed as the skill
+// name. Selecting it autocompletes the command token ("/<skill> ") into the
+// input — the name stays visible — so the user can append their request.
 export function buildSkillCommand(folder) {
   const name = String(folder || '').trim()
   if (!name) return null
   return {
     id: '/' + name,
     type: 'skill',
-    label: name,
-    hint: '调用技能',
-    insertText: `请使用「${name}」技能：`,
+    label: '',
+    hint: '技能',
+    insertText: '/' + name + ' ',
   }
 }
 

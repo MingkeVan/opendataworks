@@ -42,12 +42,12 @@ describe('filterCommands', () => {
 })
 
 describe('buildSkillCommands', () => {
-  it('builds a skill directive command per folder and de-dupes', () => {
+  it('builds a skill command per folder, displays the name, and de-dupes', () => {
     const cmds = buildSkillCommands(['my-skill', 'my-skill', ''])
     expect(cmds).toHaveLength(1)
-    expect(cmds[0]).toMatchObject({ id: '/my-skill', type: 'skill', label: 'my-skill' })
-    expect(cmds[0].insertText).toContain('my-skill')
-    expect(cmds[0].insertText).toContain('技能')
+    expect(cmds[0]).toMatchObject({ id: '/my-skill', type: 'skill' })
+    // Selecting autocompletes the skill name as the command token.
+    expect(cmds[0].insertText).toBe('/my-skill ')
   })
 
   it('ignores blank input', () => {
@@ -66,7 +66,7 @@ describe('useSlashCommands', () => {
 
   const cmds = [
     { id: '/clear', type: 'builtin', label: '清空输入', run: vi.fn() },
-    { id: '/my-skill', type: 'skill', label: 'my-skill', insertText: '请使用「my-skill」技能：' },
+    { id: '/my-skill', type: 'skill', label: '', insertText: '/my-skill ' },
   ]
 
   it('opens and filters from the current input', () => {
@@ -96,12 +96,12 @@ describe('useSlashCommands', () => {
     expect(slash.visible.value).toBe(false)
   })
 
-  it('inserts a directive and focuses for a skill command', () => {
+  it('autocompletes the skill name and focuses for a skill command', () => {
     const { slash, inputText, focusInput } = setup(cmds)
     inputText.value = '/my'
     slash.syncFromInput()
     slash.select(slash.filtered.value[0])
-    expect(inputText.value).toBe('请使用「my-skill」技能：')
+    expect(inputText.value).toBe('/my-skill ')
     expect(focusInput).toHaveBeenCalledOnce()
   })
 
