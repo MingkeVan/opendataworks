@@ -95,10 +95,49 @@ ARCH_PERF_005）出现「工具/SQL 已经实际执行、却没有可用最终�
 范围说明：可发送消息的嵌入式 `WidgetChat.vue` 本次未加重试按钮（其既有错误卡片不变），
 如需可在后续迭代直接复用引擎的 `retryMessage`。
 
+## 2026-06-15 迭代：空回答（无伪标签）同样标错可重试
+
+继漂移收口后，用户复现到另一类同源现象：深度思考结束后对话直接停住，任务落库为
+`task_status=finished`、`error` 为空、`content=已完成。`，前端无报错也无法感知，只能手动
+「继续」才把答案补出来。
+
+复盘确认这是漂移收口的**残留盲区**：
+
+- `SdkResultAccumulator.build_result()` 成功兜底分支 `content or "已完成。"` 把「非错误
+  结束 + 可见回答为空」当作正常完成。`current_answer_text()` 只收集 `text` 块，`thinking`
+  内容本就不进可见答案，因此**纯思考结束、无可见文本、无 `tool_use`、且未命中伪标签**的
+  回合会落进这条静默成功分支。
+- 06-12 迭代只在命中已登记伪标签（`_saw_pseudo_tool_call`）时才标错；本类现象没有可识别
+  的伪标签（模型思考后直接 stop，常见于第三方 `anthropic_compatible` 端点的扩展思考），
+  于是绕过漂移护栏，静默成 `finished + 已完成。`。
+- 「继续就好了」是因为后续走 resume 路径（`resume_session_id`）重发同一会话，模型补出
+  上一轮跳过的回答。空回合是模型/代理侧产物，不是后端崩溃。
+
+调整：
+
+1. `build_result()` 成功分支不再使用 `content or "已完成。"` 兜底。可见回答非空时照常
+   `finished` 返回原文；**可见回答为空时一律 `task_status="error"`**，错误码
+   `empty_completion`，`error.message` 为面向用户的可重试提示。复用既有「`build_result`
+   为 error 时 `sdk_writer.append_error(...)`」通道，使实时流必然带终止 `error` 记录；前端
+   复用 06-12 已有的错误卡片与「重试」按钮（均对任意 `status=error` 生效，**前端无需改动**）。
+2. 漂移收口 `_build_format_drift_result` 与空回答收口 `_build_empty_completion_result`
+   抽取共用私有方法 `_build_incomplete_run_result(content, reason, error_code, message,
+   fallback)`，统一「合成 tool 输出标记 → `_recover_partial_content` 兜底文本 → 组装 `error`
+   结果」，避免重复 guard 分支（遵循「最小兜底、单层」）。空回答若此前有真实 `tool_use`，
+   兜底文本指向「上方思考过程中的工具输出」并保留在 `content` 供历史展示。
+
+取舍：对「有真实 `tool_use` 但无文字结论」的空回答同样标错，与漂移一致——只有 error 路径
+会把终止记录写入实时流，`finished + 兜底文本` 不进实时流会重演静默结束。写流程（data-dev）
+下空回答属模型异常静默而非操作失败，标错 + 用户手动重试比假「已完成。」更安全：现状文案会
+在模型实际异常时谎报完成、掩盖写操作是否真正生效。
+
 ## 接口与契约变化
 
 - 任务错误码 `tool_call_format_drift`：2026-06-12 起对所有伪工具调用漂移返回
   （首版仅在无可兜底内容时返回）；兜底出的部分文本保留在任务 `content` 中。
+- 任务错误码 `empty_completion`：2026-06-15 起，非错误结束但无可见回答的运行返回
+  （取代原 `finished + "已完成。"` 静默兜底）；若此前有真实 `tool_use`，兜底文本指向工具输出
+  并保留在任务 `content` 中。
 - 前端共享引擎新增动作 `retryMessage(failedMessage)`。
 - `_recover_partial_content` 复用，不改签名。
 - 新增内部辅助 `_contains_pseudo_tool_call` / `_strip_pseudo_tool_call_tags`

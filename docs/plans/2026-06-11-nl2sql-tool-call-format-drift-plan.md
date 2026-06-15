@@ -88,7 +88,40 @@ python3 -m pytest tests/test_task_executor.py tests/test_agent_runtime.py -q
 - 漂移为非确定性模型行为，仍以合成流/桩测试为权威覆盖；真实端到端烟测在远程容器
   （无本地 MySQL/Redis/模型凭据）不可执行，按验证规则在交付说明中明确未覆盖层。
 
+## 2026-06-15 迭代任务（空回答无伪标签 → 标错可重试）
+
+### 影响栈
+
+- DataAgent 后端（`dataagent/dataagent-backend`）：成功收口语义、单测。
+- 前端无改动：错误卡片、重试按钮、`topicStatus`、`retryMessage` 已对任意 `status=error`
+  通用，`empty_completion` 直接复用。
+
+### 任务与改动文件
+
+1. `core/task_executor.py`
+   - `build_result()`：删除成功分支 `content or "已完成。"` 静默兜底；可见回答为空时改走
+     `_build_empty_completion_result()` 返回 `error: empty_completion`，非空时 `finished`
+     返回原文。
+   - 抽出共用 `_build_incomplete_run_result(...)`，`_build_format_drift_result` 与
+     `_build_empty_completion_result` 复用（漂移行为不变，仅去重）。
+2. `tests/test_task_executor.py`
+   - 新增两个合成流用例：纯思考空回答 → `error: empty_completion`；空回答但有真实
+     `tool_use` → `error: empty_completion` 且 `content` 指向「工具输出」。
+   - 修正两个 env/mcp 注入用例的桩：`ResultMessage("success", ...)` 补最终 `result` 文本，
+     使其代表真实成功 run（空 `result` 现属 `empty_completion` 错误，而非 `finished`）。
+
+### 验证（2026-06-15）
+
+- 后端：远程容器无 `.venv-py313`，用宿主 Python 3.11.15（满足 >=3.10）补装
+  `pytest/httpx/pymysql/cffi/anyio/pydantic-settings` 后运行
+  `python3 -m pytest tests/test_task_executor.py tests/test_agent_runtime.py -q` →
+  62 passed（60 既有 + 2 新增）。
+- 端到端：空回答为非确定性模型行为，无法稳定触发，合成流契约测试为权威覆盖；真实
+  NL2SQL 烟测在远程容器（无本地 MySQL/Redis/模型凭据）不可执行，按验证规则在此明确未
+  覆盖真实端到端层。
+
 ## 回滚
 
 逐文件回退上述改动即可，无 schema / 部署 / 迁移变更；新增错误码
-`tool_call_format_drift` 仅为新增返回值，回退后不再产生。
+`tool_call_format_drift` 仅为新增返回值，回退后不再产生。2026-06-15 迭代同理：回退
+`core/task_executor.py` 即恢复 `content or "已完成。"`，错误码 `empty_completion` 不再产生。

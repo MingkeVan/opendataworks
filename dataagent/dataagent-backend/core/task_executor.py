@@ -293,46 +293,83 @@ class SdkResultAccumulator:
         if self._saw_pseudo_tool_call:
             return self._build_format_drift_result(content)
 
+        if not content:
+            return self._build_empty_completion_result()
+
         return TaskExecutionResult(
             task_status="finished",
-            content=content or "已完成。",
+            content=content,
             usage=self.usage or None,
+            provider_id=self.provider_id,
+            model=self.model,
+            session_id=self.session_id,
+        )
+
+    def _build_incomplete_run_result(
+        self,
+        *,
+        content: str,
+        reason: str,
+        error_code: str,
+        message: str,
+        fallback: str,
+    ) -> TaskExecutionResult:
+        """Terminate a non-error run that produced no trustworthy final answer.
+
+        Shared closeout for the two ways a clean (success-subtype) run can still
+        dead-end: it leaked pseudo tool-call tags instead of a real call, or it
+        ended with no visible answer at all (typically a thinking-only turn that
+        stopped early). Both must surface as a task error — the live stream only
+        carries the raw blocks, so without a terminal error record the chat UI
+        ends the conversation silently with no way to notice the failure or
+        retry. Salvaged clean text / tool-output note is kept in the content for
+        history; the error itself carries the user-facing retry message.
+        """
+        synthetic_blocks: dict[str, dict[str, Any]] = (
+            {"tool": {"type": "tool_result", "output": "1"}} if self._saw_tool_use else {}
+        )
+        recovered = _recover_partial_content(
+            question=self.params.question,
+            main_text=content,
+            blocks=synthetic_blocks,
+            reason=reason,
+        )
+        return TaskExecutionResult(
+            task_status="error",
+            content=recovered or fallback,
+            usage=self.usage or None,
+            error={"code": error_code, "message": message, "detail": reason},
             provider_id=self.provider_id,
             model=self.model,
             session_id=self.session_id,
         )
 
     def _build_format_drift_result(self, content: str) -> TaskExecutionResult:
-        """Close out a run that leaked pseudo tool-call tags instead of a real call.
+        """Close out a run that leaked pseudo tool-call tags instead of a real call."""
+        return self._build_incomplete_run_result(
+            content=_strip_pseudo_tool_call_tags(content).strip(),
+            reason="模型工具调用格式异常未正常收口",
+            error_code="tool_call_format_drift",
+            message="模型输出了伪工具调用标签，本次回答未正常完成，请重试",
+            fallback="模型本次回答因工具调用格式异常未能正常生成，请重试。",
+        )
 
-        The model turn ended without an SDK error, but it emitted XML-style
-        tool-call markup as text and never produced a trustworthy final answer.
-        A drifted run must always terminate as a task error: the live stream only
-        carries the raw blocks (leaked tags included), so without a terminal
-        error record the chat UI ends the conversation silently with no way to
-        notice the failure or retry. Salvaged clean text is kept in the content
-        for history; the error itself carries the user-facing retry message.
+    def _build_empty_completion_result(self) -> TaskExecutionResult:
+        """Close out a clean run that ended with no visible answer at all.
+
+        The turn ended without an SDK error and without leaking pseudo tool-call
+        tags, yet produced no final text — usually a thinking-only turn that
+        stopped early. This previously fell back to a silent ``finished`` with
+        "已完成。", so the chat ended on an empty answer with no way to retry.
+        Routing it through the shared error closeout makes the existing error
+        card and retry button surface instead.
         """
-        reason = "模型工具调用格式异常未正常收口"
-        cleaned = _strip_pseudo_tool_call_tags(content).strip()
-        synthetic_blocks: dict[str, dict[str, Any]] = (
-            {"tool": {"type": "tool_result", "output": "1"}} if self._saw_tool_use else {}
-        )
-        recovered = _recover_partial_content(
-            question=self.params.question,
-            main_text=cleaned,
-            blocks=synthetic_blocks,
-            reason=reason,
-        )
-        message = "模型输出了伪工具调用标签，本次回答未正常完成，请重试"
-        return TaskExecutionResult(
-            task_status="error",
-            content=recovered or "模型本次回答因工具调用格式异常未能正常生成，请重试。",
-            usage=self.usage or None,
-            error={"code": "tool_call_format_drift", "message": message, "detail": reason},
-            provider_id=self.provider_id,
-            model=self.model,
-            session_id=self.session_id,
+        return self._build_incomplete_run_result(
+            content="",
+            reason="模型本次未产出可见回答",
+            error_code="empty_completion",
+            message="模型本次没有给出回答，请重试",
+            fallback="模型本次没有返回任何回答，请重试。",
         )
 
 
