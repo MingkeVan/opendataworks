@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 
@@ -86,6 +87,48 @@ def test_trend_can_request_line_explicitly():
     assert chart["version"] == 1
     assert chart["chart_type"] == "line"
     assert chart["x_field"] == "stat_day"
+
+
+def test_trend_chart_keeps_all_daily_rows():
+    start = date(2024, 1, 1)
+    rows = [
+        {"stat_day": (start + timedelta(days=offset)).isoformat(), "publish_cnt": offset % 7}
+        for offset in range(366)
+    ]
+    payload = {
+        "kind": "sql_execution",
+        "rows": rows,
+        "has_more": False,
+        "truncated_by_size": False,
+    }
+
+    chart = _run_chart_spec(payload, "--chart-type", "line")
+
+    assert chart["version"] == 1
+    assert chart["chart_type"] == "line"
+    assert len(chart["dataset"]) == 366
+    assert chart["dataset"][0]["stat_day"] == "2024-01-01"
+    assert chart["dataset"][-1]["stat_day"] == "2024-12-31"
+
+
+def test_chart_refuses_incomplete_sql_execution_rows():
+    payload = {
+        "kind": "sql_execution",
+        "rows": [
+            {"stat_day": "2026-01-01", "publish_cnt": 1},
+            {"stat_day": "2026-01-02", "publish_cnt": 2},
+        ],
+        "has_more": True,
+        "truncated_by_size": False,
+    }
+
+    chart = _run_chart_spec(payload, "--chart-type", "line")
+
+    assert chart["kind"] == "chart_spec"
+    assert chart["error"]
+    assert "不完整数据" in chart["error"]
+    assert chart["dataset"] == []
+    assert chart["series"] == []
 
 
 def test_table_can_be_requested_explicitly():

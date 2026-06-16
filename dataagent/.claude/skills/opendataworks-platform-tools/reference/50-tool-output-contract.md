@@ -140,6 +140,8 @@
 - 明细场景且明确要求独立表格时，才输出 `table`
 - 不适合图表时，不输出 `chart_spec`，只保留 `sql_execution`
 - 生成图表时，优先把完整 `sql_execution` JSON 直接作为输入传入；只有 JSON 过长时才落临时文件。
+- `chart_spec.dataset` 必须是传入的完整结果行集，不得抽样或只截取前 N 行；时间序列按完整时间范围渲染，前端可自行做标签抽稀，但不能丢数据点。
+- 如果 `sql_execution` 已经 `has_more=true`、`truncated_by_size=true` 或 `error_code=result_truncated`，不得生成图表；必须先改写 SQL 聚合/过滤到完整有界结果，再重新生成 `chart_spec`。
 - 对比 / 趋势 / 占比场景，必须显式传 `--chart-type`。
 
 ## 前端渲染边界
