@@ -18,6 +18,7 @@ from core.readonly_query_proxy import (
     execute_readonly_query,
 )
 from core.skill_admin_service import current_settings_payload, resolved_chat_settings_payload
+from core.permission_gate import normalize_permission_decision
 from core.task_coordinator import get_task_coordinator
 from core.task_submission_service import compute_next_run_at, current_utc_naive, submit_message_task
 from core.topic_files import TopicFileError, list_files, safe_workspace_file, save_upload
@@ -652,8 +653,10 @@ async def api_submit_permission_decision(task_id: str, payload: PermissionDecisi
             decision=effective,
             note=str(payload.note or ""),
         )
+    # Return the canonical persisted form (allowed/denied) so the immediate
+    # response matches the streamed/reloaded SDK record.
     return PermissionDecisionResponse.model_validate(
-        {"task_id": task_id, "request_id": request_id, "decision": effective}
+        {"task_id": task_id, "request_id": request_id, "decision": normalize_permission_decision(effective)}
     )
 
 

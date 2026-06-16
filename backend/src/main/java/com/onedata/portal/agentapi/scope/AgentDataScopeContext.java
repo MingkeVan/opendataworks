@@ -78,6 +78,17 @@ public final class AgentDataScopeContext {
         }
     }
 
+    /**
+     * Validate a single optional datasource/database name from a write payload.
+     * No-ops when the name is blank or when no scope is active, so callers don't
+     * need to repeat the {@code isActive()}/{@code hasText} guard.
+     */
+    public static void requireDatabaseNameAllowedIfPresent(String database) {
+        if (StringUtils.hasText(database)) {
+            requireDatabaseNameAllowed(database);
+        }
+    }
+
     public static void requireAllowed(Long clusterId, String database) {
         if (!isAllowed(clusterId, database)) {
             throw new IllegalArgumentException("数据范围限制: 未授权访问 database `" + trimToEmpty(database) + "`");

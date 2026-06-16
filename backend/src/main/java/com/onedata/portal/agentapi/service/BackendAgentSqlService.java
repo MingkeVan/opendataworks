@@ -7,7 +7,6 @@ import com.onedata.portal.service.DataQueryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 /**
  * Agent-facing SQL analysis, delegating to {@link DataQueryService#analyzeQuery}.
@@ -21,9 +20,7 @@ public class BackendAgentSqlService implements AgentSqlService {
 
     @Override
     public Object analyze(AgentSqlAnalyzeRequest request) {
-        if (StringUtils.hasText(request.getDatabase())) {
-            AgentDataScopeContext.requireDatabaseNameAllowed(request.getDatabase());
-        }
+        AgentDataScopeContext.requireDatabaseNameAllowedIfPresent(request.getDatabase());
         SqlAnalyzeRequest delegate = new SqlAnalyzeRequest();
         delegate.setSql(request.getSql());
         delegate.setDatabase(request.getDatabase());

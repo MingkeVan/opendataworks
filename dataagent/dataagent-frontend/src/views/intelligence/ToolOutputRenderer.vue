@@ -177,7 +177,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { extractChartSpec, extractTextParts, parseMaybeJson } from './chartSpec'
 import { describeToolAction, formatSkillBootstrapLabel } from './toolPresentation'
-import { copyText } from '@/utils/clipboard'
+import { useCopyFeedback } from '@/utils/useCopyFeedback'
 import ChartSpecView from './ChartSpecView.vue'
 import ResultDataTable from './components/ResultDataTable.vue'
 import SqlCodePanel from './components/SqlCodePanel.vue'
@@ -593,18 +593,10 @@ const exportPreviewColumns = computed(() => {
   return isPlainObject(firstRow) ? Object.keys(firstRow) : []
 })
 
-const copiedBlock = ref('')
-let copiedBlockTimer = 0
+const { copiedKey: copiedBlock, copyWithFeedback } = useCopyFeedback()
 const copyBlock = async (key, text) => {
   try {
-    await copyText(text)
-    copiedBlock.value = key
-    if (copiedBlockTimer && typeof window !== 'undefined') window.clearTimeout(copiedBlockTimer)
-    if (typeof window !== 'undefined') {
-      copiedBlockTimer = window.setTimeout(() => {
-        copiedBlock.value = ''
-      }, 1500)
-    }
+    await copyWithFeedback(text, key)
   } catch (_error) {
     // 剪贴板不可用时静默失败
   }
@@ -728,9 +720,6 @@ watch(
 onBeforeUnmount(() => {
   if (statusTimer && typeof window !== 'undefined') {
     window.clearInterval(statusTimer)
-  }
-  if (copiedBlockTimer && typeof window !== 'undefined') {
-    window.clearTimeout(copiedBlockTimer)
   }
 })
 </script>

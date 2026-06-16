@@ -79,6 +79,12 @@ def _permission_behavior(result):
     return getattr(result, "behavior", None)
 
 
+def _permission_updated_input(result):
+    if isinstance(result, dict):
+        return result.get("updatedInput")
+    return getattr(result, "updated_input", None)
+
+
 def test_can_use_tool_allows_read_tools_without_confirmation(monkeypatch):
     cb, writer, store = _build_gate(monkeypatch, "deny")
     result = asyncio.run(cb("mcp__portal__portal_search_tables", {}))
@@ -104,6 +110,43 @@ def test_can_use_tool_confirms_write_tool_denied(monkeypatch):
     assert writer.requests[0]["risk_level"] == "critical"
     assert writer.decisions[0]["decision"] == "denied"
     assert store.statuses == ["waiting_permission", "running"]
+
+
+def test_can_use_tool_strips_card_annotations_from_forwarded_input(monkeypatch):
+    cb, writer, store = _build_gate(monkeypatch, "allow")
+    result = asyncio.run(
+        cb(
+            "mcp__portal__portal_publish_workflow",
+            {
+                "workflow_id": 7,
+                "operation": "deploy",
+                "preview_token": "tok",
+                "title": "发布工作流 #7",
+                "summary": "新增一张表",
+            },
+        )
+    )
+    assert _permission_behavior(result) == "allow"
+    # Card-annotation keys must not leak into the forwarded MCP call (extra="forbid").
+    assert _permission_updated_input(result) == {
+        "workflow_id": 7,
+        "operation": "deploy",
+        "preview_token": "tok",
+    }
+    # The card still receives the annotations for display.
+    assert writer.requests[0]["title"] == "发布工作流 #7"
+    assert writer.requests[0]["summary"] == "新增一张表"
+
+
+def test_can_use_tool_auto_allow_strips_card_annotations(monkeypatch):
+    cb, writer, store = _build_gate(monkeypatch, "allow", mode="acceptEdits")
+    # Draft write tool auto-allows under acceptEdits but still must not forward annotations.
+    result = asyncio.run(
+        cb("mcp__portal__portal_create_task", {"task": {"name": "t"}, "title": "建表", "summary": "x"})
+    )
+    assert _permission_behavior(result) == "allow"
+    assert writer.requests == []
+    assert _permission_updated_input(result) == {"task": {"name": "t"}}
 
 
 def test_can_use_tool_timeout_denies(monkeypatch):

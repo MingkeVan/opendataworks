@@ -839,7 +839,8 @@ def test_permission_decision_endpoint(monkeypatch):
         # Valid allow.
         ok = client.post(base, json={"request_id": "req-1", "decision": "allow"})
         assert ok.status_code == 200
-        assert ok.json() == {"task_id": task_id, "request_id": "req-1", "decision": "allow"}
+        # Response uses the canonical persisted form, matching the SDK record below.
+        assert ok.json() == {"task_id": task_id, "request_id": "req-1", "decision": "allowed"}
         decisions = [
             rec for rec in store.sdk_records[task_id]
             if rec["record_type"] == "permission_decision"
@@ -849,7 +850,7 @@ def test_permission_decision_endpoint(monkeypatch):
 
         # Idempotent: a later deny for the same request_id returns the first decision.
         again = client.post(base, json={"request_id": "req-1", "decision": "deny"})
-        assert again.json()["decision"] == "allow"
+        assert again.json()["decision"] == "allowed"
         decisions = [
             rec for rec in store.sdk_records[task_id]
             if rec["record_type"] == "permission_decision"

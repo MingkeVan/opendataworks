@@ -76,12 +76,8 @@ public class BackendAgentTaskService implements AgentTaskService {
     }
 
     private void validateDataScope(DataTask task) {
-        if (!AgentDataScopeContext.isActive() || task == null) {
-            return;
-        }
-        String datasourceName = task.getDatasourceName();
-        if (StringUtils.hasText(datasourceName)) {
-            AgentDataScopeContext.requireDatabaseNameAllowed(datasourceName);
+        if (task != null) {
+            AgentDataScopeContext.requireDatabaseNameAllowedIfPresent(task.getDatasourceName());
         }
     }
 }

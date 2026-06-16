@@ -13,6 +13,8 @@ Tool names are matched against both the bare MCP tool name (e.g.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from core.agent_profile_service import normalize_permission_mode
 
 # High-risk tools always require confirmation in default/acceptEdits and are
@@ -38,6 +40,40 @@ DRAFT_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
 )
 
 WRITE_TOOL_NAMES: frozenset[str] = HIGH_RISK_TOOL_NAMES | DRAFT_WRITE_TOOL_NAMES
+
+# Confirmation-card annotation keys the skill attaches to a write tool call so the
+# generic gate can render a meaningful card (title/diff summary). They are gate
+# metadata, not part of any downstream tool schema — the portal MCP write tools
+# use ``extra="forbid"`` and would reject the call after approval if these leaked
+# through. The gate consumes them for the card and strips them before forwarding.
+CARD_ANNOTATION_KEYS: frozenset[str] = frozenset({"title", "summary"})
+
+
+def strip_card_annotations(tool_input: dict[str, Any]) -> dict[str, Any]:
+    """Drop confirmation-card annotation keys from a tool input before it is
+    forwarded to the underlying tool."""
+    return {k: v for k, v in tool_input.items() if k not in CARD_ANNOTATION_KEYS}
+
+
+# Canonical permission-decision values persisted in SDK records and surfaced to
+# clients. The request side accepts the bare ``allow``/``deny`` verbs; both the
+# stored record and the API response use these normalized forms so the immediate
+# response and the later streamed/reloaded record never diverge.
+_PERMISSION_DECISION_NORMALIZATION = {
+    "allow": "allowed",
+    "allowed": "allowed",
+    "deny": "denied",
+    "denied": "denied",
+    "timeout": "timeout",
+}
+
+
+def normalize_permission_decision(decision: Any) -> str:
+    """Coerce a permission decision to its canonical persisted form.
+
+    ``allow`` -> ``allowed``, ``deny`` -> ``denied``, ``timeout`` stays; anything
+    unknown collapses to ``denied`` (fail-closed)."""
+    return _PERMISSION_DECISION_NORMALIZATION.get(str(decision or "").strip().lower(), "denied")
 
 
 def permission_decision_redis_key(task_id: str, request_id: str) -> str:
