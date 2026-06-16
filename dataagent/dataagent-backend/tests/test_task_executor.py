@@ -1341,84 +1341,27 @@ def _patch_default_provider(monkeypatch):
     )
 
 
-def test_execute_task_stream_marks_pseudo_tool_call_drift_as_error_with_partial_text(monkeypatch, tmp_path: Path):
-    # The model leaks pseudo tool-call tags in a thinking block instead of making
-    # a real tool call, then ends the turn. The run must terminate as a task
-    # error so the stream carries a terminal error record the chat UI can render
-    # (error card + retry); the salvaged partial text stays in the content.
+def test_execute_task_stream_keeps_leaked_pseudo_tag_in_thinking_as_finish(monkeypatch, tmp_path: Path):
+    # Pseudo tool-call format-drift detection was removed: a leaked tool-call tag
+    # in a thinking block is no longer reclassified as an error. With a real
+    # visible answer present, the run finishes normally and the thinking-only
+    # tags never reach the visible content.
     _install_fake_sdk(
         monkeypatch,
         [
             StreamEvent({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
-            StreamEvent({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "正在检查 issue_status"}}),
+            StreamEvent({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "最近 30 天发布 174 次。"}}),
             StreamEvent({"type": "content_block_stop", "index": 0}),
-            StreamEvent(
-                {
-                    "type": "content_block_start",
-                    "index": 1,
-                    "content_block": {"type": "tool_use", "id": "tool-bash-1", "name": "Bash", "input": {"command": "python run_sql.py"}},
-                }
-            ),
-            StreamEvent({"type": "content_block_stop", "index": 1}),
-            UserMessage([{ "type": "tool_result", "tool_use_id": "tool-bash-1", "name": "Bash", "content": "174"}]),
-            StreamEvent({"type": "content_block_start", "index": 2, "content_block": {"type": "thinking", "thinking": ""}}),
-            StreamEvent(
-                {
-                    "type": "content_block_delta",
-                    "index": 2,
-                    "delta": {"type": "thinking_delta", "thinking": "Now let me also get some breakdown </parameter></function></tool_call>"},
-                }
-            ),
-            StreamEvent({"type": "content_block_stop", "index": 2}),
-            ResultMessage("success", session_id="sdk-drift-1"),
-        ],
-    )
-    _patch_default_provider(monkeypatch)
-    _patch_skill_runtime(monkeypatch, tmp_path)
-
-    async def _run():
-        return await task_executor.execute_task_stream(_build_input(), emit=lambda record: None)
-
-    result = asyncio.run(_run())
-
-    assert result.task_status == "error"
-    assert result.error is not None
-    assert result.error["code"] == "tool_call_format_drift"
-    assert "请重试" in result.error["message"]
-    assert "正在检查 issue_status" in result.content
-    assert "工具调用格式异常" in result.content
-    assert result.content != "已完成。"
-    # Leaked pseudo tags must not survive into the visible answer.
-    assert "</tool_call>" not in result.content
-    assert "</parameter>" not in result.content
-
-
-def test_execute_task_stream_marks_pseudo_tool_call_drift_as_error_with_tool_output_only(monkeypatch, tmp_path: Path):
-    # Drift with no usable visible text but a real tool_use earlier: the run
-    # still terminates as a task error, while the content points at the gathered
-    # tool output instead of "已完成。".
-    _install_fake_sdk(
-        monkeypatch,
-        [
-            StreamEvent(
-                {
-                    "type": "content_block_start",
-                    "index": 0,
-                    "content_block": {"type": "tool_use", "id": "tool-bash-1", "name": "Bash", "input": {"command": "python run_sql.py"}},
-                }
-            ),
-            StreamEvent({"type": "content_block_stop", "index": 0}),
-            UserMessage([{ "type": "tool_result", "tool_use_id": "tool-bash-1", "name": "Bash", "content": "2026-06-09"}]),
             StreamEvent({"type": "content_block_start", "index": 1, "content_block": {"type": "thinking", "thinking": ""}}),
             StreamEvent(
                 {
                     "type": "content_block_delta",
                     "index": 1,
-                    "delta": {"type": "thinking_delta", "thinking": "Now I need to verify the enum </parameter></function></tool_call>"},
+                    "delta": {"type": "thinking_delta", "thinking": "Now let me also get some breakdown </parameter></function></tool_call>"},
                 }
             ),
             StreamEvent({"type": "content_block_stop", "index": 1}),
-            ResultMessage("success", session_id="sdk-drift-2"),
+            ResultMessage("success", session_id="sdk-no-drift-1"),
         ],
     )
     _patch_default_provider(monkeypatch)
@@ -1429,43 +1372,11 @@ def test_execute_task_stream_marks_pseudo_tool_call_drift_as_error_with_tool_out
 
     result = asyncio.run(_run())
 
-    assert result.task_status == "error"
-    assert result.error is not None
-    assert result.error["code"] == "tool_call_format_drift"
-    assert "工具调用格式异常" in result.content
-    assert "工具输出" in result.content
-    assert result.content != "已完成。"
-
-
-def test_execute_task_stream_marks_pseudo_tool_call_drift_as_error_when_nothing_usable(monkeypatch, tmp_path: Path):
-    # Drift with no visible text and no tool output: there is nothing to salvage,
-    # so the run is reported as a distinct error instead of a silent finish.
-    _install_fake_sdk(
-        monkeypatch,
-        [
-            StreamEvent({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
-            StreamEvent(
-                {
-                    "type": "content_block_delta",
-                    "index": 0,
-                    "delta": {"type": "thinking_delta", "thinking": "Now I have all the data I need... </parameter></function></tool_call>"},
-                }
-            ),
-            StreamEvent({"type": "content_block_stop", "index": 0}),
-            ResultMessage("success", session_id="sdk-drift-3"),
-        ],
-    )
-    _patch_default_provider(monkeypatch)
-    _patch_skill_runtime(monkeypatch, tmp_path)
-
-    async def _run():
-        return await task_executor.execute_task_stream(_build_input(), emit=lambda record: None)
-
-    result = asyncio.run(_run())
-
-    assert result.task_status == "error"
-    assert result.error is not None
-    assert result.error["code"] == "tool_call_format_drift"
+    assert result.task_status == "finished"
+    assert result.error is None
+    assert "最近 30 天发布 174 次。" in result.content
+    assert "</tool_call>" not in result.content
+    assert "</parameter>" not in result.content
 
 
 def test_execute_task_stream_recovers_thinking_only_empty_finish_once(monkeypatch, tmp_path: Path):

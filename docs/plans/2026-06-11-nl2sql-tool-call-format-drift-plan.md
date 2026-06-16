@@ -1,5 +1,8 @@
 # NL2SQL 伪工具调用格式漂移收口 — 执行计划
 
+> **2026-06-16 更新：本计划交付的 format-drift 检测与改判已整体移除，**
+> 详见 `docs/plans/2026-06-16-nl2sql-runtime-simplification-plan.md`。本文保留作历史记录。
+
 配套设计：`docs/design/2026-06-11-nl2sql-tool-call-format-drift-design.md`
 
 ## 影响栈

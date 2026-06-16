@@ -214,10 +214,10 @@ describe('useNl2SqlChat engine', () => {
     api.taskApi.streamSdkEvents.mockImplementation(async (_taskId, opts) => {
       streamCall += 1
       if (streamCall === 1) {
-        // First run drifts: the backend appends a terminal error record
-        // (tool_call_format_drift) after the SDK's clean done record.
+        // First run fails: the backend appends a terminal error record
+        // (e.g. empty_completion) after the SDK's clean done record.
         opts.onRecord({ record_type: 'done', data: { is_error: false } })
-        opts.onRecord({ record_type: 'error', data: { message: '模型输出了伪工具调用标签，本次回答未正常完成，请重试' } })
+        opts.onRecord({ record_type: 'error', data: { message: '模型本次没有给出回答，请重试' } })
       } else {
         opts.onRecord({ record_type: 'done', data: {} })
       }
