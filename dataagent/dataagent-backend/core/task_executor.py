@@ -464,6 +464,8 @@ def _permission_result_types():
 
         return PermissionResultAllow, PermissionResultDeny
     except Exception:
+        # SDK 不可用时回退到 dict 权限协议；属可预期的可选依赖缺失
+        logger.debug("permission result types unavailable, falling back to dict protocol", exc_info=True)
         return None, None
 
 
@@ -473,10 +475,12 @@ def _allow_result(tool_input: dict[str, Any]):
         try:
             return Allow(updated_input=tool_input)
         except Exception:
+            # SDK 结果类签名不兼容时降级，记录以便排查 schema 漂移
+            logger.debug("PermissionResultAllow(updated_input=...) failed, retrying without input", exc_info=True)
             try:
                 return Allow()
             except Exception:
-                pass
+                logger.warning("PermissionResultAllow construction failed, using dict allow fallback", exc_info=True)
     return {"behavior": "allow", "updatedInput": tool_input}
 
 
@@ -486,7 +490,8 @@ def _deny_result(message: str):
         try:
             return Deny(message=message)
         except Exception:
-            pass
+            # SDK 结果类签名不兼容时降级到 dict deny，保持拒绝语义不变
+            logger.warning("PermissionResultDeny construction failed, using dict deny fallback", exc_info=True)
     return {"behavior": "deny", "message": message}
 
 
