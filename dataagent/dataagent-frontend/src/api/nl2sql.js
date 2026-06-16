@@ -204,6 +204,12 @@ export function createNl2SqlApiClient(options = {}) {
         note,
       })
     },
+    submitQuestionAnswer(taskId, requestId, answers = []) {
+      return runtimeRequest.post(`/tasks/${taskId}/question-answer`, {
+        request_id: requestId,
+        answers,
+      })
+    },
     async streamSdkEvents(taskId, options = {}) {
       const { onRecord, signal, afterId = 0 } = options
       const response = await fetch(
@@ -314,6 +320,9 @@ export function createNl2SqlApiClient(options = {}) {
     },
     getAgent(agentId) {
       return dataagentRequest.get(`/agents/${encodeURIComponent(agentId)}`)
+    },
+    getAgentSlashCommands(agentId) {
+      return dataagentRequest.get(`/agents/${encodeURIComponent(agentId)}/slash-commands`)
     },
     createAgent(data) {
       return dataagentRequest.post('/agents', data)

@@ -28,6 +28,8 @@ from models.schemas import (
     CreateTaskRequest,
     PermissionDecisionRequest,
     PermissionDecisionResponse,
+    QuestionAnswerRequest,
+    QuestionAnswerResponse,
     CreateTopicRequest,
     DeliverMessageRequest,
     ExecuteQueryRequest,
@@ -655,6 +657,39 @@ async def api_submit_permission_decision(task_id: str, payload: PermissionDecisi
     # response matches the streamed/reloaded SDK record.
     return PermissionDecisionResponse.model_validate(
         {"task_id": task_id, "request_id": request_id, "decision": normalize_permission_decision(effective)}
+    )
+
+
+@task_router.post("/{task_id}/question-answer", response_model=QuestionAnswerResponse)
+async def api_submit_question_answer(task_id: str, payload: QuestionAnswerRequest, request: Request):
+    store = _get_store()
+    context = _request_context(request)
+    task = store.get_task(task_id, context=context)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    request_id = str(payload.request_id or "").strip()
+    if not request_id:
+        raise HTTPException(status_code=400, detail="request_id is required")
+    if str(task.get("task_status") or "") != "waiting_input":
+        raise HTTPException(status_code=409, detail="task is not awaiting a user answer")
+    pending_request_id = store.get_pending_question_request_id(task_id)
+    if pending_request_id and pending_request_id != request_id:
+        raise HTTPException(status_code=409, detail="request_id does not match the current pending question")
+    coordinator = get_task_coordinator()
+    if not pending_request_id:
+        existing = await coordinator.read_question_answer(task_id, request_id)
+        if not existing:
+            raise HTTPException(status_code=409, detail="task has no pending question")
+    answers = [a for a in (payload.answers or []) if isinstance(a, dict)]
+    accepted = await coordinator.submit_question_answer(task_id, request_id, answers)
+    if pending_request_id:
+        store.append_question_answer_record(
+            task_id=task_id,
+            request_id=request_id,
+            answers=answers,
+        )
+    return QuestionAnswerResponse.model_validate(
+        {"task_id": task_id, "request_id": request_id, "accepted": bool(accepted)}
     )
 
 

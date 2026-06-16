@@ -238,6 +238,54 @@ class SdkBlockWriter:
             },
         )
 
+    def append_question_request(
+        self,
+        *,
+        request_id: str,
+        questions: Any,
+    ) -> None:
+        """Record an ``ask_user_question`` request block.
+
+        Skill-agnostic: ``questions`` is the opaque tool input rendered verbatim
+        as a selection card by the chat UI and widget. Projected into a
+        ``question_request`` block.
+        """
+        self._store.append_sdk_record(
+            task_id=self._task_id,
+            topic_id=self._topic_id,
+            turn_index=self._turn_index,
+            record_type="question_request",
+            event_type=None,
+            data={
+                "request_id": str(request_id),
+                "questions": questions if isinstance(questions, list) else [],
+            },
+        )
+
+    def append_question_answer(
+        self,
+        *,
+        request_id: str,
+        answers: Any,
+        answered_at: str = "",
+    ) -> None:
+        """Record the user's answer for a prior ``ask_user_question`` request.
+
+        Merges onto the matching ``question_request`` block during projection.
+        """
+        self._store.append_sdk_record(
+            task_id=self._task_id,
+            topic_id=self._topic_id,
+            turn_index=self._turn_index,
+            record_type="question_answer",
+            event_type=None,
+            data={
+                "request_id": str(request_id),
+                "answers": answers if isinstance(answers, list) else [],
+                "answered_at": str(answered_at or ""),
+            },
+        )
+
     def append_done(self, *, is_error: bool, subtype: str = "") -> None:
         self._append_terminal_record(
             record_type="done",

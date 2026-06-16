@@ -98,6 +98,13 @@ def resolve_columns(payload: dict[str, Any], rows: list[dict[str, Any]]) -> list
     return []
 
 
+def input_result_is_incomplete(payload: dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    error_code = str(payload.get("error_code") or "").strip()
+    return bool(payload.get("has_more")) or bool(payload.get("truncated_by_size")) or error_code == "result_truncated"
+
+
 def base_chart_payload(chart_type: str, title: str, description: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "kind": "chart_spec",
@@ -105,7 +112,7 @@ def base_chart_payload(chart_type: str, title: str, description: str, rows: list
         "chart_type": chart_type,
         "title": title,
         "description": description,
-        "dataset": rows[:20],
+        "dataset": rows,
         "error": None,
     }
 
@@ -141,6 +148,22 @@ def main():
             raise ValueError("rows 不能为空")
 
         preferred_chart_type = str(args.chart_type or "").strip().lower()
+        title = str(args.title or "").strip() or payload.get("summary") or "查询结果图表"
+        if input_result_is_incomplete(payload):
+            print_json(
+                error_payload(
+                    "chart_spec",
+                    "SQL 结果已被截断或命中行数上限，不能用不完整数据生成图表。请先缩小查询范围、按时间或类别聚合，或使用导出结果离线处理。",
+                    version=1,
+                    chart_type="",
+                    title=title,
+                    description="未生成图表。",
+                    dataset=[],
+                    series=[],
+                )
+            )
+            return
+
         chart_type, x_field, series_fields = choose_chart(
             normalized_rows,
             preferred_chart_type=preferred_chart_type,
@@ -148,7 +171,6 @@ def main():
             value_field=str(args.value_field or "").strip(),
         )
 
-        title = str(args.title or "").strip() or payload.get("summary") or "查询结果图表"
         if chart_type == "table" or preferred_chart_type == "table":
             columns = resolve_columns(payload, normalized_rows)
             if not columns:

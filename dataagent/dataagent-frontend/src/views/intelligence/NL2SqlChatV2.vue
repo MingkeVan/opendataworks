@@ -86,6 +86,8 @@
               <el-radio-group v-model="filterStatus" size="small" class="v2-filter-radios">
                 <el-radio label="">全部</el-radio>
                 <el-radio label="running">进行中</el-radio>
+                <el-radio label="awaiting">待输入</el-radio>
+                <el-radio label="awaiting_permission">待确认</el-radio>
                 <el-radio label="error">失败</el-radio>
                 <el-radio label="suspended">已取消</el-radio>
                 <el-radio label="finished">完成</el-radio>
@@ -123,7 +125,9 @@
               </svg>
             </span>
             <span v-else class="v2-session-meta">
-              <span v-if="topicBadgeKind(topic) === 'error'" class="v2-session-dot is-error" title="执行失败" />
+              <span v-if="topicBadgeKind(topic) === 'awaiting'" class="v2-session-await" title="等待你的选择">待输入</span>
+              <span v-else-if="topicBadgeKind(topic) === 'awaiting_permission'" class="v2-session-await is-permission" title="等待你的确认">待确认</span>
+              <span v-else-if="topicBadgeKind(topic) === 'error'" class="v2-session-dot is-error" title="执行失败" />
               <span v-else-if="topicBadgeKind(topic) === 'suspended'" class="v2-session-dot is-suspended" title="已取消" />
               {{ formatTime(topic.updated_at || topic.created_at) }}
             </span>
@@ -212,7 +216,7 @@
                       </div>
 
                       <!-- Tool use block (chart-producing tools render their chart directly below the block) -->
-                      <div v-else-if="block.type === 'tool_use'" class="v2-tool-row">
+                      <div v-else-if="block.type === 'tool_use' && !isAskUserQuestionBlock(block)" class="v2-tool-row">
                         <ToolOutputRenderer :tool="blockToToolProp(block)" :file-url-resolver="resolveWorkspaceFileHref" />
                       </div>
 
@@ -222,6 +226,14 @@
                         :block="block"
                         :disabled="msg._v2state.status !== 'streaming'"
                         @decide="(payload) => handlePermissionDecision(msg, payload)"
+                      />
+
+                      <!-- AskUserQuestion selection card -->
+                      <QuestionSelectionCard
+                        v-else-if="block.type === 'question_request'"
+                        :block="block"
+                        :disabled="msg._v2state.status !== 'streaming'"
+                        @answer="(payload) => handleQuestionAnswer(msg, payload)"
                       />
 
                       <!-- Text block (inline chart_spec rendered as a real chart) -->
@@ -333,6 +345,13 @@
 
           <!-- Input bar -->
           <div class="v2-composer" :class="{ 'is-focused': inputText }">
+            <SlashCommandMenu
+              :visible="slash.visible.value"
+              :commands="slash.filtered.value"
+              :active-index="slash.activeIndex.value"
+              @select="slash.select"
+              @hover="slash.setActive"
+            />
             <input
               ref="fileInputRef"
               type="file"
@@ -344,11 +363,11 @@
               ref="textareaRef"
               v-model="inputText"
               class="v2-textarea"
-              placeholder="输入数据问题…"
+              placeholder="输入数据问题…（输入 / 调用命令）"
               :disabled="!availableModels.length"
               rows="1"
-              @keydown.enter="onEnterKey"
-              @input="autoResize"
+              @keydown="onComposerKeydown"
+              @input="onComposerInput"
             />
             <div class="v2-composer-inline">
               <span class="v2-composer-hint">Enter 发送，Shift + Enter 换行</span>
@@ -522,12 +541,15 @@ import { dataagentApi } from '@/api/dataagent'
 import ToolOutputRenderer from './ToolOutputRenderer.vue'
 import ChartSpecView from './ChartSpecView.vue'
 import PermissionConfirmationCard from './PermissionConfirmationCard.vue'
+import QuestionSelectionCard from './QuestionSelectionCard.vue'
 import { blockToToolProp } from './v2StreamParser'
 import { splitChartSpecText, stripChartSpecsFromText } from './chartSpec'
 import { topicStatusKind } from './topicStatus'
 import { hydrateMessageFromApi, isPlainEnterSubmit, renderMarkdown as renderMarkdownBase } from './chatMessage'
 import { useNl2SqlChat } from './useNl2SqlChat'
 import { useChatMessageActions } from './useChatMessageActions'
+import SlashCommandMenu from './SlashCommandMenu.vue'
+import { useSlashCommands, buildCommands } from './useSlashCommands'
 
 const route = useRoute()
 const router = useRouter()
@@ -560,7 +582,7 @@ const chat = useNl2SqlChat({
   getAgentId: () => agentSelectValue.value || '',
   getPermissionMode: () => permissionMode.value || '',
   topicTitleLength: 60,
-  afterRun: () => loadTopics(),
+  afterRun: () => { loadTopics(); void loadSlashCommands() },
   onTopicEnsured: (id) => { if (!isWidgetMode.value) replaceRouteTopic(id) },
   notifyError: (message) => ElMessage.error('请求失败: ' + message),
 })
@@ -606,7 +628,14 @@ const targetMessageId = ref('')
 // ── Computed ─────────────────────────────────────────────────────────────────
 // Status filter values map to topicStatusKind(): '' (finished/none) is the
 // terminal-success bucket, the rest mirror the badge kinds.
-const STATUS_FILTER_KIND = { running: 'running', error: 'error', suspended: 'suspended', finished: '' }
+const STATUS_FILTER_KIND = {
+  running: 'running',
+  awaiting: 'awaiting',
+  awaiting_permission: 'awaiting_permission',
+  error: 'error',
+  suspended: 'suspended',
+  finished: '',
+}
 
 const filteredTopics = computed(() => {
   const kw = searchKeyword.value.trim().toLowerCase()
@@ -704,6 +733,42 @@ function autoResize() {
   if (!el) return
   el.style.height = 'auto'
   el.style.height = Math.min(el.scrollHeight, 160) + 'px'
+}
+
+// ── Slash commands ─────────────────────────────────────────────────────────
+// Typing "/" opens a menu of the agent's authoritative SDK slash commands
+// (built-ins + skills + custom commands), fetched from the backend. Selecting
+// one autocompletes the "/<name> " token for the user to send.
+const slashCommandNames = ref([])
+const slashCommands = computed(() => buildCommands(slashCommandNames.value))
+const slash = useSlashCommands({
+  getCommands: () => slashCommands.value,
+  inputText,
+  focusInput: () => nextTick(() => { textareaRef.value?.focus(); autoResize() }),
+})
+
+async function loadSlashCommands() {
+  const id = String(agentSelectValue.value || '').trim()
+  if (!id) {
+    slashCommandNames.value = []
+    return
+  }
+  try {
+    const data = await agentApi.getAgentSlashCommands(id)
+    slashCommandNames.value = Array.isArray(data?.slash_commands) ? data.slash_commands : []
+  } catch {
+    slashCommandNames.value = []
+  }
+}
+
+function onComposerInput() {
+  slash.syncFromInput()
+  autoResize()
+}
+
+function onComposerKeydown(event) {
+  if (slash.handleKeydown(event)) return
+  if (event.key === 'Enter' || event.keyCode === 13) onEnterKey(event)
 }
 
 // ── Scroll ─────────────────────────────────────────────────────────────────
@@ -1038,6 +1103,7 @@ async function handleSelectTopic(topicId) {
 
 function handleAgentChange(agentId) {
   agentSelectValue.value = agentId
+  void loadSlashCommands()
   const value = String(agentId || '').trim()
   const previousValue = String(route.query.agent_id || '').trim()
   if (previousValue === value) return
@@ -1071,6 +1137,7 @@ function handleModelCommand(command) {
 // refresh (reloadTopicsAfterRun), and error toasts (notifyError) are wired
 // through the engine options at setup.
 async function handleSend() {
+  slash.close()
   if (isWidgetMode.value) return
   if (isStreaming.value || isUploading.value) return
   const ready = pendingAttachments.value.filter((a) => a.rel_path && !a.uploading)
@@ -1107,6 +1174,32 @@ async function handlePermissionDecision(msg, payload) {
     )
     if (block && block.decision === 'pending') {
       block.summary = (block.summary || '') + '\n[提交失败，请重试]'
+      block._submitFailed = Date.now()
+    }
+  }
+}
+
+// The built-in AskUserQuestion tool_use streams as its own block, but it is
+// rendered as the QuestionSelectionCard (driven by the question_request record),
+// so the raw tool block is suppressed to avoid a duplicate.
+function isAskUserQuestionBlock(block) {
+  return String(block?.name || '') === 'AskUserQuestion'
+}
+
+// AskUserQuestion: post the user's selection for a run paused in waiting_input.
+// The streamed question_answer record reconciles the card into its answered state.
+async function handleQuestionAnswer(msg, payload) {
+  const taskId = String(msg?.task_id || activeTaskId.value || '').trim()
+  const requestId = String(payload?.requestId || '').trim()
+  const answers = Array.isArray(payload?.answers) ? payload.answers : []
+  if (!taskId || !requestId) return
+  try {
+    await api.taskApi.submitQuestionAnswer(taskId, requestId, answers)
+  } catch (err) {
+    const block = (msg?._v2state?.blocks || []).find(
+      (b) => b.type === 'question_request' && b.requestId === requestId,
+    )
+    if (block && !block.answered) {
       block._submitFailed = Date.now()
     }
   }
@@ -1318,6 +1411,7 @@ watch(inputText, (value) => {
 onMounted(async () => {
   await Promise.all([loadSettings(), loadAgents()])
   await loadTopics()
+  void loadSlashCommands()
 })
 
 watch(() => route.query.agent_id, async () => {
@@ -1684,6 +1778,18 @@ onBeforeUnmount(() => {
 .v2-session-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 .v2-session-dot.is-error { background: #F56C6C; }
 .v2-session-dot.is-suspended { background: #A0AABF; }
+.v2-session-await {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 16px;
+  color: #2f7bf0;
+  background: #e6f0ff;
+  vertical-align: middle;
+}
+.v2-session-await.is-permission { color: #b9770e; background: #fdf1dd; }
 
 .v2-session-loading {
   display: inline-flex;
@@ -2140,6 +2246,7 @@ onBeforeUnmount(() => {
 }
 
 .v2-composer {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;

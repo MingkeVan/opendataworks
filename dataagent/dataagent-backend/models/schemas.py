@@ -82,6 +82,17 @@ class PermissionDecisionResponse(BaseModel):
     decision: str
 
 
+class QuestionAnswerRequest(BaseModel):
+    request_id: str
+    answers: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class QuestionAnswerResponse(BaseModel):
+    task_id: str
+    request_id: str
+    accepted: bool
+
+
 class CreateTaskRequest(BaseModel):
     topic_id: str
     message_type: str
@@ -459,6 +470,14 @@ class AgentProfile(BaseModel):
     is_builtin: bool = False
     created_at: str = ""
     updated_at: str = ""
+
+
+class AgentSlashCommandsResponse(BaseModel):
+    # Authoritative slash-command names for an agent. ``source`` is "sdk" when the
+    # list came from a real run's system/init message, or "fallback" when derived
+    # from the agent's enabled skill folders before any run reported it.
+    slash_commands: List[str] = Field(default_factory=list)
+    source: str = ""
 
 
 class WorkspaceFile(BaseModel):

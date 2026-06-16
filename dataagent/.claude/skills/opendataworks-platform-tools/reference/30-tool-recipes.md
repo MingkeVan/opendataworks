@@ -107,8 +107,9 @@
   - `--data '<JSON rows>'`：直接传 JSON 数组，适用于已有行数据。
   - `--input '<sql_execution JSON>'`：传 `run_sql.py` 的完整输出 JSON（含 `rows` 字段）。
 - 可选参数：`--title "标题"`, `--x-field <维度字段>`, `--y-field <度量字段>`。
+- 数据完整性：`chart_spec.dataset` 必须保留传入的完整行集，脚本不抽样、不截前 N 行；若 `sql_execution` 已经 `has_more=true`、`truncated_by_size=true` 或 `error_code=result_truncated`，脚本会拒绝生成图表，必须先改写 SQL 做更精确的时间/类别聚合或缩小范围。
 - 收口规则：成功返回一次 `chart_spec` 后结束本轮，不重复生成。
-- 命令模板：`"$DATAAGENT_PYTHON_BIN" "${DATAAGENT_PLATFORM_SKILL_ROOT}/scripts/build_chart_spec.py" --chart-type <bar|line|pie|table> --data '<JSON rows>' [--title "<标题>"] [--x-field <维度字段>] [--y-field <度量字段>]`
+- 命令模板：`"$DATAAGENT_PYTHON_BIN" "${DATAAGENT_PLATFORM_SKILL_ROOT}/scripts/build_chart_spec.py" --chart-type <bar|line|pie|table> --input '<sql_execution JSON>' [--title "<标题>"] [--x-field <维度字段>] [--y-field <度量字段>]`
 - 注意：`build_chart_spec.py` 不是独立注册的工具名，必须通过 Bash 工具执行上述命令。
 
 ## format_answer.py

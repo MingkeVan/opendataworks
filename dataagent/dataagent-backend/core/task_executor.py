@@ -16,6 +16,12 @@ import httpx
 
 from config import get_settings
 from core.agent_profile_service import DEFAULT_AGENT_ID, normalize_agent_snapshot, normalize_permission_mode
+from core.ask_user_question import (
+    ASK_USER_QUESTION_TOOL_NAME,
+    is_ask_user_question_tool,
+    to_sdk_answer_input,
+    wait_for_answer,
+)
 from core.permission_gate import (
     is_high_risk_tool,
     is_write_tool,
@@ -53,6 +59,7 @@ from core.agent_runtime import (
 )
 from core.claude_cli import resolve_claude_cli_path
 from core.sdk_block_writer import SdkBlockWriter
+from core.slash_command_cache import record_agent_slash_commands
 from core.topic_task_store import get_topic_task_store
 from core.topic_workspace import prepare_topic_workspace
 
@@ -159,6 +166,14 @@ class SdkResultAccumulator:
         if session_id:
             self.session_id = session_id
 
+        if msg_type == "SystemMessage":
+            # The init message carries the session's authoritative slash-command
+            # list (built-ins + skills + custom commands). Cache it per agent so
+            # the chat input's slash menu can surface the real commands.
+            if str(getattr(msg, "subtype", "") or "") == "init":
+                self._record_slash_commands(msg)
+            return
+
         if msg_type == "ResultMessage":
             self.result_subtype = str(getattr(msg, "subtype", "") or "")
             self.result_is_error = bool(getattr(msg, "is_error", False))
@@ -191,6 +206,18 @@ class SdkResultAccumulator:
             if self._saw_stream_event:
                 return
             self._ingest_assistant_content(content)
+
+    def _record_slash_commands(self, msg: Any) -> None:
+        data = getattr(msg, "data", None)
+        commands = data.get("slash_commands") if isinstance(data, dict) else None
+        if commands is None:
+            commands = getattr(msg, "slash_commands", None)
+        if not isinstance(commands, list):
+            return
+        snapshot = getattr(self.params, "agent_snapshot", None)
+        agent_id = str(snapshot.get("agent_id") or "").strip() if isinstance(snapshot, dict) else ""
+        if agent_id:
+            record_agent_slash_commands(agent_id, commands)
 
     def _ingest_assistant_content(self, content: Any) -> None:
         if isinstance(content, str):
@@ -484,6 +511,60 @@ def _deny_result(message: str):
     return {"behavior": "deny", "message": message}
 
 
+async def _handle_ask_user_question(
+    *,
+    tool_input: dict[str, Any],
+    context: Any,
+    sdk_writer: SdkBlockWriter,
+    store: Any,
+    task_id: str,
+    wait_seconds: int,
+    is_cancel_requested: Callable[[], Awaitable[bool] | bool] | None,
+):
+    """Resolve a built-in ``AskUserQuestion`` call against the user.
+
+    Records a question_request block (rendered as a selection card), parks the
+    task in ``waiting_input``, waits on Redis for the user's selection, records
+    question_answer, then returns ``PermissionResultAllow`` with the answer mapped
+    onto the tool's ``updated_input`` so the run resumes with the selection. With
+    no answer (timeout/cancel) the tool's own "did not answer" result is used.
+    """
+    questions = tool_input.get("questions")
+    if not isinstance(questions, list) or not questions:
+        return _allow_result(tool_input)
+
+    request_id = str(getattr(context, "tool_use_id", "") or "").strip() or uuid.uuid4().hex
+    try:
+        sdk_writer.append_question_request(request_id=request_id, questions=questions)
+        store.set_task_status(task_id, "waiting_input")
+    except Exception:
+        logger.exception("ask_user: failed to record question request task_id=%s", task_id)
+        return _allow_result(tool_input)
+
+    answers = await wait_for_answer(
+        task_id,
+        request_id,
+        timeout_seconds=wait_seconds,
+        is_cancel_requested=is_cancel_requested,
+    )
+    answers = answers or []
+    try:
+        append_answer = getattr(store, "append_question_answer_record", None)
+        if callable(append_answer):
+            append_answer(task_id=task_id, request_id=request_id, answers=answers)
+        else:
+            sdk_writer.append_question_answer(
+                request_id=request_id,
+                answers=answers,
+                answered_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            )
+        store.set_task_status(task_id, "running")
+    except Exception:
+        logger.exception("ask_user: failed to record question answer task_id=%s", task_id)
+
+    return _allow_result(to_sdk_answer_input(questions, answers))
+
+
 def _build_can_use_tool_callback(
     *,
     sdk_writer: SdkBlockWriter,
@@ -495,7 +576,9 @@ def _build_can_use_tool_callback(
 ):
     """Build the SDK can_use_tool callback enforcing session permission policy.
 
-    Read/analysis tools auto-allow. Write/high-risk tools (per session mode) pause
+    Read/analysis tools auto-allow. ``AskUserQuestion`` pauses the run to collect
+    a multiple-choice answer (recorded as a question_request/answer block and
+    returned via updated_input). Write/high-risk tools (per session mode) pause
     the run: a permission_request block is recorded, the task moves to
     waiting_permission, and the run waits for the user's decision (Redis) before
     recording the decision and resuming. Plan-denied tools are rejected outright.
@@ -503,6 +586,16 @@ def _build_can_use_tool_callback(
 
     async def can_use_tool(tool_name: str, tool_input: dict[str, Any] | None = None, context: Any = None):
         tool_input = dict(tool_input or {})
+        if is_ask_user_question_tool(tool_name):
+            return await _handle_ask_user_question(
+                tool_input=tool_input,
+                context=context,
+                sdk_writer=sdk_writer,
+                store=store,
+                task_id=task_id,
+                wait_seconds=wait_seconds,
+                is_cancel_requested=is_cancel_requested,
+            )
         # For write tools the skill may attach card-annotation keys (title/summary)
         # that no downstream tool schema accepts; the card reads them from the raw
         # input, but the forwarded input must drop them or the MCP call is rejected
@@ -804,14 +897,27 @@ async def _execute_task_stream_local(
         (agent_snapshot or {}).get("allowed_tools") if agent_snapshot else None,
         permission_mode=logical_permission_mode,
     )
-    # Gating fires only when there are guardable write tools (portal MCP) and the
-    # session mode asks for confirmation. When gating, the SDK must run in
-    # "default" mode so can_use_tool is consulted; otherwise preserve the
-    # established bypassPermissions behavior (allowed_tools is the boundary).
+    # Let the agent surface multiple-choice questions via the built-in
+    # AskUserQuestion tool. It always resolves through can_use_tool, so advertise
+    # it and ensure the callback is installed below.
+    ask_user_enabled = bool(getattr(cfg, "dataagent_ask_user_question_enabled", True))
+    if ask_user_enabled and ASK_USER_QUESTION_TOOL_NAME not in allowed_tools:
+        allowed_tools = [*allowed_tools, ASK_USER_QUESTION_TOOL_NAME]
+
+    # Gating fires when there are guardable write tools (portal MCP) and the
+    # session mode asks for confirmation; only then does the SDK run in "default"
+    # mode. The SDK permission mode is otherwise preserved as-is.
     needs_gating = bool(mcp_servers) and logical_permission_mode in {"default", "acceptEdits"}
-    can_use_tool = None
     if needs_gating:
         permission_mode = "default"
+    else:
+        permission_mode = _resolve_sdk_permission_mode(requested_permission_mode)
+    # The callback is installed for gating and/or AskUserQuestion. The built-in
+    # AskUserQuestion always resolves through can_use_tool (it requires user
+    # interaction), so installing the callback is sufficient regardless of mode;
+    # non-write tools are auto-allowed, keeping allowed_tools the capability boundary.
+    can_use_tool = None
+    if needs_gating or ask_user_enabled:
         can_use_tool = _build_can_use_tool_callback(
             sdk_writer=sdk_writer,
             store=get_topic_task_store(),
@@ -820,8 +926,7 @@ async def _execute_task_stream_local(
             wait_seconds=int(getattr(cfg, "task_permission_wait_seconds", 600) or 600),
             is_cancel_requested=is_cancel_requested,
         )
-    else:
-        permission_mode = _resolve_sdk_permission_mode(requested_permission_mode)
+
     options_kwargs = dict(
         system_prompt=system_prompt,
         model=model,
