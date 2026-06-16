@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import socket
@@ -11,6 +12,7 @@ from typing import Any
 import redis.asyncio as redis
 
 from config import get_settings
+from core.ask_user_question import ask_question_answer_redis_key
 from core.permission_gate import permission_decision_redis_key
 from core.task_submission_service import compute_next_run_at, current_utc_naive, submit_message_task
 from core.task_executor import TaskExecutionInput, execute_task_stream
@@ -137,6 +139,27 @@ class TaskCoordinator:
         if self._redis is None:
             return None
         value = await self._redis.get(self._permission_key(task_id, request_id))
+        return str(value) if value is not None else None
+
+    async def submit_question_answer(self, task_id: str, request_id: str, answers: list[dict[str, Any]]) -> bool:
+        """Publish the user's answer for a waiting ``ask_user_question`` run.
+
+        Idempotent: the first answer for a ``request_id`` wins. Mirrors the
+        permission-decision flow so the executor's tool handler observes it via
+        Redis. Returns whether a value is present after the call.
+        """
+        if self._redis is None:
+            return False
+        key = self._answer_key(task_id, request_id)
+        ttl = max(60, int(self.settings.task_permission_wait_seconds or 600) + 60)
+        payload = json.dumps({"answers": answers}, ensure_ascii=False)
+        await self._redis.set(key, payload, ex=ttl, nx=True)
+        return bool(await self._redis.exists(key))
+
+    async def read_question_answer(self, task_id: str, request_id: str) -> str | None:
+        if self._redis is None:
+            return None
+        value = await self._redis.get(self._answer_key(task_id, request_id))
         return str(value) if value is not None else None
 
     async def _queue_loop(self) -> None:
@@ -619,6 +642,9 @@ class TaskCoordinator:
 
     def _permission_key(self, task_id: str, request_id: str) -> str:
         return permission_decision_redis_key(task_id, request_id)
+
+    def _answer_key(self, task_id: str, request_id: str) -> str:
+        return ask_question_answer_redis_key(task_id, request_id)
 
     def _recovery_key(self) -> str:
         return "da:task:recovery:lock"

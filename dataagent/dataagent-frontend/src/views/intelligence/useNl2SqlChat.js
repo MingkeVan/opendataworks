@@ -12,7 +12,7 @@
 // and write the exposed `topics` ref directly.
 
 import { computed, reactive, ref, triggerRef, watch } from 'vue'
-import { topicStatusKind } from './topicStatus'
+import { topicStatusKind, isActiveStatusKind } from './topicStatus'
 import {
   compareTopicsByRecency,
   extractErrorText,
@@ -113,7 +113,9 @@ export function useNl2SqlChat(options) {
     (topic?.topic_id === topicId.value && Boolean(activeTaskId.value)) ||
     topicStatusKind(topic?.current_task_status) === 'running'
   const topicBadgeKind = (topic) => topicStatusKind(topic?.current_task_status)
-  const isTopicTaskActive = (topic) => topicStatusKind(topic?.current_task_status) === 'running'
+  // A run parked at waiting_input ('awaiting') is still live, so it counts as
+  // active — re-selecting the topic must resume its stream to deliver the answer.
+  const isTopicTaskActive = (topic) => isActiveStatusKind(topicStatusKind(topic?.current_task_status))
 
   // Reflect a task's terminal/active status onto its topic so the badge stays
   // accurate without reloading the list.

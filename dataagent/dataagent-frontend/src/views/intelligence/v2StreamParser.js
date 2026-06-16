@@ -47,6 +47,10 @@ export function processV2Record(state, record) {
     _handlePermissionRequest(state, record.data || {})
   } else if (record.record_type === 'permission_decision') {
     _handlePermissionDecision(state, record.data || {})
+  } else if (record.record_type === 'question_request') {
+    _handleQuestionRequest(state, record.data || {})
+  } else if (record.record_type === 'question_answer') {
+    _handleQuestionAnswer(state, record.data || {})
   } else if (record.record_type === 'done') {
     state.status = (record.data || {}).is_error ? 'error' : 'done'
   } else if (record.record_type === 'error') {
@@ -84,6 +88,33 @@ function _handlePermissionDecision(state, data) {
   block.decision = data.decision || 'pending'
   block.note = data.note || ''
   block.decided_at = data.decided_at || ''
+}
+
+function _handleQuestionRequest(state, data) {
+  const currentTurn = state.turns.at(-1)
+  const block = {
+    turnIndex: currentTurn ? currentTurn.turnIndex : 0,
+    blockIndex: currentTurn ? currentTurn.blocks.length : state.blocks.length,
+    type: 'question_request',
+    content: '',
+    status: 'done',
+    requestId: data.request_id || '',
+    questions: Array.isArray(data.questions) ? data.questions : [],
+    answers: [],
+    answered: false,
+    answered_at: '',
+  }
+  if (currentTurn) currentTurn.blocks.push(block)
+  state.blocks.push(block)
+}
+
+function _handleQuestionAnswer(state, data) {
+  const requestId = data.request_id || ''
+  const block = state.blocks.find((b) => b.type === 'question_request' && b.requestId === requestId)
+  if (!block) return
+  block.answers = Array.isArray(data.answers) ? data.answers : []
+  block.answered = true
+  block.answered_at = data.answered_at || ''
 }
 
 function _handleStreamEvent(state, evt) {

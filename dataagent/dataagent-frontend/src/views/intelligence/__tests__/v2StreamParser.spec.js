@@ -183,6 +183,48 @@ describe('processV2Record — terminal records', () => {
   })
 })
 
+describe('processV2Record — ask_user_question', () => {
+  const questions = [
+    { question: '按哪个维度统计?', header: '维度', multiSelect: false, options: [{ label: '按天' }, { label: '按周' }] },
+  ]
+
+  it('question_request appends a question_request block shared with the turn', () => {
+    const state = feed(createChatState(), [
+      stream({ type: 'message_start' }),
+      { record_type: 'question_request', data: { request_id: 'q1', questions } },
+    ])
+    const block = state.blocks.find((b) => b.type === 'question_request')
+    expect(block).toBeTruthy()
+    expect(block.requestId).toBe('q1')
+    expect(block.questions).toEqual(questions)
+    expect(block.answered).toBe(false)
+    expect(state.turns.at(-1).blocks).toContain(block)
+  })
+
+  it('question_answer reconciles the matching block into its answered state', () => {
+    const answers = [{ header: '维度', question: '按哪个维度统计?', selected: ['按天'], other: '' }]
+    const state = feed(createChatState(), [
+      stream({ type: 'message_start' }),
+      { record_type: 'question_request', data: { request_id: 'q1', questions } },
+      { record_type: 'question_answer', data: { request_id: 'q1', answers, answered_at: '2026-06-15T00:00:00Z' } },
+    ])
+    const block = state.blocks.find((b) => b.type === 'question_request')
+    expect(block.answered).toBe(true)
+    expect(block.answers).toEqual(answers)
+    expect(block.answered_at).toBe('2026-06-15T00:00:00Z')
+  })
+
+  it('question_answer for an unknown request_id is ignored', () => {
+    const state = feed(createChatState(), [
+      stream({ type: 'message_start' }),
+      { record_type: 'question_request', data: { request_id: 'q1', questions } },
+      { record_type: 'question_answer', data: { request_id: 'other', answers: [{}] } },
+    ])
+    const block = state.blocks.find((b) => b.type === 'question_request')
+    expect(block.answered).toBe(false)
+  })
+})
+
 describe('blockToToolProp', () => {
   const baseBlock = (over) => ({
     type: 'tool_use',

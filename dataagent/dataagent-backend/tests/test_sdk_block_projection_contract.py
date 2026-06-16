@@ -51,6 +51,16 @@ def _to_canonical(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "decision": block.get("decision"),
                 }
             )
+        elif btype == "question_request":
+            canonical.append(
+                {
+                    "kind": "question_request",
+                    "request_id": block.get("request_id"),
+                    "questions": block.get("questions") or [],
+                    "answered": bool(block.get("answered")),
+                    "answers": block.get("answers") or [],
+                }
+            )
         else:
             kind = "text" if btype == "main_text" else str(btype or "")
             text = str(block.get("text") or "")

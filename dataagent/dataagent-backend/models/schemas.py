@@ -82,6 +82,17 @@ class PermissionDecisionResponse(BaseModel):
     decision: str
 
 
+class QuestionAnswerRequest(BaseModel):
+    request_id: str
+    answers: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class QuestionAnswerResponse(BaseModel):
+    task_id: str
+    request_id: str
+    accepted: bool
+
+
 class CreateTaskRequest(BaseModel):
     topic_id: str
     message_type: str

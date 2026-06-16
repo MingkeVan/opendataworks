@@ -918,6 +918,155 @@
           "decision": "timeout"
         }
       ]
+    },
+    {
+      "name": "ask_user question pending",
+      "records": [
+        {
+          "seq_id": 1,
+          "record_type": "stream",
+          "data": {
+            "type": "message_start"
+          }
+        },
+        {
+          "seq_id": 2,
+          "record_type": "question_request",
+          "data": {
+            "request_id": "q-1",
+            "questions": [
+              {
+                "question": "你想按哪个维度统计?",
+                "header": "维度",
+                "multiSelect": false,
+                "options": [
+                  {
+                    "label": "按天",
+                    "description": "每天一个数据点"
+                  },
+                  {
+                    "label": "按周",
+                    "description": "每周一个数据点"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "expected": [
+        {
+          "kind": "question_request",
+          "request_id": "q-1",
+          "questions": [
+            {
+              "question": "你想按哪个维度统计?",
+              "header": "维度",
+              "multiSelect": false,
+              "options": [
+                {
+                  "label": "按天",
+                  "description": "每天一个数据点"
+                },
+                {
+                  "label": "按周",
+                  "description": "每周一个数据点"
+                }
+              ]
+            }
+          ],
+          "answered": false,
+          "answers": []
+        }
+      ]
+    },
+    {
+      "name": "ask_user question answered",
+      "records": [
+        {
+          "seq_id": 1,
+          "record_type": "stream",
+          "data": {
+            "type": "message_start"
+          }
+        },
+        {
+          "seq_id": 2,
+          "record_type": "question_request",
+          "data": {
+            "request_id": "q-1",
+            "questions": [
+              {
+                "question": "你想按哪个维度统计?",
+                "header": "维度",
+                "multiSelect": false,
+                "options": [
+                  {
+                    "label": "按天",
+                    "description": "每天一个数据点"
+                  },
+                  {
+                    "label": "按周",
+                    "description": "每周一个数据点"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "seq_id": 3,
+          "record_type": "question_answer",
+          "data": {
+            "request_id": "q-1",
+            "answers": [
+              {
+                "header": "维度",
+                "question": "你想按哪个维度统计?",
+                "selected": [
+                  "按天"
+                ],
+                "other": ""
+              }
+            ],
+            "answered_at": "2026-06-15T00:00:00"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "kind": "question_request",
+          "request_id": "q-1",
+          "questions": [
+            {
+              "question": "你想按哪个维度统计?",
+              "header": "维度",
+              "multiSelect": false,
+              "options": [
+                {
+                  "label": "按天",
+                  "description": "每天一个数据点"
+                },
+                {
+                  "label": "按周",
+                  "description": "每周一个数据点"
+                }
+              ]
+            }
+          ],
+          "answered": true,
+          "answers": [
+            {
+              "header": "维度",
+              "question": "你想按哪个维度统计?",
+              "selected": [
+                "按天"
+              ],
+              "other": ""
+            }
+          ]
+        }
+      ]
     }
   ]
 }
