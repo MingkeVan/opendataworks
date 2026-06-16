@@ -7,6 +7,11 @@ describe('topicStatusKind', () => {
     expect(topicStatusKind('running')).toBe('running')
   })
 
+  it('treats parked-but-active waiting_* statuses as in-progress', () => {
+    expect(topicStatusKind('waiting_permission')).toBe('running')
+    expect(topicStatusKind('waiting_input')).toBe('running')
+  })
+
   it('maps terminal failure/cancel to their own kinds', () => {
     expect(topicStatusKind('error')).toBe('error')
     expect(topicStatusKind('suspended')).toBe('suspended')
