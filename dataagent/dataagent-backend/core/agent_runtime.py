@@ -353,6 +353,15 @@ def _build_runtime_env(
     params: Any | None = None,
     skill_runtime: dict[str, Any] | None = None,
 ) -> dict[str, str]:
+    """Build the environment dict handed to the skill-driven agent subprocess.
+
+    Inherits the current process env, overlays ``provider_env`` (provider/model
+    credentials and base URL), and exposes the skill-agnostic invocation contract
+    (``DATAAGENT_PYTHON_BIN``/``DATAAGENT_SKILL_ROOT``) plus per-run knobs derived
+    from ``cfg`` and ``params`` (query limit, SQL read timeout, enabled skills,
+    data scope). No direct DB connection settings are exposed here — those stay at
+    the deploy/skill layer. See AGENTS.md "Intelligent Query module rules".
+    """
     python_bin = Path(sys.executable).absolute()
     python_dir = str(python_bin.parent)
     skills_root = Path(str((skill_runtime or {}).get("primary_root") or resolve_builtin_skill_root_dir())).resolve()

@@ -41,7 +41,8 @@ mybatis-plus:
   type-aliases-package: com.onedata.portal.entity
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 走 SLF4J 而非直接打印到 stdout，便于按日志级别统一管理（生产可关闭 SQL 日志）
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
   global-config:
     db-config:
       id-type: auto

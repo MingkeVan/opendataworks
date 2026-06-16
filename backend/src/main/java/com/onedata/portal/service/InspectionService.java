@@ -901,36 +901,6 @@ public class InspectionService {
                 inspectionIssueMapper.insert(issue);
                 issues.add(issue);
             }
-
-            // 实际的历史对比逻辑(需要 TableStatisticsHistoryMapper)
-            // Long historicalRowCount = getHistoricalRowCount(table.getId(), compareTime);
-            // if (historicalRowCount != null && historicalRowCount > minRowThreshold) {
-            //     double changeRatio = (double) currentRowCount / historicalRowCount;
-            //
-            //     if (changeRatio >= increaseThreshold) {
-            //         // 数据量暴增
-            //         InspectionIssue issue = createIssue(recordId, rule, table);
-            //         issue.setSeverity(calculateVolumeSeverity(changeRatio, true));
-            //         issue.setIssueDescription(String.format("数据量异常增长 %.1f 倍", changeRatio));
-            //         issue.setCurrentValue(String.format("%,d 行 (增长 %.1f%%)",
-            //             currentRowCount, (changeRatio - 1) * 100));
-            //         issue.setExpectedValue(String.format("历史数据量: %,d 行", historicalRowCount));
-            //         issue.setSuggestion(generateVolumeSuggestion(changeRatio, true));
-            //         inspectionIssueMapper.insert(issue);
-            //         issues.add(issue);
-            //     } else if (changeRatio <= decreaseThreshold) {
-            //         // 数据量暴降
-            //         InspectionIssue issue = createIssue(recordId, rule, table);
-            //         issue.setSeverity(calculateVolumeSeverity(changeRatio, false));
-            //         issue.setIssueDescription(String.format("数据量异常下降 %.1f%%", (1 - changeRatio) * 100));
-            //         issue.setCurrentValue(String.format("%,d 行 (下降 %.1f%%)",
-            //             currentRowCount, (1 - changeRatio) * 100));
-            //         issue.setExpectedValue(String.format("历史数据量: %,d 行", historicalRowCount));
-            //         issue.setSuggestion(generateVolumeSuggestion(changeRatio, false));
-            //         inspectionIssueMapper.insert(issue);
-            //         issues.add(issue);
-            //     }
-            // }
         }
 
         return issues;
