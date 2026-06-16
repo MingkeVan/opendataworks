@@ -579,7 +579,9 @@ public class WorkflowDefinitionLifecycleService {
         }
         try {
             return Long.parseLong(value.trim());
-        } catch (NumberFormatException ignored) {
+        } catch (NumberFormatException e) {
+            // 非数字文本，返回 null
+            log.trace("解析 Long 失败，返回 null: {}", value, e);
             return null;
         }
     }
@@ -932,8 +934,9 @@ public class WorkflowDefinitionLifecycleService {
         for (DateTimeFormatter formatter : DATETIME_FORMATS) {
             try {
                 return LocalDateTime.parse(candidate, formatter);
-            } catch (DateTimeParseException ignored) {
-                // try next format
+            } catch (DateTimeParseException e) {
+                // 当前格式不匹配，尝试下一个格式
+                log.trace("按格式 {} 解析时间失败，尝试下一个", formatter, e);
             }
         }
         return null;

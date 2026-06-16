@@ -8,9 +8,10 @@ spring:
     name: opendataworks
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/opendataworks?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: opendataworks
-    password: opendataworks123
+    # 数据库连接通过环境变量外部化，默认值仅用于本地开发，与部署 .env 的 SPRING_DATASOURCE_* 约定一致
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/opendataworks?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${SPRING_DATASOURCE_USERNAME:opendataworks}
+    password: ${SPRING_DATASOURCE_PASSWORD:opendataworks123}
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: GMT+8

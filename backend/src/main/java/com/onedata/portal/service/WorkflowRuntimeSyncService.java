@@ -1233,7 +1233,9 @@ public class WorkflowRuntimeSyncService {
             try {
                 String candidate = raw.trim().replace("Z", "");
                 return LocalDateTime.parse(candidate, formatter);
-            } catch (DateTimeParseException ignored) {
+            } catch (DateTimeParseException e) {
+                // 当前格式不匹配，尝试下一个格式
+                log.trace("按格式 {} 解析时间失败，尝试下一个", formatter, e);
             }
         }
         return null;

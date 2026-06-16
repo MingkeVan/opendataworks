@@ -564,7 +564,9 @@ public class WorkflowService {
             }
             String normalized = node != null ? canonicalizeJson(node) : snapshotJson.trim();
             return sha256(normalized);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // 非法 JSON 时退化为对原始文本取哈希
+            log.trace("规范化快照 JSON 失败，回退原始文本哈希", e);
             return sha256(snapshotJson.trim());
         }
     }
@@ -667,7 +669,9 @@ public class WorkflowService {
         try {
             JsonNode node = objectMapper.readTree(trimmed);
             return objectMapper.writeValueAsString(node);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // 非法 JSON 时回退为原始文本
+            log.trace("格式化 JSON 失败，回退原始文本", e);
             return trimmed;
         }
     }
@@ -884,7 +888,9 @@ public class WorkflowService {
         JsonNode seedRoot;
         try {
             seedRoot = objectMapper.readTree(seedJson);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // 元数据种子 JSON 非法时跳过填充
+            log.trace("解析定义元数据种子 JSON 失败，跳过", e);
             return;
         }
         if (seedRoot == null || seedRoot.isNull() || seedRoot.isMissingNode()) {
@@ -1100,8 +1106,9 @@ public class WorkflowService {
                 }
                 try {
                     return Long.parseLong(text.trim());
-                } catch (NumberFormatException ignored) {
-                    // ignore invalid number
+                } catch (NumberFormatException e) {
+                    // 跳过非数字文本，继续尝试下一个
+                    log.trace("解析 Long 失败，跳过无效文本: {}", text, e);
                 }
             }
         }
@@ -1581,8 +1588,9 @@ public class WorkflowService {
             if (StringUtils.hasText(relation.getNodeAttrs())) {
                 try {
                     binding.setNodeAttrs(objectMapper.readValue(relation.getNodeAttrs(), Map.class));
-                } catch (Exception ignored) {
-                    // ignore malformed node attrs
+                } catch (Exception e) {
+                    // 节点属性 JSON 非法时跳过，保留其余绑定信息
+                    log.trace("解析节点属性 nodeAttrs 失败，跳过", e);
                 }
             }
             bindings.add(binding);

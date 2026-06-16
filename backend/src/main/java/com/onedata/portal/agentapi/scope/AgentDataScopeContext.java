@@ -2,6 +2,7 @@ package com.onedata.portal.agentapi.scope;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
@@ -11,6 +12,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
+@Slf4j
 public final class AgentDataScopeContext {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -139,7 +141,9 @@ public final class AgentDataScopeContext {
                 result.add(item);
             }
             return result;
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // 数据范围 JSON 解析失败时按“无范围”处理
+            log.trace("解析数据范围 scope 失败，返回空列表", e);
             return Collections.emptyList();
         }
     }

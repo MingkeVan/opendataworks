@@ -1160,12 +1160,15 @@ public class WorkflowVersionOperationService {
         }
         try {
             return LocalDateTime.parse(text, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-        } catch (DateTimeParseException ignored) {
-            // fallback
+        } catch (DateTimeParseException e) {
+            // ISO 格式不匹配，回退到 yyyy-MM-dd HH:mm:ss
+            log.trace("按 ISO 格式解析时间失败，尝试备用格式: {}", text, e);
         }
         try {
             return LocalDateTime.parse(text, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-        } catch (DateTimeParseException ignored) {
+        } catch (DateTimeParseException e) {
+            // 备用格式也不匹配，返回默认值
+            log.trace("按备用格式解析时间失败，返回默认值: {}", text, e);
             return defaultValue;
         }
     }

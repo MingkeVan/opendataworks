@@ -781,7 +781,9 @@ public class SqlTableMatcherService {
             Method method = target.getClass().getMethod(methodName);
             method.setAccessible(true);
             return method.invoke(target);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // 反射调用失败时返回 null（目标方法可能不存在）
+            log.trace("反射调用方法 {} 失败，返回 null", methodName, e);
             return null;
         }
     }
