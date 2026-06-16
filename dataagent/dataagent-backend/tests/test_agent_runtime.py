@@ -89,6 +89,47 @@ def test_build_runtime_env_derives_platform_root_from_primary_root_when_enabled_
     assert runtime_env["DATAAGENT_PLATFORM_SKILL_ROOT"] == str(platform_root.resolve())
 
 
+def test_resolve_sql_read_timeout_seconds_selects_mode_specific_value():
+    from config import resolve_sql_read_timeout_seconds
+
+    cfg = SimpleNamespace(
+        agent_interactive_sql_read_timeout_seconds=300,
+        agent_background_sql_read_timeout_seconds=900,
+    )
+    assert resolve_sql_read_timeout_seconds(cfg, "interactive") == 300
+    assert resolve_sql_read_timeout_seconds(cfg, "background") == 900
+    # auto 归入后台档
+    assert resolve_sql_read_timeout_seconds(cfg, "auto") == 900
+    # 未知/空模式按交互档处理
+    assert resolve_sql_read_timeout_seconds(cfg, None) == 300
+
+
+def test_build_runtime_env_falls_back_to_mode_sql_read_timeout_when_unset(monkeypatch):
+    monkeypatch.setattr(agent_runtime, "resolve_builtin_skill_root_dir", lambda: Path("/tmp/skill-root"))
+    cfg = SimpleNamespace(
+        query_result_limit=1000,
+        agent_interactive_sql_read_timeout_seconds=300,
+        agent_background_sql_read_timeout_seconds=900,
+    )
+
+    # 未显式设置（0）时按执行模式回落，而不是向技能传递 0
+    env_interactive = agent_runtime._build_runtime_env(
+        cfg, {}, SimpleNamespace(question="", sql_read_timeout_seconds=0, execution_mode="interactive")
+    )
+    assert env_interactive["DATAAGENT_SQL_READ_TIMEOUT_SECONDS"] == "300"
+
+    env_background = agent_runtime._build_runtime_env(
+        cfg, {}, SimpleNamespace(question="", sql_read_timeout_seconds=0, execution_mode="background")
+    )
+    assert env_background["DATAAGENT_SQL_READ_TIMEOUT_SECONDS"] == "900"
+
+    # 显式值优先，不被回落覆盖
+    env_explicit = agent_runtime._build_runtime_env(
+        cfg, {}, SimpleNamespace(question="", sql_read_timeout_seconds=45, execution_mode="background")
+    )
+    assert env_explicit["DATAAGENT_SQL_READ_TIMEOUT_SECONDS"] == "45"
+
+
 def test_safe_base_url_preserves_path_without_query_or_fragment():
     actual = agent_runtime._safe_base_url("http://relay.example.internal/maas?token=secret#frag")
 
