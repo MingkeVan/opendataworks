@@ -171,6 +171,39 @@ def test_deepeval_apply_judges_uses_shared_results_when_metric_is_copied(monkeyp
     assert updated[0]["case_passed"] is True
 
 
+def test_deepeval_apply_judges_fails_when_auto_rule_check_fails(monkeypatch):
+    _install_fake_deepeval(monkeypatch)
+    runner = _load_runner()
+    runner.DataAgentEvaluationMetric.shared_case_judges = {
+        "ODW_SAMPLE_001": {
+            "score": 9,
+            "dimension_scores": {"intent": 1},
+            "hallucination": False,
+            "veto_rules_triggered": [],
+            "failure_attribution": [],
+            "comment": "ok",
+            "judge_failed": False,
+        }
+    }
+    metric = runner.DataAgentEvaluationMetric(runner.JudgeConfig(base_url="http://judge", token="t", model="m"))
+    result = {
+        "case_id": "ODW_SAMPLE_001",
+        "task_status": "finished",
+        "errors": [],
+        "auto_rule_check": {
+            "passed": False,
+            "triggered_veto_rules": [],
+            "failure_attribution": ["missing_sql_fragment"],
+        },
+    }
+
+    updated = runner._apply_judges([result], metric)
+
+    assert updated[0]["judge"]["score"] == 9
+    assert "missing_sql_fragment" in updated[0]["judge"]["failure_attribution"]
+    assert updated[0]["case_passed"] is False
+
+
 def test_deepeval_agent_id_can_default_from_environment(monkeypatch):
     _install_fake_deepeval(monkeypatch)
     runner = _load_runner()
@@ -474,6 +507,29 @@ def test_deepeval_auto_rule_check_adds_generic_failure_attribution(monkeypatch):
     assert {"sql_only", "wrong_domain", "placeholder_leak", "empty_result"}.issubset(
         set(result["failure_attribution"])
     )
+
+
+def test_deepeval_auto_rule_check_fails_missing_sql_or_tool_requirements(monkeypatch):
+    _install_fake_deepeval(monkeypatch)
+    runner = _load_runner()
+    case = {
+        **_sample_case(),
+        "required_sql_fragments": ["public.dim_tech_env_workflow_df"],
+        "expected_tool_names": ["run_sql"],
+    }
+
+    result = runner.auto_rule_check(
+        case,
+        final_answer="当前 DEV 环境共有 10 个工作流。",
+        blocks=[],
+        sql_outputs=[],
+        tool_names=[],
+    )
+
+    assert result["passed"] is False
+    assert result["missing_sql_fragments"] == ["public.dim_tech_env_workflow_df"]
+    assert result["missing_tool_names"] == ["run_sql"]
+    assert {"missing_sql_fragment", "missing_tool"}.issubset(set(result["failure_attribution"]))
 
 
 def test_deepeval_auto_rule_check_ignores_tool_doc_text_for_user_visible_regexes(monkeypatch):

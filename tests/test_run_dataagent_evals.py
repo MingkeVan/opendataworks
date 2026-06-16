@@ -305,6 +305,28 @@ def test_auto_rule_check_adds_generic_failure_attribution():
     )
 
 
+def test_auto_rule_check_fails_missing_sql_or_tool_requirements():
+    runner = _load_runner()
+    case = {
+        **_sample_case(),
+        "required_sql_fragments": ["public.dim_tech_env_workflow_df"],
+        "expected_tool_names": ["run_sql"],
+    }
+
+    result = runner.auto_rule_check(
+        case,
+        final_answer="当前 DEV 环境共有 10 个工作流。",
+        blocks=[],
+        sql_outputs=[],
+        tool_names=[],
+    )
+
+    assert result["passed"] is False
+    assert result["missing_sql_fragments"] == ["public.dim_tech_env_workflow_df"]
+    assert result["missing_tool_names"] == ["run_sql"]
+    assert {"missing_sql_fragment", "missing_tool"}.issubset(set(result["failure_attribution"]))
+
+
 def test_extract_sql_outputs_ignores_reference_text_and_uses_tool_sql():
     runner = _load_runner()
     actual_sql = (
@@ -472,6 +494,59 @@ def test_run_case_submits_turns_in_order(monkeypatch):
     assert result["turns"] == case["turns"]
     assert result["case_passed"] is True
     assert result["errors"] == []
+
+
+def test_run_case_fails_when_auto_rule_check_fails(monkeypatch):
+    runner = _load_runner()
+    case = {
+        **_sample_case(),
+        "required_sql_fragments": ["public.required_table"],
+    }
+
+    def fake_http_json(method, url, payload=None, **kwargs):
+        if url.endswith("/api/v1/nl2sql/topics") and method == "POST":
+            return {"topic_id": "topic_1"}
+        if url.endswith("/api/v1/nl2sql/tasks/deliver-message"):
+            return {"task_id": "task_1", "accepted": True}
+        if url == "http://dataagent/api/v1/nl2sql/tasks/task_1":
+            return {"task_id": "task_1", "topic_id": "topic_1", "task_status": "success"}
+        if url.startswith("http://dataagent/api/v1/nl2sql/topics/topic_1/messages"):
+            return {
+                "items": [
+                    {
+                        "sender_type": "assistant",
+                        "task_id": "task_1",
+                        "content": "当前 DEV 环境共有 10 个工作流。",
+                        "blocks": _assistant_blocks("当前 DEV 环境共有 10 个工作流。"),
+                    }
+                ]
+            }
+        raise AssertionError(f"unexpected request: {method} {url}")
+
+    def fake_judge_case(judge_config, case, payload):
+        return {
+            "score": 9,
+            "dimension_scores": {"intent": 1},
+            "hallucination": False,
+            "veto_rules_triggered": [],
+            "failure_attribution": [],
+            "comment": "ok",
+            "judge_failed": False,
+        }
+
+    monkeypatch.setattr(runner, "http_json", fake_http_json)
+    monkeypatch.setattr(runner, "_judge_case", fake_judge_case)
+
+    result = runner.run_case(
+        "http://dataagent",
+        case,
+        types.SimpleNamespace(agent_id="agent_eval", provider_id="", model="", timeout_seconds=5),
+        runner.JudgeConfig(base_url="http://judge", token="t", model="m"),
+    )
+
+    assert result["auto_rule_check"]["passed"] is False
+    assert "missing_sql_fragment" in result["judge"]["failure_attribution"]
+    assert result["case_passed"] is False
 
 
 def test_judge_payload_removes_sql_style_veto_rules():

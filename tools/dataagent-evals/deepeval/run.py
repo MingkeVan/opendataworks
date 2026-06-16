@@ -574,7 +574,7 @@ def auto_rule_check(case: dict[str, Any], *, final_answer: str, blocks: list[dic
         missing_tool_names=missing_tool_names,
     )
     return {
-        "passed": not forbidden_hits,
+        "passed": not (missing_sql_fragments or forbidden_hits or missing_tool_names),
         "missing_sql_fragments": missing_sql_fragments,
         "forbidden_sql_patterns": forbidden_hits,
         "missing_tool_names": missing_tool_names,
@@ -1162,6 +1162,7 @@ def _apply_judges(results: list[dict[str, Any]], metric: DataAgentEvaluationMetr
         item["case_passed"] = (
             not item.get("errors")
             and str(item.get("task_status") or "").lower() in SUCCESS_STATUSES
+            and bool((item.get("auto_rule_check") or {}).get("passed", True))
             and float(judge.get("score") or 0) >= 8
             and not bool(judge.get("judge_failed"))
             and not bool(judge.get("hallucination"))

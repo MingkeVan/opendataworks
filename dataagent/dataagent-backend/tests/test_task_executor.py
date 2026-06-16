@@ -1174,6 +1174,44 @@ def test_execute_task_stream_surfaces_provider_error_instead_of_exit_code(monkey
     assert emitted == []
 
 
+def test_execute_task_stream_normalizes_success_subtype_provider_error(monkeypatch, tmp_path: Path):
+    provider_error = "There's an issue with the selected model (deepseek-v4-pro[1m])."
+    _install_fake_sdk(
+        monkeypatch,
+        [
+            AssistantMessage([TextBlock(provider_error)], error=provider_error),
+            ResultMessage("success", None, is_error=False, session_id="sess-1"),
+        ],
+        final_exception=RuntimeError("Command failed with exit code 1"),
+    )
+    monkeypatch.setattr(
+        task_executor,
+        "resolve_runtime_provider_selection",
+        lambda provider_id, model: {
+            "provider_id": "anyrouter",
+            "model": "deepseek-v4-pro[1m]",
+            "api_key": "",
+            "auth_token": "token",
+            "base_url": "https://relay.example.invalid",
+            "supports_partial_messages": True,
+        },
+    )
+    _patch_skill_runtime(monkeypatch, tmp_path)
+
+    async def _run():
+        return await task_executor.execute_task_stream(_build_input(), emit=lambda record: None)
+
+    result = asyncio.run(_run())
+
+    assert result.task_status == "error"
+    assert result.content == provider_error
+    assert result.error == {
+        "code": "provider_error",
+        "message": provider_error,
+        "exception_type": "RuntimeError",
+    }
+
+
 def test_execute_task_stream_resumes_sdk_session_without_replaying_history(monkeypatch, tmp_path: Path):
     QueryCapture.last_prompt = None
     QueryCapture.last_options = None
@@ -1476,6 +1514,48 @@ def test_execute_task_stream_recovers_thinking_only_empty_finish_once(monkeypatc
     assert "最近 30 天工作流发布次数趋势" in _recovery_prompt
 
 
+def test_execute_task_stream_recovers_thinking_only_empty_finish_without_session(monkeypatch, tmp_path: Path):
+    _install_fake_sdk_runs(
+        monkeypatch,
+        [
+            [
+                StreamEvent({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
+                StreamEvent(
+                    {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "thinking_delta", "thinking": "I should answer, but no text is emitted."},
+                    }
+                ),
+                StreamEvent({"type": "content_block_stop", "index": 0}),
+                ResultMessage("success"),
+            ],
+            [
+                StreamEvent({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+                StreamEvent({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "无 session 恢复后的回答"}}),
+                StreamEvent({"type": "content_block_stop", "index": 0}),
+                ResultMessage("success", session_id="sdk-recovered-1"),
+            ],
+        ],
+    )
+    _patch_default_provider(monkeypatch)
+    _patch_skill_runtime(monkeypatch, tmp_path)
+
+    async def _run():
+        return await task_executor.execute_task_stream(_build_input(), emit=lambda record: None)
+
+    result = asyncio.run(_run())
+
+    assert result.task_status == "finished"
+    assert result.error is None
+    assert result.content == "无 session 恢复后的回答"
+    assert len(QueryCapture.calls) == 2
+    assert "resume" not in QueryCapture.calls[1]["options"].kwargs
+    _recovery_prompt = _prompt_text(QueryCapture.calls[1]["prompt"])
+    assert "上一轮已经以 end_turn 结束" in _recovery_prompt
+    assert "最近 30 天工作流发布次数趋势" in _recovery_prompt
+
+
 def test_execute_task_stream_marks_empty_finish_as_error_after_recovery_still_empty(monkeypatch, tmp_path: Path):
     _install_fake_sdk_runs(
         monkeypatch,
@@ -1510,11 +1590,11 @@ def test_execute_task_stream_marks_empty_finish_as_error_after_recovery_still_em
     assert len(QueryCapture.calls) == 2
 
 
-def test_execute_task_stream_keeps_empty_finish_with_tool_use_as_finished(monkeypatch, tmp_path: Path):
+def test_execute_task_stream_marks_empty_finish_with_tool_use_as_incomplete_answer(monkeypatch, tmp_path: Path):
     # Tools ran but the model ended the turn with no final text and no leaked
-    # tag. Only the no-tool thinking-only case is converted to an error; a run
-    # that actually invoked a tool keeps the prior finished behavior, because
-    # retrying it could repeat a write. So this stays finished, not empty_completion.
+    # tag. This must not be reported as a successful "已完成。" answer; it is an
+    # incomplete answer error and is not auto-retried because replaying tools
+    # could repeat writes.
     _install_fake_sdk(
         monkeypatch,
         [
@@ -1547,7 +1627,9 @@ def test_execute_task_stream_keeps_empty_finish_with_tool_use_as_finished(monkey
 
     result = asyncio.run(_run())
 
-    assert result.task_status == "finished"
-    assert result.error is None
-    assert result.content == "已完成。"
+    assert result.task_status == "error"
+    assert result.error is not None
+    assert result.error["code"] == "incomplete_answer"
+    assert "最终回答" in result.error["message"]
+    assert result.content != "已完成。"
     assert len(QueryCapture.calls) == 1

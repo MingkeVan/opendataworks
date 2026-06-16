@@ -541,7 +541,7 @@ def auto_rule_check(case: dict[str, Any], *, final_answer: str, blocks: list[dic
         missing_tool_names=missing_tool_names,
     )
     return {
-        "passed": True,
+        "passed": not (missing_sql_fragments or missing_tool_names),
         "missing_sql_fragments": missing_sql_fragments,
         "forbidden_sql_patterns": [],
         "missing_tool_names": missing_tool_names,
@@ -975,6 +975,7 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace, judg
     case_passed = (
         not errors
         and str(task.get("task_status") or "").lower() in SUCCESS_STATUSES
+        and bool(rule_check.get("passed", True))
         and float(judge.get("score") or 0) >= 8
         and not bool(judge.get("judge_failed"))
         and not bool(judge.get("hallucination"))
