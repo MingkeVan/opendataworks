@@ -139,8 +139,11 @@ class SdkResultAccumulator:
         return str(fallback or "").strip()
 
     def preferred_error_code(self) -> str:
-        if self.provider_error_message or self.result_is_error:
-            return str(self.result_subtype or "provider_error")
+        subtype = str(self.result_subtype or "").strip()
+        if self.provider_error_message:
+            return subtype if subtype and subtype != "success" else "provider_error"
+        if self.result_is_error:
+            return subtype if subtype and subtype != "success" else "provider_error"
         return "model_call_failed"
 
     def _append_text(self, block_index: int, piece: str) -> None:
@@ -367,11 +370,10 @@ class SdkResultAccumulator:
             )
             return self._build_format_drift_result(content)
 
-        # A clean run with no visible answer and no tool call is a thinking-only
-        # dead-end — surface it as a retryable error so the chat does not end
-        # silently on an empty answer. When a real tool ran, keep the prior
-        # finished behavior: re-running could repeat a write, so only the no-tool
-        # case is converted here.
+        # A clean run with no visible answer is still an incomplete run. The
+        # no-tool case can be retried once by the caller below; a tool-backed
+        # empty closeout is marked explicitly without an automatic retry because
+        # replaying could repeat a write.
         if not content and not self._saw_tool_use:
             logger.warning(
                 "task.result.empty_completion task_id=%s topic_id=%s provider=%s model=%s saw_stream_event=%s result_subtype=%s session_id_set=%s",
@@ -384,21 +386,32 @@ class SdkResultAccumulator:
                 bool(self.session_id),
             )
             return self._build_empty_completion_result()
+        if not content and self._saw_tool_use:
+            logger.warning(
+                "task.result.incomplete_answer task_id=%s topic_id=%s provider=%s model=%s saw_stream_event=%s result_subtype=%s session_id_set=%s",
+                self.params.task_id,
+                self.params.topic_id,
+                self.provider_id,
+                self.model,
+                self._saw_stream_event,
+                self.result_subtype,
+                bool(self.session_id),
+            )
+            return self._build_incomplete_answer_result()
 
         logger.info(
-            "task.result.finished task_id=%s topic_id=%s provider=%s model=%s content_len=%s saw_tool_use=%s fallback_content=%s session_id_set=%s",
+            "task.result.finished task_id=%s topic_id=%s provider=%s model=%s content_len=%s saw_tool_use=%s session_id_set=%s",
             self.params.task_id,
             self.params.topic_id,
             self.provider_id,
             self.model,
             len(content),
             self._saw_tool_use,
-            not bool(content),
             bool(self.session_id),
         )
         return TaskExecutionResult(
             task_status="finished",
-            content=content or "已完成。",
+            content=content,
             usage=self.usage or None,
             provider_id=self.provider_id,
             model=self.model,
@@ -416,14 +429,12 @@ class SdkResultAccumulator:
     ) -> TaskExecutionResult:
         """Terminate a non-error run that produced no trustworthy final answer.
 
-        Shared closeout for the two ways a clean (success-subtype) run can still
-        dead-end: it leaked pseudo tool-call tags instead of a real call, or it
-        ended with no visible answer at all (typically a thinking-only turn that
-        stopped early). Both must surface as a task error — the live stream only
+        Shared closeout for the ways a clean (success-subtype) run can still
+        dead-end: it leaked pseudo tool-call tags instead of a real call, ended
+        thinking-only with no answer, or invoked tools but never wrote the final
+        response. These must surface as task errors — the live stream only
         carries the raw blocks, so without a terminal error record the chat UI
-        ends the conversation silently with no way to notice the failure or
-        retry. Salvaged clean text / tool-output note is kept in the content for
-        history; the error itself carries the user-facing retry message.
+        cannot distinguish success from an incomplete answer.
         """
         synthetic_blocks: dict[str, dict[str, Any]] = (
             {"tool": {"type": "tool_result", "output": "1"}} if self._saw_tool_use else {}
@@ -454,6 +465,16 @@ class SdkResultAccumulator:
             fallback="模型本次回答因工具调用格式异常未能正常生成，请重试。",
         )
 
+    def _build_incomplete_answer_result(self) -> TaskExecutionResult:
+        """Close out a tool-backed run that never produced final visible text."""
+        return self._build_incomplete_run_result(
+            content="",
+            reason="模型调用工具后未生成最终回答",
+            error_code="incomplete_answer",
+            message="模型本次调用工具后没有给出最终回答，请重试",
+            fallback="模型本次调用工具后没有返回最终回答，请重试。",
+        )
+
     def _build_empty_completion_result(self) -> TaskExecutionResult:
         """Close out a clean run that ended with no visible answer and no tool.
 
@@ -462,8 +483,6 @@ class SdkResultAccumulator:
         back to a silent ``finished`` with "已完成。", so the chat ended on an
         empty answer with no way to retry. Routing it through the shared error
         closeout makes the existing error card and retry button surface instead.
-        Runs that did invoke a tool keep the prior finished behavior — see the
-        ``_saw_tool_use`` guard in ``build_result``.
         """
         return self._build_incomplete_run_result(
             content="",
@@ -1094,42 +1113,33 @@ async def _execute_task_stream_local(
     )
     if _is_empty_completion_result(result):
         recovery_session_id = str(result.session_id or accumulator.session_id or params.resume_session_id or "").strip()
-        if recovery_session_id:
-            recovery_timeout = _empty_completion_recovery_timeout(timeout_seconds)
-            logger.warning(
-                "task.empty_completion.recover_start task_id=%s topic_id=%s provider=%s model=%s timeout=%s session_id_set=%s",
-                params.task_id,
-                params.topic_id,
-                provider_id,
-                model,
-                recovery_timeout,
-                bool(recovery_session_id),
-            )
-            result = await _run_sdk_turn(
-                turn_prompt=_build_empty_completion_recovery_prompt(params.question),
-                turn_options=_make_options(recovery_session_id),
-                turn_timeout_seconds=recovery_timeout,
-                phase="empty_completion_recovery",
-            )
-            logger.info(
-                "task.empty_completion.recover_result task_id=%s topic_id=%s provider=%s model=%s task_status=%s error_code=%s content_len=%s session_id_set=%s",
-                params.task_id,
-                params.topic_id,
-                provider_id,
-                model,
-                result.task_status,
-                str((result.error or {}).get("code") or ""),
-                len(str(result.content or "")),
-                bool(result.session_id),
-            )
-        else:
-            logger.warning(
-                "task.empty_completion.recover_skip task_id=%s topic_id=%s provider=%s model=%s reason=no_session",
-                params.task_id,
-                params.topic_id,
-                provider_id,
-                model,
-            )
+        recovery_timeout = _empty_completion_recovery_timeout(timeout_seconds)
+        logger.warning(
+            "task.empty_completion.recover_start task_id=%s topic_id=%s provider=%s model=%s timeout=%s session_id_set=%s",
+            params.task_id,
+            params.topic_id,
+            provider_id,
+            model,
+            recovery_timeout,
+            bool(recovery_session_id),
+        )
+        result = await _run_sdk_turn(
+            turn_prompt=_build_empty_completion_recovery_prompt(params.question),
+            turn_options=_make_options(recovery_session_id or None),
+            turn_timeout_seconds=recovery_timeout,
+            phase="empty_completion_recovery",
+        )
+        logger.info(
+            "task.empty_completion.recover_result task_id=%s topic_id=%s provider=%s model=%s task_status=%s error_code=%s content_len=%s session_id_set=%s",
+            params.task_id,
+            params.topic_id,
+            provider_id,
+            model,
+            result.task_status,
+            str((result.error or {}).get("code") or ""),
+            len(str(result.content or "")),
+            bool(result.session_id),
+        )
 
     if result.task_status == "error" and not terminal_error_record_written:
         sdk_writer.append_error(
