@@ -6,7 +6,7 @@
 // This form matches the same language (identifiers, dotted paths, backtick
 // quoted names) but runs in linear time.
 const IDENTIFIER_TOKEN = /(?:`[^`]*`|[\w$]|\.)+$/
-const VALID_FOR = /^[`"'\[\]\w$.]*$/
+const VALID_FOR = /^[`"'[\]\w$.]*$/
 
 const SQL_KEYWORDS = [
   'SELECT',

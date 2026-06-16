@@ -4,7 +4,7 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, placeholder, Decoration } from '@codemirror/view'
+import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, placeholder as cmPlaceholder, Decoration } from '@codemirror/view'
 import { EditorState, Compartment } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { autocompletion, acceptCompletion } from '@codemirror/autocomplete'
@@ -127,7 +127,7 @@ const buildExtensions = () => {
   extensions.push(
     languageCompartment.of(sql({ dialect: MySQL })),
     editableCompartment.of(EditorView.editable.of(!props.readOnly)),
-    placeholderCompartment.of(props.placeholder ? placeholder(props.placeholder) : []),
+    placeholderCompartment.of(props.placeholder ? cmPlaceholder(props.placeholder) : []),
     completionCompartment.of(
       autocompletion({
         override: [completionSource],
@@ -285,7 +285,7 @@ watch(
 watch(
   () => props.placeholder,
   (next) => {
-    reconfigure(placeholderCompartment, next ? placeholder(String(next)) : [])
+    reconfigure(placeholderCompartment, next ? cmPlaceholder(String(next)) : [])
   }
 )
 

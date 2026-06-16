@@ -4,7 +4,7 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, placeholder } from '@codemirror/view'
+import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, placeholder as cmPlaceholder } from '@codemirror/view'
 import { Compartment, EditorState } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
@@ -43,7 +43,7 @@ const createEditor = () => {
         highlightActiveLine(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         EditorView.lineWrapping,
-        props.placeholder ? placeholder(props.placeholder) : [],
+        props.placeholder ? cmPlaceholder(props.placeholder) : [],
         editableCompartment.of(EditorView.editable.of(!props.readOnly)),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && !suppressEmit) {
