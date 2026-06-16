@@ -4,31 +4,31 @@ import { ref } from 'vue'
 import {
   parseSlashQuery,
   filterCommands,
-  buildSkillCommand,
-  buildSkillCommands,
+  buildCommand,
+  buildCommands,
   useSlashCommands,
 } from '../useSlashCommands'
 
 describe('parseSlashQuery', () => {
   it('returns the token after a leading slash', () => {
     expect(parseSlashQuery('/')).toBe('')
-    expect(parseSlashQuery('/clear')).toBe('clear')
+    expect(parseSlashQuery('/compact')).toBe('compact')
     expect(parseSlashQuery('/opendataworks-platform-tools')).toBe('opendataworks-platform-tools')
   })
 
   it('stays out of command mode for prose and mid-text slashes', () => {
     expect(parseSlashQuery('')).toBeNull()
     expect(parseSlashQuery('hello')).toBeNull()
-    expect(parseSlashQuery('/clear table')).toBeNull() // contains whitespace
+    expect(parseSlashQuery('/compact now')).toBeNull() // contains whitespace
     expect(parseSlashQuery('请使用 a/b 路径')).toBeNull()
   })
 })
 
 describe('filterCommands', () => {
   const commands = [
-    { id: '/clear', label: '清空输入' },
-    { id: '/new', label: '新建话题' },
-    { id: '/sales-skill', label: 'sales-skill' },
+    { id: '/compact', label: '压缩对话历史' },
+    { id: '/context', label: '查看上下文用量' },
+    { id: '/sales-skill', label: '' },
   ]
 
   it('returns all commands for an empty query', () => {
@@ -36,23 +36,28 @@ describe('filterCommands', () => {
   })
 
   it('matches case-insensitively on id and label', () => {
-    expect(filterCommands(commands, 'CLE').map((c) => c.id)).toEqual(['/clear'])
+    expect(filterCommands(commands, 'COMPA').map((c) => c.id)).toEqual(['/compact'])
     expect(filterCommands(commands, 'sales').map((c) => c.id)).toEqual(['/sales-skill'])
+    expect(filterCommands(commands, '用量').map((c) => c.id)).toEqual(['/context'])
   })
 })
 
-describe('buildSkillCommands', () => {
-  it('builds a skill command per folder, displays the name, and de-dupes', () => {
-    const cmds = buildSkillCommands(['my-skill', 'my-skill', ''])
-    expect(cmds).toHaveLength(1)
-    expect(cmds[0]).toMatchObject({ id: '/my-skill', type: 'skill' })
-    // Selecting autocompletes the skill name as the command token.
-    expect(cmds[0].insertText).toBe('/my-skill ')
+describe('buildCommands', () => {
+  it('builds a command per name, hints built-ins, and de-dupes', () => {
+    const cmds = buildCommands(['compact', 'my-skill', 'my-skill', '', '/usage'])
+    expect(cmds.map((c) => c.id)).toEqual(['/compact', '/my-skill', '/usage'])
+    // Selecting autocompletes the command token.
+    expect(cmds[0].insertText).toBe('/compact ')
+    // Known SDK built-ins get a friendly hint; others fall back to a generic one.
+    expect(cmds[0].hint).toBe('压缩对话历史')
+    expect(cmds[1].hint).toBe('技能')
+    // A leading slash in the source name is tolerated.
+    expect(cmds[2].id).toBe('/usage')
   })
 
   it('ignores blank input', () => {
-    expect(buildSkillCommand('')).toBeNull()
-    expect(buildSkillCommands(null)).toEqual([])
+    expect(buildCommand('')).toBeNull()
+    expect(buildCommands(null)).toEqual([])
   })
 })
 
@@ -64,10 +69,7 @@ describe('useSlashCommands', () => {
     return { slash, inputText, focusInput }
   }
 
-  const cmds = [
-    { id: '/clear', type: 'builtin', label: '清空输入', run: vi.fn() },
-    { id: '/my-skill', type: 'skill', label: '', insertText: '/my-skill ' },
-  ]
+  const cmds = buildCommands(['compact', 'my-skill'])
 
   it('opens and filters from the current input', () => {
     const { slash, inputText } = setup(cmds)
@@ -76,41 +78,27 @@ describe('useSlashCommands', () => {
     expect(slash.visible.value).toBe(true)
     expect(slash.filtered.value).toHaveLength(2)
 
-    inputText.value = '/cle'
+    inputText.value = '/comp'
     slash.syncFromInput()
-    expect(slash.filtered.value.map((c) => c.id)).toEqual(['/clear'])
+    expect(slash.filtered.value.map((c) => c.id)).toEqual(['/compact'])
 
     inputText.value = 'normal text'
     slash.syncFromInput()
     expect(slash.visible.value).toBe(false)
   })
 
-  it('runs a built-in command and clears the token', () => {
-    const run = vi.fn()
-    const { slash, inputText } = setup([{ id: '/clear', type: 'builtin', label: 'x', run }])
-    inputText.value = '/clear'
-    slash.syncFromInput()
-    slash.select(slash.filtered.value[0])
-    expect(run).toHaveBeenCalledOnce()
-    expect(inputText.value).toBe('')
-    expect(slash.visible.value).toBe(false)
-  })
-
-  it('autocompletes the skill name and focuses for a skill command', () => {
+  it('autocompletes the command token and focuses on select', () => {
     const { slash, inputText, focusInput } = setup(cmds)
     inputText.value = '/my'
     slash.syncFromInput()
     slash.select(slash.filtered.value[0])
     expect(inputText.value).toBe('/my-skill ')
     expect(focusInput).toHaveBeenCalledOnce()
+    expect(slash.visible.value).toBe(false)
   })
 
   it('navigates with arrows and selects with Enter, consuming the event', () => {
-    const run = vi.fn()
-    const { slash, inputText } = setup([
-      { id: '/a', type: 'builtin', label: 'a', run: vi.fn() },
-      { id: '/b', type: 'builtin', label: 'b', run },
-    ])
+    const { slash, inputText } = setup(cmds)
     inputText.value = '/'
     slash.syncFromInput()
 
@@ -121,7 +109,7 @@ describe('useSlashCommands', () => {
 
     const enter = { key: 'Enter', preventDefault: vi.fn() }
     expect(slash.handleKeydown(enter)).toBe(true)
-    expect(run).toHaveBeenCalledOnce()
+    expect(inputText.value).toBe('/my-skill ')
   })
 
   it('does not consume keys when the menu is closed', () => {

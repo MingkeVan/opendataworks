@@ -1,13 +1,24 @@
 // Slash-command support shared by the NL2SQL chat input surfaces (the portal
 // NL2SqlChatV2.vue and the embeddable WidgetChat.vue).
 //
-// Skills have no native "command" protocol: the agent picks them from their
-// SKILL.md description. A skill command therefore inserts a natural-language
-// directive ("请使用「<folder>」技能：") that nudges the agent to use that skill,
-// which the user then completes and sends. Built-in commands (e.g. /clear, /new)
-// run a callback directly. The whole feature is frontend-only.
+// The command list is authoritative: the backend reports the SDK's real
+// slash-command names (built-ins like /compact + skills like
+// /opendataworks-platform-tools + custom commands) via
+// GET /agents/{id}/slash-commands. The Agent SDK invokes a slash command simply
+// by receiving a prompt that starts with "/<name>", so selecting a command
+// autocompletes the "/<name> " token into the input and the user sends it
+// (optionally with arguments) like any other message.
 
 import { computed, ref } from 'vue'
+
+// Friendly hints for the SDK's well-known built-in commands. Any other name is a
+// skill or custom command and falls back to a generic label.
+const BUILTIN_COMMAND_HINTS = {
+  clear: '清空对话上下文',
+  compact: '压缩对话历史',
+  context: '查看上下文用量',
+  usage: '查看用量',
+}
 
 // Command mode is entered only when the entire input is a single leading-slash
 // token with no whitespace, e.g. "/", "/clear", "/opendataworks-platform-tools".
@@ -33,27 +44,25 @@ export function filterCommands(commands, query) {
   })
 }
 
-// Build a skill command from its folder name. The folder name is the canonical
-// identifier the agent and runtime use, and is what gets displayed as the skill
-// name. Selecting it autocompletes the command token ("/<skill> ") into the
-// input — the name stays visible — so the user can append their request.
-export function buildSkillCommand(folder) {
-  const name = String(folder || '').trim()
-  if (!name) return null
+// Build a command descriptor from an SDK slash-command name. The name is shown
+// as-is (e.g. "/compact", "/opendataworks-platform-tools"); selecting it
+// autocompletes the "/<name> " token so the user can append arguments and send.
+export function buildCommand(name) {
+  const cmd = String(name || '').trim().replace(/^\/+/, '')
+  if (!cmd) return null
   return {
-    id: '/' + name,
-    type: 'skill',
+    id: '/' + cmd,
     label: '',
-    hint: '技能',
-    insertText: '/' + name + ' ',
+    hint: BUILTIN_COMMAND_HINTS[cmd] || '技能',
+    insertText: '/' + cmd + ' ',
   }
 }
 
-export function buildSkillCommands(folders) {
+export function buildCommands(names) {
   const seen = new Set()
   const result = []
-  for (const folder of Array.isArray(folders) ? folders : []) {
-    const cmd = buildSkillCommand(folder)
+  for (const name of Array.isArray(names) ? names : []) {
+    const cmd = buildCommand(name)
     if (cmd && !seen.has(cmd.id)) {
       seen.add(cmd.id)
       result.push(cmd)
@@ -106,13 +115,8 @@ export function useSlashCommands({ getCommands, inputText, focusInput }) {
   function select(cmd) {
     if (!cmd) return
     close()
-    if (cmd.type === 'builtin') {
-      inputText.value = ''
-      if (typeof cmd.run === 'function') cmd.run()
-      return
-    }
-    // skill (and any future insert-style command)
-    inputText.value = cmd.insertText || ''
+    // Autocomplete the command token; the user adds any arguments and sends it.
+    inputText.value = cmd.insertText != null ? cmd.insertText : cmd.id + ' '
     if (typeof focusInput === 'function') focusInput()
   }
 

@@ -415,6 +415,29 @@ def test_agent_profile_routes_contract(monkeypatch):
     assert deleted.json()["status"] == "ok"
 
 
+def test_agent_slash_commands_route_contract(monkeypatch):
+    from core import slash_command_cache
+
+    slash_command_cache._AGENT_SLASH_COMMANDS.clear()
+    profile = {"agent_id": "agent_1", "name": "x", "skill_folders": ["marketing-insights", "platform-tools"]}
+    monkeypatch.setattr(admin_routes, "get_agent_profile", lambda agent_id: profile if agent_id == "agent_1" else None)
+
+    client = TestClient(app)
+
+    # Cold start: no run reported yet, fall back to the agent's enabled skill folders.
+    fallback = client.get("/api/v1/dataagent/agents/agent_1/slash-commands")
+    assert fallback.status_code == 200
+    assert fallback.json() == {"slash_commands": ["marketing-insights", "platform-tools"], "source": "fallback"}
+
+    # Once a run reports the authoritative list, it wins.
+    slash_command_cache.record_agent_slash_commands("agent_1", ["clear", "compact", "marketing-insights"])
+    authoritative = client.get("/api/v1/dataagent/agents/agent_1/slash-commands")
+    assert authoritative.json() == {"slash_commands": ["clear", "compact", "marketing-insights"], "source": "sdk"}
+
+    missing = client.get("/api/v1/dataagent/agents/unknown/slash-commands")
+    assert missing.status_code == 404
+
+
 class _FakeWidgetStore:
     """Records admin store calls so the route contract can be asserted without MySQL."""
 

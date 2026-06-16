@@ -46,6 +46,7 @@ from core.agent_runtime import (
 )
 from core.claude_cli import resolve_claude_cli_path
 from core.sdk_block_writer import SdkBlockWriter
+from core.slash_command_cache import record_agent_slash_commands
 from core.topic_task_store import get_topic_task_store
 from core.topic_workspace import prepare_topic_workspace
 
@@ -152,6 +153,14 @@ class SdkResultAccumulator:
         if session_id:
             self.session_id = session_id
 
+        if msg_type == "SystemMessage":
+            # The init message carries the session's authoritative slash-command
+            # list (built-ins + skills + custom commands). Cache it per agent so
+            # the chat input's slash menu can surface the real commands.
+            if str(getattr(msg, "subtype", "") or "") == "init":
+                self._record_slash_commands(msg)
+            return
+
         if msg_type == "ResultMessage":
             self.result_subtype = str(getattr(msg, "subtype", "") or "")
             self.result_is_error = bool(getattr(msg, "is_error", False))
@@ -184,6 +193,18 @@ class SdkResultAccumulator:
             if self._saw_stream_event:
                 return
             self._ingest_assistant_content(content)
+
+    def _record_slash_commands(self, msg: Any) -> None:
+        data = getattr(msg, "data", None)
+        commands = data.get("slash_commands") if isinstance(data, dict) else None
+        if commands is None:
+            commands = getattr(msg, "slash_commands", None)
+        if not isinstance(commands, list):
+            return
+        snapshot = getattr(self.params, "agent_snapshot", None)
+        agent_id = str(snapshot.get("agent_id") or "").strip() if isinstance(snapshot, dict) else ""
+        if agent_id:
+            record_agent_slash_commands(agent_id, commands)
 
     def _ingest_assistant_content(self, content: Any) -> None:
         if isinstance(content, str):

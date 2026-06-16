@@ -324,7 +324,7 @@ import { extractErrorText, isPlainEnterSubmit, renderMarkdown as renderMarkdownB
 import { useNl2SqlChat } from '@/views/intelligence/useNl2SqlChat'
 import { useChatMessageActions } from '@/views/intelligence/useChatMessageActions'
 import SlashCommandMenu from '@/views/intelligence/SlashCommandMenu.vue'
-import { useSlashCommands, buildSkillCommands } from '@/views/intelligence/useSlashCommands'
+import { useSlashCommands, buildCommands } from '@/views/intelligence/useSlashCommands'
 
 const props = defineProps({
   config: {
@@ -354,7 +354,7 @@ const DEFAULT_SUGGESTIONS = [
 const TOPIC_STATUS_REFRESH_INTERVAL_MS = 3000
 
 const agentPresetQuestions = ref([])
-const agentSkillFolders = ref([])
+const slashCommandNames = ref([])
 const agentName = ref('智能数据助手')
 const suggestions = computed(() => agentPresetQuestions.value.length ? agentPresetQuestions.value : DEFAULT_SUGGESTIONS)
 const permissionMode = ref('default')
@@ -411,8 +411,11 @@ const canDeliverPendingOutbound = computed(() => (
 
 watch(
   isBusy,
-  (value) => {
+  (value, previous) => {
     props.state.isBusy = value
+    // A finished run may have reported new SDK slash commands (built-ins surface
+    // only after the first run); refresh the authoritative list.
+    if (previous && !value) void loadSlashCommands()
   },
   { immediate: true }
 )
@@ -750,18 +753,29 @@ const resizeTextarea = () => {
 }
 
 // ── Slash commands ─────────────────────────────────────────────────────────
-// Typing "/" opens a menu: the agent's skills (insert a "use this skill"
-// directive) plus the /clear built-in.
-const slashCommands = computed(() => {
-  const commands = buildSkillCommands(agentSkillFolders.value)
-  commands.push({ id: '/clear', type: 'builtin', label: '清空输入', hint: '操作', run: () => { inputText.value = '' } })
-  return commands
-})
+// Typing "/" opens a menu of the agent's authoritative SDK slash commands
+// (built-ins + skills + custom commands), fetched from the backend. Selecting
+// one autocompletes the "/<name> " token for the user to send.
+const slashCommands = computed(() => buildCommands(slashCommandNames.value))
 const slash = useSlashCommands({
   getCommands: () => slashCommands.value,
   inputText,
   focusInput: () => nextTick(() => { textareaRef.value?.focus(); resizeTextarea() }),
 })
+
+const loadSlashCommands = async () => {
+  const id = String(agentId.value || '').trim()
+  if (!id || id === 'demo') {
+    slashCommandNames.value = []
+    return
+  }
+  try {
+    const data = await api.agentApi.getAgentSlashCommands(id)
+    slashCommandNames.value = Array.isArray(data?.slash_commands) ? data.slash_commands : []
+  } catch {
+    slashCommandNames.value = []
+  }
+}
 
 const onComposerInput = () => {
   slash.syncFromInput()
@@ -887,10 +901,10 @@ onMounted(async () => {
       if (agentProfile?.name) agentName.value = String(agentProfile.name)
       const questions = Array.isArray(agentProfile?.preset_questions) ? agentProfile.preset_questions.filter(Boolean) : []
       agentPresetQuestions.value = questions.slice(0, 3)
-      agentSkillFolders.value = Array.isArray(agentProfile?.skill_folders) ? agentProfile.skill_folders.filter(Boolean) : []
     } catch {
       // non-fatal, fall back to defaults
     }
+    void loadSlashCommands()
   }
   void loadTopics()
 })
