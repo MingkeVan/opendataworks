@@ -123,7 +123,8 @@
               </svg>
             </span>
             <span v-else class="v2-session-meta">
-              <span v-if="topicBadgeKind(topic) === 'error'" class="v2-session-dot is-error" title="执行失败" />
+              <span v-if="topicBadgeKind(topic) === 'awaiting'" class="v2-session-await" title="等待你的选择">待输入</span>
+              <span v-else-if="topicBadgeKind(topic) === 'error'" class="v2-session-dot is-error" title="执行失败" />
               <span v-else-if="topicBadgeKind(topic) === 'suspended'" class="v2-session-dot is-suspended" title="已取消" />
               {{ formatTime(topic.updated_at || topic.created_at) }}
             </span>
@@ -1719,6 +1720,17 @@ onBeforeUnmount(() => {
 .v2-session-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 .v2-session-dot.is-error { background: #F56C6C; }
 .v2-session-dot.is-suspended { background: #A0AABF; }
+.v2-session-await {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 16px;
+  color: #2f7bf0;
+  background: #e6f0ff;
+  vertical-align: middle;
+}
 
 .v2-session-loading {
   display: inline-flex;

@@ -93,6 +93,9 @@
 - `NL2SqlChatV2.vue`:在 permission 分支旁挂载卡片并提交答案;抑制
   `name=AskUserQuestion` 的原始 tool_use 块,避免与卡片重复渲染。
 - `api/nl2sql.js`:`submitQuestionAnswer(taskId, requestId, answers)`。
+- `topicStatus.js`:`waiting_input` 映射为独立的 `'awaiting'` 徽标(会话列表显示
+  "待输入"),区别于"进行中"转圈;`isActiveStatusKind` 让其仍算活跃,重新进入
+  话题时继续接流。
 
 ### 提问引导
 
