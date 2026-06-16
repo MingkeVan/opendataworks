@@ -440,7 +440,7 @@ export function useNl2SqlChat(options) {
     }
   }
 
-  // Recover from a failed assistant reply (e.g. tool_call_format_drift): re-ask
+  // Recover from a failed assistant reply (any status=error, e.g. empty_completion): re-ask
   // the question that produced it as a normal new turn. deliver-message persists
   // every delivery as a user message, so re-sending keeps the live view and the
   // reloaded history identical; the failed reply stays visible as the record of

@@ -86,6 +86,13 @@ class Settings(BaseSettings):
     dataagent_portal_mcp_token: str = ""
     dataagent_portal_mcp_token_header_name: str = "X-Portal-MCP-Token"
 
+    # ---- Agent 交互能力 ----
+    # AskUserQuestion 让 agent 通过选择卡片向用户提问。开启时会为每次运行安装
+    # can_use_tool 回调，并以流式输入形态投递 prompt。置 false 后：AskUserQuestion 不再
+    # 加入 allowed_tools，且在无写工具门控的会话中 can_use_tool 回到 None、prompt 回到
+    # 纯字符串形态（更接近 v1.3.0 的调用形态）。写工具确认门控不受本开关影响。
+    dataagent_ask_user_question_enabled: bool = True
+
     # ---- Topic runtime root / sandbox ----
     # Host-visible persistent root used by the sandbox runner when asking the
     # host Docker/Podman daemon to bind-mount topic subdirectories into child

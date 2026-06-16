@@ -1,5 +1,11 @@
 # NL2SQL 伪工具调用格式漂移收口 — 设计
 
+> **2026-06-16 更新：本设计描述的「伪工具调用 / format-drift 检测与改判」已整体移除。**
+> 该检测会扫描 thinking 文本、把含工具标签子串的正常回答误判为错误，属不可控因素。
+> 详见 `docs/design/2026-06-16-nl2sql-runtime-simplification-design.md`。本文保留作历史记录。
+> `empty_completion` / `incomplete_answer` 改判与一次性自动恢复不受影响，仍然保留。
+
+
 ## 背景与问题
 
 在智能问数（NL2SQL）链路中，部分评测用例（ARCH_RISK_002 / ARCH_RISK_003 /

@@ -40,7 +40,6 @@ from core.agent_runtime import (
     _build_system_prompt,
     _build_workspace_boundary_hooks,
     _clip_text,
-    _contains_pseudo_tool_call,
     _default_model_for_provider,
     _extract_block,
     _format_exception_reason,
@@ -52,7 +51,6 @@ from core.agent_runtime import (
     _result_subtype_to_reason,
     _safe_base_url,
     _safe_stringify,
-    _strip_pseudo_tool_call_tags,
     resolve_agent_skill_runtime,
     resolve_enabled_skill_runtime,
     resolve_runtime_provider_selection,
@@ -115,16 +113,11 @@ class SdkResultAccumulator:
         self.result_is_error = False
         self.provider_error_message = ""
         self._saw_stream_event = False
-        self._saw_pseudo_tool_call = False
         self._saw_tool_use = False
         self._text_order: list[int] = []
         self._text_by_index: dict[int, str] = {}
         self._block_context: dict[int, dict[str, Any]] = {}
         self._next_message_block_index = 10_000
-
-    def _note_pseudo_tool_call(self, text: str) -> None:
-        if not self._saw_pseudo_tool_call and _contains_pseudo_tool_call(text):
-            self._saw_pseudo_tool_call = True
 
     def _remember_provider_error(self, message: Any) -> None:
         text = str(message or "").strip()
@@ -233,10 +226,8 @@ class SdkResultAccumulator:
             lower_type = block_type.lower()
             if "tool_use" in lower_type:
                 self._saw_tool_use = True
-            if block_text:
-                self._note_pseudo_tool_call(block_text)
-                if "text" in lower_type or lower_type in {"textblock", "text"}:
-                    self._append_message_text(block_text)
+            if block_text and ("text" in lower_type or lower_type in {"textblock", "text"}):
+                self._append_message_text(block_text)
 
     def _ingest_stream_event(self, raw_event: dict[str, Any]) -> None:
         event_type = str(raw_event.get("type") or "").strip()
@@ -273,14 +264,6 @@ class SdkResultAccumulator:
             block_payload = self._block_context.get(block_index) or {}
             delta_payload = raw_event.get("delta") if isinstance(raw_event.get("delta"), dict) else {}
             delta_type = str(delta_payload.get("type") or "")
-            # Detect leaked pseudo tool-call tags in any block, including thinking,
-            # so a drifted run is not silently reported as a clean answer. Thinking
-            # deltas carry text under "thinking"; text deltas under "text". Thinking
-            # text is still kept out of the visible answer below.
-            if delta_type == "thinking_delta":
-                self._note_pseudo_tool_call(str(delta_payload.get("thinking") or ""))
-            elif delta_type == "text_delta":
-                self._note_pseudo_tool_call(str(delta_payload.get("text") or ""))
             if str(block_payload.get("type") or "") != "text":
                 return
             if delta_type == "text_delta":
@@ -358,18 +341,6 @@ class SdkResultAccumulator:
                 session_id=self.session_id,
             )
 
-        if self._saw_pseudo_tool_call:
-            logger.warning(
-                "task.result.format_drift task_id=%s topic_id=%s provider=%s model=%s saw_tool_use=%s content_len=%s",
-                self.params.task_id,
-                self.params.topic_id,
-                self.provider_id,
-                self.model,
-                self._saw_tool_use,
-                len(content),
-            )
-            return self._build_format_drift_result(content)
-
         # A clean run with no visible answer is still an incomplete run. The
         # no-tool case can be retried once by the caller below; a tool-backed
         # empty closeout is marked explicitly without an automatic retry because
@@ -430,11 +401,10 @@ class SdkResultAccumulator:
         """Terminate a non-error run that produced no trustworthy final answer.
 
         Shared closeout for the ways a clean (success-subtype) run can still
-        dead-end: it leaked pseudo tool-call tags instead of a real call, ended
-        thinking-only with no answer, or invoked tools but never wrote the final
-        response. These must surface as task errors — the live stream only
-        carries the raw blocks, so without a terminal error record the chat UI
-        cannot distinguish success from an incomplete answer.
+        dead-end: it ended thinking-only with no answer, or invoked tools but
+        never wrote the final response. These must surface as task errors — the
+        live stream only carries the raw blocks, so without a terminal error
+        record the chat UI cannot distinguish success from an incomplete answer.
         """
         synthetic_blocks: dict[str, dict[str, Any]] = (
             {"tool": {"type": "tool_result", "output": "1"}} if self._saw_tool_use else {}
@@ -455,16 +425,6 @@ class SdkResultAccumulator:
             session_id=self.session_id,
         )
 
-    def _build_format_drift_result(self, content: str) -> TaskExecutionResult:
-        """Close out a run that leaked pseudo tool-call tags instead of a real call."""
-        return self._build_incomplete_run_result(
-            content=_strip_pseudo_tool_call_tags(content).strip(),
-            reason="模型工具调用格式异常未正常收口",
-            error_code="tool_call_format_drift",
-            message="模型输出了伪工具调用标签，本次回答未正常完成，请重试",
-            fallback="模型本次回答因工具调用格式异常未能正常生成，请重试。",
-        )
-
     def _build_incomplete_answer_result(self) -> TaskExecutionResult:
         """Close out a tool-backed run that never produced final visible text."""
         return self._build_incomplete_run_result(
@@ -478,11 +438,11 @@ class SdkResultAccumulator:
     def _build_empty_completion_result(self) -> TaskExecutionResult:
         """Close out a clean run that ended with no visible answer and no tool.
 
-        A thinking-only turn that stopped early: no SDK error, no leaked pseudo
-        tool-call tag, no ``tool_use``, and no final text. This previously fell
-        back to a silent ``finished`` with "已完成。", so the chat ended on an
-        empty answer with no way to retry. Routing it through the shared error
-        closeout makes the existing error card and retry button surface instead.
+        A thinking-only turn that stopped early: no SDK error, no ``tool_use``,
+        and no final text. This previously fell back to a silent ``finished``
+        with "已完成。", so the chat ended on an empty answer with no way to
+        retry. Routing it through the shared error closeout makes the existing
+        error card and retry button surface instead.
         """
         return self._build_incomplete_run_result(
             content="",
