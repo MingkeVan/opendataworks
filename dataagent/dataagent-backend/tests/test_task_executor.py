@@ -237,6 +237,18 @@ async def _collect_async_prompt(prompt):
     return [item async for item in prompt]
 
 
+def _prompt_text(prompt):
+    """Prompt text regardless of plain-string or streamed (can_use_tool) form.
+
+    With AskUserQuestion enabled the SDK runs in streaming-input mode, so the
+    prompt is an async generator of user-message dicts rather than a raw string.
+    """
+    if isinstance(prompt, str):
+        return prompt
+    items = asyncio.run(_collect_async_prompt(prompt))
+    return "".join(str((item.get("message") or {}).get("content") or "") for item in items)
+
+
 def _build_input(*, history=None, resume_session_id=None, agent_snapshot=None, permission_mode=None):
     return task_executor.TaskExecutionInput(
         task_id="task-1",
@@ -452,7 +464,7 @@ def test_execute_task_stream_applies_agent_snapshot_runtime_overrides(monkeypatc
     assert captured["kwargs"]["allow_empty"] is True
     assert ClaudeAgentOptions.last_kwargs["cwd"] == str(topic_workspace)
     assert ClaudeAgentOptions.last_kwargs["skills"] == []
-    assert ClaudeAgentOptions.last_kwargs["allowed_tools"] == ["Read"]
+    assert ClaudeAgentOptions.last_kwargs["allowed_tools"] == ["Read", "AskUserQuestion"]
     assert ClaudeAgentOptions.last_kwargs["mcp_servers"] == {}
     assert ClaudeAgentOptions.last_kwargs["max_turns"] == 7
     # Permission mode resolves through the runtime helper (root vs non-root differ);
@@ -1086,7 +1098,7 @@ def test_execute_task_stream_resumes_sdk_session_without_replaying_history(monke
 
     result = asyncio.run(_run())
 
-    assert QueryCapture.last_prompt == "最近 30 天工作流发布次数趋势"
+    assert _prompt_text(QueryCapture.last_prompt) == "最近 30 天工作流发布次数趋势"
     assert ClaudeAgentOptions.last_kwargs["resume"] == "sdk-session-continued"
     assert result.session_id == "sdk-session-continued"
 
@@ -1346,8 +1358,9 @@ def test_execute_task_stream_recovers_thinking_only_empty_finish_once(monkeypatc
     assert result.content == "恢复后的回答"
     assert len(QueryCapture.calls) == 2
     assert QueryCapture.calls[1]["options"].kwargs["resume"] == "sdk-empty-1"
-    assert "上一轮已经以 end_turn 结束" in QueryCapture.calls[1]["prompt"]
-    assert "最近 30 天工作流发布次数趋势" in QueryCapture.calls[1]["prompt"]
+    _recovery_prompt = _prompt_text(QueryCapture.calls[1]["prompt"])
+    assert "上一轮已经以 end_turn 结束" in _recovery_prompt
+    assert "最近 30 天工作流发布次数趋势" in _recovery_prompt
 
 
 def test_execute_task_stream_marks_empty_finish_as_error_after_recovery_still_empty(monkeypatch, tmp_path: Path):

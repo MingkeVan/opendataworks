@@ -9,16 +9,18 @@
 
 1. `core/ask_user_question.py`(新增)
    - `ask_question_answer_redis_key(task_id, request_id)`
+   - `is_ask_user_question_tool(name)` / `ASK_USER_QUESTION_TOOL_NAME`
    - `wait_for_answer(task_id, request_id, *, timeout_seconds, ...)`:自连接 Redis
-     轮询,返回答案 JSON 或 `None`(超时/取消)。
-   - `build_ask_user_mcp_server(*, sdk_writer, store, task_id, wait_seconds,
-     is_cancel_requested)`:返回 `(server, tool_qualified_name)`,工具处理函数完成
-     记录/暂停/等待/恢复/返回答案文本。
+     轮询,返回答案列表或 `None`(超时/取消)。
+   - `to_sdk_answer_input(questions, answers)`:把 UI 答案映射为内置工具的
+     `updated_input`(`answers` / `annotations`)。
 2. `core/sdk_block_writer.py`:`append_question_request` / `append_question_answer`。
 3. `core/topic_task_store.py`:投影 `question_request`/`question_answer`;
    `get_pending_question_request_id`;`append_question_answer_record`。
 4. `core/task_coordinator.py`:`submit_question_answer` / `read_question_answer`。
-5. `core/task_executor.py`:构建并挂载 ask_user MCP server,加入 `allowed_tools`。
+5. `core/task_executor.py`:`AskUserQuestion` 加入 `allowed_tools`;在
+   `can_use_tool` 回调中拦截并答题(`_handle_ask_user_question`);启用时安装回调并
+   以 `default` 模式运行。
 6. `models/schemas.py`:`QuestionAnswerRequest` / `QuestionAnswerResponse`。
 7. `api/routes.py`:`POST /{task_id}/question-answer`。
 

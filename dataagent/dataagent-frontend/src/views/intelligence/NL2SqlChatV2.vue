@@ -212,7 +212,7 @@
                       </div>
 
                       <!-- Tool use block (chart-producing tools render their chart directly below the block) -->
-                      <div v-else-if="block.type === 'tool_use'" class="v2-tool-row">
+                      <div v-else-if="block.type === 'tool_use' && !isAskUserQuestionBlock(block)" class="v2-tool-row">
                         <ToolOutputRenderer :tool="blockToToolProp(block)" :file-url-resolver="resolveWorkspaceFileHref" />
                       </div>
 
@@ -1119,6 +1119,13 @@ async function handlePermissionDecision(msg, payload) {
       block._submitFailed = Date.now()
     }
   }
+}
+
+// The built-in AskUserQuestion tool_use streams as its own block, but it is
+// rendered as the QuestionSelectionCard (driven by the question_request record),
+// so the raw tool block is suppressed to avoid a duplicate.
+function isAskUserQuestionBlock(block) {
+  return String(block?.name || '') === 'AskUserQuestion'
 }
 
 // AskUserQuestion: post the user's selection for a run paused in waiting_input.
