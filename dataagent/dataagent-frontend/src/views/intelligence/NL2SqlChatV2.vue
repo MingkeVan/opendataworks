@@ -333,6 +333,13 @@
 
           <!-- Input bar -->
           <div class="v2-composer" :class="{ 'is-focused': inputText }">
+            <SlashCommandMenu
+              :visible="slash.visible.value"
+              :commands="slash.filtered.value"
+              :active-index="slash.activeIndex.value"
+              @select="slash.select"
+              @hover="slash.setActive"
+            />
             <input
               ref="fileInputRef"
               type="file"
@@ -344,11 +351,11 @@
               ref="textareaRef"
               v-model="inputText"
               class="v2-textarea"
-              placeholder="输入数据问题…"
+              placeholder="输入数据问题…（输入 / 调用命令）"
               :disabled="!availableModels.length"
               rows="1"
-              @keydown.enter="onEnterKey"
-              @input="autoResize"
+              @keydown="onComposerKeydown"
+              @input="onComposerInput"
             />
             <div class="v2-composer-inline">
               <span class="v2-composer-hint">Enter 发送，Shift + Enter 换行</span>
@@ -528,6 +535,8 @@ import { topicStatusKind } from './topicStatus'
 import { hydrateMessageFromApi, isPlainEnterSubmit, renderMarkdown as renderMarkdownBase } from './chatMessage'
 import { useNl2SqlChat } from './useNl2SqlChat'
 import { useChatMessageActions } from './useChatMessageActions'
+import SlashCommandMenu from './SlashCommandMenu.vue'
+import { useSlashCommands, buildCommands } from './useSlashCommands'
 
 const route = useRoute()
 const router = useRouter()
@@ -560,7 +569,7 @@ const chat = useNl2SqlChat({
   getAgentId: () => agentSelectValue.value || '',
   getPermissionMode: () => permissionMode.value || '',
   topicTitleLength: 60,
-  afterRun: () => loadTopics(),
+  afterRun: () => { loadTopics(); void loadSlashCommands() },
   onTopicEnsured: (id) => { if (!isWidgetMode.value) replaceRouteTopic(id) },
   notifyError: (message) => ElMessage.error('请求失败: ' + message),
 })
@@ -704,6 +713,42 @@ function autoResize() {
   if (!el) return
   el.style.height = 'auto'
   el.style.height = Math.min(el.scrollHeight, 160) + 'px'
+}
+
+// ── Slash commands ─────────────────────────────────────────────────────────
+// Typing "/" opens a menu of the agent's authoritative SDK slash commands
+// (built-ins + skills + custom commands), fetched from the backend. Selecting
+// one autocompletes the "/<name> " token for the user to send.
+const slashCommandNames = ref([])
+const slashCommands = computed(() => buildCommands(slashCommandNames.value))
+const slash = useSlashCommands({
+  getCommands: () => slashCommands.value,
+  inputText,
+  focusInput: () => nextTick(() => { textareaRef.value?.focus(); autoResize() }),
+})
+
+async function loadSlashCommands() {
+  const id = String(agentSelectValue.value || '').trim()
+  if (!id) {
+    slashCommandNames.value = []
+    return
+  }
+  try {
+    const data = await agentApi.getAgentSlashCommands(id)
+    slashCommandNames.value = Array.isArray(data?.slash_commands) ? data.slash_commands : []
+  } catch {
+    slashCommandNames.value = []
+  }
+}
+
+function onComposerInput() {
+  slash.syncFromInput()
+  autoResize()
+}
+
+function onComposerKeydown(event) {
+  if (slash.handleKeydown(event)) return
+  if (event.key === 'Enter' || event.keyCode === 13) onEnterKey(event)
 }
 
 // ── Scroll ─────────────────────────────────────────────────────────────────
@@ -1038,6 +1083,7 @@ async function handleSelectTopic(topicId) {
 
 function handleAgentChange(agentId) {
   agentSelectValue.value = agentId
+  void loadSlashCommands()
   const value = String(agentId || '').trim()
   const previousValue = String(route.query.agent_id || '').trim()
   if (previousValue === value) return
@@ -1071,6 +1117,7 @@ function handleModelCommand(command) {
 // refresh (reloadTopicsAfterRun), and error toasts (notifyError) are wired
 // through the engine options at setup.
 async function handleSend() {
+  slash.close()
   if (isWidgetMode.value) return
   if (isStreaming.value || isUploading.value) return
   const ready = pendingAttachments.value.filter((a) => a.rel_path && !a.uploading)
@@ -1318,6 +1365,7 @@ watch(inputText, (value) => {
 onMounted(async () => {
   await Promise.all([loadSettings(), loadAgents()])
   await loadTopics()
+  void loadSlashCommands()
 })
 
 watch(() => route.query.agent_id, async () => {
@@ -2140,6 +2188,7 @@ onBeforeUnmount(() => {
 }
 
 .v2-composer {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;

@@ -29,6 +29,7 @@ from core.skill_admin_service import (
     update_skill_runtime,
 )
 from core.skill_discovery import resolve_skills_root_dir
+from core.slash_command_cache import get_agent_slash_commands
 from core.topic_task_store import get_topic_task_store
 from models.schemas import (
     AdminSettingsResponse,
@@ -42,6 +43,7 @@ from models.schemas import (
     AgentProfile,
     AgentProfileCreateRequest,
     AgentProfileUpdateRequest,
+    AgentSlashCommandsResponse,
     ModelDetectionRequest,
     ModelDetectionResponse,
     ProviderConfig,
@@ -228,6 +230,22 @@ async def get_agent(agent_id: str):
     if not profile:
         raise HTTPException(status_code=404, detail="agent not found")
     return AgentProfile.model_validate(profile)
+
+
+@skills_router.get("/agents/{agent_id}/slash-commands", response_model=AgentSlashCommandsResponse)
+async def get_agent_slash_commands_endpoint(agent_id: str):
+    # Prefer the authoritative list captured from a real run's system/init message.
+    cached = get_agent_slash_commands(agent_id)
+    if cached is not None:
+        return AgentSlashCommandsResponse(slash_commands=cached, source="sdk")
+    # Cold start (no run has reported yet): fall back to the agent's enabled skill
+    # folders, which the SDK also exposes as /<folder> commands.
+    profile = get_agent_profile(agent_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="agent not found")
+    raw = profile.get("skill_folders")
+    folders = [str(item).strip() for item in raw if str(item or "").strip()] if isinstance(raw, list) else []
+    return AgentSlashCommandsResponse(slash_commands=folders, source="fallback")
 
 
 @skills_router.put("/agents/{agent_id}", response_model=AgentProfile)

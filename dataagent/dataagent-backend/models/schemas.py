@@ -461,6 +461,14 @@ class AgentProfile(BaseModel):
     updated_at: str = ""
 
 
+class AgentSlashCommandsResponse(BaseModel):
+    # Authoritative slash-command names for an agent. ``source`` is "sdk" when the
+    # list came from a real run's system/init message, or "fallback" when derived
+    # from the agent's enabled skill folders before any run reported it.
+    slash_commands: List[str] = Field(default_factory=list)
+    source: str = ""
+
+
 class WorkspaceFile(BaseModel):
     name: str
     rel_path: str

@@ -315,6 +315,9 @@ export function createNl2SqlApiClient(options = {}) {
     getAgent(agentId) {
       return dataagentRequest.get(`/agents/${encodeURIComponent(agentId)}`)
     },
+    getAgentSlashCommands(agentId) {
+      return dataagentRequest.get(`/agents/${encodeURIComponent(agentId)}/slash-commands`)
+    },
     createAgent(data) {
       return dataagentRequest.post('/agents', data)
     },
