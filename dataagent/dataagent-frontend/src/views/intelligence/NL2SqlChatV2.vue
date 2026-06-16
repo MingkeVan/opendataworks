@@ -86,6 +86,8 @@
               <el-radio-group v-model="filterStatus" size="small" class="v2-filter-radios">
                 <el-radio label="">全部</el-radio>
                 <el-radio label="running">进行中</el-radio>
+                <el-radio label="awaiting">待输入</el-radio>
+                <el-radio label="awaiting_permission">待确认</el-radio>
                 <el-radio label="error">失败</el-radio>
                 <el-radio label="suspended">已取消</el-radio>
                 <el-radio label="finished">完成</el-radio>
@@ -124,6 +126,7 @@
             </span>
             <span v-else class="v2-session-meta">
               <span v-if="topicBadgeKind(topic) === 'awaiting'" class="v2-session-await" title="等待你的选择">待输入</span>
+              <span v-else-if="topicBadgeKind(topic) === 'awaiting_permission'" class="v2-session-await is-permission" title="等待你的确认">待确认</span>
               <span v-else-if="topicBadgeKind(topic) === 'error'" class="v2-session-dot is-error" title="执行失败" />
               <span v-else-if="topicBadgeKind(topic) === 'suspended'" class="v2-session-dot is-suspended" title="已取消" />
               {{ formatTime(topic.updated_at || topic.created_at) }}
@@ -616,7 +619,14 @@ const targetMessageId = ref('')
 // ── Computed ─────────────────────────────────────────────────────────────────
 // Status filter values map to topicStatusKind(): '' (finished/none) is the
 // terminal-success bucket, the rest mirror the badge kinds.
-const STATUS_FILTER_KIND = { running: 'running', error: 'error', suspended: 'suspended', finished: '' }
+const STATUS_FILTER_KIND = {
+  running: 'running',
+  awaiting: 'awaiting',
+  awaiting_permission: 'awaiting_permission',
+  error: 'error',
+  suspended: 'suspended',
+  finished: '',
+}
 
 const filteredTopics = computed(() => {
   const kw = searchKeyword.value.trim().toLowerCase()
@@ -1731,6 +1741,7 @@ onBeforeUnmount(() => {
   background: #e6f0ff;
   vertical-align: middle;
 }
+.v2-session-await.is-permission { color: #b9770e; background: #fdf1dd; }
 
 .v2-session-loading {
   display: inline-flex;

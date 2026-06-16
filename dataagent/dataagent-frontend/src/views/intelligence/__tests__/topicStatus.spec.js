@@ -7,14 +7,16 @@ describe('topicStatusKind', () => {
     expect(topicStatusKind('running')).toBe('running')
   })
 
-  it('gives waiting_input its own awaiting kind, others stay in-progress', () => {
+  it('gives waiting_input and waiting_permission their own awaiting kinds', () => {
     expect(topicStatusKind('waiting_input')).toBe('awaiting')
-    expect(topicStatusKind('waiting_permission')).toBe('running')
+    expect(topicStatusKind('waiting_permission')).toBe('awaiting_permission')
+    expect(topicStatusKind('waiting_other')).toBe('running')
   })
 
-  it('treats running and awaiting as active (keep streaming)', () => {
+  it('treats running and both awaiting kinds as active (keep streaming)', () => {
     expect(isActiveStatusKind('running')).toBe(true)
     expect(isActiveStatusKind('awaiting')).toBe(true)
+    expect(isActiveStatusKind('awaiting_permission')).toBe(true)
     expect(isActiveStatusKind('error')).toBe(false)
     expect(isActiveStatusKind('')).toBe(false)
   })
