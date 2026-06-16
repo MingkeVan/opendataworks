@@ -128,3 +128,7 @@ docker compose -f deploy/docker-compose.dev.yml up -d
 ## 许可证
 
 本项目采用 [GNU General Public License v3.0 only](LICENSE) 开源协议。
+
+## Star 趋势
+
+[![Star History Chart](https://api.star-history.com/svg?repos=opendata-lab/opendataworks&type=Date)](https://star-history.com/#opendata-lab/opendataworks&Date)
