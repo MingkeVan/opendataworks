@@ -130,3 +130,7 @@ Contributions are welcome. Please read the [contribution guide](https://opendata
 ## License
 
 OpenDataWorks is licensed under the [GNU General Public License v3.0 only](LICENSE).
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=opendata-lab/opendataworks&type=Date)](https://star-history.com/#opendata-lab/opendataworks&Date)
