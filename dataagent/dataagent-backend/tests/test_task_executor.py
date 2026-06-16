@@ -21,6 +21,8 @@ class _RecordingWriter:
     def __init__(self):
         self.requests = []
         self.decisions = []
+        self.question_requests = []
+        self.question_answers = []
 
     def append_permission_request(self, **kwargs):
         self.requests.append(kwargs)
@@ -28,13 +30,23 @@ class _RecordingWriter:
     def append_permission_decision(self, **kwargs):
         self.decisions.append(kwargs)
 
+    def append_question_request(self, **kwargs):
+        self.question_requests.append(kwargs)
+
+    def append_question_answer(self, **kwargs):
+        self.question_answers.append(kwargs)
+
 
 class _RecordingStore:
     def __init__(self):
         self.statuses = []
+        self.question_answer_records = []
 
     def set_task_status(self, task_id, status):
         self.statuses.append(status)
+
+    def append_question_answer_record(self, **kwargs):
+        self.question_answer_records.append(kwargs)
 
 
 def _build_gate(monkeypatch, decision, *, mode="default"):
@@ -99,6 +111,64 @@ def test_can_use_tool_timeout_denies(monkeypatch):
     result = asyncio.run(cb("mcp__portal__portal_create_task", {}))
     assert _permission_behavior(result) == "deny"
     assert writer.decisions[0]["decision"] == "timeout"
+
+
+def _build_ask_gate(monkeypatch, answers, *, mode="default"):
+    writer = _RecordingWriter()
+    store = _RecordingStore()
+
+    async def fake_answer(task_id, request_id, *, timeout_seconds, is_cancel_requested=None, **kw):
+        return answers
+
+    monkeypatch.setattr(task_executor, "wait_for_answer", fake_answer)
+    cb = task_executor._build_can_use_tool_callback(
+        sdk_writer=writer,
+        store=store,
+        task_id="task-1",
+        permission_mode=mode,
+        wait_seconds=5,
+        is_cancel_requested=None,
+    )
+    return cb, writer, store
+
+
+def _updated_input(result):
+    if isinstance(result, dict):
+        return result.get("updatedInput") or result.get("updated_input")
+    return getattr(result, "updated_input", None)
+
+
+@pytest.mark.parametrize("mode", ["default", "plan", "bypassPermissions", "acceptEdits"])
+def test_can_use_tool_ask_user_question_answers_in_any_mode(monkeypatch, mode):
+    # AskUserQuestion is intercepted regardless of session mode (matching the
+    # official behavior of asking even under plan / bypassPermissions). The user's
+    # selection is mapped onto updated_input.answers so the built-in tool resumes.
+    answers = [{"question": "按哪个维度统计?", "selected": ["按天"], "other": "含节假日"}]
+    cb, writer, store = _build_ask_gate(monkeypatch, answers, mode=mode)
+    questions = [{"question": "按哪个维度统计?", "header": "维度", "options": [{"label": "按天"}]}]
+
+    result = asyncio.run(cb("AskUserQuestion", {"questions": questions}, SimpleNamespace(tool_use_id="tu-9")))
+
+    assert _permission_behavior(result) == "allow"
+    updated = _updated_input(result)
+    assert updated["answers"] == {"按哪个维度统计?": "按天"}
+    assert updated["annotations"] == {"按哪个维度统计?": {"notes": "含节假日"}}
+    assert writer.question_requests[0]["request_id"] == "tu-9"
+    assert store.question_answer_records[0]["answers"] == answers
+    assert store.statuses == ["waiting_input", "running"]
+
+
+def test_can_use_tool_ask_user_question_no_answer_returns_questions_only(monkeypatch):
+    # Timeout / cancellation yields no answers; returning only questions lets the
+    # built-in tool produce its own "did not answer" result and continue.
+    cb, writer, store = _build_ask_gate(monkeypatch, [])
+    questions = [{"question": "按哪个维度统计?", "header": "维度", "options": [{"label": "按天"}]}]
+
+    result = asyncio.run(cb("AskUserQuestion", {"questions": questions}, SimpleNamespace(tool_use_id="tu-1")))
+
+    assert _permission_behavior(result) == "allow"
+    assert _updated_input(result) == {"questions": questions}
+    assert store.statuses == ["waiting_input", "running"]
 
 
 def test_can_use_tool_plan_denies_writes_without_request(monkeypatch):
