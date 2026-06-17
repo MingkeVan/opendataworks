@@ -119,15 +119,18 @@ class WorkflowServiceMetadataPersistenceTest {
                 dolphinSchedulerService,
                 dataTaskMapper,
                 dataLineageMapper,
-                tableTaskRelationMapper);
-        service = new WorkflowService(
-                dataWorkflowMapper,
-                workflowTaskRelationMapper,
+                tableTaskRelationMapper,
                 workflowVersionService,
                 workflowVersionMapper,
                 objectMapper,
                 workflowTopologyService,
                 dolphinConfigService,
+                workflowTaskRelationService,
+                workflowDefinitionAssembler);
+        service = new WorkflowService(
+                dataWorkflowMapper,
+                workflowTaskRelationMapper,
+                workflowTopologyService,
                 workflowQueryService,
                 workflowTaskRelationService,
                 workflowExecutionService,

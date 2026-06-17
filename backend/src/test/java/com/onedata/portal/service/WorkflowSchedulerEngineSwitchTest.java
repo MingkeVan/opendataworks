@@ -14,7 +14,6 @@ import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
-import com.onedata.portal.mapper.WorkflowVersionMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,10 +45,6 @@ class WorkflowSchedulerEngineSwitchTest {
     private DataWorkflowMapper dataWorkflowMapper;
     @Mock
     private WorkflowTaskRelationMapper workflowTaskRelationMapper;
-    @Mock
-    private WorkflowVersionService workflowVersionService;
-    @Mock
-    private WorkflowVersionMapper workflowVersionMapper;
     @Mock
     private DolphinSchedulerService dolphinSchedulerService;
     @Mock
@@ -91,11 +86,7 @@ class WorkflowSchedulerEngineSwitchTest {
         workflowService = new WorkflowService(
                 dataWorkflowMapper,
                 workflowTaskRelationMapper,
-                workflowVersionService,
-                workflowVersionMapper,
-                objectMapper,
                 workflowTopologyService,
-                dolphinConfigService,
                 workflowQueryService,
                 workflowTaskRelationService,
                 workflowExecutionService,

@@ -47,20 +47,20 @@
 ### T4 — 抽取 WorkflowExecutionService（运行触发，已完成）
 - 目标: 迁移 `executeWorkflow` / `backfillWorkflow` / `switchSchedulerEngine` 的编排逻辑（执行日志先持久化，DolphinScheduler 触发后回写运行态，失败时标记日志失败；调度引擎切换保持连接校验、项目解析、运行态字段清空和定义 JSON 运行态绑定重写顺序）。
 - 触及文件: 新增 `WorkflowExecutionService.java` + 单测；改 `WorkflowService.java` 委托；新增 `WorkflowDefinitionAssembler.java` 承接调度引擎切换所需的定义运行态绑定刷新。
-- 边界: `WorkflowDefinitionAssembler` 当前只承接 `switchSchedulerEngine` 需要的运行态绑定刷新和 catalog 回填；`createWorkflow` / `updateWorkflow` 的完整定义装配、版本快照和任务元数据规范化仍留待后续切片迁移。
+- 边界: `WorkflowDefinitionAssembler` 已扩展承接 `createWorkflow` / `updateWorkflow` 和 `switchSchedulerEngine` 需要的定义装配、运行态绑定刷新、catalog 回填、任务元数据规范化和调度默认值处理。
 - 验证: `mvn -pl backend -am -Dtest=WorkflowExecutionServiceTest,WorkflowServiceMetadataPersistenceTest,WorkflowSchedulerEngineSwitchTest -DfailIfNoTests=false test`；回归执行、回填、失败日志和引擎切换既有保护。
 - 回退: 单提交回退。
 
-### T5 — 抽取 WorkflowCommandService（CRUD，删除切片已完成，create/update 前置已完成）
-- 目标: 迁移写命令逻辑；本切片已迁移 `deleteWorkflow`（含 DolphinScheduler 远端清理、关系硬删、可选任务/血缘/表关系级联软删）。
-- 触及文件: 新增 `WorkflowCommandService.java`；改 `WorkflowService.java` 委托；复用既有删除行为测试覆盖真实协作者；`WorkflowDefinitionAssembler` 已承接 create/update 所需的定义装配、任务元数据规范化和调度默认值处理。
-- 边界: `createWorkflow` / `updateWorkflow` 的最终事务编排仍留在 `WorkflowService`，下一切片迁入 `WorkflowCommandService` 时只需同步迁移版本快照、变更判定和 relation version 回写，不再复制定义装配私有方法。
-- 事务: `@Transactional` 保留在 `WorkflowService` 编排层；协作者随编排事务传播，不另起独立事务。
-- 验证: `mvn -pl backend -am -Dtest=WorkflowServiceMetadataPersistenceTest,WorkflowSchedulerEngineSwitchTest -DfailIfNoTests=false test`；重点回归级联删除和非级联删除的事务内副作用。
+### T5 — 抽取 WorkflowCommandService（CRUD，已完成）
+- 目标: 迁移写命令逻辑；`WorkflowCommandService` 已承接 `createWorkflow` / `updateWorkflow` / `deleteWorkflow`，包含定义写入、任务关系重建、任务元数据规范化、版本快照、变更判定、relation version 回写、DolphinScheduler 远端清理和可选任务/血缘/表关系级联软删。
+- 触及文件: `WorkflowCommandService.java`、`WorkflowService.java`、`WorkflowServiceMetadataPersistenceTest.java`、`WorkflowSchedulerEngineSwitchTest.java`；复用 `WorkflowDefinitionAssembler` 处理定义装配、任务元数据规范化和调度默认值。
+- 边界: `buildDefinitionJsonForExport` 和 `normalizeAndPersistMetadata` 仍保留在 `WorkflowService` facade，因为它们既有公有 API 会在读取/规范化时写回 `definition_json`，后续如需继续下沉应作为独立行为保持切片处理。
+- 事务: `@Transactional` 保留在 `WorkflowService` facade；协作者随 facade 事务传播，不另起独立事务。
+- 验证: `mvn -pl backend -am -Dtest=WorkflowServiceMetadataPersistenceTest,WorkflowSchedulerEngineSwitchTest,WorkflowExecutionServiceTest -DfailIfNoTests=false test`；重点回归 create/update 版本快照、任务关系版本回写、级联删除和调度引擎切换。
 - 回退: 单提交回退。
 
 ### T6 — 收尾
-- 目标: `WorkflowService` 收敛为薄编排 facade；清理迁移后残留的未用私有方法/导入。
+- 目标: `WorkflowService` 已收敛为 facade；清理迁移后残留的未用私有方法/导入，并保留对带写回副作用公有 API 的显式边界说明。
 - 验证: `mvn -pl backend -am test`；统计 `WorkflowService` 行数下降、依赖收敛。
 - 回退: 单提交回退。
 

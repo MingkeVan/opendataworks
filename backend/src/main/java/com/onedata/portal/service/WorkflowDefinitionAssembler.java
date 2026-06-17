@@ -649,6 +649,7 @@ public class WorkflowDefinitionAssembler {
             taskParams.put("rawScript", taskNode.get("taskSql"));
             taskParams.put("datasourceName", taskNode.get("datasourceName"));
             taskParams.put("type", taskNode.get("datasourceType"));
+            taskParams.put("datasourceType", taskNode.get("datasourceType"));
             item.put("taskParams", taskParams);
 
             item.put("inputTableIds", taskNode.get("inputTableIds"));
