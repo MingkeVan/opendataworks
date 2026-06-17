@@ -2,7 +2,9 @@ package com.onedata.portal.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.onedata.portal.dto.workflow.WorkflowBackfillRequest;
+import com.onedata.portal.dto.workflow.WorkflowSchedulerEngineRequest;
 import com.onedata.portal.entity.DataWorkflow;
+import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.entity.TaskExecutionLog;
 import com.onedata.portal.entity.WorkflowTaskRelation;
 import com.onedata.portal.mapper.DataWorkflowMapper;
@@ -27,6 +29,8 @@ public class WorkflowExecutionService {
     private final WorkflowTaskRelationMapper workflowTaskRelationMapper;
     private final TaskExecutionLogMapper taskExecutionLogMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
+    private final DolphinConfigService dolphinConfigService;
+    private final WorkflowDefinitionAssembler workflowDefinitionAssembler;
 
     public String executeWorkflow(Long workflowId) {
         DataWorkflow workflow = dataWorkflowMapper.selectById(workflowId);
@@ -89,6 +93,68 @@ public class WorkflowExecutionService {
             markExecutionFailed(executionLog, ex);
             throw ex;
         }
+    }
+
+    public DataWorkflow switchSchedulerEngine(Long workflowId, WorkflowSchedulerEngineRequest request) {
+        if (workflowId == null) {
+            throw new IllegalArgumentException("workflowId 不能为空");
+        }
+        if (request == null || request.getDolphinConfigId() == null || request.getDolphinConfigId() <= 0) {
+            throw new IllegalArgumentException("dolphinConfigId 不能为空");
+        }
+        DataWorkflow workflow = dataWorkflowMapper.selectById(workflowId);
+        if (workflow == null) {
+            throw new IllegalArgumentException("Workflow not found: " + workflowId);
+        }
+        Long targetConfigId = request.getDolphinConfigId();
+        DolphinConfig targetConfig = dolphinConfigService.getEnabledConfig(targetConfigId);
+        if (!dolphinSchedulerService.testConnection(targetConfigId)) {
+            throw new IllegalStateException("目标 Dolphin 环境连接失败: " + targetConfig.getConfigName());
+        }
+        Long targetProjectCode = dolphinSchedulerService.getProjectCode(targetConfigId, true);
+        if (targetProjectCode == null || targetProjectCode <= 0) {
+            throw new IllegalStateException("目标 Dolphin 项目不可用: " + targetConfig.getProjectName());
+        }
+
+        String operator = StringUtils.hasText(request.getOperator()) ? request.getOperator().trim() : "system";
+        LocalDateTime updatedAt = LocalDateTime.now();
+
+        workflow.setDolphinConfigId(targetConfigId);
+        workflow.setWorkflowCode(null);
+        workflow.setProjectCode(targetProjectCode);
+        workflow.setDolphinScheduleId(null);
+        workflow.setScheduleState("OFFLINE");
+        workflow.setStatus("offline");
+        workflow.setPublishStatus("never");
+        workflow.setLastPublishedVersionId(null);
+        workflow.setRuntimeSyncStatus(null);
+        workflow.setRuntimeSyncMessage(null);
+        workflow.setRuntimeSyncHash(null);
+        workflow.setRuntimeSyncAt(null);
+        workflow.setUpdatedBy(operator);
+        workflow.setUpdatedAt(updatedAt);
+        workflow.setDefinitionJson(workflowDefinitionAssembler.refreshRuntimeBindings(
+                workflow.getDefinitionJson(),
+                targetConfigId,
+                targetProjectCode));
+        dataWorkflowMapper.update(null, Wrappers.<DataWorkflow>lambdaUpdate()
+                .eq(DataWorkflow::getId, workflowId)
+                .set(DataWorkflow::getDolphinConfigId, targetConfigId)
+                .set(DataWorkflow::getWorkflowCode, null)
+                .set(DataWorkflow::getProjectCode, targetProjectCode)
+                .set(DataWorkflow::getDolphinScheduleId, null)
+                .set(DataWorkflow::getScheduleState, "OFFLINE")
+                .set(DataWorkflow::getStatus, "offline")
+                .set(DataWorkflow::getPublishStatus, "never")
+                .set(DataWorkflow::getLastPublishedVersionId, null)
+                .set(DataWorkflow::getRuntimeSyncStatus, null)
+                .set(DataWorkflow::getRuntimeSyncMessage, null)
+                .set(DataWorkflow::getRuntimeSyncHash, null)
+                .set(DataWorkflow::getRuntimeSyncAt, null)
+                .set(DataWorkflow::getDefinitionJson, workflow.getDefinitionJson())
+                .set(DataWorkflow::getUpdatedBy, operator)
+                .set(DataWorkflow::getUpdatedAt, updatedAt));
+        return workflow;
     }
 
     private TaskExecutionLog createWorkflowExecutionLog(Long workflowId, String triggerType) {

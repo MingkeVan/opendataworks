@@ -12,6 +12,7 @@ import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
+import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -56,6 +57,8 @@ class WorkflowSchedulerEngineSwitchTest {
     @Mock
     private TableTaskRelationMapper tableTaskRelationMapper;
     @Mock
+    private TaskExecutionLogMapper taskExecutionLogMapper;
+    @Mock
     private WorkflowTopologyService workflowTopologyService;
     @Mock
     private DolphinConfigService dolphinConfigService;
@@ -64,20 +67,28 @@ class WorkflowSchedulerEngineSwitchTest {
     @Mock
     private WorkflowTaskRelationService workflowTaskRelationService;
     @Mock
-    private WorkflowExecutionService workflowExecutionService;
-    @Mock
     private WorkflowCommandService workflowCommandService;
 
     private WorkflowService workflowService;
 
     @BeforeEach
     void setUp() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        WorkflowDefinitionAssembler workflowDefinitionAssembler =
+                new WorkflowDefinitionAssembler(objectMapper, dolphinSchedulerService);
+        WorkflowExecutionService workflowExecutionService = new WorkflowExecutionService(
+                dataWorkflowMapper,
+                workflowTaskRelationMapper,
+                taskExecutionLogMapper,
+                dolphinSchedulerService,
+                dolphinConfigService,
+                workflowDefinitionAssembler);
         workflowService = new WorkflowService(
                 dataWorkflowMapper,
                 workflowTaskRelationMapper,
                 workflowVersionService,
                 workflowVersionMapper,
-                new ObjectMapper(),
+                objectMapper,
                 dolphinSchedulerService,
                 dataTaskMapper,
                 tableTaskRelationMapper,

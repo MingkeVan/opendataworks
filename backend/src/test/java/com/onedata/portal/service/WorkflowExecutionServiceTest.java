@@ -38,6 +38,10 @@ class WorkflowExecutionServiceTest {
     private TaskExecutionLogMapper taskExecutionLogMapper;
     @Mock
     private DolphinSchedulerService dolphinSchedulerService;
+    @Mock
+    private DolphinConfigService dolphinConfigService;
+    @Mock
+    private WorkflowDefinitionAssembler workflowDefinitionAssembler;
 
     private WorkflowExecutionService service;
 
@@ -47,7 +51,9 @@ class WorkflowExecutionServiceTest {
                 dataWorkflowMapper,
                 workflowTaskRelationMapper,
                 taskExecutionLogMapper,
-                dolphinSchedulerService);
+                dolphinSchedulerService,
+                dolphinConfigService,
+                workflowDefinitionAssembler);
     }
 
     @Test

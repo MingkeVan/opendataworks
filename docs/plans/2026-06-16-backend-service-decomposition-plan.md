@@ -44,17 +44,17 @@
 - 验证: `mvn -pl backend -am -Dtest=WorkflowTaskRelationServiceTest,WorkflowTaskRelationServiceIntegrationTest,WorkflowServiceMetadataPersistenceTest,WorkflowSchedulerEngineSwitchTest -DfailIfNoTests=false test`；回归任务关系刷新、拓扑 entry/exit、上下游计数和真实表约束。
 - 回退: 单提交回退。
 
-### T4 — 抽取 WorkflowExecutionService（运行触发，执行/补数已完成）
-- 目标: 迁移 `executeWorkflow` / `backfillWorkflow` 的编排逻辑（执行日志先持久化，DolphinScheduler 触发后回写运行态，失败时标记日志失败）。
-- 触及文件: 新增 `WorkflowExecutionService.java` + 单测；改 `WorkflowService.java` 委托。
-- 边界: `switchSchedulerEngine` 仍调用 `refreshDefinitionRuntimeIds` 与 `enrichDefinitionMetadataFromCatalog`，会重写定义 JSON 中项目、调度、task-group 运行态绑定；本切片不复制这串定义装配私有逻辑，待 `WorkflowDefinitionAssembler` 抽取后再迁移。
+### T4 — 抽取 WorkflowExecutionService（运行触发，已完成）
+- 目标: 迁移 `executeWorkflow` / `backfillWorkflow` / `switchSchedulerEngine` 的编排逻辑（执行日志先持久化，DolphinScheduler 触发后回写运行态，失败时标记日志失败；调度引擎切换保持连接校验、项目解析、运行态字段清空和定义 JSON 运行态绑定重写顺序）。
+- 触及文件: 新增 `WorkflowExecutionService.java` + 单测；改 `WorkflowService.java` 委托；新增 `WorkflowDefinitionAssembler.java` 承接调度引擎切换所需的定义运行态绑定刷新。
+- 边界: `WorkflowDefinitionAssembler` 当前只承接 `switchSchedulerEngine` 需要的运行态绑定刷新和 catalog 回填；`createWorkflow` / `updateWorkflow` 的完整定义装配、版本快照和任务元数据规范化仍留待后续切片迁移。
 - 验证: `mvn -pl backend -am -Dtest=WorkflowExecutionServiceTest,WorkflowServiceMetadataPersistenceTest,WorkflowSchedulerEngineSwitchTest -DfailIfNoTests=false test`；回归执行、回填、失败日志和引擎切换既有保护。
 - 回退: 单提交回退。
 
 ### T5 — 抽取 WorkflowCommandService（CRUD，删除切片已完成）
 - 目标: 迁移写命令逻辑；本切片已迁移 `deleteWorkflow`（含 DolphinScheduler 远端清理、关系硬删、可选任务/血缘/表关系级联软删）。
 - 触及文件: 新增 `WorkflowCommandService.java`；改 `WorkflowService.java` 委托；复用既有删除行为测试覆盖真实协作者。
-- 边界: `createWorkflow` / `updateWorkflow` 仍依赖 `resolveDefinitionJson`、版本快照、任务元数据规范化和 Dolphin datasource/task-group catalog 回填；这些逻辑应先随 `WorkflowDefinitionAssembler` 拆出后再迁移，避免在 CommandService 中复制大段定义装配私有方法。
+- 边界: `createWorkflow` / `updateWorkflow` 仍依赖 `resolveDefinitionJson`、版本快照、任务元数据规范化和 Dolphin datasource/task-group catalog 回填；这些逻辑应在 `WorkflowDefinitionAssembler` 承接完整定义装配后再迁移，避免在 CommandService 中复制大段定义装配私有方法。
 - 事务: `@Transactional` 保留在 `WorkflowService` 编排层；协作者随编排事务传播，不另起独立事务。
 - 验证: `mvn -pl backend -am -Dtest=WorkflowServiceMetadataPersistenceTest,WorkflowSchedulerEngineSwitchTest -DfailIfNoTests=false test`；重点回归级联删除和非级联删除的事务内副作用。
 - 回退: 单提交回退。
