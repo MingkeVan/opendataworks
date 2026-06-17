@@ -50,6 +50,7 @@ Use this method if you have internet access and are deploying directly from the 
    # Edit .env for database credentials; DolphinScheduler config is set in System Settings after startup
    vim .env
    ```
+   后端主库连接通过 `.env` 中的 `SPRING_DATASOURCE_URL`、`SPRING_DATASOURCE_USERNAME`、`SPRING_DATASOURCE_PASSWORD` 注入。默认值指向本 compose 内的 `mysql:3306/opendataworks`，如连接外部 MySQL，请同步调整这三个变量。
 
 3. **Start Services**:
    ```bash
@@ -129,6 +130,7 @@ Use this method for isolated environments without internet access. You will use 
    # Edit .env and configure settings
    vim deploy/.env
    ```
+   后端主库连接通过 `deploy/.env` 中的 `SPRING_DATASOURCE_URL`、`SPRING_DATASOURCE_USERNAME`、`SPRING_DATASOURCE_PASSWORD` 注入。默认值指向包内 compose 的 `mysql:3306/opendataworks`，如连接外部 MySQL，请同步调整这三个变量。
 
 4. **Start Services**:
    ```bash

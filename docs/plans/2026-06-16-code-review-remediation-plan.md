@@ -30,9 +30,9 @@
 - 目标: 数据库 `url`/`username`/`password` 改为环境变量注入，与既有 `${AUTH_JWT_SECRET:...}` 风格一致
 - 触及文件:
   - `backend/src/main/resources/application.yml:11-13`
-  - `deploy/.env.example`、`deploy/docker-compose.dev.yml`、`deploy/docker-compose.prod.yml`（补充 `DB_URL/DB_USERNAME/DB_PASSWORD` 透传）
+  - `deploy/.env.example`（补充 `SPRING_DATASOURCE_URL` / `SPRING_DATASOURCE_USERNAME` / `SPRING_DATASOURCE_PASSWORD`；Compose 已通过既有 `env_file` 注入，无需改 compose）
   - `deploy/README.md`（说明新增环境变量）
-- 做法: `url: ${DB_URL:jdbc:mysql://localhost:3306/...}`、`username: ${DB_USERNAME:opendataworks}`、`password: ${DB_PASSWORD:opendataworks123}`，保留默认值以不破坏本地启动
+- 做法: `url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/...}`、`username: ${SPRING_DATASOURCE_USERNAME:opendataworks}`、`password: ${SPRING_DATASOURCE_PASSWORD:opendataworks123}`，保留默认值以不破坏本地启动
 - 验证: `mvn -pl backend -am compile`；本地以默认值与显式 env 两种方式各启动一次确认数据源装配成功
 - 回退: 单文件还原；默认值保留意味着即便回退也不影响既有部署
 - 影响面: 部署行为（中），需同步更新 deploy 文档（已含在触及文件内）
@@ -88,8 +88,8 @@
 ### P1-3 前端 JSON.parse / localStorage 容错
 - 对应发现: 4.3 中项
 - 目标: 消除数据损坏导致的静默崩溃
-- 触及文件: `views/datastudio/DataStudioNew.vue:1341,1373`、`views/workflows/WorkflowDetail.vue:1499`、`views/settings/DataSourceManagement.vue:503,516`
-- 做法: 抽一个 `safeJsonParse(raw, fallback)` 工具置于 `utils/`，所有读取点改用；`localStorage` 读取加 try-catch 与（必要时）schema 版本号
+- 触及文件: `frontend/src/utils/safeJson.js`、`frontend/src/utils/__tests__/safeJson.spec.js`
+- 做法: 抽一个 `safeJsonParse(raw, fallback)` 工具置于 `utils/`；点名的现有 `JSON.parse` 站点经核查已有 try-catch 兜底，本轮不 churn 工作代码，新代码和后续触达点优先使用该工具。
 - 验证: 为 `safeJsonParse` 增加 Vitest 单测；`npm --prefix frontend run test`
 - 回退: 局部还原
 - 影响面: 局部（低）

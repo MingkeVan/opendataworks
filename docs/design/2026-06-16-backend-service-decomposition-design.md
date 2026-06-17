@@ -70,6 +70,7 @@ WorkflowController / 同族服务 / DataTaskService
         │  （仍调用稳定的 WorkflowService 公有方法）
         ▼
 WorkflowService（薄编排 facade：事务边界 + 组合调用）
+        ├── JsonCanonicalizer            JSON 规范化 / 哈希（已完成的纯工具切片）
         ├── WorkflowQueryService        读取：list / getDetail / 导出 JSON 组装
         ├── WorkflowCommandService      写入：create / update / delete（含级联）
         ├── WorkflowDefinitionAssembler 定义 JSON 组装、规范化、元数据回填（纯逻辑，无事务）
@@ -78,14 +79,14 @@ WorkflowService（薄编排 facade：事务边界 + 组合调用）
 ```
 
 - 已存在的 `WorkflowVersionService`/`WorkflowTopologyService`/`WorkflowInstanceCacheService` 等**继续复用**，把 `WorkflowService` 内与之重复的私有逻辑迁移过去而非新建。
-- `WorkflowDefinitionAssembler` 优先抽取——它是 85 个私有方法的核心，纯函数式（输入定义/请求，输出规范化 JSON / 绑定结构），**最易加单测、最易安全迁移**。
+- `JsonCanonicalizer` 已作为首个低风险纯逻辑切片落地；剩余 T2-T5 涉及读取、任务关系、执行和 CRUD 等有状态路径，需在 MySQL 8 + DolphinScheduler 环境中继续差分验证。
 
 ### 4.2 迁移策略（行为保持、增量、可回退）
 
 1. **先补测试网**：为 `WorkflowService` 的 13 个公有方法补特征化（characterization）测试，锁定当前输入输出与副作用，作为重构的回归基线。
 2. **一次一职责**：按上表逐个抽取，每次只迁移一类职责，保持公有方法签名不变、内部改为委托新协作者。
 3. **每步独立提交、独立验证**，可单独回退。
-4. **优先顺序**：DefinitionAssembler（纯逻辑、最安全）→ QueryService → TaskRelationService → ExecutionService → CommandService（事务最重，最后做）。
+4. **优先顺序**：JsonCanonicalizer（已完成的纯逻辑切片）→ QueryService → TaskRelationService → ExecutionService → CommandService（事务最重，最后做）。
 
 ### 4.3 事务边界处理
 

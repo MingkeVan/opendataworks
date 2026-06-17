@@ -64,7 +64,7 @@ OpenDataWorks 是一个多模块单仓库（monorepo），整体架构**清晰�
 - 位置: `backend/src/main/resources/application.yml:11-13`
 - 现象: `url`/`username`/`password` 直接写死（`opendataworks` / `opendataworks123`，且 JDBC URL 写死 `localhost:3306`），而同文件 / 同仓库其他敏感项已正确外部化（如 `${AUTH_JWT_SECRET:...}`、`${AGENT_API_SERVICE_TOKEN:}`）。
 - 影响: 风格不一致、生产部署需改源码；凭据可被源码检索。
-- 建议: 统一为 `${DB_USERNAME:opendataworks}` / `${DB_PASSWORD:...}` / `${DB_URL:...}` 形式，与 JWT 密钥保持一致的外部化约定。
+- 建议: 统一为 `${SPRING_DATASOURCE_USERNAME:opendataworks}` / `${SPRING_DATASOURCE_PASSWORD:...}` / `${SPRING_DATASOURCE_URL:...}` 形式，与 Spring Boot 数据源环境变量约定和 JWT 密钥外部化风格保持一致。
 
 ### H-2. 后端存在多处“静默吞咽异常” — 🔴 高
 - 位置示例: `DataQueryService.java:139,144`、`DolphinSchedulerService.java:702`、`InspectionService.java:1584`、`WorkflowService.java:567,670,887`（全仓共 `catch (... ignored ...)` 26 处）
@@ -129,7 +129,7 @@ OpenDataWorks 是一个多模块单仓库（monorepo），整体架构**清晰�
 | 高 | 次级巨型组件：`WorkflowDetail.vue`(2792)、`TaskEditDrawer.vue`(1358)、`DataStudioRightPanel.vue`(1985) | 见左列 |
 | 高 | 无 Lint/格式化配置 + 127 处 `console.*` 残留（见 H-3）| `frontend/` |
 | 中 | **视图相互导入视图**（如 `DataIntegration.vue` 导入 `TaskTable.vue`/`DataSourceManagement.vue`；`DataStudioNew.vue`、`LineageView.vue` 导入 `views/tasks/TaskEditDrawer.vue`），存在耦合与潜在循环依赖；`TaskEditDrawer` 等应下沉到 `components/` | 见左列 |
-| 中 | 多处 `JSON.parse` / `localStorage` 读取无 try-catch 与版本校验，数据损坏会静默崩溃 | `DataStudioNew.vue:1341,1373`、`WorkflowDetail.vue:1499`、`DataSourceManagement.vue:503,516` |
+| 中 | 多处 `JSON.parse` / `localStorage` 容错写法分散，建议收敛公共解析工具；点名站点需逐处核查是否已有 try-catch 兜底 | `DataStudioNew.vue:1341,1373`、`WorkflowDetail.vue:1499`、`DataSourceManagement.vue:503,516` |
 | 中 | `provide('dataStudioCtx', {...})` 暴露大型上下文对象形成隐式契约，数据流难追踪 | `DataStudioNew.vue:4852` |
 | 低 | API 模块 import 风格不一（`@/utils/request` vs `../utils/request`）；超时魔法数散落（`request.js:8` 60000、`table.js` 600000、`query.js` 多处）| `api/*.js` |
 | 低 | 组件测试覆盖极低：12 个测试文件（基于 Vitest），主要覆盖工具/辅助函数，最大组件无测试 | `frontend/src/**/__tests__` |

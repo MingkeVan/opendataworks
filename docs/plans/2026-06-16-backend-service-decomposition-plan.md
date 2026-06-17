@@ -21,14 +21,14 @@
 - 验证: `mvn -pl backend -am test`，新增测试全绿。
 - 回退: 删除新增测试文件（纯增量，无生产影响）。
 
-### T1 — 抽取 WorkflowDefinitionAssembler（最低风险，先做）
-- 目标: 把「定义 JSON 组装 / 规范化 / 元数据回填」相关的私有方法从 `WorkflowService` 下沉到纯逻辑协作者。
+### T1 — 抽取 JsonCanonicalizer（最低风险，已完成首个切片）
+- 目标: 先把 `WorkflowService` 与 `TableMetadataVersionService` 中重复的 JSON 规范化 / SHA-256 哈希逻辑下沉到纯工具，消除重复实现并为后续有状态拆分铺路。
 - 触及文件:
-  - 新增 `backend/src/main/java/com/onedata/portal/service/WorkflowDefinitionAssembler.java`（`@Service` + `@RequiredArgsConstructor`，仅依赖 `ObjectMapper` 等只读/无状态依赖）
-  - 改 `WorkflowService.java`：移动相关私有方法，改为委托新协作者
-  - 新增 `backend/src/test/java/com/onedata/portal/service/WorkflowDefinitionAssemblerTest.java`
-- 做法: 选取无 Mapper 依赖、可纯函数化的私有方法整体迁移；`WorkflowService` 保留薄包装调用，公有方法签名不变。
-- 验证: `mvn -pl backend -am test`（T0 基线 + 新单测全绿）。
+  - 新增 `backend/src/main/java/com/onedata/portal/util/JsonCanonicalizer.java`
+  - 改 `WorkflowService.java` 与 `TableMetadataVersionService.java`：删除重复私有实现，委托 `JsonCanonicalizer`
+  - 新增 `backend/src/test/java/com/onedata/portal/util/JsonCanonicalizerTest.java`
+- 做法: 保持原规范化输出、空白输入哈希返回 `null` 等边界语义不变；只搬迁纯逻辑，不改变公有 API、schema、部署或事务边界。
+- 验证: `mvn -pl backend -am test`（新增工具单测 + 受影响服务测试）。
 - 回退: 单提交回退；公有 API 不变，调用方不受影响。
 
 ### T2 — 抽取 WorkflowQueryService（读取）
