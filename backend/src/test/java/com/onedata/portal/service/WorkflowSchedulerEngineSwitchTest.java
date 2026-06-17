@@ -9,7 +9,6 @@ import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.workflow.WorkflowSchedulerEngineRequest;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.DolphinConfig;
-import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
@@ -55,8 +54,6 @@ class WorkflowSchedulerEngineSwitchTest {
     @Mock
     private DataTaskMapper dataTaskMapper;
     @Mock
-    private DataLineageMapper dataLineageMapper;
-    @Mock
     private TableTaskRelationMapper tableTaskRelationMapper;
     @Mock
     private WorkflowTopologyService workflowTopologyService;
@@ -68,6 +65,8 @@ class WorkflowSchedulerEngineSwitchTest {
     private WorkflowTaskRelationService workflowTaskRelationService;
     @Mock
     private WorkflowExecutionService workflowExecutionService;
+    @Mock
+    private WorkflowCommandService workflowCommandService;
 
     private WorkflowService workflowService;
 
@@ -81,13 +80,13 @@ class WorkflowSchedulerEngineSwitchTest {
                 new ObjectMapper(),
                 dolphinSchedulerService,
                 dataTaskMapper,
-                dataLineageMapper,
                 tableTaskRelationMapper,
                 workflowTopologyService,
                 dolphinConfigService,
                 workflowQueryService,
                 workflowTaskRelationService,
-                workflowExecutionService);
+                workflowExecutionService,
+                workflowCommandService);
     }
 
     @Test
