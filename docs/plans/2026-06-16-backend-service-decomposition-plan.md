@@ -32,9 +32,10 @@
 - 回退: 单提交回退；公有 API 不变，调用方不受影响。
 
 ### T2 — 抽取 WorkflowQueryService（读取）
-- 目标: 迁移 `list` / `getDetail` / `buildDefinitionJsonForExport` 的读取与组装逻辑。
+- 目标: 迁移 `list` / `getDetail` 的纯读取逻辑，包含列表分页、详情组装、当前版本号填充、DolphinScheduler 最近实例实时读取与缓存兜底。
 - 触及文件: 新增 `WorkflowQueryService.java` + 测试；改 `WorkflowService.java` 委托。
-- 验证: `mvn -pl backend -am test`；重点回归列表分页、详情组装、导出 JSON。
+- 边界: `buildDefinitionJsonForExport` 在 `definition_json` 缺失时会根据任务关系重建并写回工作流，不是纯查询；本切片暂留在 `WorkflowService`，待 `WorkflowDefinitionAssembler` 抽取后再迁移。
+- 验证: `mvn -pl backend -am test`；重点回归列表分页、详情组装、最近实例和版本号填充。
 - 回退: 单提交回退。
 
 ### T3 — 抽取 WorkflowTaskRelationService（任务绑定/拓扑刷新）

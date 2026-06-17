@@ -14,8 +14,6 @@ import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
-import com.onedata.portal.mapper.WorkflowInstanceCacheMapper;
-import com.onedata.portal.mapper.WorkflowPublishRecordMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -50,13 +48,9 @@ class WorkflowSchedulerEngineSwitchTest {
     @Mock
     private WorkflowTaskRelationMapper workflowTaskRelationMapper;
     @Mock
-    private WorkflowPublishRecordMapper workflowPublishRecordMapper;
-    @Mock
     private WorkflowVersionService workflowVersionService;
     @Mock
     private WorkflowVersionMapper workflowVersionMapper;
-    @Mock
-    private WorkflowInstanceCacheMapper workflowInstanceCacheMapper;
     @Mock
     private DolphinSchedulerService dolphinSchedulerService;
     @Mock
@@ -71,19 +65,18 @@ class WorkflowSchedulerEngineSwitchTest {
     private WorkflowTopologyService workflowTopologyService;
     @Mock
     private DolphinConfigService dolphinConfigService;
+    @Mock
+    private WorkflowQueryService workflowQueryService;
 
     private WorkflowService workflowService;
 
     @BeforeEach
     void setUp() {
-        WorkflowInstanceCacheService cacheService = new WorkflowInstanceCacheService(workflowInstanceCacheMapper);
         workflowService = new WorkflowService(
                 dataWorkflowMapper,
                 workflowTaskRelationMapper,
-                workflowPublishRecordMapper,
                 workflowVersionService,
                 workflowVersionMapper,
-                cacheService,
                 new ObjectMapper(),
                 dolphinSchedulerService,
                 dataTaskMapper,
@@ -91,7 +84,8 @@ class WorkflowSchedulerEngineSwitchTest {
                 tableTaskRelationMapper,
                 taskExecutionLogMapper,
                 workflowTopologyService,
-                dolphinConfigService);
+                dolphinConfigService,
+                workflowQueryService);
     }
 
     @Test

@@ -25,7 +25,7 @@
 
 `WorkflowService` 当前公有方法按职责可归为五类：
 
-- 读取/查询：`list`、`getDetail`、`buildDefinitionJsonForExport`
+- 读取/查询：`list`、`getDetail`；`buildDefinitionJsonForExport` 虽是导出入口，但在 `definition_json` 缺失时会重建并写回工作流，应随定义组装职责单独迁移。
 - 写入/CRUD：`createWorkflow`、`updateWorkflow`、`deleteWorkflow`（两个重载）
 - 运行触发：`executeWorkflow`、`backfillWorkflow`
 - 版本与元数据：`syncCurrentVersion`、`normalizeAndPersistMetadata`
@@ -71,7 +71,7 @@ WorkflowController / 同族服务 / DataTaskService
         ▼
 WorkflowService（薄编排 facade：事务边界 + 组合调用）
         ├── JsonCanonicalizer            JSON 规范化 / 哈希（已完成的纯工具切片）
-        ├── WorkflowQueryService        读取：list / getDetail / 导出 JSON 组装
+        ├── WorkflowQueryService        读取：list / getDetail（纯查询）
         ├── WorkflowCommandService      写入：create / update / delete（含级联）
         ├── WorkflowDefinitionAssembler 定义 JSON 组装、规范化、元数据回填（纯逻辑，无事务）
         ├── WorkflowTaskRelationService 任务绑定与 refreshTaskRelations
@@ -79,7 +79,7 @@ WorkflowService（薄编排 facade：事务边界 + 组合调用）
 ```
 
 - 已存在的 `WorkflowVersionService`/`WorkflowTopologyService`/`WorkflowInstanceCacheService` 等**继续复用**，把 `WorkflowService` 内与之重复的私有逻辑迁移过去而非新建。
-- `JsonCanonicalizer` 已作为首个低风险纯逻辑切片落地；剩余 T2-T5 涉及读取、任务关系、执行和 CRUD 等有状态路径，需在 MySQL 8 + DolphinScheduler 环境中继续差分验证。
+- `JsonCanonicalizer` 已作为首个低风险纯逻辑切片落地；`WorkflowQueryService` 先承接 `list/getDetail` 纯查询路径；`buildDefinitionJsonForExport` 的缺失定义回填逻辑待 `WorkflowDefinitionAssembler` 抽取后迁移。剩余任务关系、执行和 CRUD 等有状态路径需在 MySQL 8 + DolphinScheduler 环境中继续差分验证。
 
 ### 4.2 迁移策略（行为保持、增量、可回退）
 

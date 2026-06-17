@@ -19,7 +19,6 @@ import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
-import com.onedata.portal.mapper.WorkflowPublishRecordMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -63,16 +62,10 @@ class WorkflowServiceMetadataPersistenceTest {
     private WorkflowTaskRelationMapper workflowTaskRelationMapper;
 
     @Mock
-    private WorkflowPublishRecordMapper workflowPublishRecordMapper;
-
-    @Mock
     private WorkflowVersionService workflowVersionService;
 
     @Mock
     private WorkflowVersionMapper workflowVersionMapper;
-
-    @Mock
-    private WorkflowInstanceCacheService workflowInstanceCacheService;
 
     @Mock
     private DolphinSchedulerService dolphinSchedulerService;
@@ -95,6 +88,9 @@ class WorkflowServiceMetadataPersistenceTest {
     @Mock
     private DolphinConfigService dolphinConfigService;
 
+    @Mock
+    private WorkflowQueryService workflowQueryService;
+
     private ObjectMapper objectMapper;
     private WorkflowService service;
 
@@ -104,10 +100,8 @@ class WorkflowServiceMetadataPersistenceTest {
         service = new WorkflowService(
                 dataWorkflowMapper,
                 workflowTaskRelationMapper,
-                workflowPublishRecordMapper,
                 workflowVersionService,
                 workflowVersionMapper,
-                workflowInstanceCacheService,
                 objectMapper,
                 dolphinSchedulerService,
                 dataTaskMapper,
@@ -115,7 +109,8 @@ class WorkflowServiceMetadataPersistenceTest {
                 tableTaskRelationMapper,
                 taskExecutionLogMapper,
                 workflowTopologyService,
-                dolphinConfigService);
+                dolphinConfigService,
+                workflowQueryService);
     }
 
     @Test
