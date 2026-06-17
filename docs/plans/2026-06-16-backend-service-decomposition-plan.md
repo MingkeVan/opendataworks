@@ -51,10 +51,10 @@
 - 验证: `mvn -pl backend -am -Dtest=WorkflowExecutionServiceTest,WorkflowServiceMetadataPersistenceTest,WorkflowSchedulerEngineSwitchTest -DfailIfNoTests=false test`；回归执行、回填、失败日志和引擎切换既有保护。
 - 回退: 单提交回退。
 
-### T5 — 抽取 WorkflowCommandService（CRUD，删除切片已完成）
+### T5 — 抽取 WorkflowCommandService（CRUD，删除切片已完成，create/update 前置已完成）
 - 目标: 迁移写命令逻辑；本切片已迁移 `deleteWorkflow`（含 DolphinScheduler 远端清理、关系硬删、可选任务/血缘/表关系级联软删）。
-- 触及文件: 新增 `WorkflowCommandService.java`；改 `WorkflowService.java` 委托；复用既有删除行为测试覆盖真实协作者。
-- 边界: `createWorkflow` / `updateWorkflow` 仍依赖 `resolveDefinitionJson`、版本快照、任务元数据规范化和 Dolphin datasource/task-group catalog 回填；这些逻辑应在 `WorkflowDefinitionAssembler` 承接完整定义装配后再迁移，避免在 CommandService 中复制大段定义装配私有方法。
+- 触及文件: 新增 `WorkflowCommandService.java`；改 `WorkflowService.java` 委托；复用既有删除行为测试覆盖真实协作者；`WorkflowDefinitionAssembler` 已承接 create/update 所需的定义装配、任务元数据规范化和调度默认值处理。
+- 边界: `createWorkflow` / `updateWorkflow` 的最终事务编排仍留在 `WorkflowService`，下一切片迁入 `WorkflowCommandService` 时只需同步迁移版本快照、变更判定和 relation version 回写，不再复制定义装配私有方法。
 - 事务: `@Transactional` 保留在 `WorkflowService` 编排层；协作者随编排事务传播，不另起独立事务。
 - 验证: `mvn -pl backend -am -Dtest=WorkflowServiceMetadataPersistenceTest,WorkflowSchedulerEngineSwitchTest -DfailIfNoTests=false test`；重点回归级联删除和非级联删除的事务内副作用。
 - 回退: 单提交回退。

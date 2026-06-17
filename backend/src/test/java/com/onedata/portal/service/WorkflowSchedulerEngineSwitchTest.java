@@ -75,7 +75,12 @@ class WorkflowSchedulerEngineSwitchTest {
     void setUp() {
         ObjectMapper objectMapper = new ObjectMapper();
         WorkflowDefinitionAssembler workflowDefinitionAssembler =
-                new WorkflowDefinitionAssembler(objectMapper, dolphinSchedulerService);
+                new WorkflowDefinitionAssembler(
+                        objectMapper,
+                        dolphinSchedulerService,
+                        dataTaskMapper,
+                        tableTaskRelationMapper,
+                        workflowTaskRelationService);
         WorkflowExecutionService workflowExecutionService = new WorkflowExecutionService(
                 dataWorkflowMapper,
                 workflowTaskRelationMapper,
@@ -89,15 +94,13 @@ class WorkflowSchedulerEngineSwitchTest {
                 workflowVersionService,
                 workflowVersionMapper,
                 objectMapper,
-                dolphinSchedulerService,
-                dataTaskMapper,
-                tableTaskRelationMapper,
                 workflowTopologyService,
                 dolphinConfigService,
                 workflowQueryService,
                 workflowTaskRelationService,
                 workflowExecutionService,
-                workflowCommandService);
+                workflowCommandService,
+                workflowDefinitionAssembler);
     }
 
     @Test

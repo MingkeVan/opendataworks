@@ -93,6 +93,7 @@ class WorkflowServiceMetadataPersistenceTest {
     private WorkflowCommandService workflowCommandService;
 
     private WorkflowTaskRelationService workflowTaskRelationService;
+    private WorkflowDefinitionAssembler workflowDefinitionAssembler;
 
     private ObjectMapper objectMapper;
     private WorkflowService service;
@@ -106,6 +107,12 @@ class WorkflowServiceMetadataPersistenceTest {
                 dataTaskMapper,
                 workflowTopologyService,
                 objectMapper);
+        workflowDefinitionAssembler = new WorkflowDefinitionAssembler(
+                objectMapper,
+                dolphinSchedulerService,
+                dataTaskMapper,
+                tableTaskRelationMapper,
+                workflowTaskRelationService);
         workflowCommandService = new WorkflowCommandService(
                 dataWorkflowMapper,
                 workflowTaskRelationMapper,
@@ -119,15 +126,13 @@ class WorkflowServiceMetadataPersistenceTest {
                 workflowVersionService,
                 workflowVersionMapper,
                 objectMapper,
-                dolphinSchedulerService,
-                dataTaskMapper,
-                tableTaskRelationMapper,
                 workflowTopologyService,
                 dolphinConfigService,
                 workflowQueryService,
                 workflowTaskRelationService,
                 workflowExecutionService,
-                workflowCommandService);
+                workflowCommandService,
+                workflowDefinitionAssembler);
     }
 
     @Test
