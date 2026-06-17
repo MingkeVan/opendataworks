@@ -36,6 +36,7 @@ import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.WorkflowPublishRecordMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
+import com.onedata.portal.util.JsonCanonicalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -47,9 +48,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Collections;
@@ -61,7 +59,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
@@ -562,65 +559,12 @@ public class WorkflowService {
             if (node != null && node.isObject()) {
                 ((ObjectNode) node).remove("meta");
             }
-            String normalized = node != null ? canonicalizeJson(node) : snapshotJson.trim();
-            return sha256(normalized);
+            String normalized = node != null ? JsonCanonicalizer.canonicalize(node) : snapshotJson.trim();
+            return JsonCanonicalizer.sha256(normalized);
         } catch (Exception e) {
             // 非法 JSON 时退化为对原始文本取哈希
             log.trace("规范化快照 JSON 失败，回退原始文本哈希", e);
-            return sha256(snapshotJson.trim());
-        }
-    }
-
-    private String canonicalizeJson(JsonNode node) {
-        if (node == null || node.isNull() || node.isMissingNode()) {
-            return "null";
-        }
-        if (node.isObject()) {
-            StringBuilder sb = new StringBuilder();
-            sb.append('{');
-            boolean first = true;
-            TreeSet<String> fieldNames = new TreeSet<>();
-            node.fieldNames().forEachRemaining(fieldNames::add);
-            for (String fieldName : fieldNames) {
-                if (!first) {
-                    sb.append(',');
-                }
-                first = false;
-                sb.append('"').append(fieldName).append('"').append(':');
-                sb.append(canonicalizeJson(node.get(fieldName)));
-            }
-            sb.append('}');
-            return sb.toString();
-        }
-        if (node.isArray()) {
-            StringBuilder sb = new StringBuilder();
-            sb.append('[');
-            for (int i = 0; i < node.size(); i++) {
-                if (i > 0) {
-                    sb.append(',');
-                }
-                sb.append(canonicalizeJson(node.get(i)));
-            }
-            sb.append(']');
-            return sb.toString();
-        }
-        return node.toString();
-    }
-
-    private String sha256(String text) {
-        if (!StringUtils.hasText(text)) {
-            return null;
-        }
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(text.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("无法生成 hash", e);
+            return JsonCanonicalizer.sha256(snapshotJson.trim());
         }
     }
 
