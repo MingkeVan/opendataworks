@@ -87,6 +87,7 @@ public class WorkflowService {
     private final WorkflowTopologyService workflowTopologyService;
     private final DolphinConfigService dolphinConfigService;
     private final WorkflowQueryService workflowQueryService;
+    private final WorkflowTaskRelationService workflowTaskRelationService;
 
     public Page<DataWorkflow> list(WorkflowQueryRequest request) {
         return workflowQueryService.list(request);
@@ -110,9 +111,10 @@ public class WorkflowService {
                 Wrappers.<WorkflowTaskRelation>lambdaQuery()
                         .eq(WorkflowTaskRelation::getWorkflowId, workflowId)
                         .orderByAsc(WorkflowTaskRelation::getId));
-        List<WorkflowTaskBinding> bindings = buildTaskBindingsFromRelations(relations);
+        List<WorkflowTaskBinding> bindings = workflowTaskRelationService.buildTaskBindingsFromRelations(relations);
 
-        WorkflowTopologyResult topology = workflowTopologyService.buildTopology(collectTaskIds(bindings));
+        WorkflowTopologyResult topology = workflowTopologyService.buildTopology(
+                workflowTaskRelationService.collectTaskIds(bindings));
         String definitionJson = resolveDefinitionJson(workflow, null, bindings, topology);
         workflow.setDefinitionJson(definitionJson);
         dataWorkflowMapper.updateById(workflow);
@@ -125,7 +127,7 @@ public class WorkflowService {
         LocalDateTime now = LocalDateTime.now();
         List<WorkflowTaskBinding> taskBindings = normalizeTaskBindings(request.getTasks());
         request.setTasks(taskBindings);
-        List<Long> taskIdsInOrder = collectTaskIds(taskBindings);
+        List<Long> taskIdsInOrder = workflowTaskRelationService.collectTaskIds(taskBindings);
         WorkflowTopologyResult topology = workflowTopologyService.buildTopology(taskIdsInOrder);
         workflow.setWorkflowName(request.getWorkflowName());
         workflow.setDescription(request.getDescription());
@@ -145,7 +147,7 @@ public class WorkflowService {
         normalizeWorkflowScheduleDefaults(workflow);
         dataWorkflowMapper.insert(workflow);
 
-        persistTaskRelations(workflow.getId(), taskBindings, null, topology);
+        workflowTaskRelationService.persistTaskRelations(workflow.getId(), taskBindings, null, topology);
         normalizeTaskMetadata(taskIdsInOrder, workflow.getTaskGroupName());
 
         String resolvedDefinitionJson = resolveDefinitionJson(workflow, request, taskBindings, topology);
@@ -270,7 +272,7 @@ public class WorkflowService {
         }
         List<WorkflowTaskBinding> taskBindings = normalizeTaskBindings(request.getTasks());
         request.setTasks(taskBindings);
-        List<Long> taskIdsInOrder = collectTaskIds(taskBindings);
+        List<Long> taskIdsInOrder = workflowTaskRelationService.collectTaskIds(taskBindings);
         WorkflowTopologyResult topology = workflowTopologyService.buildTopology(taskIdsInOrder);
         workflow.setWorkflowName(request.getWorkflowName());
         workflow.setDescription(request.getDescription());
@@ -288,7 +290,7 @@ public class WorkflowService {
         }
         normalizeWorkflowScheduleDefaults(workflow);
 
-        persistTaskRelations(workflowId, taskBindings, workflow.getCurrentVersionId(), topology);
+        workflowTaskRelationService.persistTaskRelations(workflowId, taskBindings, workflow.getCurrentVersionId(), topology);
         normalizeTaskMetadata(taskIdsInOrder, workflow.getTaskGroupName());
 
         String resolvedDefinitionJson = resolveDefinitionJson(workflow, request, taskBindings, topology);
@@ -322,7 +324,7 @@ public class WorkflowService {
         request.setGlobalParams(workflow.getGlobalParams());
         request.setDolphinConfigId(workflow.getDolphinConfigId());
         request.setProjectCode(workflow.getProjectCode());
-        request.setTasks(buildTaskBindingsFromRelations(relations));
+        request.setTasks(workflowTaskRelationService.buildTaskBindingsFromRelations(relations));
         request.setOperator(resolveWorkflowOperator(workflow, operator));
         request.setTriggerSource(StringUtils.hasText(triggerSource) ? triggerSource.trim() : "publish_auto_save");
         return updateWorkflow(workflowId, request);
@@ -341,8 +343,8 @@ public class WorkflowService {
                 Wrappers.<WorkflowTaskRelation>lambdaQuery()
                         .eq(WorkflowTaskRelation::getWorkflowId, workflowId)
                         .orderByAsc(WorkflowTaskRelation::getId));
-        List<WorkflowTaskBinding> taskBindings = buildTaskBindingsFromRelations(relations);
-        List<Long> taskIdsInOrder = collectTaskIds(taskBindings);
+        List<WorkflowTaskBinding> taskBindings = workflowTaskRelationService.buildTaskBindingsFromRelations(relations);
+        List<Long> taskIdsInOrder = workflowTaskRelationService.collectTaskIds(taskBindings);
         WorkflowTopologyResult topology = workflowTopologyService.buildTopology(taskIdsInOrder);
         workflow.setEntryTaskIds(toJson(orderTaskIds(topology.getEntryTaskIds(), taskIdsInOrder)));
         workflow.setExitTaskIds(toJson(orderTaskIds(topology.getExitTaskIds(), taskIdsInOrder)));
@@ -1262,7 +1264,7 @@ public class WorkflowService {
     }
 
     private List<Map<String, Object>> buildTaskSnapshotNodes(List<WorkflowTaskBinding> bindings) {
-        List<Long> taskIds = collectTaskIds(bindings);
+        List<Long> taskIds = workflowTaskRelationService.collectTaskIds(bindings);
         if (CollectionUtils.isEmpty(taskIds)) {
             return Collections.emptyList();
         }
@@ -1431,32 +1433,6 @@ public class WorkflowService {
         return sql.replace("\r\n", "\n").trim();
     }
 
-    private List<WorkflowTaskBinding> buildTaskBindingsFromRelations(List<WorkflowTaskRelation> relations) {
-        if (CollectionUtils.isEmpty(relations)) {
-            return Collections.emptyList();
-        }
-        List<WorkflowTaskBinding> bindings = new ArrayList<>();
-        for (WorkflowTaskRelation relation : relations) {
-            if (relation == null || relation.getTaskId() == null) {
-                continue;
-            }
-            WorkflowTaskBinding binding = new WorkflowTaskBinding();
-            binding.setTaskId(relation.getTaskId());
-            binding.setEntry(relation.getIsEntry());
-            binding.setExit(relation.getIsExit());
-            if (StringUtils.hasText(relation.getNodeAttrs())) {
-                try {
-                    binding.setNodeAttrs(objectMapper.readValue(relation.getNodeAttrs(), Map.class));
-                } catch (Exception e) {
-                    // 节点属性 JSON 非法时跳过，保留其余绑定信息
-                    log.trace("解析节点属性 nodeAttrs 失败，跳过", e);
-                }
-            }
-            bindings.add(binding);
-        }
-        return bindings;
-    }
-
     private String resolveWorkflowOperator(DataWorkflow workflow, String operator) {
         if (StringUtils.hasText(operator)) {
             return operator.trim();
@@ -1474,82 +1450,12 @@ public class WorkflowService {
         return value == null ? null : value.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
 
-    private void persistTaskRelations(Long workflowId,
-            List<WorkflowTaskBinding> tasks,
-            Long previousVersionId,
-            WorkflowTopologyResult topology) {
-        // Rebuilding workflow topology reuses the same task ids, so logical delete would
-        // immediately conflict with workflow_task_relation.uk_task on reinsert.
-        workflowTaskRelationMapper.hardDeleteByWorkflowId(workflowId);
-        if (CollectionUtils.isEmpty(tasks)) {
-            return;
-        }
-        Set<Long> entrySet = topology != null && topology.getEntryTaskIds() != null
-                ? topology.getEntryTaskIds()
-                : Collections.emptySet();
-        Set<Long> exitSet = topology != null && topology.getExitTaskIds() != null
-                ? topology.getExitTaskIds()
-                : Collections.emptySet();
-        for (WorkflowTaskBinding binding : tasks) {
-            if (binding.getTaskId() == null) {
-                continue;
-            }
-            ensureTaskAssignable(binding.getTaskId(), workflowId);
-            WorkflowTaskRelation relation = new WorkflowTaskRelation();
-            relation.setWorkflowId(workflowId);
-            relation.setTaskId(binding.getTaskId());
-            relation.setIsEntry(entrySet.contains(binding.getTaskId()));
-            relation.setIsExit(exitSet.contains(binding.getTaskId()));
-            relation.setNodeAttrs(toJson(binding.getNodeAttrs()));
-            relation.setVersionId(previousVersionId);
-            relation.setUpstreamTaskCount(tableTaskRelationMapper.countUpstreamTasks(binding.getTaskId()));
-            relation.setDownstreamTaskCount(tableTaskRelationMapper.countDownstreamTasks(binding.getTaskId()));
-            workflowTaskRelationMapper.insert(relation);
-        }
-    }
-
     /**
      * 重新计算工作流中所有任务的上下游关系
      * 用于在单个任务被添加/更新/删除后重新计算整个工作流的关系
      */
     public void refreshTaskRelations(Long workflowId) {
-        // 获取工作流中的所有任务
-        List<WorkflowTaskRelation> existingRelations = workflowTaskRelationMapper.selectList(
-                Wrappers.<WorkflowTaskRelation>lambdaQuery()
-                        .eq(WorkflowTaskRelation::getWorkflowId, workflowId));
-
-        // 转换为 List<WorkflowTask bindings>，保留必要的属性
-        List<WorkflowTaskBinding> taskBindings = new ArrayList<>();
-        Long versionId = null;
-        WorkflowTopologyResult topology = null;
-
-        for (WorkflowTaskRelation relation : existingRelations) {
-            WorkflowTaskBinding binding = new WorkflowTaskBinding();
-            binding.setTaskId(relation.getTaskId());
-            binding.setEntry(relation.getIsEntry());
-            binding.setExit(relation.getIsExit());
-            // 将原来的 nodeAttrs 转换回 NodeAttrs
-            if (StringUtils.hasText(relation.getNodeAttrs())) {
-                try {
-                    binding.setNodeAttrs(objectMapper.readValue(relation.getNodeAttrs(), Map.class));
-                } catch (Exception ex) {
-                    // 忽略解析错误，使用空值
-                }
-            }
-            taskBindings.add(binding);
-            versionId = relation.getVersionId();
-        }
-
-        // 重新构建拓扑信息
-        if (!taskBindings.isEmpty()) {
-            List<Long> taskIds = taskBindings.stream()
-                    .map(WorkflowTaskBinding::getTaskId)
-                    .collect(Collectors.toList());
-            topology = workflowTopologyService.buildTopology(taskIds);
-        }
-
-        // 重新保存所有关系（会先删除再插入）
-        persistTaskRelations(workflowId, taskBindings, versionId, topology);
+        workflowTaskRelationService.refreshTaskRelations(workflowId);
     }
 
     private List<Long> orderTaskIds(Set<Long> sourceIds, List<Long> taskOrder) {
@@ -1570,19 +1476,6 @@ public class WorkflowService {
         return ordered;
     }
 
-    private List<Long> collectTaskIds(List<WorkflowTaskBinding> tasks) {
-        if (CollectionUtils.isEmpty(tasks)) {
-            return Collections.emptyList();
-        }
-        LinkedHashSet<Long> ordered = new LinkedHashSet<>();
-        for (WorkflowTaskBinding task : tasks) {
-            if (task != null && task.getTaskId() != null) {
-                ordered.add(task.getTaskId());
-            }
-        }
-        return new ArrayList<>(ordered);
-    }
-
     private List<WorkflowTaskBinding> normalizeTaskBindings(List<WorkflowTaskBinding> tasks) {
         if (CollectionUtils.isEmpty(tasks)) {
             return Collections.emptyList();
@@ -1598,19 +1491,6 @@ public class WorkflowService {
             return objectMapper.writeValueAsString(value);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialize json", e);
-        }
-    }
-
-    private void ensureTaskAssignable(Long taskId, Long workflowId) {
-        DataTask dataTask = dataTaskMapper.selectById(taskId);
-        if (dataTask == null) {
-            throw new IllegalArgumentException("Task not found: " + taskId);
-        }
-        WorkflowTaskRelation existing = workflowTaskRelationMapper.selectOne(
-                Wrappers.<WorkflowTaskRelation>lambdaQuery()
-                        .eq(WorkflowTaskRelation::getTaskId, taskId));
-        if (existing != null && !existing.getWorkflowId().equals(workflowId)) {
-            throw new IllegalStateException("任务已归属其他工作流, taskId=" + taskId);
         }
     }
 

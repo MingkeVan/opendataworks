@@ -67,6 +67,8 @@ class WorkflowSchedulerEngineSwitchTest {
     private DolphinConfigService dolphinConfigService;
     @Mock
     private WorkflowQueryService workflowQueryService;
+    @Mock
+    private WorkflowTaskRelationService workflowTaskRelationService;
 
     private WorkflowService workflowService;
 
@@ -85,7 +87,8 @@ class WorkflowSchedulerEngineSwitchTest {
                 taskExecutionLogMapper,
                 workflowTopologyService,
                 dolphinConfigService,
-                workflowQueryService);
+                workflowQueryService,
+                workflowTaskRelationService);
     }
 
     @Test

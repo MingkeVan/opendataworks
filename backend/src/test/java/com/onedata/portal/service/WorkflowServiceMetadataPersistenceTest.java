@@ -91,12 +91,20 @@ class WorkflowServiceMetadataPersistenceTest {
     @Mock
     private WorkflowQueryService workflowQueryService;
 
+    private WorkflowTaskRelationService workflowTaskRelationService;
+
     private ObjectMapper objectMapper;
     private WorkflowService service;
 
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
+        workflowTaskRelationService = new WorkflowTaskRelationService(
+                workflowTaskRelationMapper,
+                tableTaskRelationMapper,
+                dataTaskMapper,
+                workflowTopologyService,
+                objectMapper);
         service = new WorkflowService(
                 dataWorkflowMapper,
                 workflowTaskRelationMapper,
@@ -110,7 +118,8 @@ class WorkflowServiceMetadataPersistenceTest {
                 taskExecutionLogMapper,
                 workflowTopologyService,
                 dolphinConfigService,
-                workflowQueryService);
+                workflowQueryService,
+                workflowTaskRelationService);
     }
 
     @Test

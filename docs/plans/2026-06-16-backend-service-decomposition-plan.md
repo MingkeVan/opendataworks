@@ -38,10 +38,10 @@
 - 验证: `mvn -pl backend -am test`；重点回归列表分页、详情组装、最近实例和版本号填充。
 - 回退: 单提交回退。
 
-### T3 — 抽取 WorkflowTaskRelationService（任务绑定/拓扑刷新）
-- 目标: 迁移 `refreshTaskRelations` 及任务绑定相关私有方法（与已有 `WorkflowTopologyService` 协作，避免重复）。
-- 触及文件: 新增 `WorkflowTaskRelationService.java` + 测试；改 `WorkflowService.java`。
-- 验证: `mvn -pl backend -am test`；回归任务关系刷新与拓扑。
+### T3 — 抽取 WorkflowTaskRelationService（任务绑定/拓扑刷新，已完成）
+- 目标: 迁移 `refreshTaskRelations`、任务绑定还原、taskId 去重收集、关系硬删重建与任务归属校验（与已有 `WorkflowTopologyService` 协作，避免重复）。
+- 触及文件: 新增 `WorkflowTaskRelationService.java` + 单测/真实 MySQL 集成测试；改 `WorkflowService.java` 委托。
+- 验证: `mvn -pl backend -am -Dtest=WorkflowTaskRelationServiceTest,WorkflowTaskRelationServiceIntegrationTest,WorkflowServiceMetadataPersistenceTest,WorkflowSchedulerEngineSwitchTest -DfailIfNoTests=false test`；回归任务关系刷新、拓扑 entry/exit、上下游计数和真实表约束。
 - 回退: 单提交回退。
 
 ### T4 — 抽取 WorkflowExecutionService（运行触发）
