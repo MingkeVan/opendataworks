@@ -18,7 +18,6 @@ import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
-import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -80,9 +79,6 @@ class WorkflowServiceMetadataPersistenceTest {
     private TableTaskRelationMapper tableTaskRelationMapper;
 
     @Mock
-    private TaskExecutionLogMapper taskExecutionLogMapper;
-
-    @Mock
     private WorkflowTopologyService workflowTopologyService;
 
     @Mock
@@ -90,6 +86,9 @@ class WorkflowServiceMetadataPersistenceTest {
 
     @Mock
     private WorkflowQueryService workflowQueryService;
+
+    @Mock
+    private WorkflowExecutionService workflowExecutionService;
 
     private WorkflowTaskRelationService workflowTaskRelationService;
 
@@ -115,11 +114,11 @@ class WorkflowServiceMetadataPersistenceTest {
                 dataTaskMapper,
                 dataLineageMapper,
                 tableTaskRelationMapper,
-                taskExecutionLogMapper,
                 workflowTopologyService,
                 dolphinConfigService,
                 workflowQueryService,
-                workflowTaskRelationService);
+                workflowTaskRelationService,
+                workflowExecutionService);
     }
 
     @Test

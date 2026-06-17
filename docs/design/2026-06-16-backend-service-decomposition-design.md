@@ -79,7 +79,7 @@ WorkflowService（薄编排 facade：事务边界 + 组合调用）
 ```
 
 - 已存在的 `WorkflowVersionService`/`WorkflowTopologyService`/`WorkflowInstanceCacheService` 等**继续复用**，把 `WorkflowService` 内与之重复的私有逻辑迁移过去而非新建。
-- `JsonCanonicalizer` 已作为首个低风险纯逻辑切片落地；`WorkflowQueryService` 已承接 `list/getDetail` 纯查询路径；`WorkflowTaskRelationService` 已承接任务绑定还原、taskId 收集、关系硬删重建和 `refreshTaskRelations`。`buildDefinitionJsonForExport` 的缺失定义回填逻辑待 `WorkflowDefinitionAssembler` 抽取后迁移。剩余执行和 CRUD 等有状态路径需在 MySQL 8 + DolphinScheduler 环境中继续差分验证。
+- `JsonCanonicalizer` 已作为首个低风险纯逻辑切片落地；`WorkflowQueryService` 已承接 `list/getDetail` 纯查询路径；`WorkflowTaskRelationService` 已承接任务绑定还原、taskId 收集、关系硬删重建和 `refreshTaskRelations`；`WorkflowExecutionService` 已承接 `executeWorkflow/backfillWorkflow` 的运行触发与执行日志状态流转。`buildDefinitionJsonForExport` 的缺失定义回填逻辑、`switchSchedulerEngine` 的定义运行态绑定重写逻辑待 `WorkflowDefinitionAssembler` 抽取后迁移。剩余 CRUD 等有状态路径需在 MySQL 8 + DolphinScheduler 环境中继续差分验证。
 
 ### 4.2 迁移策略（行为保持、增量、可回退）
 

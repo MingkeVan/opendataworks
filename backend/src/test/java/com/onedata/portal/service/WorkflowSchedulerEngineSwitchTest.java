@@ -13,7 +13,6 @@ import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
-import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -60,8 +59,6 @@ class WorkflowSchedulerEngineSwitchTest {
     @Mock
     private TableTaskRelationMapper tableTaskRelationMapper;
     @Mock
-    private TaskExecutionLogMapper taskExecutionLogMapper;
-    @Mock
     private WorkflowTopologyService workflowTopologyService;
     @Mock
     private DolphinConfigService dolphinConfigService;
@@ -69,6 +66,8 @@ class WorkflowSchedulerEngineSwitchTest {
     private WorkflowQueryService workflowQueryService;
     @Mock
     private WorkflowTaskRelationService workflowTaskRelationService;
+    @Mock
+    private WorkflowExecutionService workflowExecutionService;
 
     private WorkflowService workflowService;
 
@@ -84,11 +83,11 @@ class WorkflowSchedulerEngineSwitchTest {
                 dataTaskMapper,
                 dataLineageMapper,
                 tableTaskRelationMapper,
-                taskExecutionLogMapper,
                 workflowTopologyService,
                 dolphinConfigService,
                 workflowQueryService,
-                workflowTaskRelationService);
+                workflowTaskRelationService,
+                workflowExecutionService);
     }
 
     @Test

@@ -44,10 +44,11 @@
 - 验证: `mvn -pl backend -am -Dtest=WorkflowTaskRelationServiceTest,WorkflowTaskRelationServiceIntegrationTest,WorkflowServiceMetadataPersistenceTest,WorkflowSchedulerEngineSwitchTest -DfailIfNoTests=false test`；回归任务关系刷新、拓扑 entry/exit、上下游计数和真实表约束。
 - 回退: 单提交回退。
 
-### T4 — 抽取 WorkflowExecutionService（运行触发）
-- 目标: 迁移 `executeWorkflow` / `backfillWorkflow` / `switchSchedulerEngine` 的编排逻辑（外部 DolphinScheduler 调用顺序保持「先持久化后远程」）。
-- 触及文件: 新增 `WorkflowExecutionService.java` + 测试；改 `WorkflowService.java`。
-- 验证: `mvn -pl backend -am test`；回归执行、回填、引擎切换。
+### T4 — 抽取 WorkflowExecutionService（运行触发，执行/补数已完成）
+- 目标: 迁移 `executeWorkflow` / `backfillWorkflow` 的编排逻辑（执行日志先持久化，DolphinScheduler 触发后回写运行态，失败时标记日志失败）。
+- 触及文件: 新增 `WorkflowExecutionService.java` + 单测；改 `WorkflowService.java` 委托。
+- 边界: `switchSchedulerEngine` 仍调用 `refreshDefinitionRuntimeIds` 与 `enrichDefinitionMetadataFromCatalog`，会重写定义 JSON 中项目、调度、task-group 运行态绑定；本切片不复制这串定义装配私有逻辑，待 `WorkflowDefinitionAssembler` 抽取后再迁移。
+- 验证: `mvn -pl backend -am -Dtest=WorkflowExecutionServiceTest,WorkflowServiceMetadataPersistenceTest,WorkflowSchedulerEngineSwitchTest -DfailIfNoTests=false test`；回归执行、回填、失败日志和引擎切换既有保护。
 - 回退: 单提交回退。
 
 ### T5 — 抽取 WorkflowCommandService（CRUD，事务最重，最后做）
