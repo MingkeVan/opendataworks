@@ -79,9 +79,23 @@
   - 已知非本切片问题: 浏览器 console 唯一 error 为 `/dataagent/widget/opendataworks-widget.bundle.js` 代理 500，与 DataStudio 查询执行抽取无关。
 - 回退: 单提交回退。
 
-### F10 — useResultChart / useTableMetaEditing（后续，未完整完成）
-- 抽出图表渲染（`renderChart`/`disposeChart`/`setChartRef`）与元数据编辑（`startMetaEdit`/`saveMetaEdit`/字段编辑）。
-- 验证: 手动冒烟（图表渲染、元数据/字段编辑保存）。
+### F10a — useResultChart（已完成）
+- 抽出图表渲染（`renderChart`/`disposeChart`/`setChartRef`/`syncResultPaneLayout`/默认选列接线），保留 `chartColumnSelect.js` 作为纯评分工具。
+- 触及文件: 新增 `frontend/src/views/datastudio/composables/useResultChart.js`；改 `DataStudioNew.vue` 接入 composable，保持模板与 `provide('dataStudioCtx')` 契约不变。
+- 验证: lint/test/build；真实项目浏览器冒烟（查询返回结果、切换图表、默认选列、ECharts canvas 渲染、图表类型切换）。
+- F10a 验证记录:
+  - 静态验证: `nvm use` 后 `npm --prefix frontend run lint`（0 error，既有 259 warnings）、`npm --prefix frontend run test`（19 files / 87 tests passed，既有 malformed JSON/localStorage timeout stderr）、`npm --prefix frontend run build` 通过（既有 Sass legacy API 与 chunk size warning）。
+  - 本机 Podman 容器: MySQL 8.0 `127.0.0.1:3306`、Redis 7.2 `127.0.0.1:6379`、DolphinScheduler 3.2 `127.0.0.1:12345`。
+  - 后端: `SPRING_DATASOURCE_URL=jdbc:mysql://127.0.0.1:3306/opendataworks...`、`SPRING_DATASOURCE_USERNAME=opendataworks`、`SPRING_DATASOURCE_PASSWORD=opendataworks123`，Spring Boot 启动在 `127.0.0.1:18080/api`，Flyway 校验 46 个迁移且 schema 版本 45 无需迁移。
+  - 前端: `nvm use` 后 `VITE_BACKEND_PROXY_TARGET=http://127.0.0.1:18080 npm --prefix frontend run dev -- --host 127.0.0.1 --port 3000`。
+  - Playwright: 打开 `http://127.0.0.1:3000/datastudio`，新建查询，选择 `README 演示集群 / opendataworks`，执行 `SELECT '2026-06-01' AS dt, 10 AS pv UNION ALL SELECT '2026-06-02' AS dt, 25 AS pv UNION ALL SELECT '2026-06-03' AS dt, 18 AS pv;`，结果页显示 3 行；切换「图表」后默认 X 轴为 `dt`、Y 轴为 `pv`，柱状图 canvas `423x230` 且采样 `127/651` 个非空像素；切换「折线图」后 canvas 仍存在且尺寸有效。
+  - 清理: 删除本轮 `data_query_history` 中匹配 `SELECT '2026-06-01' AS dt, 10 AS pv%` 的 2 条烟测记录，复查剩余 0 条。
+  - 已知非本切片问题: 浏览器 console error 为 `/dataagent/widget/opendataworks-widget.bundle.js` 代理 500；另有既有 Element Plus `small` deprecation 与 `TaskEditDrawer` 图标组件解析 warning，与图表抽取无关。
+- 回退: 单提交回退。
+
+### F10b — useTableMetaEditing（后续，未完成）
+- 抽出元数据编辑（`startMetaEdit`/`saveMetaEdit`）与字段编辑（`startFieldsEdit`/`addField`/`removeField`/`saveFieldsEdit`）。
+- 验证: 手动冒烟（元数据/字段编辑保存、取消回滚、右侧面板状态同步）。
 - 回退: 单提交回退。
 
 ### F11 — 收尾（滚动推进）
