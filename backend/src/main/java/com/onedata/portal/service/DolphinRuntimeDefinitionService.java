@@ -145,8 +145,9 @@ public class DolphinRuntimeDefinitionService {
                         explicitEdges = parseTaskEdges(exportedDefinition);
                     }
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
                 // 旧路径兼容分支，导出兜底失败时保留已有解析结果
+                log.trace("导出兜底解析失败，保留已有解析结果", e);
             }
         }
         enrichTaskGroupNames(tasks);
@@ -787,7 +788,9 @@ public class DolphinRuntimeDefinitionService {
             }
             try {
                 return Long.parseLong(text.trim());
-            } catch (NumberFormatException ignored) {
+            } catch (NumberFormatException e) {
+                // 非数字文本，返回 null
+                log.trace("解析 Long 失败，返回 null: {}", text, e);
                 return null;
             }
         }
@@ -823,7 +826,9 @@ public class DolphinRuntimeDefinitionService {
                 }
                 try {
                     value = Long.parseLong(text.trim());
-                } catch (NumberFormatException ignored) {
+                } catch (NumberFormatException e) {
+                    // 跳过非数字文本
+                    log.trace("解析 Long 失败，跳过: {}", text, e);
                     continue;
                 }
             } else {
@@ -877,8 +882,9 @@ public class DolphinRuntimeDefinitionService {
         Integer parsedPriority = null;
         try {
             parsedPriority = Integer.parseInt(normalized);
-        } catch (NumberFormatException ignored) {
-            // keep original text when parsing fails
+        } catch (NumberFormatException e) {
+            // 解析失败时保留原始文本
+            log.trace("解析优先级失败，保留原始文本: {}", normalized, e);
         }
         if (parsedPriority == null) {
             return normalized;

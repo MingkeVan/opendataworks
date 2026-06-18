@@ -1278,8 +1278,9 @@ public class WorkflowPublishService {
                 } else if (item.isTextual()) {
                     try {
                         current.add(Long.parseLong(item.asText().trim()));
-                    } catch (NumberFormatException ignored) {
-                        // ignore invalid value
+                    } catch (NumberFormatException e) {
+                        // 跳过非数字项
+                        log.trace("解析 Long 失败，跳过无效项: {}", item.asText(), e);
                     }
                 }
             }
@@ -1315,8 +1316,9 @@ public class WorkflowPublishService {
                 }
                 try {
                     return Long.parseLong(text.trim());
-                } catch (NumberFormatException ignored) {
-                    // skip invalid value
+                } catch (NumberFormatException e) {
+                    // 跳过非数字文本，继续尝试下一个
+                    log.trace("解析 Long 失败，跳过无效文本: {}", text, e);
                 }
             }
         }
@@ -1398,8 +1400,9 @@ public class WorkflowPublishService {
         for (DateTimeFormatter formatter : SCHEDULE_INPUT_FORMATTERS) {
             try {
                 return LocalDateTime.parse(trimmed, formatter);
-            } catch (DateTimeParseException ignored) {
-                // try next formatter
+            } catch (DateTimeParseException e) {
+                // 当前格式不匹配，尝试下一个格式
+                log.trace("按格式 {} 解析时间失败，尝试下一个", formatter, e);
             }
         }
         return null;

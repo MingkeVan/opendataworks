@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from config import resolve_sql_read_timeout_seconds
 from core.provider_runtime import build_provider_env as _build_provider_env
 from core.provider_runtime import normalize_provider_id as _normalize_provider_id
 from core.provider_runtime import safe_base_url_for_log as _safe_base_url_for_log
@@ -352,6 +353,15 @@ def _build_runtime_env(
     params: Any | None = None,
     skill_runtime: dict[str, Any] | None = None,
 ) -> dict[str, str]:
+    """Build the environment dict handed to the skill-driven agent subprocess.
+
+    Inherits the current process env, overlays ``provider_env`` (provider/model
+    credentials and base URL), and exposes the skill-agnostic invocation contract
+    (``DATAAGENT_PYTHON_BIN``/``DATAAGENT_SKILL_ROOT``) plus per-run knobs derived
+    from ``cfg`` and ``params`` (query limit, SQL read timeout, enabled skills,
+    data scope). No direct DB connection settings are exposed here — those stay at
+    the deploy/skill layer. See AGENTS.md "Intelligent Query module rules".
+    """
     python_bin = Path(sys.executable).absolute()
     python_dir = str(python_bin.parent)
     skills_root = Path(str((skill_runtime or {}).get("primary_root") or resolve_builtin_skill_root_dir())).resolve()
@@ -369,6 +379,10 @@ def _build_runtime_env(
     runtime_env = dict(os.environ)
     runtime_env.update(provider_env)
     sql_read_timeout = int(getattr(params, "sql_read_timeout_seconds", 0) or 0)
+    if sql_read_timeout <= 0:
+        # 兼容历史/恢复任务未持久化该值的情况，按执行模式回落到统一档位，
+        # 避免向技能传递 0 导致使用不一致的短默认值
+        sql_read_timeout = resolve_sql_read_timeout_seconds(cfg, getattr(params, "execution_mode", None))
     original_question = str(getattr(params, "question", "") or "").strip()
     runtime_env.update(
         {

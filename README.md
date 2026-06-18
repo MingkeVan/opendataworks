@@ -107,6 +107,19 @@ docker compose -f deploy/docker-compose.dev.yml up -d
 
 请参考 [快速开始指南](https://opendataworks.vercel.app/guide/quick-start.html) 部署并启动 OpenDataWorks。
 
+## 模块结构
+
+仓库为多模块单仓库，主要模块及边界如下：
+
+- `backend/`：主业务后端（Java · Spring Boot），元数据、工作流、血缘、平台 API；依赖库模块 `odw-auth`（统一鉴权）与 `backend-agent-api`（面向 Agent 的只读元数据接口契约）。三者由根 `pom.xml` 统一构建。
+- `frontend/`：主门户 Web 前端（Vue 3 · Vite），智能问数页内嵌 DataAgent Widget。
+- `dataagent/`：Python NL2SQL 智能问数后端（FastAPI · Claude Agent SDK），主门户集成链路。
+- `opendataagent/`：独立的 Go Agent 平台，**独立部署、与主门户编排解耦**（详见 [双 Agent 平台共存说明](docs/handbook/parallel-agent-platforms.md)）。
+- `skills/`：两套 Agent 运行时共享的技能源目录，运行时挂载、不打包进镜像。
+- `deploy/`：主门户 Docker Compose 编排与环境模板（不含 `opendataagent`）。
+
+更多约定见仓库根 `AGENTS.md` 与 `docs/handbook/architecture.md`。
+
 ## 文档
 
 详细文档请查看官方文档网站：**https://opendataworks.vercel.app/**

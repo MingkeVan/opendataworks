@@ -13,6 +13,7 @@ import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowDefinition;
 import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowSchedule;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -34,6 +35,7 @@ import java.util.stream.Collectors;
 /**
  * 运行态快照与差异计算服务
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class WorkflowRuntimeDiffService {
@@ -409,7 +411,9 @@ public class WorkflowRuntimeDiffService {
         try {
             JsonNode node = objectMapper.readTree(trimmed);
             return toJson(node);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // 非法 JSON 时回退为原始文本
+            log.trace("规范化 JSON 失败，回退原始文本", e);
             return trimmed;
         }
     }

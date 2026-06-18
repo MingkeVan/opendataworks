@@ -13,15 +13,13 @@ import com.onedata.portal.entity.DataTableVersion;
 import com.onedata.portal.mapper.DataFieldMapper;
 import com.onedata.portal.mapper.DataTableMapper;
 import com.onedata.portal.mapper.DataTableVersionMapper;
+import com.onedata.portal.util.JsonCanonicalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -75,7 +73,7 @@ public class TableMetadataVersionService {
             }
             Map<String, Object> snapshot = buildSnapshot(table, loadOrderedFields(tableId));
             String snapshotJson = objectMapper.writeValueAsString(snapshot);
-            String hash = sha256(canonicalizeJson(objectMapper.readTree(snapshotJson)));
+            String hash = JsonCanonicalizer.sha256(JsonCanonicalizer.canonicalize(objectMapper.readTree(snapshotJson)));
 
             DataTableVersion latest = selectLatestVersion(tableId);
             if (latest != null && Objects.equals(latest.getSnapshotHash(), hash)) {
@@ -370,56 +368,6 @@ public class TableMetadataVersionService {
     }
 
     // ---------------- 规范化与哈希 ----------------
-
-    private String canonicalizeJson(JsonNode node) {
-        if (node == null || node.isNull() || node.isMissingNode()) {
-            return "null";
-        }
-        if (node.isObject()) {
-            StringBuilder sb = new StringBuilder();
-            sb.append('{');
-            boolean first = true;
-            TreeSet<String> fieldNames = new TreeSet<>();
-            node.fieldNames().forEachRemaining(fieldNames::add);
-            for (String fieldName : fieldNames) {
-                if (!first) {
-                    sb.append(',');
-                }
-                first = false;
-                sb.append('"').append(fieldName).append('"').append(':');
-                sb.append(canonicalizeJson(node.get(fieldName)));
-            }
-            sb.append('}');
-            return sb.toString();
-        }
-        if (node.isArray()) {
-            StringBuilder sb = new StringBuilder();
-            sb.append('[');
-            for (int i = 0; i < node.size(); i++) {
-                if (i > 0) {
-                    sb.append(',');
-                }
-                sb.append(canonicalizeJson(node.get(i)));
-            }
-            sb.append(']');
-            return sb.toString();
-        }
-        return node.toString();
-    }
-
-    private String sha256(String text) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(text.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("无法生成 hash", e);
-        }
-    }
 
     // ---------------- raw diff ----------------
 

@@ -335,8 +335,9 @@ public class WorkflowDeployService {
                 }
                 try {
                     return Long.parseLong(text.trim());
-                } catch (NumberFormatException ignored) {
-                    // skip invalid text value
+                } catch (NumberFormatException e) {
+                    // 跳过非数字文本，继续尝试下一个
+                    log.trace("解析 Long 失败，跳过无效文本: {}", text, e);
                 }
             }
         }

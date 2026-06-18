@@ -149,3 +149,22 @@ def update_settings(patch: dict) -> Settings:
         current.update({k: v for k, v in patch.items() if v is not None})
         _settings = Settings(**current)
     return _settings
+
+
+def is_background_execution_mode(execution_mode) -> bool:
+    """统一判定执行模式是否走后台（长）超时档位。
+
+    ``auto`` 归入后台档，与 ``resolve_task_timeouts`` 的历史语义保持一致。
+    """
+    return str(execution_mode or "").strip().lower() in {"background", "auto"}
+
+
+def resolve_sql_read_timeout_seconds(cfg: Settings, execution_mode) -> int:
+    """按执行模式解析 SQL 只读查询超时（秒）。
+
+    单一来源，供任务提交期的 ``resolve_task_timeouts`` 与运行期 env 装配共用，
+    避免不同路径各自回落到不一致的短默认值。
+    """
+    if is_background_execution_mode(execution_mode):
+        return int(getattr(cfg, "agent_background_sql_read_timeout_seconds", 0) or 900)
+    return int(getattr(cfg, "agent_interactive_sql_read_timeout_seconds", 0) or 300)

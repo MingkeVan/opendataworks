@@ -2136,7 +2136,9 @@ class WorkflowRuntimeSyncRealIntegrationTest {
 
         String projectName = StringUtils.hasText(System.getenv("DS_PROJECT_NAME"))
                 ? System.getenv("DS_PROJECT_NAME")
-                : IT_PROJECT_NAME;
+                : (config != null && StringUtils.hasText(config.getProjectName())
+                        ? config.getProjectName()
+                        : IT_PROJECT_NAME);
 
         DolphinConfig updated = new DolphinConfig();
         updated.setUrl(effectiveBaseUrl);

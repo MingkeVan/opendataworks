@@ -136,13 +136,15 @@ public class DataQueryService {
             cancelRequested.set(true);
             try {
                 statement.cancel();
-            } catch (SQLException ignored) {
-                // ignored
+            } catch (SQLException e) {
+                // 取消语句失败不影响后续清理
+                log.trace("取消查询语句失败", e);
             }
             try {
                 connection.close();
-            } catch (SQLException ignored) {
-                // ignored
+            } catch (SQLException e) {
+                // 关闭连接失败仅记录，不向上抛出
+                log.trace("关闭查询连接失败", e);
             }
         }
     }

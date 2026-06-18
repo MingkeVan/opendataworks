@@ -9,15 +9,11 @@ import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.workflow.WorkflowSchedulerEngineRequest;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.DolphinConfig;
-import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
-import com.onedata.portal.mapper.WorkflowInstanceCacheMapper;
-import com.onedata.portal.mapper.WorkflowPublishRecordMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
-import com.onedata.portal.mapper.WorkflowVersionMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,19 +46,9 @@ class WorkflowSchedulerEngineSwitchTest {
     @Mock
     private WorkflowTaskRelationMapper workflowTaskRelationMapper;
     @Mock
-    private WorkflowPublishRecordMapper workflowPublishRecordMapper;
-    @Mock
-    private WorkflowVersionService workflowVersionService;
-    @Mock
-    private WorkflowVersionMapper workflowVersionMapper;
-    @Mock
-    private WorkflowInstanceCacheMapper workflowInstanceCacheMapper;
-    @Mock
     private DolphinSchedulerService dolphinSchedulerService;
     @Mock
     private DataTaskMapper dataTaskMapper;
-    @Mock
-    private DataLineageMapper dataLineageMapper;
     @Mock
     private TableTaskRelationMapper tableTaskRelationMapper;
     @Mock
@@ -71,27 +57,41 @@ class WorkflowSchedulerEngineSwitchTest {
     private WorkflowTopologyService workflowTopologyService;
     @Mock
     private DolphinConfigService dolphinConfigService;
+    @Mock
+    private WorkflowQueryService workflowQueryService;
+    @Mock
+    private WorkflowTaskRelationService workflowTaskRelationService;
+    @Mock
+    private WorkflowCommandService workflowCommandService;
 
     private WorkflowService workflowService;
 
     @BeforeEach
     void setUp() {
-        WorkflowInstanceCacheService cacheService = new WorkflowInstanceCacheService(workflowInstanceCacheMapper);
+        ObjectMapper objectMapper = new ObjectMapper();
+        WorkflowDefinitionAssembler workflowDefinitionAssembler =
+                new WorkflowDefinitionAssembler(
+                        objectMapper,
+                        dolphinSchedulerService,
+                        dataTaskMapper,
+                        tableTaskRelationMapper,
+                        workflowTaskRelationService);
+        WorkflowExecutionService workflowExecutionService = new WorkflowExecutionService(
+                dataWorkflowMapper,
+                workflowTaskRelationMapper,
+                taskExecutionLogMapper,
+                dolphinSchedulerService,
+                dolphinConfigService,
+                workflowDefinitionAssembler);
         workflowService = new WorkflowService(
                 dataWorkflowMapper,
                 workflowTaskRelationMapper,
-                workflowPublishRecordMapper,
-                workflowVersionService,
-                workflowVersionMapper,
-                cacheService,
-                new ObjectMapper(),
-                dolphinSchedulerService,
-                dataTaskMapper,
-                dataLineageMapper,
-                tableTaskRelationMapper,
-                taskExecutionLogMapper,
                 workflowTopologyService,
-                dolphinConfigService);
+                workflowQueryService,
+                workflowTaskRelationService,
+                workflowExecutionService,
+                workflowCommandService,
+                workflowDefinitionAssembler);
     }
 
     @Test

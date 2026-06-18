@@ -18,8 +18,6 @@ import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
-import com.onedata.portal.mapper.TaskExecutionLogMapper;
-import com.onedata.portal.mapper.WorkflowPublishRecordMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -63,16 +61,10 @@ class WorkflowServiceMetadataPersistenceTest {
     private WorkflowTaskRelationMapper workflowTaskRelationMapper;
 
     @Mock
-    private WorkflowPublishRecordMapper workflowPublishRecordMapper;
-
-    @Mock
     private WorkflowVersionService workflowVersionService;
 
     @Mock
     private WorkflowVersionMapper workflowVersionMapper;
-
-    @Mock
-    private WorkflowInstanceCacheService workflowInstanceCacheService;
 
     @Mock
     private DolphinSchedulerService dolphinSchedulerService;
@@ -87,13 +79,21 @@ class WorkflowServiceMetadataPersistenceTest {
     private TableTaskRelationMapper tableTaskRelationMapper;
 
     @Mock
-    private TaskExecutionLogMapper taskExecutionLogMapper;
-
-    @Mock
     private WorkflowTopologyService workflowTopologyService;
 
     @Mock
     private DolphinConfigService dolphinConfigService;
+
+    @Mock
+    private WorkflowQueryService workflowQueryService;
+
+    @Mock
+    private WorkflowExecutionService workflowExecutionService;
+
+    private WorkflowCommandService workflowCommandService;
+
+    private WorkflowTaskRelationService workflowTaskRelationService;
+    private WorkflowDefinitionAssembler workflowDefinitionAssembler;
 
     private ObjectMapper objectMapper;
     private WorkflowService service;
@@ -101,21 +101,41 @@ class WorkflowServiceMetadataPersistenceTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        service = new WorkflowService(
+        workflowTaskRelationService = new WorkflowTaskRelationService(
+                workflowTaskRelationMapper,
+                tableTaskRelationMapper,
+                dataTaskMapper,
+                workflowTopologyService,
+                objectMapper);
+        workflowDefinitionAssembler = new WorkflowDefinitionAssembler(
+                objectMapper,
+                dolphinSchedulerService,
+                dataTaskMapper,
+                tableTaskRelationMapper,
+                workflowTaskRelationService);
+        workflowCommandService = new WorkflowCommandService(
                 dataWorkflowMapper,
                 workflowTaskRelationMapper,
-                workflowPublishRecordMapper,
-                workflowVersionService,
-                workflowVersionMapper,
-                workflowInstanceCacheService,
-                objectMapper,
                 dolphinSchedulerService,
                 dataTaskMapper,
                 dataLineageMapper,
                 tableTaskRelationMapper,
-                taskExecutionLogMapper,
+                workflowVersionService,
+                workflowVersionMapper,
+                objectMapper,
                 workflowTopologyService,
-                dolphinConfigService);
+                dolphinConfigService,
+                workflowTaskRelationService,
+                workflowDefinitionAssembler);
+        service = new WorkflowService(
+                dataWorkflowMapper,
+                workflowTaskRelationMapper,
+                workflowTopologyService,
+                workflowQueryService,
+                workflowTaskRelationService,
+                workflowExecutionService,
+                workflowCommandService,
+                workflowDefinitionAssembler);
     }
 
     @Test

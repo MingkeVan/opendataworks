@@ -79,16 +79,34 @@ class DataTaskServiceValidationTest {
     }
 
     @Test
-    void validateTaskShouldRejectSqlWithoutDatasource() {
+    void validateTaskShouldAllowSqlDatasourceToResolveDuringPublish() {
         DataTask task = sqlTask();
         task.setDatasourceName(null);
 
-        assertThrows(IllegalArgumentException.class,
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(dataTaskService,
+                "validateTask",
+                task,
+                Collections.singletonList(100L),
+                Collections.singletonList(200L)));
+    }
+
+    @Test
+    void validatePublishMetadataShouldRejectSqlWithoutDatasource() {
+        DataTask task = sqlTask();
+        task.setId(1L);
+        task.setTaskName("sql_without_datasource");
+        task.setDatasourceName(null);
+        task.setDolphinTaskCode(1001L);
+        task.setDolphinTaskVersion(1);
+        task.setPriority(5);
+        task.setRetryTimes(1);
+        task.setRetryInterval(60);
+        task.setTimeoutSeconds(600);
+
+        assertThrows(IllegalStateException.class,
                 () -> ReflectionTestUtils.invokeMethod(dataTaskService,
-                        "validateTask",
-                        task,
-                        Collections.singletonList(100L),
-                        Collections.singletonList(200L)));
+                        "validatePublishMetadata",
+                        Collections.singletonList(task)));
     }
 
     @Test

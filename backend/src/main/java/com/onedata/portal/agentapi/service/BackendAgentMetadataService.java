@@ -893,7 +893,9 @@ public class BackendAgentMetadataService implements AgentMetadataService {
             target.setPort(uri.getPort() > 0 ? uri.getPort() : 3306);
             target.setDatabase(database);
             return target;
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // JDBC URL 解析失败时返回 null
+            log.trace("解析 JDBC 连接信息失败，返回 null", e);
             return null;
         }
     }

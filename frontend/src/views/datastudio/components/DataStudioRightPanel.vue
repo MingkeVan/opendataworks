@@ -2,7 +2,7 @@
   <div :class="rootClass">
     <div v-if="hasTableTab && state" ref="panelShellRef" class="panel-shell" :style="panelShellStyle">
 
-      <section class="meta-panel" @scroll.passive>
+      <section class="meta-panel">
         <el-alert
           v-if="isPlatformMetadataMissing(state.table)"
           type="error"

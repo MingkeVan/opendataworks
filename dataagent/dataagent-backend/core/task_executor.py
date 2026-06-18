@@ -66,6 +66,29 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TaskExecutionInput:
+    """One NL2SQL run's execution contract, assembled by the coordinator/submission layer.
+
+    Timeout fields are resolved per ``execution_mode`` at submission time (see
+    ``resolve_task_timeouts``); when a recovered/legacy task carries ``0``/``None``
+    the runtime falls back to the mode-specific value (see ``agent_runtime`` and
+    ``config.resolve_sql_read_timeout_seconds``).
+
+    Fields:
+        task_id / topic_id: identity of this run and its conversation topic.
+        question: the user prompt for this run.
+        history: prior turns passed to the model as context.
+        resume_session_id: SDK session id to resume, or ``None`` for a fresh run.
+        provider_id / model: selected runtime provider and model id.
+        database_hint: optional default schema/database for SQL tools.
+        debug: enable verbose runtime diagnostics.
+        timeout_seconds: total bounded wall-clock budget for this single run.
+        sql_read_timeout_seconds: per read-query budget exposed to skill SQL tools.
+        sql_write_timeout_seconds: per write-statement budget.
+        execution_mode: ``interactive`` or ``background``/``auto`` timeout tier.
+        agent_snapshot: frozen agent profile (skills, data scope, max_turns, ...).
+        permission_mode: write/high-risk confirmation policy for this run.
+    """
+
     task_id: str
     topic_id: str
     question: str
@@ -464,6 +487,8 @@ def _permission_result_types():
 
         return PermissionResultAllow, PermissionResultDeny
     except Exception:
+        # SDK 不可用时回退到 dict 权限协议；属可预期的可选依赖缺失
+        logger.debug("permission result types unavailable, falling back to dict protocol", exc_info=True)
         return None, None
 
 
@@ -473,10 +498,12 @@ def _allow_result(tool_input: dict[str, Any]):
         try:
             return Allow(updated_input=tool_input)
         except Exception:
+            # SDK 结果类签名不兼容时降级，记录以便排查 schema 漂移
+            logger.debug("PermissionResultAllow(updated_input=...) failed, retrying without input", exc_info=True)
             try:
                 return Allow()
             except Exception:
-                pass
+                logger.warning("PermissionResultAllow construction failed, using dict allow fallback", exc_info=True)
     return {"behavior": "allow", "updatedInput": tool_input}
 
 
@@ -486,7 +513,8 @@ def _deny_result(message: str):
         try:
             return Deny(message=message)
         except Exception:
-            pass
+            # SDK 结果类签名不兼容时降级到 dict deny，保持拒绝语义不变
+            logger.warning("PermissionResultDeny construction failed, using dict deny fallback", exc_info=True)
     return {"behavior": "deny", "message": message}
 
 
@@ -680,6 +708,14 @@ async def execute_task_stream(
     emit: Callable[[dict[str, Any]], Awaitable[None] | None],
     is_cancel_requested: Callable[[], Awaitable[bool] | bool] | None = None,
 ) -> TaskExecutionResult:
+    """Execute one NL2SQL run, streaming events via ``emit``, return the terminal result.
+
+    Dispatches to the sandbox runner when ``dataagent_sandbox_mode`` is set,
+    otherwise runs in-process. ``emit`` receives SDK/widget event dicts as they
+    occur (text deltas, tool calls, permission/question cards); the awaited return
+    value is the final :class:`TaskExecutionResult` (status, content, usage, error,
+    session id). ``is_cancel_requested`` is polled to abort a long/stalled run.
+    """
     cfg = get_settings()
     if _should_use_sandbox_runner(cfg):
         return await _execute_task_stream_via_runner(

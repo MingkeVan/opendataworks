@@ -699,7 +699,9 @@ public class DolphinSchedulerService {
         // Ensure offline before delete
         try {
             setWorkflowReleaseState(workflowCode, "OFFLINE");
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // 删除前的下线操作失败不阻断删除（可能本就处于下线态）
+            log.trace("删除前下线工作流 {} 失败，继续删除", workflowCode, e);
         }
 
         openApiClient.deleteProcessDefinition(projectCode, workflowCode);
