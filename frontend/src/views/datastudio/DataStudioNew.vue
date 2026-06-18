@@ -1198,6 +1198,7 @@ import {
 } from './chartColumnSelect'
 import { splitSqlStatements } from './sqlStatements'
 import { useTabPersistence } from './composables/useTabPersistence'
+import { useResizablePanes } from './composables/useResizablePanes'
 
 const SqlEditor = defineAsyncComponent({
   loader: () => import('@/components/SqlEditor.vue'),
@@ -1217,48 +1218,6 @@ const DataStudioRightPanel = defineAsyncComponent({
 const clusterId = ref(null)
 const route = useRoute()
 const router = useRouter()
-const studioLayoutRef = ref(null)
-const DEFAULT_SIDEBAR_RATIO = 0.2
-const DEFAULT_RIGHT_RATIO = 0.23
-const MIN_SIDEBAR_WIDTH = 220
-const MAX_SIDEBAR_WIDTH = 840
-const MIN_RIGHT_WIDTH = 320
-const MAX_RIGHT_WIDTH = 900
-const sidebarWidthRatio = ref(DEFAULT_SIDEBAR_RATIO)
-const rightPanelWidthRatio = ref(DEFAULT_RIGHT_RATIO)
-const getLayoutWidth = () => {
-  const width = studioLayoutRef.value?.getBoundingClientRect()?.width || window.innerWidth || 1
-  return Math.max(1, width)
-}
-const clampWidth = (value, min, max) => Math.max(min, Math.min(max, value))
-const clampSidebarWidth = (value) => clampWidth(value, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH)
-const clampRightWidth = (value) => clampWidth(value, MIN_RIGHT_WIDTH, MAX_RIGHT_WIDTH)
-const getSidebarWidthPx = () => clampSidebarWidth(getLayoutWidth() * sidebarWidthRatio.value)
-const getRightPanelWidthPx = () => clampRightWidth(getLayoutWidth() * rightPanelWidthRatio.value)
-const sidebarPaneStyle = computed(() => ({
-  width: `${(sidebarWidthRatio.value * 100).toFixed(2)}%`,
-  minWidth: `${MIN_SIDEBAR_WIDTH}px`,
-  maxWidth: `${MAX_SIDEBAR_WIDTH}px`
-}))
-const rightPaneStyle = computed(() => ({
-  width: `${(rightPanelWidthRatio.value * 100).toFixed(2)}%`,
-  minWidth: `${MIN_RIGHT_WIDTH}px`,
-  maxWidth: `${MAX_RIGHT_WIDTH}px`
-}))
-const normalizePaneRatios = () => {
-  const layoutWidth = getLayoutWidth()
-  sidebarWidthRatio.value = clampSidebarWidth(layoutWidth * sidebarWidthRatio.value) / layoutWidth
-  rightPanelWidthRatio.value = clampRightWidth(layoutWidth * rightPanelWidthRatio.value) / layoutWidth
-}
-const isResizing = ref(false)
-let resizeMoveHandler = null
-let resizeUpHandler = null
-let resizeRightMoveHandler = null
-let resizeRightUpHandler = null
-const leftPaneHeights = reactive({})
-const leftPaneRefs = ref({})
-let resizeLeftMoveHandler = null
-let resizeLeftUpHandler = null
 const historyData = ref([])
 const historyPager = reactive({ pageNum: 1, pageSize: 15, total: 0 })
 const historyLoading = ref(false)
@@ -1320,6 +1279,25 @@ const activeTab = ref('')
 const tabStates = reactive({})
 const queryTimerHandles = new Map()
 const queryTabCounter = ref(1)
+
+// 三栏布局尺寸与拖拽（P2-2 F5）：syncResultPaneLayout 为前向引用，惰性传入
+const {
+  studioLayoutRef,
+  sidebarPaneStyle,
+  rightPaneStyle,
+  normalizePaneRatios,
+  isResizing,
+  leftPaneHeights,
+  leftPaneRefs,
+  setLeftPaneRef,
+  getLeftPaneStyle,
+  startResize,
+  startRightResize,
+  startLeftResize,
+} = useResizablePanes({
+  activeTab,
+  syncResultPaneLayout: (tabId) => syncResultPaneLayout(tabId),
+})
 
 	const tableRefs = ref({})
 	const chartRefs = ref({})
@@ -1717,17 +1695,6 @@ const setTableRef = (key, el, tableId) => {
   if (tableObserver.value) {
     tableObserver.value.observe(el)
   }
-}
-
-const setLeftPaneRef = (key, el) => {
-  if (!key || !el) return
-  leftPaneRefs.value[key] = el
-}
-
-const getLeftPaneStyle = (key) => {
-  const height = leftPaneHeights[key]
-  if (!height) return {}
-  return { '--left-top': `${height}px` }
 }
 
 const getTableKey = (table, fallbackDb = '', fallbackSource = '') => {
@@ -3903,13 +3870,6 @@ const disposeChart = (tabId, resultIndex = null) => {
   })
 }
 
-const handleResize = () => {
-  normalizePaneRatios()
-  const tabId = activeTab.value
-  if (!tabId) return
-  syncResultPaneLayout(tabId)
-}
-
 const startMetaEdit = async (tabId) => {
   if (isDemoMode) {
     showDemoReadonlyMessage('编辑表信息')
@@ -4347,86 +4307,6 @@ const goLineage = (tabId) => {
   router.push({ path: '/lineage', query: { tableId: state.table.id } })
 }
 
-const startResize = (event) => {
-  event.preventDefault()
-  const startX = event.clientX
-  const startWidth = getSidebarWidthPx()
-  isResizing.value = true
-
-  resizeMoveHandler = (moveEvent) => {
-    const delta = moveEvent.clientX - startX
-    const next = clampSidebarWidth(startWidth + delta)
-    sidebarWidthRatio.value = next / getLayoutWidth()
-  }
-  resizeUpHandler = () => {
-    isResizing.value = false
-    window.removeEventListener('mousemove', resizeMoveHandler)
-    window.removeEventListener('mouseup', resizeUpHandler)
-    resizeMoveHandler = null
-    resizeUpHandler = null
-  }
-  window.addEventListener('mousemove', resizeMoveHandler)
-  window.addEventListener('mouseup', resizeUpHandler)
-}
-
-const startRightResize = (event) => {
-  event.preventDefault()
-  const startX = event.clientX
-  const startWidth = getRightPanelWidthPx()
-  isResizing.value = true
-
-  resizeRightMoveHandler = (moveEvent) => {
-    const delta = startX - moveEvent.clientX
-    const next = clampRightWidth(startWidth + delta)
-    rightPanelWidthRatio.value = next / getLayoutWidth()
-  }
-  resizeRightUpHandler = () => {
-    isResizing.value = false
-    window.removeEventListener('mousemove', resizeRightMoveHandler)
-    window.removeEventListener('mouseup', resizeRightUpHandler)
-    resizeRightMoveHandler = null
-    resizeRightUpHandler = null
-  }
-  window.addEventListener('mousemove', resizeRightMoveHandler)
-  window.addEventListener('mouseup', resizeRightUpHandler)
-}
-
-const startLeftResize = (tabId, event) => {
-  event.preventDefault()
-  const container = leftPaneRefs.value[tabId]
-  if (!container) return
-  const queryPanel = container.querySelector('.query-panel')
-  const containerRect = container.getBoundingClientRect()
-  const startY = event.clientY
-  const startHeight = queryPanel?.getBoundingClientRect().height || 220
-  const minTop = 160
-  const minBottom = 220
-  const resizerHeight = 6
-  isResizing.value = true
-  let layoutRaf = 0
-
-  resizeLeftMoveHandler = (moveEvent) => {
-    const delta = moveEvent.clientY - startY
-    let next = startHeight + delta
-    const maxTop = Math.max(minTop, containerRect.height - minBottom - resizerHeight)
-    next = Math.max(minTop, Math.min(maxTop, next))
-    leftPaneHeights[tabId] = next
-    if (layoutRaf) cancelAnimationFrame(layoutRaf)
-    layoutRaf = requestAnimationFrame(() => syncResultPaneLayout(tabId))
-  }
-  resizeLeftUpHandler = () => {
-    isResizing.value = false
-    window.removeEventListener('mousemove', resizeLeftMoveHandler)
-    window.removeEventListener('mouseup', resizeLeftUpHandler)
-    resizeLeftMoveHandler = null
-    resizeLeftUpHandler = null
-    if (layoutRaf) cancelAnimationFrame(layoutRaf)
-    layoutRaf = requestAnimationFrame(() => syncResultPaneLayout(tabId))
-  }
-  window.addEventListener('mousemove', resizeLeftMoveHandler)
-  window.addEventListener('mouseup', resizeLeftUpHandler)
-}
-
 watch(
   () => [historyPager.pageNum, historyPager.pageSize],
   () => {
@@ -4613,12 +4493,10 @@ onMounted(async () => {
   }
   await nextTick()
   normalizePaneRatios()
-  window.addEventListener('resize', handleResize)
 })
 
 onBeforeUnmount(() => {
   flushPersistTabs()
-  window.removeEventListener('resize', handleResize)
   if (schemaCountReloadTimer) {
     clearTimeout(schemaCountReloadTimer)
     schemaCountReloadTimer = null
@@ -4629,30 +4507,6 @@ onBeforeUnmount(() => {
 			queryTimerHandles.clear()
   if (tableObserver.value) {
     tableObserver.value.disconnect()
-  }
-  if (resizeMoveHandler) {
-    window.removeEventListener('mousemove', resizeMoveHandler)
-    resizeMoveHandler = null
-  }
-  if (resizeUpHandler) {
-    window.removeEventListener('mouseup', resizeUpHandler)
-    resizeUpHandler = null
-  }
-  if (resizeRightMoveHandler) {
-    window.removeEventListener('mousemove', resizeRightMoveHandler)
-    resizeRightMoveHandler = null
-  }
-  if (resizeRightUpHandler) {
-    window.removeEventListener('mouseup', resizeRightUpHandler)
-    resizeRightUpHandler = null
-  }
-  if (resizeLeftMoveHandler) {
-    window.removeEventListener('mousemove', resizeLeftMoveHandler)
-    resizeLeftMoveHandler = null
-  }
-  if (resizeLeftUpHandler) {
-    window.removeEventListener('mouseup', resizeLeftUpHandler)
-    resizeLeftUpHandler = null
   }
 })
 </script>
