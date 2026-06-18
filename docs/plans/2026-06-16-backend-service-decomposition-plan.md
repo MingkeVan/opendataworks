@@ -31,11 +31,11 @@
 - 验证: `mvn -pl backend -am test`（新增工具单测 + 受影响服务测试）。
 - 回退: 单提交回退；公有 API 不变，调用方不受影响。
 
-### T2 — 抽取 WorkflowQueryService（读取）
-- 目标: 迁移 `list` / `getDetail` 的纯读取逻辑，包含列表分页、详情组装、当前版本号填充、DolphinScheduler 最近实例实时读取与缓存兜底。
-- 触及文件: 新增 `WorkflowQueryService.java` + 测试；改 `WorkflowService.java` 委托。
-- 边界: `buildDefinitionJsonForExport` 在 `definition_json` 缺失时会根据任务关系重建并写回工作流，不是纯查询；本切片暂留在 `WorkflowService`，待 `WorkflowDefinitionAssembler` 抽取后再迁移。
-- 验证: `mvn -pl backend -am test`；重点回归列表分页、详情组装、最近实例和版本号填充。
+### T2 — 抽取 WorkflowQueryService（读取，已完成）
+- 目标: `WorkflowQueryService` 已承接 `list` / `getDetail` 的纯读取逻辑，包含列表分页、详情组装、当前版本号填充、DolphinScheduler 最近实例实时读取与缓存兜底；`WorkflowService` 保持公有 API 并委托。
+- 触及文件: `WorkflowQueryService.java`、`WorkflowService.java`、`WorkflowQueryServiceTest.java`、`WorkflowQueryServiceIntegrationTest.java`。
+- 边界: `buildDefinitionJsonForExport` 在 `definition_json` 缺失时会根据任务关系重建并写回工作流，不是纯查询；该带写回副作用的公有 API 保留在 `WorkflowService` facade。
+- 验证: `SPRING_DATASOURCE_URL=jdbc:mysql://127.0.0.1:3306/opendataworks?... SPRING_DATASOURCE_USERNAME=opendataworks SPRING_DATASOURCE_PASSWORD=opendataworks123 mvn -pl backend -am -Dtest=WorkflowQueryServiceTest,WorkflowQueryServiceIntegrationTest -DfailIfNoTests=false test`；结果 `Tests run: 3, Failures: 0, Errors: 0, Skipped: 0`。
 - 回退: 单提交回退。
 
 ### T3 — 抽取 WorkflowTaskRelationService（任务绑定/拓扑刷新，已完成）
@@ -71,6 +71,22 @@
 - 每个任务: `mvn -pl backend -am test`，T0 基线 + 各步新增测试必须全绿。
 - 关键回归面: 创建/更新/级联删除、发布链路依赖、运行触发与回填、调度引擎切换、`refreshTaskRelations`、导出 JSON。
 - 若本地可启动后端 + MySQL，对发布/运行链路做一次冒烟（评审报告已说明本仓库智能问数冒烟方法，此处为工作流链路类比）。
+
+### 2026-06-18 本地有状态验证
+
+- 环境:
+  - MySQL: `127.0.0.1:3306/opendataworks`，容器 `data-portal-mysql`，版本 `8.0.43`。
+  - Redis: `127.0.0.1:6379`，容器 `odw-local-redis`，`redis-cli ping` 返回 `PONG`。
+  - DolphinScheduler: `127.0.0.1:12345/dolphinscheduler`，容器 `dolphinscheduler-standalone-server`，版本 `3.2.0`，健康检查 `UP`。
+  - 本地 Dolphin 验证环境修正: `reserved-memory` 调整为 `0.01`，并将 `mysql-connector-j-8.0.33.jar` 放入 `/opt/dolphinscheduler/libs/api-server/` 与 `/opt/dolphinscheduler/libs/worker-server/`，否则 DS 3.2 standalone 会分别出现 master overload 或 SQL task `ClassNotFoundException: com.mysql.cj.jdbc.Driver`。
+- 代码修正验证:
+  - `WorkflowInstanceCache.createdAt` 为 `Date` 类型，原 MyBatis-Plus 自动填充只覆盖 `LocalDateTime`；已扩展 `MybatisPlusConfig` 同时填充 `Date`，并在 `WorkflowQueryServiceIntegrationTest` 断言真实插入后 `createdAt` 非空。
+- 命令与结果:
+  - `SPRING_DATASOURCE_URL=jdbc:mysql://127.0.0.1:3306/opendataworks?... SPRING_DATASOURCE_USERNAME=opendataworks SPRING_DATASOURCE_PASSWORD=opendataworks123 mvn -pl backend -am -Dtest=WorkflowQueryServiceIntegrationTest -DfailIfNoTests=false test` -> `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`。
+  - 同环境 `mvn -pl backend -am -Dtest=WorkflowRuntimeSyncRealIntegrationTest -DfailIfNoTests=false test` -> `Tests run: 7, Failures: 0, Errors: 0, Skipped: 0`；覆盖真实 Dolphin 发布、反向同步、运行实例、SQL 节点执行、结果表断言和清理。
+  - 同环境 `mvn -pl backend -am -Dtest=WorkflowQueryServiceTest,WorkflowQueryServiceIntegrationTest,WorkflowTaskRelationServiceTest,WorkflowTaskRelationServiceIntegrationTest,WorkflowExecutionServiceTest,WorkflowSchedulerEngineSwitchTest,WorkflowServiceMetadataPersistenceTest,WorkflowVersionComparePersistenceIntegrationTest,WorkflowPublishPreviewIntegrationTest -DfailIfNoTests=false test` -> `Tests run: 29, Failures: 0, Errors: 0, Skipped: 0`。
+  - 同环境 `mvn -pl backend -am -Dtest=WorkflowLifecycleFullTest,WorkflowLifecycleIntegrationTest -DfailIfNoTests=false test` -> `Tests run: 9, Failures: 0, Errors: 0, Skipped: 0`。
+  - 同环境 `mvn -pl backend -am test` -> `Tests run: 294, Failures: 0, Errors: 0, Skipped: 2`。
 
 ## 回滚策略
 

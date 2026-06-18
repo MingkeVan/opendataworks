@@ -66,8 +66,8 @@ class WorkflowQueryServiceIntegrationTest {
         cache.setDurationMs(1200L);
         cache.setStartTime(new Date(1710000000000L));
         cache.setEndTime(new Date(1710003600000L));
-        cache.setCreatedAt(new Date());
         workflowInstanceCacheMapper.insert(cache);
+        assertNotNull(workflowInstanceCacheMapper.selectById(cache.getId()).getCreatedAt());
 
         WorkflowQueryRequest query = new WorkflowQueryRequest();
         query.setKeyword(workflowName);

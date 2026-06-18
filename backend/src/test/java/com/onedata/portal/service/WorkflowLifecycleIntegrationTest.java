@@ -1,5 +1,6 @@
 package com.onedata.portal.service;
 
+import com.onedata.portal.dto.DolphinDatasourceOption;
 import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.DataTask;
@@ -9,13 +10,22 @@ import com.onedata.portal.mapper.DataTaskMapper;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
 
 /**
  * 工作流生命周期集成测试
@@ -37,13 +47,23 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("工作流完整生命周期集成测试")
 class WorkflowLifecycleIntegrationTest {
 
+    private static final String RUN_ID = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    private static final String TABLE_A_NAME = "test_table_a_" + RUN_ID;
+    private static final String TABLE_B_NAME = "test_table_b_" + RUN_ID;
+    private static final String TABLE_C_NAME = "test_table_c_" + RUN_ID;
+    private static final String TABLE_VERIFY_NAME = "test_table_verify_" + RUN_ID;
+    private static final String TABLE_ANALYZE_NAME = "test_table_analyze_" + RUN_ID;
+    private static final long TEST_WORKFLOW_CODE = 900001L;
+    private static final String HIDDEN_ENGINE = "dinky";
+    private static final List<Long> hiddenDolphinTaskIds = new ArrayList<>();
+
     @Autowired
     private DataTaskService dataTaskService;
 
     @Autowired
     private DataTableService dataTableService;
 
-    @Autowired
+    @SpyBean
     private DolphinSchedulerService dolphinSchedulerService;
 
     @Autowired
@@ -59,6 +79,8 @@ class WorkflowLifecycleIntegrationTest {
     private static Long tableAId;
     private static Long tableBId;
     private static Long tableCId;
+    private static Long tableVerifyId;
+    private static Long tableAnalyzeId;
     private static Long task1Id;
     private static Long task2Id;
     private static Long task3Id;
@@ -70,6 +92,7 @@ class WorkflowLifecycleIntegrationTest {
                                     @Autowired DataTableMapper tableMapper,
                                     @Autowired DataLineageMapper lineageMapper) {
         System.out.println("\n🧹 清理旧测试数据...\n");
+        hideExternalDolphinTasks(taskMapper);
 
         // 删除旧的测试数据
         List<DataTask> oldTasks = taskMapper.selectList(
@@ -95,12 +118,63 @@ class WorkflowLifecycleIntegrationTest {
         System.out.println("✅ 旧测试数据已清理\n");
     }
 
+    @AfterAll
+    static void restoreHiddenDolphinTasks(@Autowired DataTaskMapper taskMapper) {
+        for (Long taskId : hiddenDolphinTaskIds) {
+            DataTask task = taskMapper.selectById(taskId);
+            if (task != null) {
+                task.setEngine("dolphin");
+                taskMapper.updateById(task);
+            }
+        }
+        hiddenDolphinTaskIds.clear();
+    }
+
     @BeforeEach
     void printSeparator(TestInfo testInfo) {
+        configureDolphinSchedulerMock();
         String separator = createSeparator(80);
         System.out.println("\n" + separator);
         System.out.println("🧪 " + testInfo.getDisplayName());
         System.out.println(separator);
+    }
+
+    private static void hideExternalDolphinTasks(DataTaskMapper taskMapper) {
+        List<DataTask> externalTasks = taskMapper.selectList(
+            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<DataTask>()
+                .eq(DataTask::getEngine, "dolphin")
+                .notLike(DataTask::getTaskCode, "test_task_")
+        );
+        for (DataTask task : externalTasks) {
+            hiddenDolphinTaskIds.add(task.getId());
+            task.setEngine(HIDDEN_ENGINE);
+            taskMapper.updateById(task);
+        }
+    }
+
+    private void configureDolphinSchedulerMock() {
+        doNothing().when(dolphinSchedulerService).clearProjectCodeCache();
+        doReturn(Collections.emptyList()).when(dolphinSchedulerService).listTaskGroups(nullable(String.class));
+        doReturn(testDatasourceOptions()).when(dolphinSchedulerService)
+                .listDatasources(nullable(String.class), nullable(String.class));
+        doReturn(TEST_WORKFLOW_CODE).when(dolphinSchedulerService).syncWorkflow(
+                anyLong(),
+                anyString(),
+                nullable(String.class),
+                anyList(),
+                anyList(),
+                anyList(),
+                nullable(String.class));
+        doNothing().when(dolphinSchedulerService).setWorkflowReleaseState(anyLong(), anyString());
+    }
+
+    private List<DolphinDatasourceOption> testDatasourceOptions() {
+        DolphinDatasourceOption option = new DolphinDatasourceOption();
+        option.setId(1L);
+        option.setName("doris_test");
+        option.setType("MYSQL");
+        option.setDbName("test_db");
+        return Collections.singletonList(option);
     }
 
     private String createSeparator(int length) {
@@ -117,9 +191,8 @@ class WorkflowLifecycleIntegrationTest {
     void step1_createTables() {
         System.out.println("\n📋 创建测试表...\n");
 
-        // 创建 table_a
         DataTable tableA = new DataTable();
-        tableA.setTableName("test_table_a");
+        tableA.setTableName(TABLE_A_NAME);
         tableA.setDbName("test_db");
         tableA.setLayer("ods");
         tableA.setTableComment("源表A - 集成测试");
@@ -129,9 +202,8 @@ class WorkflowLifecycleIntegrationTest {
         tableAId = tableA.getId();
         System.out.println("✅ 创建表 table_a (ID: " + tableAId + ")");
 
-        // 创建 table_b
         DataTable tableB = new DataTable();
-        tableB.setTableName("test_table_b");
+        tableB.setTableName(TABLE_B_NAME);
         tableB.setDbName("test_db");
         tableB.setLayer("dwd");
         tableB.setTableComment("中间表B - 集成测试");
@@ -141,9 +213,8 @@ class WorkflowLifecycleIntegrationTest {
         tableBId = tableB.getId();
         System.out.println("✅ 创建表 table_b (ID: " + tableBId + ")");
 
-        // 创建 table_c
         DataTable tableC = new DataTable();
-        tableC.setTableName("test_table_c");
+        tableC.setTableName(TABLE_C_NAME);
         tableC.setDbName("test_db");
         tableC.setLayer("dws");
         tableC.setTableComment("目标表C - 集成测试");
@@ -153,9 +224,33 @@ class WorkflowLifecycleIntegrationTest {
         tableCId = tableC.getId();
         System.out.println("✅ 创建表 table_c (ID: " + tableCId + ")");
 
+        DataTable tableVerify = new DataTable();
+        tableVerify.setTableName(TABLE_VERIFY_NAME);
+        tableVerify.setDbName("test_db");
+        tableVerify.setLayer("ads");
+        tableVerify.setTableComment("验证结果表 - 集成测试");
+        tableVerify.setOwner("test_user");
+        tableVerify.setStatus("active");
+        dataTableMapper.insert(tableVerify);
+        tableVerifyId = tableVerify.getId();
+        System.out.println("✅ 创建表 verify (ID: " + tableVerifyId + ")");
+
+        DataTable tableAnalyze = new DataTable();
+        tableAnalyze.setTableName(TABLE_ANALYZE_NAME);
+        tableAnalyze.setDbName("test_db");
+        tableAnalyze.setLayer("ads");
+        tableAnalyze.setTableComment("分析结果表 - 集成测试");
+        tableAnalyze.setOwner("test_user");
+        tableAnalyze.setStatus("active");
+        dataTableMapper.insert(tableAnalyze);
+        tableAnalyzeId = tableAnalyze.getId();
+        System.out.println("✅ 创建表 analyze (ID: " + tableAnalyzeId + ")");
+
         assertNotNull(tableAId);
         assertNotNull(tableBId);
         assertNotNull(tableCId);
+        assertNotNull(tableVerifyId);
+        assertNotNull(tableAnalyzeId);
     }
 
     @Test
@@ -166,14 +261,14 @@ class WorkflowLifecycleIntegrationTest {
 
         // Task 1: 读 table_a, 写 table_b
         DataTask task1 = new DataTask();
-        task1.setTaskName("转换任务1_A到B");
-        task1.setTaskCode("test_task_1_a_to_b");
+        task1.setTaskName("转换任务1_A到B_" + RUN_ID);
+        task1.setTaskCode("test_task_1_a_to_b_" + RUN_ID);
         task1.setTaskType("batch");
         task1.setEngine("dolphin");
         task1.setDolphinNodeType("SQL");
         task1.setDatasourceName("doris_test");
         task1.setDatasourceType("MYSQL");
-        task1.setTaskSql("INSERT INTO test_table_b SELECT * FROM test_table_a");
+        task1.setTaskSql("INSERT INTO " + TABLE_B_NAME + " SELECT * FROM " + TABLE_A_NAME);
         task1.setTaskDesc("从table_a读取数据并写入table_b");
         task1.setPriority(5);
         task1.setTimeoutSeconds(600);
@@ -191,14 +286,14 @@ class WorkflowLifecycleIntegrationTest {
 
         // Task 2: 读 table_b, 写 table_c
         DataTask task2 = new DataTask();
-        task2.setTaskName("转换任务2_B到C");
-        task2.setTaskCode("test_task_2_b_to_c");
+        task2.setTaskName("转换任务2_B到C_" + RUN_ID);
+        task2.setTaskCode("test_task_2_b_to_c_" + RUN_ID);
         task2.setTaskType("batch");
         task2.setEngine("dolphin");
         task2.setDolphinNodeType("SQL");
         task2.setDatasourceName("doris_test");
         task2.setDatasourceType("MYSQL");
-        task2.setTaskSql("INSERT INTO test_table_c SELECT * FROM test_table_b");
+        task2.setTaskSql("INSERT INTO " + TABLE_C_NAME + " SELECT * FROM " + TABLE_B_NAME);
         task2.setTaskDesc("从table_b读取数据并写入table_c");
         task2.setPriority(5);
         task2.setTimeoutSeconds(600);
@@ -216,14 +311,14 @@ class WorkflowLifecycleIntegrationTest {
 
         // Task 3: 读 table_c (仅读取，数据验证任务)
         DataTask task3 = new DataTask();
-        task3.setTaskName("验证任务3_读C");
-        task3.setTaskCode("test_task_3_verify_c");
+        task3.setTaskName("验证任务3_读C_" + RUN_ID);
+        task3.setTaskCode("test_task_3_verify_c_" + RUN_ID);
         task3.setTaskType("batch");
         task3.setEngine("dolphin");
         task3.setDolphinNodeType("SQL");
         task3.setDatasourceName("doris_test");
         task3.setDatasourceType("MYSQL");
-        task3.setTaskSql("SELECT COUNT(*) FROM test_table_c");
+        task3.setTaskSql("INSERT INTO " + TABLE_VERIFY_NAME + " SELECT COUNT(*) FROM " + TABLE_C_NAME);
         task3.setTaskDesc("验证table_c的数据");
         task3.setPriority(5);
         task3.setTimeoutSeconds(300);
@@ -233,8 +328,8 @@ class WorkflowLifecycleIntegrationTest {
 
         DataTask createdTask3 = dataTaskService.create(
             task3,
-            Arrays.asList(tableCId),  // 读取 table_c
-            null                      // 不写入任何表
+            Arrays.asList(tableCId),      // 读取 table_c
+            Arrays.asList(tableVerifyId)  // 写入验证结果表
         );
         task3Id = createdTask3.getId();
         System.out.println("✅ 创建任务3 (ID: " + task3Id + "): 读取 table_c 进行验证");
@@ -310,14 +405,14 @@ class WorkflowLifecycleIntegrationTest {
 
         // Task 4: 读 table_b (与 task_2 并行依赖 table_b)
         DataTask task4 = new DataTask();
-        task4.setTaskName("分析任务4_读B");
-        task4.setTaskCode("test_task_4_analyze_b");
+        task4.setTaskName("分析任务4_读B_" + RUN_ID);
+        task4.setTaskCode("test_task_4_analyze_b_" + RUN_ID);
         task4.setTaskType("batch");
         task4.setEngine("dolphin");
         task4.setDolphinNodeType("SQL");
         task4.setDatasourceName("doris_test");
         task4.setDatasourceType("MYSQL");
-        task4.setTaskSql("SELECT AVG(value) FROM test_table_b");
+        task4.setTaskSql("INSERT INTO " + TABLE_ANALYZE_NAME + " SELECT AVG(value) FROM " + TABLE_B_NAME);
         task4.setTaskDesc("分析table_b的数据");
         task4.setPriority(5);
         task4.setTimeoutSeconds(300);
@@ -327,8 +422,8 @@ class WorkflowLifecycleIntegrationTest {
 
         DataTask createdTask4 = dataTaskService.create(
             task4,
-            Arrays.asList(tableBId),  // 读取 table_b
-            null                      // 不写入任何表
+            Arrays.asList(tableBId),      // 读取 table_b
+            Arrays.asList(tableAnalyzeId) // 写入分析结果表
         );
         task4Id = createdTask4.getId();
         System.out.println("✅ 创建任务4 (ID: " + task4Id + "): 读取 table_b 进行分析");
@@ -419,8 +514,15 @@ class WorkflowLifecycleIntegrationTest {
                 .eq(DataLineage::getTaskId, task3Id)
                 .eq(DataLineage::getLineageType, "input")
         );
+        List<DataLineage> task3Output = dataLineageMapper.selectList(
+            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<DataLineage>()
+                .eq(DataLineage::getTaskId, task3Id)
+                .eq(DataLineage::getLineageType, "output")
+        );
         assertEquals(1, task3Input.size(), "task_3应有1个输入表");
+        assertEquals(1, task3Output.size(), "task_3应有1个输出表");
         assertEquals(tableCId, task3Input.get(0).getUpstreamTableId());
+        assertEquals(tableVerifyId, task3Output.get(0).getDownstreamTableId());
         System.out.println("✅ 任务3血缘验证通过: table_c -> task_3");
 
         // 验证 task_4 的血缘
@@ -429,8 +531,15 @@ class WorkflowLifecycleIntegrationTest {
                 .eq(DataLineage::getTaskId, task4Id)
                 .eq(DataLineage::getLineageType, "input")
         );
+        List<DataLineage> task4Output = dataLineageMapper.selectList(
+            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<DataLineage>()
+                .eq(DataLineage::getTaskId, task4Id)
+                .eq(DataLineage::getLineageType, "output")
+        );
         assertEquals(1, task4Input.size(), "task_4应有1个输入表");
+        assertEquals(1, task4Output.size(), "task_4应有1个输出表");
         assertEquals(tableBId, task4Input.get(0).getUpstreamTableId());
+        assertEquals(tableAnalyzeId, task4Output.get(0).getDownstreamTableId());
         System.out.println("✅ 任务4血缘验证通过: table_b -> task_4");
 
         System.out.println("\n📊 完整血缘图：");
@@ -481,6 +590,14 @@ class WorkflowLifecycleIntegrationTest {
         if (tableCId != null) {
             dataTableMapper.deleteById(tableCId);
             System.out.println("✅ 删除表 table_c");
+        }
+        if (tableVerifyId != null) {
+            dataTableMapper.deleteById(tableVerifyId);
+            System.out.println("✅ 删除表 verify");
+        }
+        if (tableAnalyzeId != null) {
+            dataTableMapper.deleteById(tableAnalyzeId);
+            System.out.println("✅ 删除表 analyze");
         }
 
         System.out.println("\n✅ 清理完成");

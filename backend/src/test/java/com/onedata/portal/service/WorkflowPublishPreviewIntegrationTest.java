@@ -1,6 +1,10 @@
 package com.onedata.portal.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowPublishPreviewResponse;
 import com.onedata.portal.dto.workflow.WorkflowTaskBinding;
@@ -61,6 +65,9 @@ class WorkflowPublishPreviewIntegrationTest {
     @Autowired
     private DataWorkflowMapper dataWorkflowMapper;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     @MockBean
     private DolphinRuntimeDefinitionService runtimeDefinitionService;
 
@@ -120,7 +127,8 @@ class WorkflowPublishPreviewIntegrationTest {
                 null,
                 Wrappers.<DataWorkflow>lambdaUpdate()
                         .eq(DataWorkflow::getId, workflow.getId())
-                        .set(DataWorkflow::getWorkflowCode, workflowCode));
+                        .set(DataWorkflow::getWorkflowCode, workflowCode)
+                        .set(DataWorkflow::getPublishStatus, "published"));
         DataWorkflow latest = dataWorkflowMapper.selectById(workflow.getId());
         assertNotNull(latest);
 
@@ -147,8 +155,7 @@ class WorkflowPublishPreviewIntegrationTest {
         runtime.setExplicitEdges(Arrays.asList(
                 new RuntimeTaskEdge(0L, 71001L),
                 new RuntimeTaskEdge(71001L, 71002L)));
-        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(latest.getProjectCode(), latest.getWorkflowCode()))
-                .thenReturn(runtime);
+        mockRuntimeDefinition(latest, runtime);
 
         WorkflowPublishPreviewResponse preview = workflowPublishService.previewPublish(latest.getId());
         assertTrue(preview.getErrors().isEmpty(), "预检不应报错");
@@ -156,7 +163,8 @@ class WorkflowPublishPreviewIntegrationTest {
         assertNotNull(preview.getDiffSummary(), "差异摘要不能为空");
         assertTrue(preview.getDiffSummary().getEdgeAdded().isEmpty(), "入口边不应被识别为边新增");
         assertTrue(preview.getDiffSummary().getEdgeRemoved().isEmpty(), "入口边不应被识别为边删除");
-        assertFalse(Boolean.TRUE.equals(preview.getDiffSummary().getChanged()), "仅入口边差异不应标记为结构变更");
+        assertFalse(Boolean.TRUE.equals(preview.getDiffSummary().getChanged()),
+                "仅入口边差异不应标记为结构变更, diff=" + preview.getDiffSummary());
         assertFalse(Boolean.TRUE.equals(preview.getRequireConfirm()), "仅入口边差异不应要求确认");
     }
 
@@ -199,8 +207,12 @@ class WorkflowPublishPreviewIntegrationTest {
                 null,
                 Wrappers.<DataWorkflow>lambdaUpdate()
                         .eq(DataWorkflow::getId, workflow.getId())
-                        .set(DataWorkflow::getWorkflowCode, workflowCode));
+                        .set(DataWorkflow::getWorkflowCode, workflowCode)
+                        .set(DataWorkflow::getPublishStatus, "published"));
         DataWorkflow latest = dataWorkflowMapper.selectById(workflow.getId());
+        assertNotNull(latest);
+        patchDefinitionRuntimeMetadata(latest, 73001L, 110L, 66);
+        latest = dataWorkflowMapper.selectById(workflow.getId());
         assertNotNull(latest);
 
         RuntimeWorkflowDefinition runtime = new RuntimeWorkflowDefinition();
@@ -222,15 +234,16 @@ class WorkflowPublishPreviewIntegrationTest {
         runtimeTask.setTaskPriority("MEDIUM");
         runtimeTask.setTaskVersion(2);
         runtime.setTasks(Collections.singletonList(runtimeTask));
-        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(latest.getProjectCode(), latest.getWorkflowCode()))
-                .thenReturn(runtime);
+        mockRuntimeDefinition(latest, runtime);
 
         WorkflowPublishPreviewResponse preview = workflowPublishService.previewPublish(latest.getId());
         assertTrue(preview.getErrors().isEmpty(), "预检不应报错");
         assertTrue(Boolean.TRUE.equals(preview.getCanPublish()), "预检应允许发布");
         assertNotNull(preview.getDiffSummary(), "差异摘要不能为空");
-        assertTrue(preview.getDiffSummary().getTaskModified().isEmpty(), "运行态噪声字段不应触发任务差异");
-        assertFalse(Boolean.TRUE.equals(preview.getDiffSummary().getChanged()), "仅噪声字段变化不应要求确认");
+        assertTrue(preview.getDiffSummary().getTaskModified().isEmpty(),
+                "运行态噪声字段不应触发任务差异, diff=" + preview.getDiffSummary());
+        assertFalse(Boolean.TRUE.equals(preview.getDiffSummary().getChanged()),
+                "仅噪声字段变化不应要求确认, diff=" + preview.getDiffSummary());
         assertFalse(Boolean.TRUE.equals(preview.getRequireConfirm()), "仅噪声字段变化不应要求确认");
     }
 
@@ -274,6 +287,7 @@ class WorkflowPublishPreviewIntegrationTest {
                 null,
                 Wrappers.<DataWorkflow>lambdaUpdate()
                         .eq(DataWorkflow::getId, workflow.getId())
+                        .set(DataWorkflow::getPublishStatus, "published")
                         .set(DataWorkflow::getWorkflowCode, workflowCode)
                         .set(DataWorkflow::getScheduleCron, "0 0 1 * * ? *")
                         .set(DataWorkflow::getScheduleTimezone, "Asia/Shanghai")
@@ -304,15 +318,15 @@ class WorkflowPublishPreviewIntegrationTest {
                         Collections.singletonList(sinkTable),
                         "tg-alpha")));
         runtime.setSchedule(null);
-        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(latest.getProjectCode(), latest.getWorkflowCode()))
-                .thenReturn(runtime);
+        mockRuntimeDefinition(latest, runtime);
 
         WorkflowPublishPreviewResponse preview = workflowPublishService.previewPublish(latest.getId());
         assertTrue(preview.getErrors().isEmpty(), "预检不应报错");
         assertTrue(Boolean.TRUE.equals(preview.getCanPublish()), "预检应允许发布");
         assertNotNull(preview.getDiffSummary(), "差异摘要不能为空");
         assertTrue(preview.getDiffSummary().getScheduleChanges().isEmpty(), "运行态无 scheduleId 时不应提示 schedule 差异");
-        assertFalse(Boolean.TRUE.equals(preview.getDiffSummary().getChanged()), "无真实差异时不应要求确认");
+        assertFalse(Boolean.TRUE.equals(preview.getDiffSummary().getChanged()),
+                "无真实差异时不应要求确认, diff=" + preview.getDiffSummary());
         assertFalse(Boolean.TRUE.equals(preview.getRequireConfirm()), "无真实差异时不应要求确认");
         assertTrue(preview.getRepairIssues().stream()
                 .noneMatch(item -> item.getField() != null && item.getField().startsWith("schedule.")),
@@ -399,12 +413,73 @@ class WorkflowPublishPreviewIntegrationTest {
         task.setDatasourceName("doris_ds");
         task.setDatasourceType("MYSQL");
         task.setTaskGroupName(taskGroupName);
-        task.setTaskPriority("5");
+        task.setFlag("YES");
+        task.setTaskPriority("MEDIUM");
         task.setRetryTimes(1);
         task.setRetryInterval(60);
         task.setTimeoutSeconds(600);
         task.setInputTableIds(inputTableIds);
         task.setOutputTableIds(outputTableIds);
         return task;
+    }
+
+    private void patchDefinitionRuntimeMetadata(DataWorkflow workflow,
+            Long taskCode,
+            Long datasourceId,
+            Integer taskGroupId) {
+        try {
+            JsonNode rootNode = objectMapper.readTree(workflow.getDefinitionJson());
+            if (!(rootNode instanceof ObjectNode)) {
+                throw new IllegalStateException("definitionJson root must be object");
+            }
+            JsonNode taskListNode = rootNode.get("taskDefinitionList");
+            if (!(taskListNode instanceof ArrayNode)) {
+                throw new IllegalStateException("definitionJson must contain taskDefinitionList");
+            }
+            for (JsonNode taskNode : (ArrayNode) taskListNode) {
+                if (!(taskNode instanceof ObjectNode)) {
+                    continue;
+                }
+                ObjectNode taskObject = (ObjectNode) taskNode;
+                long currentTaskCode = taskObject.path("taskCode").asLong(taskObject.path("code").asLong(-1));
+                if (currentTaskCode != taskCode) {
+                    continue;
+                }
+                JsonNode paramsNode = taskObject.get("taskParams");
+                ObjectNode taskParams = paramsNode instanceof ObjectNode
+                        ? (ObjectNode) paramsNode
+                        : taskObject.putObject("taskParams");
+                if (datasourceId != null) {
+                    taskParams.put("datasourceId", datasourceId);
+                    taskParams.put("datasource", datasourceId);
+                }
+                if (taskGroupId != null) {
+                    taskObject.put("taskGroupId", taskGroupId);
+                }
+                String patchedDefinitionJson = objectMapper.writeValueAsString(rootNode);
+                dataWorkflowMapper.update(
+                        null,
+                        Wrappers.<DataWorkflow>lambdaUpdate()
+                                .eq(DataWorkflow::getId, workflow.getId())
+                                .set(DataWorkflow::getDefinitionJson, patchedDefinitionJson));
+                return;
+            }
+            throw new IllegalStateException("definitionJson taskCode not found: " + taskCode);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to patch workflow definition runtime metadata", ex);
+        }
+    }
+
+    private void mockRuntimeDefinition(DataWorkflow workflow, RuntimeWorkflowDefinition runtime) {
+        if (workflow.getDolphinConfigId() == null) {
+            when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(
+                    workflow.getProjectCode(),
+                    workflow.getWorkflowCode())).thenReturn(runtime);
+        } else {
+            when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(
+                    workflow.getDolphinConfigId(),
+                    workflow.getProjectCode(),
+                    workflow.getWorkflowCode())).thenReturn(runtime);
+        }
     }
 }
