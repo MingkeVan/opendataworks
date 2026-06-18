@@ -1200,6 +1200,7 @@ import { splitSqlStatements } from './sqlStatements'
 import { useTabPersistence } from './composables/useTabPersistence'
 import { useResizablePanes } from './composables/useResizablePanes'
 import { useSqlCompletion } from './composables/useSqlCompletion'
+import { useTabRouting } from './composables/useTabRouting'
 
 const SqlEditor = defineAsyncComponent({
   loader: () => import('@/components/SqlEditor.vue'),
@@ -1316,6 +1317,25 @@ const {
   columnStore,
   loadTables: (...args) => loadTables(...args),
   activateDatasource: (...args) => activateDatasource(...args),
+})
+
+// 标签页 URL 路由同步（P2-2 F8）：catalog 加载器与 openTableTab 惰性前向引用
+const {
+  syncRouteWithTab,
+  clearRouteTabQuery,
+  clearCreateQuery,
+  syncFromRoute,
+} = useTabRouting({
+  suppressRouteSync,
+  tabStates,
+  openTabs,
+  activeTab,
+  activeSource,
+  activeSchema,
+  tableStore,
+  loadSchemas: (...args) => loadSchemas(...args),
+  loadTables: (...args) => loadTables(...args),
+  openTableTab: (...args) => openTableTab(...args),
 })
 
 	const tableRefs = ref({})
@@ -2593,86 +2613,6 @@ const focusActiveTableInSidebar = async () => {
   if (!key) return
   selectedTableKey.value = key
   await focusTableInSidebar(payload, key, dbName, sourceId)
-}
-
-const syncRouteWithTab = (tab, tabId) => {
-  if (suppressRouteSync.value) return
-  if (!tab) return
-  const kind = tab.kind === 'query' ? 'query' : 'table'
-  const id = String(tabId ?? tab.id ?? '')
-
-  const nextQuery = { ...route.query }
-  if (id) nextQuery.tab = id
-  if (tab.sourceId) nextQuery.clusterId = String(tab.sourceId)
-  if (tab.dbName) nextQuery.database = String(tab.dbName)
-
-  if (kind === 'table') {
-    const tableId = tabStates[id]?.table?.id
-    if (tableId) nextQuery.tableId = String(tableId)
-    else delete nextQuery.tableId
-    if (tab.tableName) nextQuery.tableName = String(tab.tableName)
-  } else {
-    delete nextQuery.tableId
-    delete nextQuery.tableName
-  }
-
-  router.replace({ path: route.path, query: nextQuery })
-}
-
-const clearRouteTabQuery = () => {
-  if (suppressRouteSync.value) return
-  const nextQuery = { ...route.query }
-  delete nextQuery.tab
-  delete nextQuery.tableId
-  delete nextQuery.tableName
-  router.replace({ path: route.path, query: nextQuery })
-}
-
-const clearCreateQuery = () => {
-  if (!route.query.create) return
-  const nextQuery = { ...route.query }
-  delete nextQuery.create
-  router.replace({ path: route.path, query: nextQuery })
-}
-
-const syncFromRoute = async () => {
-  const { clusterId: routeClusterId, database, tableId, tableName } = route.query
-  if (!routeClusterId || !database || (!tableId && !tableName)) return
-  const currentTab = openTabs.value.find((item) => String(item.id) === String(activeTab.value))
-  if (currentTab) {
-    const sameSource = String(currentTab.sourceId || '') === String(routeClusterId)
-    const sameDb = String(currentTab.dbName || '') === String(database)
-    const sameName = !tableName || String(currentTab.tableName || '') === String(tableName)
-    const currentId = tabStates[String(currentTab.id)]?.table?.id
-    const sameId = !tableId || (currentId && String(currentId) === String(tableId))
-    if (sameSource && sameDb && sameName && sameId) return
-  }
-  activeSource.value = String(routeClusterId)
-  activeSchema[String(routeClusterId)] = database
-  await loadSchemas(routeClusterId, true)
-  await loadTables(routeClusterId, database, true)
-  const list = tableStore[String(routeClusterId)]?.[database] || []
-  let target = null
-  if (tableId) {
-    target = list.find((item) => String(item.id) === String(tableId))
-  }
-  if (!target && tableName) {
-    target = list.find((item) => item.tableName === tableName)
-  }
-  if (!target && tableId) {
-    try {
-      const tableInfo = await tableApi.getById(tableId)
-      if (tableInfo) {
-        target = { ...tableInfo, sourceId: String(routeClusterId), dbName: database }
-      }
-    } catch (error) {
-      console.error('路由表加载失败', error)
-    }
-  }
-  if (!target) return
-  suppressRouteSync.value = true
-  await openTableTab(target, database, routeClusterId)
-  suppressRouteSync.value = false
 }
 
 const loadTabData = async (tabId) => {
