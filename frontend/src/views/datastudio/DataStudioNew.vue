@@ -1199,6 +1199,7 @@ import {
 import { splitSqlStatements } from './sqlStatements'
 import { useTabPersistence } from './composables/useTabPersistence'
 import { useResizablePanes } from './composables/useResizablePanes'
+import { useSqlCompletion } from './composables/useSqlCompletion'
 
 const SqlEditor = defineAsyncComponent({
   loader: () => import('@/components/SqlEditor.vue'),
@@ -1297,6 +1298,24 @@ const {
 } = useResizablePanes({
   activeTab,
   syncResultPaneLayout: (tabId) => syncResultPaneLayout(tabId),
+})
+
+// SQL 补全数据源（P2-2 F6）：共享目录缓存直接注入，loadTables/activateDatasource 惰性前向引用
+const {
+  getSchemaOptions,
+  getCompletionTablesBySchema,
+  getColumnCacheKey,
+  loadCompletionTables,
+  loadCompletionColumns,
+  searchCompletionTables,
+  getSqlCompletionContext,
+} = useSqlCompletion({
+  tabStates,
+  schemaStore,
+  tableStore,
+  columnStore,
+  loadTables: (...args) => loadTables(...args),
+  activateDatasource: (...args) => activateDatasource(...args),
 })
 
 	const tableRefs = ref({})
@@ -2882,86 +2901,6 @@ const handleTabAdd = async () => {
   tabStates[queryId].query.sql = ''
   openTabs.value.splice(getTabInsertIndex(), 0, tabItem)
   activeTab.value = queryId
-}
-
-const getSchemaOptions = (sourceId) => {
-  const sid = String(sourceId || '')
-  if (!sid) return []
-  return schemaStore[sid] || []
-}
-
-const getCompletionTablesBySchema = (sourceId) => {
-  const sourceKey = String(sourceId || '')
-  if (!sourceKey) return {}
-  return tableStore[sourceKey] || {}
-}
-
-const getColumnCacheKey = (sourceId, schema, tableName) =>
-  `${String(sourceId || '')}::${String(schema || '')}::${String(tableName || '')}`
-
-const loadCompletionTables = async (sourceId, schema) => {
-  const sourceKey = String(sourceId || '')
-  const schemaName = String(schema || '')
-  if (!sourceKey || !schemaName) return []
-  await loadTables(sourceKey, schemaName)
-  return tableStore[sourceKey]?.[schemaName] || []
-}
-
-const loadCompletionColumns = async (sourceId, schema, tableName) => {
-  const sourceKey = String(sourceId || '')
-  const schemaName = String(schema || '')
-  const objectName = String(tableName || '')
-  if (!sourceKey || !schemaName || !objectName) return []
-  const cacheKey = getColumnCacheKey(sourceKey, schemaName, objectName)
-  if (Array.isArray(columnStore[cacheKey])) {
-    return columnStore[cacheKey]
-  }
-  try {
-    const activated = await activateDatasource(sourceKey)
-    if (!activated) return []
-    const columns = await dorisClusterApi.getColumns(sourceKey, schemaName, objectName)
-    columnStore[cacheKey] = Array.isArray(columns) ? columns : []
-    return columnStore[cacheKey]
-  } catch (error) {
-    console.error('加载 SQL 补全字段失败', error)
-    columnStore[cacheKey] = []
-    return []
-  }
-}
-
-const searchCompletionTables = async (sourceId, keyword) => {
-  const sourceKey = String(sourceId || '')
-  const normalizedKeyword = String(keyword || '').trim()
-  if (!sourceKey || normalizedKeyword.length < 2) return []
-  try {
-    const activated = await activateDatasource(sourceKey)
-    if (!activated) return []
-    const objects = await dorisClusterApi.searchSchemaObjects(sourceKey, {
-      keyword: normalizedKeyword,
-      limit: 50
-    })
-    return Array.isArray(objects) ? objects : []
-  } catch (error) {
-    console.error('搜索 SQL 补全表失败', error)
-    return []
-  }
-}
-
-const getSqlCompletionContext = (tabId) => {
-  const state = tabStates[String(tabId || '')]
-  if (!state) return null
-  const sourceId = String(state.table?.sourceId || '')
-  if (!sourceId) return null
-  const currentSchema = String(state.table?.dbName || '')
-  return {
-    sourceId,
-    currentSchema,
-    schemas: getSchemaOptions(sourceId),
-    tablesBySchema: getCompletionTablesBySchema(sourceId),
-    loadTables: (schema) => loadCompletionTables(sourceId, schema),
-    loadColumns: ({ schema, table }) => loadCompletionColumns(sourceId, schema, table),
-    searchTables: (keyword) => searchCompletionTables(sourceId, keyword)
-  }
 }
 
 const getTabItemById = (tabId) => {
