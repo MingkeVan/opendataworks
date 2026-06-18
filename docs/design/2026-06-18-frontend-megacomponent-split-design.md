@@ -2,7 +2,7 @@
 
 - 日期: 2026-06-18
 - 关联报告: `docs/reports/2026-06-16-main-full-code-review.md`（前端 4.3「巨型组件」发现）
-- 关联计划: `docs/plans/2026-06-16-code-review-remediation-plan.md`（P2-2）；配套执行计划 `docs/plans/2026-06-18-frontend-megacomponent-split-plan.md`（待产出）
+- 关联计划: `docs/plans/2026-06-16-code-review-remediation-plan.md`（P2-2）；配套执行计划 `docs/plans/2026-06-18-frontend-megacomponent-split-plan.md`
 - 影响栈: 前端（Vue 3 · Vite · Pinia · Element Plus）。不涉及后端、DataAgent、部署。
 - 性质: 行为保持型重构（无功能变更、无路由/接口变更）
 
@@ -106,9 +106,11 @@ src/views/datastudio/
 
 ### 5.1 当前落地状态（2026-06-18）
 
-- 已完成 F1–F6、F8、F10、F11。
+- 已完成 F1–F9。
 - 已完成 F7 `useCatalogTree`：目录树状态、schema/table/column 缓存、懒加载、过滤、刷新和侧栏聚焦已从 `DataStudioNew.vue` 移入 `composables/useCatalogTree.js`；`schemaStore/tableStore/columnStore` 仍作为同一引用共享给 SQL 补全与路由同步。
-- 未完成 F9 `useQueryExecution`：查询执行、停止、历史、导出、结果集和图表联动仍留在主组件，需作为下一高风险切片配合真实页面验证推进。
+- 已完成 F9 `useQueryExecution`：查询执行、停止、查询源/数据库选择、默认 SQL、结果集标准化、计时、历史分页/回填、CSV 导出已从 `DataStudioNew.vue` 移入 `composables/useQueryExecution.js`。图表渲染副作用仍由主组件保留，并通过回调接入查询执行后的默认图表选择和结果区布局同步。
+- F10/F11 中的纯工具和清理项已有部分落地，但 `useResultChart` 与 `useTableMetaEditing` 仍未完整抽离，后续应作为单独切片推进；当前不把图表渲染和元数据编辑标记为完整完成。
+- 当前 `DataStudioNew.vue` 已从 6108 行降至 4098 行；新增 `useQueryExecution.js` 729 行。
 
 ## 6. 权衡
 
@@ -125,6 +127,7 @@ src/views/datastudio/
 - 纯工具切片：Vitest 单测覆盖（格式化边界、图表选列评分、SQL 拆分、Tab 序列化往返）。
 - 每步：`nvm use` 后 `npm run lint`（0 error）+ `npm run test` + `npm run build` 全绿。
 - 有状态切片：补关键路径组件测试或本地手动冒烟（查询执行/目录树/Tab/图表），并在切片记录中如实标注验证范围。
+- F9 本轮真实项目验证：Podman MySQL 8.0(`127.0.0.1:3306`)、Redis 7.2(`127.0.0.1:6379`) 与 DolphinScheduler 3.2(`127.0.0.1:12345`) 已运行；Spring Boot 后端以 `SPRING_DATASOURCE_*` 指向真实 MySQL 8 启动在 `127.0.0.1:18080/api`；Vite 前端以 `VITE_BACKEND_PROXY_TARGET=http://127.0.0.1:18080` 启动在 `127.0.0.1:3000`。Playwright 通过 DataStudio 新建查询，选择 `README 演示集群 / opendataworks`，执行 `SELECT 1 AS smoke_value;` 成功返回 1 行，CSV 导出文件内容为 `smoke_value=1`，历史查询出现记录并可回填。浏览器唯一 error 为既有 DataAgent widget 资源代理 500，与本切片无关。
 
 ## 8. 回退
 

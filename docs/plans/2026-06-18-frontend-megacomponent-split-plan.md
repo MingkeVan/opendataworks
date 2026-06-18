@@ -66,17 +66,25 @@
 - 验证: 手动冒烟（打开/关闭/切换 Tab、URL 同步、刷新恢复）。
 - 回退: 单提交回退。
 
-### F9 — useQueryExecution
+### F9 — useQueryExecution（已完成）
 - 抽出 SQL 执行、结果集处理、历史、导出（`handleQuery*Select`/`buildDefaultSql`/`resetQuery`/`exportResult`/`fetchHistory`/`applyHistory`）。
-- 验证: 手动冒烟（执行查询、分页、导出、历史回填）；建议补组件测试。
+- 触及文件: 新增 `frontend/src/views/datastudio/composables/useQueryExecution.js`；改 `DataStudioNew.vue` 接入 composable，保持模板、路由和 `provide('dataStudioCtx')` 契约不变。
+- 验证: lint/test/build；真实项目浏览器冒烟（执行查询、导出、历史列表、历史回填）。
+- F9 验证记录:
+  - 本机 Podman 容器: MySQL 8.0 `127.0.0.1:3306`、Redis 7.2 `127.0.0.1:6379`、DolphinScheduler 3.2 `127.0.0.1:12345`。
+  - 后端: `SPRING_DATASOURCE_URL=jdbc:mysql://127.0.0.1:3306/opendataworks...`、`SPRING_DATASOURCE_USERNAME=opendataworks`、`SPRING_DATASOURCE_PASSWORD=opendataworks123`，Spring Boot 启动在 `127.0.0.1:18080/api`，Flyway 校验 46 个迁移且 schema 版本 45 无需迁移。
+  - 前端: `nvm use` 后 `VITE_BACKEND_PROXY_TARGET=http://127.0.0.1:18080 npm --prefix frontend run dev -- --host 127.0.0.1 --port 3000`。
+  - Playwright: 打开 `http://127.0.0.1:3000/datastudio`，新建查询，选择 `README 演示集群 / opendataworks`，执行 `SELECT 1 AS smoke_value;`，结果页显示 1 行、列 `smoke_value`、执行完成状态；点击导出生成 CSV，内容为 `smoke_value`/`1`；历史查询列表展示本次记录，点击「填入」无前端错误。
+  - 清理: 删除本轮 `data_query_history` 中 `SELECT 1 AS smoke_value;` 且 `executed_at >= '2026-06-18 21:40:00'` 的 2 条烟测记录。
+  - 已知非本切片问题: 浏览器 console 唯一 error 为 `/dataagent/widget/opendataworks-widget.bundle.js` 代理 500，与 DataStudio 查询执行抽取无关。
 - 回退: 单提交回退。
 
-### F10 — useResultChart / useTableMetaEditing
+### F10 — useResultChart / useTableMetaEditing（后续，未完整完成）
 - 抽出图表渲染（`renderChart`/`disposeChart`/`setChartRef`）与元数据编辑（`startMetaEdit`/`saveMetaEdit`/字段编辑）。
 - 验证: 手动冒烟（图表渲染、元数据/字段编辑保存）。
 - 回退: 单提交回退。
 
-### F11 — 收尾
+### F11 — 收尾（滚动推进）
 - `DataStudioNew.vue` 收敛为「模板 + composables 编排」；清理残留未用函数/导入；评估是否进一步收敛 `provide('dataStudioCtx')` 契约（如收敛则单独切片 + 同步子组件）。
 - 验证: lint/test/build；统计组件行数下降。
 - 回退: 单提交回退。
