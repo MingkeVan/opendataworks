@@ -93,9 +93,19 @@
   - 已知非本切片问题: 浏览器 console error 为 `/dataagent/widget/opendataworks-widget.bundle.js` 代理 500；另有既有 Element Plus `small` deprecation 与 `TaskEditDrawer` 图标组件解析 warning，与图表抽取无关。
 - 回退: 单提交回退。
 
-### F10b — useTableMetaEditing（后续，未完成）
+### F10b — useTableMetaEditing（已完成）
 - 抽出元数据编辑（`startMetaEdit`/`saveMetaEdit`）与字段编辑（`startFieldsEdit`/`addField`/`removeField`/`saveFieldsEdit`）。
-- 验证: 手动冒烟（元数据/字段编辑保存、取消回滚、右侧面板状态同步）。
+- 触及文件: 新增 `frontend/src/views/datastudio/composables/useTableMetaEditing.js`；改 `DataStudioNew.vue` 接入 composable，保持右侧面板 `inject` 的 `dataStudioCtx` 契约不变。
+- 验证: lint/test/build；真实项目浏览器冒烟（元数据编辑保存、字段编辑保存、右侧面板状态同步、MySQL 平台元数据与物理表字段注释校验）。
+- F10b 验证记录:
+  - 静态验证: `nvm use` 后 `npm --prefix frontend run lint`（0 error，既有 259 warnings）、`npm --prefix frontend run test`（19 files / 87 tests passed，既有 malformed JSON/localStorage timeout stderr）、`npm --prefix frontend run build` 通过（既有 Sass legacy API 与 chunk size warning）。
+  - 本机 Podman 容器: MySQL 8.0 `127.0.0.1:3306`、Redis 7.2 `127.0.0.1:6379`、DolphinScheduler 3.2 `127.0.0.1:12345`。
+  - 后端: `SPRING_DATASOURCE_URL=jdbc:mysql://127.0.0.1:3306/opendataworks...`、`SPRING_DATASOURCE_USERNAME=opendataworks`、`SPRING_DATASOURCE_PASSWORD=opendataworks123`，Spring Boot 启动在 `127.0.0.1:18080/api`，Flyway 校验 46 个迁移且 schema 版本 45 无需迁移。
+  - 前端: `nvm use` 后 `VITE_BACKEND_PROXY_TARGET=http://127.0.0.1:18080 npm --prefix frontend run dev -- --host 127.0.0.1 --port 3000`。
+  - Playwright: 打开 `http://127.0.0.1:3000/datastudio?clusterId=1&database=smoke_metadata_guidance&tableName=smoke_f10b_meta_edit&tab=1::smoke_f10b_meta_edit&tableId=1653`；在「基本信息」编辑并保存表注释 `F10b smoke updated`、负责人 `codex-f10b`，MySQL `data_table` 校验通过；在「列详情」编辑 `smoke_value` 注释为 `value updated`，后端执行真实 `ALTER TABLE ... MODIFY COLUMN ... COMMENT`，MySQL `data_field` 和 `SHOW FULL COLUMNS` 均校验通过。
+  - 环境处理: 字段路径首次因专用 smoke schema 缺少 `ALTER` 权限被 MySQL 拒绝；补充 `GRANT ALTER ON smoke_metadata_guidance.* TO 'opendataworks'@'%'/'localhost'` 后重试通过。
+  - 清理: 删除本轮 `data_table_version`、`data_field`、`data_table` 中 `table_id=1653` 的 smoke 元数据并 `DROP TABLE smoke_metadata_guidance.smoke_f10b_meta_edit`，复查剩余 0 条；本地前端和后端进程已停止。
+  - 已知非本切片问题: 浏览器 console error 为 `/dataagent/widget/opendataworks-widget.bundle.js` 代理 500；另有既有 Element Plus `small` deprecation 与 `TaskEditDrawer` 图标组件解析 warning，与表/字段编辑抽取无关。
 - 回退: 单提交回退。
 
 ### F11 — 收尾（滚动推进）

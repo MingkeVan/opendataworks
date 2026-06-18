@@ -106,12 +106,12 @@ src/views/datastudio/
 
 ### 5.1 当前落地状态（2026-06-18）
 
-- 已完成 F1–F10a。
+- 已完成 F1–F10b。
 - 已完成 F7 `useCatalogTree`：目录树状态、schema/table/column 缓存、懒加载、过滤、刷新和侧栏聚焦已从 `DataStudioNew.vue` 移入 `composables/useCatalogTree.js`；`schemaStore/tableStore/columnStore` 仍作为同一引用共享给 SQL 补全与路由同步。
 - 已完成 F9 `useQueryExecution`：查询执行、停止、查询源/数据库选择、默认 SQL、结果集标准化、计时、历史分页/回填、CSV 导出已从 `DataStudioNew.vue` 移入 `composables/useQueryExecution.js`；查询执行后的默认图表选择和结果区布局同步通过回调接入。
 - 已完成 F10a `useResultChart`：ECharts 实例、图表 DOM ref、默认选列、渲染、resize 同步与销毁已从 `DataStudioNew.vue` 移入 `composables/useResultChart.js`；纯选列评分继续复用 `chartColumnSelect.js`，`provide('dataStudioCtx')` 键集合保持不变。
-- F10b `useTableMetaEditing` 仍未抽离；元数据与字段编辑包含后端写接口、右侧面板注入契约和状态回滚，需作为独立切片验证，当前不混入图表抽取提交。
-- 当前 `DataStudioNew.vue` 已从 6108 行降至 3883 行；新增 `useQueryExecution.js` 729 行、`useResultChart.js` 252 行。
+- 已完成 F10b `useTableMetaEditing`：业务域/数据域加载、表元数据编辑、字段编辑草稿、取消回滚、字段增删改和保存刷新已从 `DataStudioNew.vue` 移入 `composables/useTableMetaEditing.js`；右侧面板 `inject` 的 `dataStudioCtx` 键集合保持不变。
+- 当前 `DataStudioNew.vue` 已从 6108 行降至 3568 行；新增 `useQueryExecution.js` 729 行、`useResultChart.js` 252 行、`useTableMetaEditing.js` 382 行。
 
 ## 6. 权衡
 
@@ -130,6 +130,7 @@ src/views/datastudio/
 - 有状态切片：补关键路径组件测试或本地手动冒烟（查询执行/目录树/Tab/图表），并在切片记录中如实标注验证范围。
 - F9 本轮真实项目验证：Podman MySQL 8.0(`127.0.0.1:3306`)、Redis 7.2(`127.0.0.1:6379`) 与 DolphinScheduler 3.2(`127.0.0.1:12345`) 已运行；Spring Boot 后端以 `SPRING_DATASOURCE_*` 指向真实 MySQL 8 启动在 `127.0.0.1:18080/api`；Vite 前端以 `VITE_BACKEND_PROXY_TARGET=http://127.0.0.1:18080` 启动在 `127.0.0.1:3000`。Playwright 通过 DataStudio 新建查询，选择 `README 演示集群 / opendataworks`，执行 `SELECT 1 AS smoke_value;` 成功返回 1 行，CSV 导出文件内容为 `smoke_value=1`，历史查询出现记录并可回填。浏览器唯一 error 为既有 DataAgent widget 资源代理 500，与本切片无关。
 - F10a 本轮真实项目验证：复用同一 Podman MySQL 8.0、Redis 7.2、DolphinScheduler 3.2；Spring Boot 后端启动在 `127.0.0.1:18080/api`，Vite 前端启动在 `127.0.0.1:3000`。Playwright 通过 DataStudio 新建查询，选择 `README 演示集群 / opendataworks`，执行 `SELECT '2026-06-01' AS dt, 10 AS pv UNION ALL SELECT '2026-06-02' AS dt, 25 AS pv UNION ALL SELECT '2026-06-03' AS dt, 18 AS pv;` 成功返回 3 行；切换到「图表」后默认 X 轴为 `dt`、Y 轴为 `pv`，柱状图 canvas 为 `423x230` 且采样 `127/651` 个非空像素，切换「折线图」后 canvas 仍保持有效尺寸。浏览器 error 仍为既有 DataAgent widget 资源代理 500；本轮 smoke 历史记录已从 `data_query_history` 清理。
+- F10b 本轮真实项目验证：复用 Podman MySQL 8.0(`127.0.0.1:3306`)、Redis 7.2(`127.0.0.1:6379`) 与 DolphinScheduler 3.2(`127.0.0.1:12345`)；Spring Boot 后端启动在 `127.0.0.1:18080/api`，Vite 前端启动在 `127.0.0.1:3000`。Playwright 打开 `smoke_metadata_guidance.smoke_f10b_meta_edit`（平台 `data_table.id=1653`）后，在右侧「基本信息」编辑并保存表注释 `F10b smoke updated`、负责人 `codex-f10b`，MySQL `data_table` 校验通过；再切到「列详情」编辑 `smoke_value` 字段注释为 `value updated`，后端执行真实 `ALTER TABLE ... MODIFY COLUMN ... COMMENT`，MySQL `data_field` 与 `SHOW FULL COLUMNS` 均校验通过。字段路径首次暴露 smoke schema 缺少 ALTER 权限，补充专用 smoke schema `ALTER` 权限后重试通过；浏览器 error 仍为既有 DataAgent widget 资源代理 500。验证后删除本轮 smoke 平台元数据和物理表，复查剩余 0 条。
 
 ## 8. 回退
 
