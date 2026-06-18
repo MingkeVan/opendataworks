@@ -1303,13 +1303,9 @@ const {
 })
 
 // SQL 补全数据源（P2-2 F6）：共享目录缓存直接注入，loadTables/activateDatasource 惰性前向引用
+// 仅取组件实际使用的入口；其余补全函数仅在 getSqlCompletionContext 内部使用
 const {
   getSchemaOptions,
-  getCompletionTablesBySchema,
-  getColumnCacheKey,
-  loadCompletionTables,
-  loadCompletionColumns,
-  searchCompletionTables,
   getSqlCompletionContext,
 } = useSqlCompletion({
   tabStates,
