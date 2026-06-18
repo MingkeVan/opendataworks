@@ -1197,6 +1197,7 @@ import {
   detectNumericColumns,
 } from './chartColumnSelect'
 import { splitSqlStatements } from './sqlStatements'
+import { useTabPersistence } from './composables/useTabPersistence'
 
 const SqlEditor = defineAsyncComponent({
   loader: () => import('@/components/SqlEditor.vue'),
@@ -1319,144 +1320,6 @@ const activeTab = ref('')
 const tabStates = reactive({})
 const queryTimerHandles = new Map()
 const queryTabCounter = ref(1)
-
-const TAB_PERSIST_KEY = isDemoMode
-  ? 'odw:datastudio:workspace-tabs:demo-v1'
-  : 'odw:datastudio:workspace-tabs:v1'
-const isRestoringTabs = ref(false)
-let persistTabsTimer = null
-
-const tabsPersistSnapshot = computed(() => {
-  const tabs = (Array.isArray(openTabs.value) ? openTabs.value : []).map((tab) => {
-    const id = String(tab?.id ?? '')
-    const state = id ? tabStates[id] : null
-    return {
-      id,
-      kind: tab?.kind === 'query' ? 'query' : 'table',
-      tableName: tab?.tableName || '',
-      dbName: tab?.dbName || state?.table?.dbName || '',
-      sourceId: tab?.sourceId || state?.table?.sourceId || '',
-      sourceType: state?.table?.sourceType || '',
-      tableId: state?.table?.id || null,
-      sql: state?.query?.sql ?? '',
-      limit: Number(state?.query?.limit ?? 200)
-    }
-  })
-  return {
-    version: 1,
-    activeTab: String(activeTab.value || ''),
-    tabs
-  }
-})
-
-const persistTabsNow = (snapshot) => {
-  try {
-    const tabs = snapshot?.tabs || []
-    if (!Array.isArray(tabs) || tabs.length === 0) {
-      localStorage.removeItem(TAB_PERSIST_KEY)
-      return
-    }
-    localStorage.setItem(TAB_PERSIST_KEY, JSON.stringify(snapshot))
-  } catch (error) {
-    console.warn('保存工作区 Tab 状态失败', error)
-  }
-}
-
-const schedulePersistTabs = (snapshot) => {
-  if (persistTabsTimer) {
-    clearTimeout(persistTabsTimer)
-  }
-  persistTabsTimer = setTimeout(() => {
-    persistTabsTimer = null
-    persistTabsNow(snapshot)
-  }, 250)
-}
-
-const flushPersistTabs = () => {
-  if (persistTabsTimer) {
-    clearTimeout(persistTabsTimer)
-    persistTabsTimer = null
-  }
-  persistTabsNow(tabsPersistSnapshot.value)
-}
-
-const restoreTabsFromStorage = () => {
-  let parsed = null
-  try {
-    const raw = localStorage.getItem(TAB_PERSIST_KEY)
-    if (!raw) return false
-    parsed = JSON.parse(raw)
-  } catch (error) {
-    console.warn('读取工作区 Tab 状态失败', error)
-    return false
-  }
-
-  if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.tabs)) return false
-
-  isRestoringTabs.value = true
-  try {
-    const nextTabs = []
-    const existingKeys = Object.keys(tabStates)
-    existingKeys.forEach((key) => delete tabStates[key])
-
-    parsed.tabs.forEach((item) => {
-      const id = String(item?.id ?? '')
-      if (!id) return
-      const kind = item?.kind === 'query' ? 'query' : 'table'
-      const tabItem = {
-        id,
-        kind,
-        tableName: String(item?.tableName ?? ''),
-        dbName: String(item?.dbName ?? ''),
-        sourceId: String(item?.sourceId ?? ''),
-        sourceType: String(item?.sourceType ?? '')
-      }
-
-      const tablePayload =
-        kind === 'query'
-          ? { tableName: '', dbName: tabItem.dbName, sourceId: tabItem.sourceId, sourceType: tabItem.sourceType }
-          : { id: item?.tableId || undefined, tableName: tabItem.tableName, dbName: tabItem.dbName, sourceId: tabItem.sourceId, sourceType: tabItem.sourceType }
-
-      tabStates[id] = createTabState(tablePayload)
-      if (typeof item?.sql === 'string') {
-        tabStates[id].query.sql = item.sql
-      }
-      if (Number.isFinite(Number(item?.limit))) {
-        tabStates[id].query.limit = Number(item.limit)
-      }
-
-      nextTabs.push(tabItem)
-    })
-
-    openTabs.value = nextTabs
-
-    const active = String(parsed?.activeTab ?? '')
-    const activeExists = active && nextTabs.some((tab) => String(tab.id) === active)
-    activeTab.value = activeExists ? active : (nextTabs[0] ? String(nextTabs[0].id) : '')
-
-    const maxQueryIndex = nextTabs
-      .filter((tab) => tab.kind === 'query')
-      .map((tab) => {
-        const match = String(tab.tableName || '').match(/(\d+)$/)
-        return match ? Number(match[1]) : 0
-      })
-      .reduce((max, val) => (Number.isFinite(val) ? Math.max(max, val) : max), 0)
-    queryTabCounter.value = maxQueryIndex ? maxQueryIndex + 1 : 1
-
-    return true
-  } finally {
-    isRestoringTabs.value = false
-  }
-}
-
-watch(
-  tabsPersistSnapshot,
-  (snapshot) => {
-    if (isRestoringTabs.value) return
-    schedulePersistTabs(snapshot)
-  },
-  { deep: true }
-)
 
 	const tableRefs = ref({})
 	const chartRefs = ref({})
@@ -4720,6 +4583,18 @@ watch(selectedTableKey, (value) => {
     openTask,
     openTableTab
   })
+
+// Tab 工作区持久化（P2-2 F4）：在 createTabState 之后装配，依赖共享响应式状态
+const { flushPersistTabs, restoreTabsFromStorage } = useTabPersistence({
+  openTabs,
+  activeTab,
+  tabStates,
+  queryTabCounter,
+  createTabState,
+  storageKey: isDemoMode
+    ? 'odw:datastudio:workspace-tabs:demo-v1'
+    : 'odw:datastudio:workspace-tabs:v1',
+})
 
 onMounted(async () => {
   setupTableObserver()
