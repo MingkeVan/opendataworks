@@ -1191,6 +1191,12 @@ import {
   abbreviateSql,
   isAggregateTable,
 } from './tableFormat'
+import {
+  scoreDimensionColumn,
+  scoreMetricColumn,
+  detectNumericColumns,
+} from './chartColumnSelect'
+import { splitSqlStatements } from './sqlStatements'
 
 const SqlEditor = defineAsyncComponent({
   loader: () => import('@/components/SqlEditor.vue'),
@@ -2291,102 +2297,6 @@ const EMPTY_RESULT_SET = Object.freeze({
   hasMore: false,
   previewRowCount: 0
 })
-
-const splitSqlStatements = (sqlText) => {
-  const text = String(sqlText || '')
-  const statements = []
-  let current = ''
-  let inSingle = false
-  let inDouble = false
-  let inLineComment = false
-  let inHashComment = false
-  let inBlockComment = false
-
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i]
-    const next = text[i + 1] || ''
-
-    if (inLineComment) {
-      current += ch
-      if (ch === '\n' || ch === '\r') inLineComment = false
-      continue
-    }
-    if (inHashComment) {
-      current += ch
-      if (ch === '\n' || ch === '\r') inHashComment = false
-      continue
-    }
-    if (inBlockComment) {
-      current += ch
-      if (ch === '*' && next === '/') {
-        current += next
-        inBlockComment = false
-        i += 1
-      }
-      continue
-    }
-    if (inSingle) {
-      current += ch
-      if (ch === '\'' && next === '\'') {
-        current += next
-        i += 1
-        continue
-      }
-      if (ch === '\'') inSingle = false
-      continue
-    }
-    if (inDouble) {
-      current += ch
-      if (ch === '"' && next === '"') {
-        current += next
-        i += 1
-        continue
-      }
-      if (ch === '"') inDouble = false
-      continue
-    }
-
-    if (ch === '-' && next === '-') {
-      inLineComment = true
-      current += ch + next
-      i += 1
-      continue
-    }
-    if (ch === '#') {
-      inHashComment = true
-      current += ch
-      continue
-    }
-    if (ch === '/' && next === '*') {
-      inBlockComment = true
-      current += ch + next
-      i += 1
-      continue
-    }
-    if (ch === '\'') {
-      inSingle = true
-      current += ch
-      continue
-    }
-    if (ch === '"') {
-      inDouble = true
-      current += ch
-      continue
-    }
-
-    if (ch === ';') {
-      const stmt = current.trim()
-      if (stmt) statements.push(stmt)
-      current = ''
-      continue
-    }
-    current += ch
-  }
-
-  const tail = current.trim()
-  if (tail) statements.push(tail)
-  return statements
-}
 
 const buildRunningStatementInfos = (sqlText) => {
   const statements = splitSqlStatements(sqlText)
@@ -3940,39 +3850,7 @@ const normalizeResultSetsForDisplay = (resultSets, tabId) => {
 
 const getNumericColumns = (tabId, resultIndex = 0) => {
   const set = getResultSetByIndex(tabId, resultIndex)
-  if (!set.rows.length || !set.columns.length) return []
-  const sample = set.rows.slice(0, 10)
-  return set.columns.filter((col) => {
-    return sample.every((row) => {
-      const val = row?.[col]
-      return val === null || val === '' || !Number.isNaN(Number(val))
-    })
-  })
-}
-
-const scoreColumnName = (name, keywords) => {
-  if (!name) return 0
-  const lower = String(name).toLowerCase()
-  return keywords.reduce((score, keyword) => (lower.includes(keyword) ? score + 10 : score), 0)
-}
-
-const scoreDimensionColumn = (column) => {
-  const keywords = [
-    'dt', 'date', 'day', 'week', 'month', 'year', 'hour', 'time',
-    'category', 'type', 'name', 'region', 'province', 'city', 'status'
-  ]
-  const suffixBoost = /(_dt|_date|_day|_month|_year|_time)$/i.test(String(column)) ? 15 : 0
-  return scoreColumnName(column, keywords) + suffixBoost
-}
-
-const scoreMetricColumn = (column) => {
-  const keywords = [
-    'count', 'cnt', 'sum', 'avg', 'mean', 'max', 'min',
-    'total', 'num', 'qty', 'amount', 'amt', 'value', 'rate', 'ratio', 'pct', 'percent',
-    '数量', '金额', '总', '均', '最大', '最小', '比率', '比例'
-  ]
-  const suffixBoost = /(_cnt|_count|_sum|_avg|_max|_min|_total)$/i.test(String(column)) ? 15 : 0
-  return scoreColumnName(column, keywords) + suffixBoost
+  return detectNumericColumns(set.columns, set.rows)
 }
 
 const applyDefaultChartSelection = (tabId) => {
