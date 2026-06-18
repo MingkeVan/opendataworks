@@ -55,9 +55,10 @@
 - 验证: 手动冒烟（编辑器补全表名/列名）；lint/test/build。
 - 回退: 单提交回退。
 
-### F7 — useCatalogTree（最大一坨）
+### F7 — useCatalogTree（最大一坨，已完成）
 - 抽出数据源/schema/表 目录树加载、节点构建、刷新、过滤、懒加载（`load*`/`build*Node`/`refresh*InTree`/`loadCatalogNode`/`filterCatalogNode`）。
-- 验证: 手动冒烟（展开数据源→schema→表、计数、刷新、过滤）；建议补关键路径组件测试。
+- 触及文件: 新增 `frontend/src/views/datastudio/composables/useCatalogTree.js`；改 `DataStudioNew.vue` 引用并保持 `schemaStore/tableStore/columnStore` 与 SQL 补全、路由同步共享。
+- 验证: `DataStudioNew.smoke.spec.js` 挂载冒烟 + 真实前端页面手动/浏览器冒烟（展开数据源→schema→表、计数、刷新、过滤）+ lint/test/build。
 - 回退: 单提交回退。
 
 ### F8 — useStudioTabs（Tab 生命周期 + 路由同步）

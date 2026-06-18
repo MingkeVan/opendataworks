@@ -104,6 +104,12 @@ src/views/datastudio/
 - **composable 契约**：`useXxx(deps)` 接收所需依赖（如 ref、api、cfg），返回该簇的状态与方法；composable 之间不互相反向依赖，避免环。
 - **纯工具**：无 Vue 依赖、无副作用，纯输入输出，便于单测。
 
+### 5.1 当前落地状态（2026-06-18）
+
+- 已完成 F1–F6、F8、F10、F11。
+- 已完成 F7 `useCatalogTree`：目录树状态、schema/table/column 缓存、懒加载、过滤、刷新和侧栏聚焦已从 `DataStudioNew.vue` 移入 `composables/useCatalogTree.js`；`schemaStore/tableStore/columnStore` 仍作为同一引用共享给 SQL 补全与路由同步。
+- 未完成 F9 `useQueryExecution`：查询执行、停止、历史、导出、结果集和图表联动仍留在主组件，需作为下一高风险切片配合真实页面验证推进。
+
 ## 6. 权衡
 
 - **收益**：组件职责清晰、状态可追踪、纯逻辑可测、降低并行开发冲突；为 `WorkflowDetail` 等后续大组件提供范式。
