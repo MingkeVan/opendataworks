@@ -1197,6 +1197,7 @@ import {
   detectNumericColumns,
 } from './chartColumnSelect'
 import { splitSqlStatements } from './sqlStatements'
+import { buildFieldPayload, isFieldChanged, isOnlyCommentChanged } from './fieldEdit'
 import { useTabPersistence } from './composables/useTabPersistence'
 import { useResizablePanes } from './composables/useResizablePanes'
 import { useSqlCompletion } from './composables/useSqlCompletion'
@@ -3956,44 +3957,6 @@ const removeField = (tabId, row) => {
     state.fieldsRemoved = [...new Set([...(state.fieldsRemoved || []), row.id])]
   }
   state.fieldsDraft = state.fieldsDraft.filter((item) => item !== row)
-}
-
-const buildFieldPayload = (row) => ({
-  fieldName: (row.fieldName || '').trim(),
-  fieldType: (row.fieldType || '').trim(),
-  fieldComment: row.fieldComment || '',
-  isNullable: row.isNullable ?? 1,
-  isPrimary: row.isPrimary ?? 0,
-  defaultValue: row.defaultValue || '',
-  fieldOrder: row.fieldOrder || 0
-})
-
-const isFieldChanged = (next, original) => {
-  if (!original) return true
-  const payload = buildFieldPayload(next)
-  return (
-    payload.fieldName !== (original.fieldName || '') ||
-    payload.fieldType !== (original.fieldType || '') ||
-    payload.fieldComment !== (original.fieldComment || '') ||
-    Number(payload.isNullable ?? 1) !== Number(original.isNullable ?? 1) ||
-    Number(payload.isPrimary ?? 0) !== Number(original.isPrimary ?? 0) ||
-    payload.defaultValue !== (original.defaultValue || '') ||
-    Number(payload.fieldOrder || 0) !== Number(original.fieldOrder || 0)
-  )
-}
-
-const isOnlyCommentChanged = (next, original) => {
-  if (!original) return false
-  const payload = buildFieldPayload(next)
-  return (
-    payload.fieldName === (original.fieldName || '') &&
-    payload.fieldType === (original.fieldType || '') &&
-    Number(payload.isNullable ?? 1) === Number(original.isNullable ?? 1) &&
-    Number(payload.isPrimary ?? 0) === Number(original.isPrimary ?? 0) &&
-    payload.defaultValue === (original.defaultValue || '') &&
-    Number(payload.fieldOrder || 0) === Number(original.fieldOrder || 0) &&
-    payload.fieldComment !== (original.fieldComment || '')
-  )
 }
 
 const saveFieldsEdit = async (tabId) => {
