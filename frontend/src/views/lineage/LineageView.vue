@@ -220,7 +220,7 @@ import { tableApi } from '@/api/table'
 import { dorisClusterApi } from '@/api/doris'
 import { isDemoMode, showDemoReadonlyMessage } from '@/demo/runtime'
 import { ElMessage, ElNotification } from 'element-plus'
-import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
+import TaskEditDrawer from '@/components/TaskEditDrawer.vue'
 
 const LineageFlow = defineAsyncComponent({
   loader: () => import('./LineageFlow.vue'),

@@ -1172,7 +1172,7 @@ import {
 import { tableApi } from '@/api/table'
 import { lineageApi } from '@/api/lineage'
 import PersistentTabs from '@/components/PersistentTabs.vue'
-import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
+import TaskEditDrawer from '@/components/TaskEditDrawer.vue'
 import DataStudioResultGrid from '@/views/datastudio/components/DataStudioResultGrid.vue'
 import { isDemoMode, showDemoReadonlyMessage } from '@/demo/runtime'
 import { copyText } from '@/utils/clipboard'
