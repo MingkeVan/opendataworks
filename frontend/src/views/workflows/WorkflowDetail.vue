@@ -852,6 +852,13 @@ import {
   formatDuration,
   formatLog
 } from './workflowDisplay'
+import {
+  cloneGlobalParamCore,
+  createGlobalParamRow,
+  normalizeGlobalParams,
+  isGlobalParamEmpty,
+  formatGlobalParamDisplay
+} from './globalParams'
 
 const route = useRoute()
 const router = useRouter()
@@ -1158,41 +1165,8 @@ const taskGroupOptions = ref([])
 const globalParamsList = ref([])
 const savingParams = ref(false)
 
-const cloneGlobalParamCore = (param = {}) => {
-  return {
-    prop: String(param?.prop ?? '').trim(),
-    direct: param?.direct || 'IN',
-    type: param?.type || 'VARCHAR',
-    value: param?.value ?? ''
-  }
-}
-
-const createGlobalParamRow = (param = {}, options = {}) => {
-  return {
-    ...cloneGlobalParamCore(param),
-    __editing: Boolean(options.editing),
-    __isNew: Boolean(options.isNew),
-    __backup: options.backup || null
-  }
-}
-
-const normalizeGlobalParams = (params) => {
-  if (!Array.isArray(params)) {
-    return []
-  }
-  return params.map(item => createGlobalParamRow(item))
-}
-
 const serializeGlobalParams = () => {
   return globalParamsList.value.map(item => cloneGlobalParamCore(item))
-}
-
-const isGlobalParamEmpty = (value) => {
-  return value === null || value === undefined || value === ''
-}
-
-const formatGlobalParamDisplay = (value) => {
-  return isGlobalParamEmpty(value) ? '-' : String(value)
 }
 
 // Computed workflow task IDs
