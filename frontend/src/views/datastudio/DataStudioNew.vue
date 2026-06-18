@@ -1182,6 +1182,15 @@ import { copyText } from '@/utils/clipboard'
 import { loadEcharts } from '@/utils/loadEcharts'
 import { buildCsvContent } from './csvExport'
 import { buildResultGridRows } from './components/resultGridModel'
+import {
+  formatNumber,
+  formatRowCount,
+  formatStorageSize,
+  formatDuration,
+  formatDateTime,
+  abbreviateSql,
+  isAggregateTable,
+} from './tableFormat'
 
 const SqlEditor = defineAsyncComponent({
   loader: () => import('@/components/SqlEditor.vue'),
@@ -2201,22 +2210,6 @@ const getLayerType = (layer) => {
   return map[layer] || 'info'
 }
 
-const formatNumber = (num) => {
-  if (num === null || num === undefined) return '-'
-  const value = Number(num)
-  if (Number.isNaN(value)) return num
-  return value.toLocaleString('zh-CN')
-}
-
-const formatRowCount = (rowCount) => {
-  if (rowCount === null || rowCount === undefined) return '-'
-  if (rowCount === 0) return '0'
-  if (rowCount < 1000) return rowCount.toString()
-  if (rowCount < 1000000) return (rowCount / 1000).toFixed(1) + 'K'
-  if (rowCount < 1000000000) return (rowCount / 1000000).toFixed(1) + 'M'
-  return (rowCount / 1000000000).toFixed(1) + 'B'
-}
-
 const ensureClusterSelected = (table) => {
   if (isDorisTable(table) && !clusterId.value) {
     ElMessage.warning('请选择 Doris 集群')
@@ -2229,11 +2222,6 @@ const isReplicaWarning = (value) => {
   if (value === null || value === undefined || value === '') return false
   const num = Number(value)
   return Number.isFinite(num) && num > 0 && num < 3
-}
-
-const isAggregateTable = (table) => {
-  if (!table?.tableModel) return false
-  return String(table.tableModel).toUpperCase() === 'AGGREGATE'
 }
 
 const hasText = (value) => value !== null && value !== undefined && String(value).trim() !== ''
@@ -2283,29 +2271,6 @@ const warnPlatformMetadataMissing = (table) => {
   if (!isPlatformMetadataMissing(table)) return false
   ElMessage.warning(MISSING_PLATFORM_METADATA_MESSAGE)
   return true
-}
-
-const formatStorageSize = (size) => {
-  if (size === null || size === undefined) return '-'
-  if (size === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-  let value = size
-  let unitIndex = 0
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024
-    unitIndex++
-  }
-  return value >= 10 ? `${value.toFixed(0)} ${units[unitIndex]}` : `${value.toFixed(1)} ${units[unitIndex]}`
-}
-
-const formatDuration = (ms) => {
-  if (!ms) return '0ms'
-  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(2)}s`
-}
-
-const formatDateTime = (value) => {
-  if (!value) return '-'
-  return String(value).replace('T', ' ').split('.')[0]
 }
 
 const INFO_TAB_NAME = 'info'
@@ -2465,12 +2430,6 @@ const getStatementStatusTagType = (status) => {
   if (value === 'BLOCKED' || value === 'ERROR') return 'danger'
   if (value === 'SKIPPED') return 'warning'
   return 'info'
-}
-
-const abbreviateSql = (sqlText) => {
-  const text = String(sqlText || '').replace(/\s+/g, ' ').trim()
-  if (!text) return ''
-  return text.length > 180 ? `${text.slice(0, 180)}...` : text
 }
 
 const isResultSetType = (resultSet) => String(resultSet?.resultType || RESULT_TYPE_RESULT_SET) === RESULT_TYPE_RESULT_SET
