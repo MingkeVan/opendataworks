@@ -102,6 +102,10 @@ export const formatDuration = (durationMs, startTime, endTime) => {
   return minutes ? `${minutes}分${remainSeconds}秒` : `${remainSeconds}秒`
 }
 
+export const getErrorMessage = (error) => {
+  return error?.response?.data?.message || error?.message || '操作失败，请稍后重试'
+}
+
 export const formatLog = (log) => {
   if (!log) {
     return '-'

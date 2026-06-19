@@ -850,7 +850,8 @@ import {
   getPublishRecordStatusText,
   formatDateTime,
   formatDuration,
-  formatLog
+  formatLog,
+  getErrorMessage
 } from './workflowDisplay'
 import {
   cloneGlobalParamCore,
@@ -1432,10 +1433,6 @@ const handleExportJson = async (row) => {
 }
 
 // Action Handlers
-const getErrorMessage = (error) => {
-  return error?.response?.data?.message || error?.message || '操作失败，请稍后重试'
-}
-
 const previewPublishAndConfirm = async (row) => {
   if (!row?.id) {
     return false

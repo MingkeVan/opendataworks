@@ -11,7 +11,17 @@ import {
   formatDateTime,
   formatDuration,
   formatLog,
+  getErrorMessage,
 } from '../workflowDisplay'
+
+describe('getErrorMessage', () => {
+  it('prefers response message, then error message, then a default', () => {
+    expect(getErrorMessage({ response: { data: { message: 'server says no' } } })).toBe('server says no')
+    expect(getErrorMessage({ message: 'boom' })).toBe('boom')
+    expect(getErrorMessage({})).toBe('操作失败，请稍后重试')
+    expect(getErrorMessage(null)).toBe('操作失败，请稍后重试')
+  })
+})
 
 describe('workflow status/text mappers', () => {
   it('map known keys and fall back gracefully', () => {
