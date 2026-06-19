@@ -859,6 +859,11 @@ import {
   isGlobalParamEmpty,
   formatGlobalParamDisplay
 } from './globalParams'
+import {
+  formatDolphinConfigOption,
+  rollbackDisabledReason,
+  versionDeleteDisabledReason
+} from './workflowVersion'
 
 const route = useRoute()
 const router = useRouter()
@@ -1537,19 +1542,6 @@ const loadDolphinConfigs = async () => {
   }
 }
 
-const formatDolphinConfigOption = (item) => {
-  if (!item) {
-    return '-'
-  }
-  const parts = [item.configName || `Dolphin #${item.id}`]
-  if (item.isDefault === 1) {
-    parts.push('默认')
-  }
-  if (!item.isActive) {
-    parts.push('停用')
-  }
-  return parts.join(' / ')
-}
 
 const openSchedulerSwitchDialog = async () => {
   if (!workflow.value?.workflow?.id) {
@@ -1846,38 +1838,15 @@ const rollbackToVersion = async (versionId) => {
   }
 }
 
-const getRollbackDisabledReason = (row) => {
-  if (!row) {
-    return '无效版本'
-  }
-  const schemaVersion = Number(row?.snapshotSchemaVersion)
-  const isV3 = row?.isV3 === true || (Number.isFinite(schemaVersion) ? schemaVersion === 3 : false)
-  if (!isV3) {
-    return '仅支持 V3，请先保存生成 V3 基线'
-  }
-  const rowVersionId = Number(row?.id)
-  const currentVersionId = Number(workflow.value?.workflow?.currentVersionId)
-  if (row?.isCurrent || (Number.isFinite(rowVersionId) && rowVersionId === currentVersionId)) {
-    return '当前版本无需恢复'
-  }
-  return ''
-}
+const getRollbackDisabledReason = (row) =>
+  rollbackDisabledReason(row, workflow.value?.workflow?.currentVersionId)
 
-const getVersionDeleteDisabledReason = (row) => {
-  const versionId = Number(row?.id)
-  if (!Number.isFinite(versionId)) {
-    return '无效版本'
-  }
-  const currentVersionId = Number(workflow.value?.workflow?.currentVersionId)
-  if (Number.isFinite(currentVersionId) && currentVersionId === versionId) {
-    return '当前版本不可删除'
-  }
-  if (lastSuccessfulPublishedVersionId.value !== null
-    && versionId === Number(lastSuccessfulPublishedVersionId.value)) {
-    return '最后一次成功发布版本不可删除'
-  }
-  return ''
-}
+const getVersionDeleteDisabledReason = (row) =>
+  versionDeleteDisabledReason(
+    row,
+    workflow.value?.workflow?.currentVersionId,
+    lastSuccessfulPublishedVersionId.value
+  )
 
 const deleteVersion = async (row) => {
   const wf = workflow.value?.workflow
