@@ -185,7 +185,7 @@ import { Plus } from '@element-plus/icons-vue'
 import { taskApi } from '@/api/task'
 import { workflowApi } from '@/api/workflow'
 import { isDemoMode, showDemoReadonlyMessage } from '@/demo/runtime'
-import TaskEditDrawer from './TaskEditDrawer.vue'
+import TaskEditDrawer from '@/components/TaskEditDrawer.vue'
 
 const props = defineProps({
   workflowId: {

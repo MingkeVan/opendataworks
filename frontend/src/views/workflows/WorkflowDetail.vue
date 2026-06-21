@@ -839,6 +839,36 @@ import {
   shouldPromptOnlineAfterDeploy
 } from './publishPreviewHelper'
 import QuartzCronBuilder from '@/components/QuartzCronBuilder.vue'
+import {
+  getWorkflowStatusType,
+  getWorkflowStatusText,
+  getInstanceStateType,
+  getInstanceStateText,
+  getTriggerText,
+  getOperationText,
+  getPublishRecordStatusType,
+  getPublishRecordStatusText,
+  formatDateTime,
+  formatDuration,
+  formatLog,
+  getErrorMessage
+} from './workflowDisplay'
+import {
+  cloneGlobalParamCore,
+  createGlobalParamRow,
+  normalizeGlobalParams,
+  isGlobalParamEmpty,
+  formatGlobalParamDisplay
+} from './globalParams'
+import {
+  formatDolphinConfigOption,
+  rollbackDisabledReason,
+  versionDeleteDisabledReason
+} from './workflowVersion'
+import { useInlineFieldEditing } from './composables/useInlineFieldEditing'
+import { useScheduleForm } from './composables/useScheduleForm'
+import { useVersionCompare } from './composables/useVersionCompare'
+import { useVersionMutations } from './composables/useVersionMutations'
 
 const route = useRoute()
 const router = useRouter()
@@ -853,17 +883,6 @@ const actionLoading = reactive({})
 const backfillDialogVisible = ref(false)
 const backfillTarget = ref(null)
 const changeMode = ref('list')
-const compareLoading = ref(false)
-const versionCompareResult = ref(null)
-const leftVersionId = ref(null)
-const rightVersionId = ref(null)
-const versionHistoryTableRef = ref(null)
-const selectedHistoryVersions = ref([])
-const rollbackLoadingVersionId = ref(null)
-const deleteLoadingVersionId = ref(null)
-const versionPublishRecordDialogVisible = ref(false)
-const activeVersionPublishRecords = ref([])
-const activeVersionForRecords = ref(null)
 const schedulerSwitchDialogVisible = ref(false)
 const schedulerSwitchSaving = ref(false)
 const schedulerSwitchForm = reactive({
@@ -900,137 +919,40 @@ const currentDolphinConfigName = computed(() => {
 })
 
 // Schedule states
-const scheduleFormRef = ref(null)
-const savingSchedule = ref(false)
-const scheduleSwitchLoading = ref(false)
-const scheduleEnabled = ref(false)
-const scheduleSwitchMuted = ref(false)
-const scheduleOptionsLoading = ref(false)
-const scheduleOptionsLoaded = ref(false)
-const schedulePreviewLoading = ref(false)
-const schedulePreviewList = ref([])
-const cronBuilderVisible = ref(false)
-const workerGroupOptions = ref([])
-const tenantOptions = ref([])
-const alertGroupOptions = ref([])
-const environmentOptions = ref([])
-const isScheduleOnline = computed(() => {
-  return (workflow.value?.workflow?.scheduleState || '').toUpperCase() === 'ONLINE'
+// 调度表单/选项/预览/上下线（W5）：buildDolphinConfigParams/loadWorkflowDetail/getErrorMessage 惰性前向引用
+const {
+  scheduleFormRef,
+  savingSchedule,
+  scheduleSwitchLoading,
+  scheduleEnabled,
+  scheduleSwitchMuted,
+  scheduleOptionsLoading,
+  scheduleOptionsLoaded,
+  schedulePreviewLoading,
+  schedulePreviewList,
+  cronBuilderVisible,
+  workerGroupOptions,
+  tenantOptions,
+  alertGroupOptions,
+  environmentOptions,
+  isScheduleOnline,
+  timezoneOptions,
+  scheduleForm,
+  environmentFilteredOptions,
+  scheduleRules,
+  loadScheduleOptions,
+  handleWorkerGroupChange,
+  previewScheduleTimes,
+  syncScheduleForm,
+  saveScheduleConfig,
+  handleToggleSchedule,
+} = useScheduleForm({
+  workflow,
+  activeTab,
+  buildDolphinConfigParams: (...args) => buildDolphinConfigParams(...args),
+  loadWorkflowDetail: (...args) => loadWorkflowDetail(...args),
+  getErrorMessage: (...args) => getErrorMessage(...args),
 })
-const timezoneOptions = computed(() => {
-  try {
-    if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
-      return Intl.supportedValuesOf('timeZone')
-    }
-  } catch {
-    // ignore
-  }
-  return [
-    'Asia/Shanghai',
-    'UTC',
-    'Asia/Hong_Kong',
-    'Asia/Singapore',
-    'Asia/Tokyo',
-    'Europe/London',
-    'America/New_York',
-    'America/Los_Angeles'
-  ]
-})
-const defaultTimezone = (() => {
-  try {
-    const tz = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone
-    return tz || 'Asia/Shanghai'
-  } catch {
-    return 'Asia/Shanghai'
-  }
-})()
-const defaultStartEndTime = (() => {
-  const start = dayjs().startOf('day')
-  return [
-    start.format('YYYY-MM-DD HH:mm:ss'),
-    start.add(100, 'year').format('YYYY-MM-DD HH:mm:ss')
-  ]
-})()
-const scheduleForm = reactive({
-  scheduleStartEndTime: defaultStartEndTime,
-  scheduleCron: '0 0 * * * ? *',
-  scheduleTimezone: defaultTimezone,
-  scheduleProcessInstancePriority: 'MEDIUM',
-  scheduleWorkerGroup: 'default',
-  scheduleTenantCode: 'default',
-  scheduleEnvironmentCode: -1,
-  scheduleFailureStrategy: 'CONTINUE',
-  scheduleWarningType: 'NONE',
-  scheduleWarningGroupId: null,
-  scheduleAutoOnline: false
-})
-const environmentFilteredOptions = computed(() => {
-  const selectedWorkerGroup = scheduleForm.scheduleWorkerGroup
-  if (!selectedWorkerGroup) {
-    return []
-  }
-  return (environmentOptions.value || []).filter((env) => {
-    const groups = env?.workerGroups || []
-    return Array.isArray(groups) && groups.includes(selectedWorkerGroup)
-  })
-})
-const scheduleRules = {
-  scheduleStartEndTime: [
-    { required: true, message: '请选择起止时间', trigger: 'change' },
-    {
-      validator: (_, value, callback) => {
-        const start = Array.isArray(value) ? value?.[0] : null
-        const end = Array.isArray(value) ? value?.[1] : null
-        if (!start || !end) {
-          callback(new Error('请选择起止时间'))
-          return
-        }
-        const startTs = dayjs(start).valueOf()
-        const endTs = dayjs(end).valueOf()
-        if (Number.isFinite(startTs) && Number.isFinite(endTs) && endTs < startTs) {
-          callback(new Error('结束时间需晚于开始时间'))
-          return
-        }
-        callback()
-      },
-      trigger: 'change'
-    }
-  ],
-  scheduleCron: [
-    { required: true, message: '请输入 Cron 表达式', trigger: 'blur' },
-    {
-      validator: (_, value, callback) => {
-        const parts = String(value || '')
-          .trim()
-          .split(/\s+/)
-          .filter(Boolean)
-        if (parts.length !== 7) {
-          callback(new Error('Cron 需为 Quartz 7 段：秒 分 时 日 月 周 年'))
-          return
-        }
-        callback()
-      },
-      trigger: 'blur'
-    }
-  ],
-  scheduleTimezone: [{ required: true, message: '请输入时区', trigger: 'blur' }],
-  scheduleWarningGroupId: [
-    {
-      validator: (_, value, callback) => {
-        if (scheduleForm.scheduleWarningType === 'NONE') {
-          callback()
-          return
-        }
-        if (!value || Number(value) <= 0) {
-          callback(new Error('请选择告警组'))
-          return
-        }
-        callback()
-      },
-      trigger: 'change'
-    }
-  ]
-}
 
 const buildDolphinConfigParams = () => {
   return currentDolphinConfigId.value
@@ -1038,75 +960,6 @@ const buildDolphinConfigParams = () => {
     : {}
 }
 
-const loadScheduleOptions = async (force = false) => {
-  if (scheduleOptionsLoaded.value && !force) {
-    return
-  }
-  scheduleOptionsLoading.value = true
-  try {
-    const params = buildDolphinConfigParams()
-    const [workerGroups, tenants, alertGroups, environments] = await Promise.all([
-      taskApi.fetchWorkerGroups(params).catch(() => []),
-      taskApi.fetchTenants(params).catch(() => []),
-      taskApi.fetchAlertGroups(params).catch(() => []),
-      taskApi.fetchEnvironments(params).catch(() => [])
-    ])
-    workerGroupOptions.value = workerGroups || []
-    tenantOptions.value = tenants || []
-    alertGroupOptions.value = alertGroups || []
-    environmentOptions.value = environments || []
-    scheduleOptionsLoaded.value = true
-  } finally {
-    scheduleOptionsLoading.value = false
-  }
-}
-
-const handleWorkerGroupChange = () => {
-  scheduleForm.scheduleEnvironmentCode = -1
-}
-
-const previewScheduleTimes = async () => {
-  if (isScheduleOnline.value) {
-    return
-  }
-  const [startTime, endTime] = Array.isArray(scheduleForm.scheduleStartEndTime)
-    ? scheduleForm.scheduleStartEndTime
-    : []
-  if (!startTime || !endTime) {
-    ElMessage.warning('请选择起止时间')
-    return
-  }
-  if (!String(scheduleForm.scheduleCron || '').trim()) {
-    ElMessage.warning('请输入 Cron 表达式')
-    return
-  }
-  if (!String(scheduleForm.scheduleTimezone || '').trim()) {
-    ElMessage.warning('请输入时区')
-    return
-  }
-
-  schedulePreviewLoading.value = true
-  try {
-    const schedule = JSON.stringify({
-      startTime,
-      endTime,
-      crontab: scheduleForm.scheduleCron,
-      timezoneId: scheduleForm.scheduleTimezone
-    })
-    const res = await taskApi.previewSchedule({ schedule }, buildDolphinConfigParams())
-    schedulePreviewList.value = Array.isArray(res) ? res : []
-  } catch (error) {
-    console.error('预览调度时间失败', error)
-  } finally {
-    schedulePreviewLoading.value = false
-  }
-}
-
-watch(activeTab, async (tab) => {
-  if (tab === 'schedule') {
-    await loadScheduleOptions()
-  }
-})
 
 watch(
   () => scheduleForm.scheduleWarningType,
@@ -1129,63 +982,47 @@ watch(
   { deep: true }
 )
 
-// Inline editing states
-const isEditingName = ref(false)
-const isEditingDescription = ref(false)
-const isEditingTaskGroup = ref(false)
-const editingName = ref('')
-const editingDescription = ref('')
-const editingTaskGroup = ref('')
-const savingField = ref(false)
-
-const taskGroupsLoading = ref(false)
-const taskGroupOptions = ref([])
-
 // Global params state
 const globalParamsList = ref([])
 const savingParams = ref(false)
 
-const cloneGlobalParamCore = (param = {}) => {
-  return {
-    prop: String(param?.prop ?? '').trim(),
-    direct: param?.direct || 'IN',
-    type: param?.type || 'VARCHAR',
-    value: param?.value ?? ''
-  }
-}
-
-const createGlobalParamRow = (param = {}, options = {}) => {
-  return {
-    ...cloneGlobalParamCore(param),
-    __editing: Boolean(options.editing),
-    __isNew: Boolean(options.isNew),
-    __backup: options.backup || null
-  }
-}
-
-const normalizeGlobalParams = (params) => {
-  if (!Array.isArray(params)) {
-    return []
-  }
-  return params.map(item => createGlobalParamRow(item))
-}
-
 const serializeGlobalParams = () => {
   return globalParamsList.value.map(item => cloneGlobalParamCore(item))
-}
-
-const isGlobalParamEmpty = (value) => {
-  return value === null || value === undefined || value === ''
-}
-
-const formatGlobalParamDisplay = (value) => {
-  return isGlobalParamEmpty(value) ? '-' : String(value)
 }
 
 // Computed workflow task IDs
 const workflowTaskIds = computed(() => {
   const relations = workflow.value?.taskRelations || []
   return relations.map(r => Number(r.taskId)).filter(id => Number.isFinite(id))
+})
+
+// 名称/任务组/描述行内编辑（W4）：loadWorkflowDetail/buildDolphinConfigParams 惰性前向引用
+const {
+  isEditingName,
+  isEditingDescription,
+  isEditingTaskGroup,
+  editingName,
+  editingDescription,
+  editingTaskGroup,
+  savingField,
+  taskGroupsLoading,
+  taskGroupOptions,
+  startEditName,
+  cancelEditName,
+  saveNameField,
+  loadTaskGroupOptions,
+  handleTaskGroupDropdown,
+  startEditTaskGroup,
+  cancelEditTaskGroup,
+  saveTaskGroupField,
+  startEditDescription,
+  cancelEditDescription,
+  saveDescriptionField,
+} = useInlineFieldEditing({
+  workflow,
+  workflowTaskIds,
+  loadWorkflowDetail: (...args) => loadWorkflowDetail(...args),
+  buildDolphinConfigParams: (...args) => buildDolphinConfigParams(...args),
 })
 
 const versionList = computed(() => {
@@ -1278,148 +1115,43 @@ const versionHistoryRows = computed(() => {
   })
 })
 
-const selectedHistoryVersionIds = computed(() => {
-  return selectedHistoryVersions.value
-    .map((item) => Number(item?.id))
-    .filter((id) => Number.isFinite(id))
-})
+const {
+  compareLoading,
+  versionCompareResult,
+  leftVersionId,
+  rightVersionId,
+  versionHistoryTableRef,
+  selectedHistoryVersions,
+  selectedHistoryVersionIds,
+  canCompareSelected,
+  clearVersionHistorySelection,
+  handleVersionSelectionChange,
+  loadVersionCompare,
+  compareSelectedVersions,
+  stepVersionCompare,
+} = useVersionCompare({ workflow, versionList, changeMode })
 
-const canCompareSelected = computed(() => selectedHistoryVersionIds.value.length === 2)
-
-const versionPublishRecordDialogTitle = computed(() => {
-  const versionNo = activeVersionForRecords.value?.versionNo
-  return Number.isFinite(Number(versionNo))
-    ? `版本 ${versionNo} 发布记录`
-    : '发布记录'
+const {
+  rollbackLoadingVersionId,
+  deleteLoadingVersionId,
+  versionPublishRecordDialogVisible,
+  activeVersionPublishRecords,
+  activeVersionForRecords,
+  versionPublishRecordDialogTitle,
+  rollbackToVersion,
+  deleteVersion,
+  openVersionPublishRecords,
+} = useVersionMutations({
+  workflow,
+  versionById,
+  publishRecordsByVersionId,
+  getRollbackDisabledReason: (...args) => getRollbackDisabledReason(...args),
+  getVersionDeleteDisabledReason: (...args) => getVersionDeleteDisabledReason(...args),
+  loadWorkflowDetail: (...args) => loadWorkflowDetail(...args),
+  backToPublishRecords: (...args) => backToPublishRecords(...args),
 })
 
 // Inline edit methods
-const startEditName = () => {
-  editingName.value = workflow.value?.workflow?.workflowName || ''
-  isEditingName.value = true
-}
-
-const cancelEditName = () => {
-  isEditingName.value = false
-  editingName.value = ''
-}
-
-const saveNameField = async () => {
-  if (!editingName.value.trim()) {
-    ElMessage.warning('名称不能为空')
-    return
-  }
-  savingField.value = true
-  try {
-    const wf = workflow.value?.workflow
-    await workflowApi.update(wf.id, {
-      workflowName: editingName.value.trim(),
-      description: wf.description,
-      taskGroupName: wf.taskGroupName || null,
-      tasks: workflowTaskIds.value.map(taskId => ({ taskId })),
-      globalParams: wf.globalParams,
-      operator: 'portal-ui'
-    })
-    ElMessage.success('名称更新成功')
-    isEditingName.value = false
-    loadWorkflowDetail()
-  } catch (error) {
-    console.error('更新名称失败', error)
-    ElMessage.error(error?.response?.data?.message || '更新失败')
-  } finally {
-    savingField.value = false
-  }
-}
-
-const loadTaskGroupOptions = async () => {
-  if (taskGroupOptions.value.length) {
-    return
-  }
-  taskGroupsLoading.value = true
-  try {
-    const res = await taskApi.fetchTaskGroups(buildDolphinConfigParams())
-    taskGroupOptions.value = res || []
-  } catch (error) {
-    console.error('加载任务组失败', error)
-    ElMessage.warning('任务组目录加载失败，可继续编辑并保存')
-  } finally {
-    taskGroupsLoading.value = false
-  }
-}
-
-const handleTaskGroupDropdown = async (visible) => {
-  if (visible && !taskGroupOptions.value.length) {
-    await loadTaskGroupOptions()
-  }
-}
-
-const startEditTaskGroup = async () => {
-  editingTaskGroup.value = workflow.value?.workflow?.taskGroupName || ''
-  isEditingTaskGroup.value = true
-  await loadTaskGroupOptions()
-}
-
-const cancelEditTaskGroup = () => {
-  isEditingTaskGroup.value = false
-  editingTaskGroup.value = ''
-}
-
-const saveTaskGroupField = async () => {
-  savingField.value = true
-  try {
-    const wf = workflow.value?.workflow
-    await workflowApi.update(wf.id, {
-      workflowName: wf.workflowName,
-      description: wf.description,
-      taskGroupName: editingTaskGroup.value || null,
-      tasks: workflowTaskIds.value.map(taskId => ({ taskId })),
-      globalParams: wf.globalParams,
-      operator: 'portal-ui'
-    })
-    ElMessage.success('任务组更新成功')
-    isEditingTaskGroup.value = false
-    loadWorkflowDetail()
-  } catch (error) {
-    console.error('更新任务组失败', error)
-    ElMessage.error(error?.response?.data?.message || '更新失败')
-  } finally {
-    savingField.value = false
-  }
-}
-
-const startEditDescription = () => {
-  editingDescription.value = workflow.value?.workflow?.description || ''
-  isEditingDescription.value = true
-}
-
-const cancelEditDescription = () => {
-  isEditingDescription.value = false
-  editingDescription.value = ''
-}
-
-const saveDescriptionField = async () => {
-  savingField.value = true
-  try {
-    const wf = workflow.value?.workflow
-    await workflowApi.update(wf.id, {
-      workflowName: wf.workflowName,
-      description: editingDescription.value,
-      taskGroupName: wf.taskGroupName || null,
-      tasks: workflowTaskIds.value.map(taskId => ({ taskId })),
-      globalParams: wf.globalParams,
-      operator: 'portal-ui'
-    })
-    ElMessage.success('描述更新成功')
-    isEditingDescription.value = false
-    loadWorkflowDetail()
-  } catch (error) {
-    console.error('更新描述失败', error)
-    ElMessage.error(error?.response?.data?.message || '更新失败')
-  } finally {
-    savingField.value = false
-  }
-}
-
 const addGlobalParam = () => {
     globalParamsList.value.push(createGlobalParamRow({}, { editing: true, isNew: true }))
 }
@@ -1468,13 +1200,6 @@ const saveGlobalParams = async () => {
     } finally {
         savingParams.value = false
     }
-}
-
-const clearVersionHistorySelection = () => {
-  selectedHistoryVersions.value = []
-  nextTick(() => {
-    versionHistoryTableRef.value?.clearSelection()
-  })
 }
 
 const loadWorkflowDetail = async () => {
@@ -1550,19 +1275,6 @@ const loadDolphinConfigs = async () => {
   }
 }
 
-const formatDolphinConfigOption = (item) => {
-  if (!item) {
-    return '-'
-  }
-  const parts = [item.configName || `Dolphin #${item.id}`]
-  if (item.isDefault === 1) {
-    parts.push('默认')
-  }
-  if (!item.isActive) {
-    parts.push('停用')
-  }
-  return parts.join(' / ')
-}
 
 const openSchedulerSwitchDialog = async () => {
   if (!workflow.value?.workflow?.id) {
@@ -1631,92 +1343,6 @@ const switchSchedulerEngine = async () => {
   }
 }
 
-const getWorkflowStatusType = (status) => {
-  const map = {
-    draft: 'info',
-    online: 'success',
-    offline: 'warning',
-    failed: 'danger'
-  }
-  return map[status] || 'info'
-}
-
-const getWorkflowStatusText = (status) => {
-  const map = {
-    draft: '草稿',
-    online: '在线',
-    offline: '下线',
-    failed: '失败'
-  }
-  return map[status] || status || '-'
-}
-
-const getInstanceStateType = (state) => {
-  const map = {
-    SUCCESS: 'success',
-    FAILED: 'danger',
-    RUNNING: 'warning',
-    STOP: 'info',
-    KILL: 'info'
-  }
-  return map[state] || 'info'
-}
-
-const getInstanceStateText = (state) => {
-  const map = {
-    SUCCESS: '成功',
-    FAILED: '失败',
-    RUNNING: '运行中',
-    STOP: '终止',
-    KILL: '被终止'
-  }
-  return map[state] || state || '-'
-}
-
-const getTriggerText = (type) => {
-  const map = {
-    manual: '手动',
-    schedule: '调度',
-    api: 'API'
-  }
-  return map[type] || type || '-'
-}
-
-const getOperationText = (operation) => {
-  const map = {
-    deploy: '部署',
-    online: '上线',
-    offline: '下线'
-  }
-  return map[operation] || operation || '-'
-}
-
-const getPublishRecordStatusType = (status) => {
-  const map = {
-    success: 'success',
-    failed: 'danger',
-    pending: 'info',
-    pending_approval: 'warning',
-    rejected: 'danger'
-  }
-  return map[status] || 'info'
-}
-
-const getPublishRecordStatusText = (status) => {
-  const map = {
-    success: '成功',
-    failed: '失败',
-    pending: '进行中',
-    pending_approval: '待审批',
-    rejected: '已拒绝'
-  }
-  return map[status] || status || '-'
-}
-
-const formatDateTime = (value) => {
-  return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'
-}
-
 const renderVersionLabel = (versionId) => {
   const id = Number(versionId)
   if (!Number.isFinite(id)) {
@@ -1727,75 +1353,6 @@ const renderVersionLabel = (versionId) => {
     return `v${version.versionNo}`
   }
   return `#${id}`
-}
-
-const syncScheduleForm = () => {
-  const wf = workflow.value?.workflow
-  if (!wf) return
-
-  scheduleForm.scheduleCron = wf.scheduleCron || '0 0 * * * ? *'
-  scheduleForm.scheduleTimezone = wf.scheduleTimezone || defaultTimezone
-  const startTime = wf.scheduleStartTime
-    ? dayjs(wf.scheduleStartTime).format('YYYY-MM-DD HH:mm:ss')
-    : null
-  const endTime = wf.scheduleEndTime
-    ? dayjs(wf.scheduleEndTime).format('YYYY-MM-DD HH:mm:ss')
-    : null
-  scheduleForm.scheduleStartEndTime = startTime && endTime ? [startTime, endTime] : defaultStartEndTime
-  scheduleForm.scheduleFailureStrategy = wf.scheduleFailureStrategy || 'CONTINUE'
-  const warningType = (wf.scheduleWarningType || 'NONE').toUpperCase()
-  scheduleForm.scheduleWarningType = warningType === 'SUCCESS_FAILURE' ? 'ALL' : warningType
-  scheduleForm.scheduleWarningGroupId =
-    wf.scheduleWarningGroupId === null || wf.scheduleWarningGroupId === undefined
-      ? 0
-      : wf.scheduleWarningGroupId
-  scheduleForm.scheduleProcessInstancePriority = wf.scheduleProcessInstancePriority || 'MEDIUM'
-  scheduleForm.scheduleWorkerGroup = wf.scheduleWorkerGroup || 'default'
-  scheduleForm.scheduleTenantCode = wf.scheduleTenantCode || 'default'
-  scheduleForm.scheduleEnvironmentCode =
-    wf.scheduleEnvironmentCode === null || wf.scheduleEnvironmentCode === undefined
-      ? -1
-      : wf.scheduleEnvironmentCode
-  scheduleForm.scheduleAutoOnline = Boolean(wf.scheduleAutoOnline)
-  schedulePreviewList.value = []
-
-  scheduleSwitchMuted.value = true
-  scheduleEnabled.value = (wf.scheduleState || '').toUpperCase() === 'ONLINE'
-  nextTick(() => {
-    scheduleSwitchMuted.value = false
-  })
-  scheduleFormRef.value?.clearValidate()
-}
-
-const formatDuration = (durationMs, startTime, endTime) => {
-  let duration = durationMs
-  if (!duration && startTime && endTime) {
-    duration = dayjs(endTime).diff(dayjs(startTime))
-  }
-  if (!duration) {
-    return '-'
-  }
-  const seconds = Math.floor(duration / 1000)
-  const minutes = Math.floor(seconds / 60)
-  const remainSeconds = seconds % 60
-  return minutes ? `${minutes}分${remainSeconds}秒` : `${remainSeconds}秒`
-}
-
-const formatLog = (log) => {
-  if (!log) {
-    return '-'
-  }
-  try {
-    const parsed = JSON.parse(log)
-    if (parsed && typeof parsed === 'object') {
-      return Object.entries(parsed)
-        .map(([key, value]) => `${key}: ${value}`)
-        .join(', ')
-    }
-    return log
-  } catch (error) {
-    return log
-  }
 }
 
 const backToPublishRecords = () => {
@@ -1816,237 +1373,15 @@ const isVersionSelectable = (row) => {
   return selectedHistoryVersionIds.value.includes(versionId)
 }
 
-const handleVersionSelectionChange = (rows) => {
-  if (!Array.isArray(rows)) {
-    selectedHistoryVersions.value = []
-    return
-  }
-  if (rows.length <= 2) {
-    selectedHistoryVersions.value = rows
-    return
-  }
-  ElMessage.warning('最多选择两个版本进行比较')
-  const keepRows = rows.slice(0, 2)
-  selectedHistoryVersions.value = keepRows
-  nextTick(() => {
-    versionHistoryTableRef.value?.clearSelection()
-    keepRows.forEach((item) => {
-      versionHistoryTableRef.value?.toggleRowSelection(item, true)
-    })
-  })
-}
+const getRollbackDisabledReason = (row) =>
+  rollbackDisabledReason(row, workflow.value?.workflow?.currentVersionId)
 
-const resolveLeftVersionId = (targetRightVersionId) => {
-  const rightId = Number(targetRightVersionId)
-  const index = versionList.value.findIndex((item) => Number(item.id) === rightId)
-  if (index <= 0) {
-    return null
-  }
-  return versionList.value[index - 1]?.id || null
-}
-
-const loadVersionCompare = async (leftId, rightId) => {
-  const wf = workflow.value?.workflow
-  const normalizedRightId = Number(rightId)
-  if (!wf?.id || !Number.isFinite(normalizedRightId)) {
-    return
-  }
-  compareLoading.value = true
-  try {
-    const result = await workflowApi.compareVersions(wf.id, {
-      leftVersionId: leftId ?? null,
-      rightVersionId: normalizedRightId,
-      operator: 'portal-ui'
-    })
-    versionCompareResult.value = result
-    leftVersionId.value = result.leftVersionId ?? null
-    rightVersionId.value = result.rightVersionId ?? normalizedRightId
-    changeMode.value = 'compare'
-  } catch (error) {
-    console.error('加载版本差异失败', error)
-    ElMessage.error(error.message || '加载版本差异失败')
-  } finally {
-    compareLoading.value = false
-  }
-}
-
-const compareSelectedVersions = async () => {
-  if (!canCompareSelected.value) {
-    ElMessage.warning('请选择两个版本进行比较')
-    return
-  }
-  if (selectedHistoryVersions.value.some((item) => !item?.isV3)) {
-    ElMessage.warning('仅支持 V3，请先保存生成 V3 基线')
-    return
-  }
-  const sorted = [...selectedHistoryVersions.value].sort((left, right) => {
-    const leftNo = Number(left?.versionNo || 0)
-    const rightNo = Number(right?.versionNo || 0)
-    if (leftNo !== rightNo) {
-      return leftNo - rightNo
-    }
-    return Number(left?.id || 0) - Number(right?.id || 0)
-  })
-  const leftVersion = sorted[0]
-  const rightVersion = sorted[1]
-  await loadVersionCompare(leftVersion?.id || null, rightVersion?.id || null)
-}
-
-const stepVersionCompare = async (direction) => {
-  if (!rightVersionId.value || !versionList.value.length) {
-    return
-  }
-  const currentRightId = Number(rightVersionId.value)
-  const index = versionList.value.findIndex((item) => Number(item.id) === currentRightId)
-  if (index < 0) {
-    return
-  }
-
-  if (direction === 'left') {
-    const nextRightIndex = index - 1
-    if (nextRightIndex < 0) {
-      return
-    }
-    const right = versionList.value[nextRightIndex]
-    const left = nextRightIndex > 0 ? versionList.value[nextRightIndex - 1]?.id : null
-    await loadVersionCompare(left, right.id)
-    return
-  }
-
-  const nextRightIndex = index + 1
-  if (nextRightIndex >= versionList.value.length) {
-    return
-  }
-  const right = versionList.value[nextRightIndex]
-  const left = versionList.value[index]?.id || null
-  await loadVersionCompare(left, right.id)
-}
-
-const openVersionPublishRecords = (row) => {
-  activeVersionForRecords.value = row || null
-  const versionId = Number(row?.id)
-  if (Number.isFinite(versionId)) {
-    activeVersionPublishRecords.value = publishRecordsByVersionId.value[versionId] || []
-  } else {
-    activeVersionPublishRecords.value = []
-  }
-  versionPublishRecordDialogVisible.value = true
-}
-
-const rollbackToVersion = async (versionId) => {
-  const wf = workflow.value?.workflow
-  const normalizedVersionId = Number(versionId)
-  if (!wf?.id || !Number.isFinite(normalizedVersionId)) {
-    return
-  }
-  const version = versionById.value[normalizedVersionId]
-  const rollbackDisabledReason = getRollbackDisabledReason(version)
-  if (rollbackDisabledReason) {
-    ElMessage.warning(rollbackDisabledReason)
-    return
-  }
-  const label = version ? `版本 ${version.versionNo}` : `#${versionId}`
-  try {
-    await ElMessageBox.confirm(
-      `确认恢复到${label}吗？恢复后会生成一个新版本。`,
-      '确认恢复',
-      {
-        type: 'warning',
-        confirmButtonText: '确认恢复',
-        cancelButtonText: '取消'
-      }
-    )
-  } catch {
-    return
-  }
-
-  rollbackLoadingVersionId.value = normalizedVersionId
-  try {
-    const response = await workflowApi.rollbackVersion(wf.id, normalizedVersionId, {
-      operator: 'portal-ui'
-    })
-    ElMessage.success(`恢复成功，已生成版本 v${response.newVersionNo}`)
-    backToPublishRecords()
-    await loadWorkflowDetail()
-  } catch (error) {
-    console.error('恢复版本失败', error)
-    ElMessage.error(error.message || '恢复版本失败')
-  } finally {
-    rollbackLoadingVersionId.value = null
-  }
-}
-
-const getRollbackDisabledReason = (row) => {
-  if (!row) {
-    return '无效版本'
-  }
-  const schemaVersion = Number(row?.snapshotSchemaVersion)
-  const isV3 = row?.isV3 === true || (Number.isFinite(schemaVersion) ? schemaVersion === 3 : false)
-  if (!isV3) {
-    return '仅支持 V3，请先保存生成 V3 基线'
-  }
-  const rowVersionId = Number(row?.id)
-  const currentVersionId = Number(workflow.value?.workflow?.currentVersionId)
-  if (row?.isCurrent || (Number.isFinite(rowVersionId) && rowVersionId === currentVersionId)) {
-    return '当前版本无需恢复'
-  }
-  return ''
-}
-
-const getVersionDeleteDisabledReason = (row) => {
-  const versionId = Number(row?.id)
-  if (!Number.isFinite(versionId)) {
-    return '无效版本'
-  }
-  const currentVersionId = Number(workflow.value?.workflow?.currentVersionId)
-  if (Number.isFinite(currentVersionId) && currentVersionId === versionId) {
-    return '当前版本不可删除'
-  }
-  if (lastSuccessfulPublishedVersionId.value !== null
-    && versionId === Number(lastSuccessfulPublishedVersionId.value)) {
-    return '最后一次成功发布版本不可删除'
-  }
-  return ''
-}
-
-const deleteVersion = async (row) => {
-  const wf = workflow.value?.workflow
-  const versionId = Number(row?.id)
-  if (!wf?.id || !Number.isFinite(versionId)) {
-    return
-  }
-  const disabledReason = getVersionDeleteDisabledReason(row)
-  if (disabledReason) {
-    ElMessage.warning(disabledReason)
-    return
-  }
-  const label = row?.versionNo ? `版本 ${row.versionNo}` : `#${versionId}`
-  try {
-    await ElMessageBox.confirm(
-      `确认删除${label}吗？删除后不可恢复。`,
-      '确认删除版本',
-      {
-        type: 'warning',
-        confirmButtonText: '确认删除',
-        cancelButtonText: '取消'
-      }
-    )
-  } catch {
-    return
-  }
-
-  deleteLoadingVersionId.value = versionId
-  try {
-    await workflowApi.deleteVersion(wf.id, versionId)
-    ElMessage.success('版本删除成功')
-    await loadWorkflowDetail()
-  } catch (error) {
-    console.error('删除版本失败', error)
-    ElMessage.error(error.message || '删除版本失败')
-  } finally {
-    deleteLoadingVersionId.value = null
-  }
-}
+const getVersionDeleteDisabledReason = (row) =>
+  versionDeleteDisabledReason(
+    row,
+    workflow.value?.workflow?.currentVersionId,
+    lastSuccessfulPublishedVersionId.value
+  )
 
 const buildDolphinWorkflowUrl = (workflow) => {
   if (!dolphinWebuiUrl.value || !workflow?.projectCode || !workflow?.workflowCode) {
@@ -2098,10 +1433,6 @@ const handleExportJson = async (row) => {
 }
 
 // Action Handlers
-const getErrorMessage = (error) => {
-  return error?.response?.data?.message || error?.message || '操作失败，请稍后重试'
-}
-
 const previewPublishAndConfirm = async (row) => {
   if (!row?.id) {
     return false
@@ -2469,85 +1800,6 @@ const handleDelete = async (row) => {
     ElMessage.error(getErrorMessage(error))
   } finally {
     setActionLoading(row.id, 'delete', false)
-  }
-}
-
-const saveScheduleConfig = async () => {
-  const wf = workflow.value?.workflow
-  if (!wf?.id) return
-
-  try {
-    await scheduleFormRef.value?.validate()
-  } catch {
-    return
-  }
-
-  savingSchedule.value = true
-  try {
-    const [startTime, endTime] = Array.isArray(scheduleForm.scheduleStartEndTime)
-      ? scheduleForm.scheduleStartEndTime
-      : []
-    await workflowApi.updateSchedule(wf.id, {
-      scheduleCron: scheduleForm.scheduleCron,
-      scheduleTimezone: scheduleForm.scheduleTimezone,
-      scheduleStartTime: startTime,
-      scheduleEndTime: endTime,
-      scheduleFailureStrategy: scheduleForm.scheduleFailureStrategy,
-      scheduleWarningType: scheduleForm.scheduleWarningType,
-      scheduleWarningGroupId:
-        scheduleForm.scheduleWarningType === 'NONE' ? 0 : scheduleForm.scheduleWarningGroupId,
-      scheduleProcessInstancePriority: scheduleForm.scheduleProcessInstancePriority,
-      scheduleWorkerGroup: scheduleForm.scheduleWorkerGroup || null,
-      scheduleTenantCode: scheduleForm.scheduleTenantCode || null,
-      scheduleEnvironmentCode:
-        scheduleForm.scheduleEnvironmentCode === null || scheduleForm.scheduleEnvironmentCode === undefined
-          ? -1
-          : scheduleForm.scheduleEnvironmentCode,
-      scheduleAutoOnline: scheduleForm.scheduleAutoOnline
-    })
-    ElMessage.success('调度配置已保存')
-    loadWorkflowDetail()
-  } catch (error) {
-    console.error('保存调度配置失败', error)
-    ElMessage.error(getErrorMessage(error))
-  } finally {
-    savingSchedule.value = false
-  }
-}
-
-const handleToggleSchedule = async (val) => {
-  if (scheduleSwitchMuted.value) {
-    return
-  }
-  const wf = workflow.value?.workflow
-  if (!wf?.id) return
-  if (!wf.dolphinScheduleId) {
-    ElMessage.warning('请先保存调度配置')
-    scheduleEnabled.value = false
-    return
-  }
-  if (val === true && wf.status !== 'online') {
-    ElMessage.warning('工作流未上线，无法上线调度')
-    scheduleEnabled.value = false
-    return
-  }
-
-  scheduleSwitchLoading.value = true
-  try {
-    if (val) {
-      await workflowApi.onlineSchedule(wf.id)
-      ElMessage.success('调度已上线')
-    } else {
-      await workflowApi.offlineSchedule(wf.id)
-      ElMessage.success('调度已下线')
-    }
-    loadWorkflowDetail()
-  } catch (error) {
-    console.error('切换调度状态失败', error)
-    ElMessage.error(getErrorMessage(error))
-    scheduleEnabled.value = !val
-  } finally {
-    scheduleSwitchLoading.value = false
   }
 }
 

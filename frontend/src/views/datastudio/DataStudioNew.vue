@@ -1147,7 +1147,7 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, markRaw, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
+import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -1171,17 +1171,27 @@ import {
 } from '@element-plus/icons-vue'
 import { tableApi } from '@/api/table'
 import { lineageApi } from '@/api/lineage'
-import { dorisClusterApi } from '@/api/doris'
-import { dataQueryApi } from '@/api/query'
-import { businessDomainApi, dataDomainApi } from '@/api/domain'
 import PersistentTabs from '@/components/PersistentTabs.vue'
-import TaskEditDrawer from '@/views/tasks/TaskEditDrawer.vue'
+import TaskEditDrawer from '@/components/TaskEditDrawer.vue'
 import DataStudioResultGrid from '@/views/datastudio/components/DataStudioResultGrid.vue'
 import { isDemoMode, showDemoReadonlyMessage } from '@/demo/runtime'
 import { copyText } from '@/utils/clipboard'
-import { loadEcharts } from '@/utils/loadEcharts'
-import { buildCsvContent } from './csvExport'
-import { buildResultGridRows } from './components/resultGridModel'
+import {
+  formatNumber,
+  formatRowCount,
+  formatStorageSize,
+  formatDuration,
+  formatDateTime,
+  isAggregateTable,
+} from './tableFormat'
+import { useTabPersistence } from './composables/useTabPersistence'
+import { useResizablePanes } from './composables/useResizablePanes'
+import { useSqlCompletion } from './composables/useSqlCompletion'
+import { useTabRouting } from './composables/useTabRouting'
+import { useCatalogTree } from './composables/useCatalogTree'
+import { useQueryExecution } from './composables/useQueryExecution'
+import { useResultChart } from './composables/useResultChart'
+import { useTableMetaEditing } from './composables/useTableMetaEditing'
 
 const SqlEditor = defineAsyncComponent({
   loader: () => import('@/components/SqlEditor.vue'),
@@ -1201,270 +1211,183 @@ const DataStudioRightPanel = defineAsyncComponent({
 const clusterId = ref(null)
 const route = useRoute()
 const router = useRouter()
-const studioLayoutRef = ref(null)
-const DEFAULT_SIDEBAR_RATIO = 0.2
-const DEFAULT_RIGHT_RATIO = 0.23
-const MIN_SIDEBAR_WIDTH = 220
-const MAX_SIDEBAR_WIDTH = 840
-const MIN_RIGHT_WIDTH = 320
-const MAX_RIGHT_WIDTH = 900
-const sidebarWidthRatio = ref(DEFAULT_SIDEBAR_RATIO)
-const rightPanelWidthRatio = ref(DEFAULT_RIGHT_RATIO)
-const getLayoutWidth = () => {
-  const width = studioLayoutRef.value?.getBoundingClientRect()?.width || window.innerWidth || 1
-  return Math.max(1, width)
-}
-const clampWidth = (value, min, max) => Math.max(min, Math.min(max, value))
-const clampSidebarWidth = (value) => clampWidth(value, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH)
-const clampRightWidth = (value) => clampWidth(value, MIN_RIGHT_WIDTH, MAX_RIGHT_WIDTH)
-const getSidebarWidthPx = () => clampSidebarWidth(getLayoutWidth() * sidebarWidthRatio.value)
-const getRightPanelWidthPx = () => clampRightWidth(getLayoutWidth() * rightPanelWidthRatio.value)
-const sidebarPaneStyle = computed(() => ({
-  width: `${(sidebarWidthRatio.value * 100).toFixed(2)}%`,
-  minWidth: `${MIN_SIDEBAR_WIDTH}px`,
-  maxWidth: `${MAX_SIDEBAR_WIDTH}px`
-}))
-const rightPaneStyle = computed(() => ({
-  width: `${(rightPanelWidthRatio.value * 100).toFixed(2)}%`,
-  minWidth: `${MIN_RIGHT_WIDTH}px`,
-  maxWidth: `${MAX_RIGHT_WIDTH}px`
-}))
-const normalizePaneRatios = () => {
-  const layoutWidth = getLayoutWidth()
-  sidebarWidthRatio.value = clampSidebarWidth(layoutWidth * sidebarWidthRatio.value) / layoutWidth
-  rightPanelWidthRatio.value = clampRightWidth(layoutWidth * rightPanelWidthRatio.value) / layoutWidth
-}
-const isResizing = ref(false)
-let resizeMoveHandler = null
-let resizeUpHandler = null
-let resizeRightMoveHandler = null
-let resizeRightUpHandler = null
-const leftPaneHeights = reactive({})
-const leftPaneRefs = ref({})
-let resizeLeftMoveHandler = null
-let resizeLeftUpHandler = null
-const historyData = ref([])
-const historyPager = reactive({ pageNum: 1, pageSize: 15, total: 0 })
-const historyLoading = ref(false)
 const createDrawerVisible = ref(false)
 
-const dbLoading = ref(false)
-const dataSources = ref([])
-const activeSource = ref('')
-const schemaStore = reactive({})
-const schemaLoading = reactive({})
-const schemaCountStore = reactive({})
-const schemaCountLoading = reactive({})
-const schemaCountKeyword = reactive({})
-const schemaCountRequestSeq = reactive({})
-const activeSchema = reactive({})
-const tableLoading = reactive({})
-const tableStore = reactive({})
-const columnStore = reactive({})
 const lineageCache = reactive({})
-const activatedSources = reactive({})
-const datasourceActivationTasks = new Map()
-const EMPTY_SCHEMA_COUNTS = Object.freeze({ tableCount: 0, viewCount: 0, totalCount: 0 })
-let schemaCountReloadTimer = null
-
-const catalogTreeRef = ref(null)
-const catalogTreeProps = {
-  children: 'children',
-  label: 'name',
-  isLeaf: 'leaf'
-}
-
-const getDatasourceNodeKey = (sourceId) => `ds:${String(sourceId)}`
-const getSchemaNodeKey = (sourceId, schemaName) => `schema:${String(sourceId)}::${schemaName}`
-const getObjectGroupNodeKey = (sourceId, schemaName, objectType) =>
-  `group:${String(sourceId)}::${schemaName}::${objectType}`
-
-const catalogRoots = computed(() => {
-  const list = Array.isArray(dataSources.value) ? dataSources.value : []
-  return list.map((source) => ({
-    nodeKey: getDatasourceNodeKey(source.id),
-    type: 'datasource',
-    name: source.clusterName || source.name || `DataSource ${source.id}`,
-    sourceId: String(source.id),
-    sourceType: source.sourceType,
-    status: source.status,
-    leaf: false
-  }))
-})
-
-const searchKeyword = ref('')
-const sortField = ref('tableName')
-const sortOrder = ref('asc')
-
-const selectedTableKey = ref('')
 const suppressRouteSync = ref(false)
 
 const openTabs = ref([])
 const activeTab = ref('')
 const tabStates = reactive({})
-const queryTimerHandles = new Map()
 const queryTabCounter = ref(1)
+const tableObserver = ref(null)
 
-const TAB_PERSIST_KEY = isDemoMode
-  ? 'odw:datastudio:workspace-tabs:demo-v1'
-  : 'odw:datastudio:workspace-tabs:v1'
-const isRestoringTabs = ref(false)
-let persistTabsTimer = null
-
-const tabsPersistSnapshot = computed(() => {
-  const tabs = (Array.isArray(openTabs.value) ? openTabs.value : []).map((tab) => {
-    const id = String(tab?.id ?? '')
-    const state = id ? tabStates[id] : null
-    return {
-      id,
-      kind: tab?.kind === 'query' ? 'query' : 'table',
-      tableName: tab?.tableName || '',
-      dbName: tab?.dbName || state?.table?.dbName || '',
-      sourceId: tab?.sourceId || state?.table?.sourceId || '',
-      sourceType: state?.table?.sourceType || '',
-      tableId: state?.table?.id || null,
-      sql: state?.query?.sql ?? '',
-      limit: Number(state?.query?.limit ?? 200)
-    }
-  })
-  return {
-    version: 1,
-    activeTab: String(activeTab.value || ''),
-    tabs
-  }
+// 目录树加载与缓存（P2-2 F7）：schema/table/column 缓存继续共享给 SQL 补全与路由同步。
+const {
+  dbLoading,
+  dataSources,
+  activeSource,
+  schemaStore,
+  schemaLoading,
+  schemaCountLoading,
+  activeSchema,
+  tableLoading,
+  tableStore,
+  columnStore,
+  catalogTreeRef,
+  catalogTreeProps,
+  catalogRoots,
+  searchKeyword,
+  sortField,
+  sortOrder,
+  selectedTableKey,
+  tableRefs,
+  loadClusters,
+  getDatasourceById,
+  activateDatasource,
+  loadSchemas,
+  loadTables,
+  setTableRef,
+  getTableKey,
+  findCachedTableById,
+  isDatasourceIconInactive,
+  getDatasourceIconUrl,
+  isViewTable,
+  getTableRowCount,
+  getTableStorageSize,
+  getTableCount,
+  getTableCountByType,
+  getProgressWidth,
+  filterCatalogNode,
+  loadCatalogNode,
+  handleCatalogNodeClick,
+  refreshCatalog,
+  refreshDatasourceNode,
+  refreshSchemaNode,
+  focusTableInSidebar,
+  focusActiveTableInSidebar,
+} = useCatalogTree({
+  clusterId,
+  tabStates,
+  openTabs,
+  activeTab,
+  tableObserver,
+  handleQuerySourceSelect: (...args) => handleQuerySourceSelect(...args),
+  handleQueryDatabaseSelect: (...args) => handleQueryDatabaseSelect(...args),
+  openTableTab: (...args) => openTableTab(...args),
 })
 
-const persistTabsNow = (snapshot) => {
-  try {
-    const tabs = snapshot?.tabs || []
-    if (!Array.isArray(tabs) || tabs.length === 0) {
-      localStorage.removeItem(TAB_PERSIST_KEY)
-      return
-    }
-    localStorage.setItem(TAB_PERSIST_KEY, JSON.stringify(snapshot))
-  } catch (error) {
-    console.warn('保存工作区 Tab 状态失败', error)
-  }
-}
+// 三栏布局尺寸与拖拽（P2-2 F5）：syncResultPaneLayout 为前向引用，惰性传入
+const {
+  studioLayoutRef,
+  sidebarPaneStyle,
+  rightPaneStyle,
+  normalizePaneRatios,
+  isResizing,
+  leftPaneHeights,
+  leftPaneRefs,
+  setLeftPaneRef,
+  getLeftPaneStyle,
+  startResize,
+  startRightResize,
+  startLeftResize,
+} = useResizablePanes({
+  activeTab,
+  syncResultPaneLayout: (tabId) => syncResultPaneLayout(tabId),
+})
 
-const schedulePersistTabs = (snapshot) => {
-  if (persistTabsTimer) {
-    clearTimeout(persistTabsTimer)
-  }
-  persistTabsTimer = setTimeout(() => {
-    persistTabsTimer = null
-    persistTabsNow(snapshot)
-  }, 250)
-}
+// SQL 补全数据源（P2-2 F6）：共享目录缓存直接注入，loadTables/activateDatasource 惰性前向引用
+// 仅取组件实际使用的入口；其余补全函数仅在 getSqlCompletionContext 内部使用
+const {
+  getSchemaOptions,
+  getSqlCompletionContext,
+} = useSqlCompletion({
+  tabStates,
+  schemaStore,
+  tableStore,
+  columnStore,
+  loadTables: (...args) => loadTables(...args),
+  activateDatasource: (...args) => activateDatasource(...args),
+})
 
-const flushPersistTabs = () => {
-  if (persistTabsTimer) {
-    clearTimeout(persistTabsTimer)
-    persistTabsTimer = null
-  }
-  persistTabsNow(tabsPersistSnapshot.value)
-}
+// 标签页 URL 路由同步（P2-2 F8）：catalog 加载器与 openTableTab 惰性前向引用
+const {
+  syncRouteWithTab,
+  clearRouteTabQuery,
+  clearCreateQuery,
+  syncFromRoute,
+} = useTabRouting({
+  suppressRouteSync,
+  tabStates,
+  openTabs,
+  activeTab,
+  activeSource,
+  activeSchema,
+  tableStore,
+  loadSchemas: (...args) => loadSchemas(...args),
+  loadTables: (...args) => loadTables(...args),
+  openTableTab: (...args) => openTableTab(...args),
+})
 
-const restoreTabsFromStorage = () => {
-  let parsed = null
-  try {
-    const raw = localStorage.getItem(TAB_PERSIST_KEY)
-    if (!raw) return false
-    parsed = JSON.parse(raw)
-  } catch (error) {
-    console.warn('读取工作区 Tab 状态失败', error)
-    return false
-  }
+// 查询执行与历史（P2-2 F9）：执行、停止、结果集标准化、导出和历史分页从主组件抽离
+const {
+  historyData,
+  historyPager,
+  historyLoading,
+  buildDefaultSql,
+  clearQueryTimer,
+  stopNowTickerIfIdle,
+  getStatementStatusTagType,
+  isResultSetType,
+  getResultSetCountText,
+  getResultSetAlertType,
+  getDisplayResultSets,
+  handleSqlSelectionChange,
+  handleQuerySourceSelect,
+  handleQueryDatabaseSelect,
+  syncAutoSelectSqlIfSchemaMismatch,
+  executeQuery,
+  stopQuery,
+  getLiveDurationMs,
+  resetQuery,
+  exportResult,
+  fetchHistory,
+  applyHistory,
+  parseResultTabIndex,
+  getResultRowKeyPrefix,
+  getResultSetByIndex,
+} = useQueryExecution({
+  clusterId,
+  activeSource,
+  activeSchema,
+  schemaStore,
+  tabStates,
+  openTabs,
+  activeTab,
+  loadSchemas: (...args) => loadSchemas(...args),
+  loadTables: (...args) => loadTables(...args),
+  syncRouteWithTab: (...args) => syncRouteWithTab(...args),
+  disposeChart: (...args) => disposeChart(...args),
+  applyDefaultChartSelection: (...args) => applyDefaultChartSelection(...args),
+  syncResultPaneLayout: (...args) => syncResultPaneLayout(...args),
+})
 
-  if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.tabs)) return false
+// 结果图表（P2-2 F10）：ECharts 实例、DOM ref、默认选列、渲染和清理从主组件抽离
+const {
+  getNumericColumns,
+  applyDefaultChartSelection,
+  canRenderChart,
+  setChartRef,
+  syncResultPaneLayout,
+  disposeChart,
+} = useResultChart({
+  activeTab,
+  tabStates,
+  parseResultTabIndex,
+  getResultSetByIndex,
+})
 
-  isRestoringTabs.value = true
-  try {
-    const nextTabs = []
-    const existingKeys = Object.keys(tabStates)
-    existingKeys.forEach((key) => delete tabStates[key])
-
-    parsed.tabs.forEach((item) => {
-      const id = String(item?.id ?? '')
-      if (!id) return
-      const kind = item?.kind === 'query' ? 'query' : 'table'
-      const tabItem = {
-        id,
-        kind,
-        tableName: String(item?.tableName ?? ''),
-        dbName: String(item?.dbName ?? ''),
-        sourceId: String(item?.sourceId ?? ''),
-        sourceType: String(item?.sourceType ?? '')
-      }
-
-      const tablePayload =
-        kind === 'query'
-          ? { tableName: '', dbName: tabItem.dbName, sourceId: tabItem.sourceId, sourceType: tabItem.sourceType }
-          : { id: item?.tableId || undefined, tableName: tabItem.tableName, dbName: tabItem.dbName, sourceId: tabItem.sourceId, sourceType: tabItem.sourceType }
-
-      tabStates[id] = createTabState(tablePayload)
-      if (typeof item?.sql === 'string') {
-        tabStates[id].query.sql = item.sql
-      }
-      if (Number.isFinite(Number(item?.limit))) {
-        tabStates[id].query.limit = Number(item.limit)
-      }
-
-      nextTabs.push(tabItem)
-    })
-
-    openTabs.value = nextTabs
-
-    const active = String(parsed?.activeTab ?? '')
-    const activeExists = active && nextTabs.some((tab) => String(tab.id) === active)
-    activeTab.value = activeExists ? active : (nextTabs[0] ? String(nextTabs[0].id) : '')
-
-    const maxQueryIndex = nextTabs
-      .filter((tab) => tab.kind === 'query')
-      .map((tab) => {
-        const match = String(tab.tableName || '').match(/(\d+)$/)
-        return match ? Number(match[1]) : 0
-      })
-      .reduce((max, val) => (Number.isFinite(val) ? Math.max(max, val) : max), 0)
-    queryTabCounter.value = maxQueryIndex ? maxQueryIndex + 1 : 1
-
-    return true
-  } finally {
-    isRestoringTabs.value = false
-  }
-}
-
-watch(
-  tabsPersistSnapshot,
-  (snapshot) => {
-    if (isRestoringTabs.value) return
-    schedulePersistTabs(snapshot)
-  },
-  { deep: true }
-)
-
-	const tableRefs = ref({})
-	const chartRefs = ref({})
-	const chartInstances = new Map()
 	const taskDrawerRef = ref(null)
-	const tableObserver = ref(null)
-	const nowTick = ref(Date.now())
-	let nowTickHandle = null
-
-	const startNowTicker = () => {
-	  if (nowTickHandle) return
-	  nowTickHandle = setInterval(() => {
-	    nowTick.value = Date.now()
-	  }, 200)
-	}
-
-	const stopNowTickerIfIdle = () => {
-	  if (!nowTickHandle) return
-	  const hasCancelable = Object.values(tabStates).some((state) => !!state?.queryCancelable)
-	  if (hasCancelable) return
-	  clearInterval(nowTickHandle)
-	  nowTickHandle = null
-	}
 
 const layerOptions = [
   { label: 'ODS - 原始数据层', value: 'ODS' },
@@ -1473,706 +1396,6 @@ const layerOptions = [
   { label: 'DWS - 汇总数据层', value: 'DWS' },
   { label: 'ADS - 应用数据层', value: 'ADS' }
 ]
-const businessDomainOptions = ref([])
-
-	const clearQueryTimer = (tabId) => {
-	  const handle = queryTimerHandles.get(tabId)
-	  if (!handle) return
-	  clearInterval(handle)
-	  queryTimerHandles.delete(tabId)
-	}
-
-	const startQueryTimer = (tabId) => {
-	  clearQueryTimer(tabId)
-	  const state = tabStates[tabId]
-	  if (!state) return
-	  state.queryTiming.startedAt = Date.now()
-	  state.queryTiming.elapsedMs = 0
-	  startNowTicker()
-	  const handle = setInterval(() => {
-	    const current = tabStates[tabId]
-	    if (!current?.queryCancelable) {
-	      clearQueryTimer(tabId)
-	      stopNowTickerIfIdle()
-	      return
-	    }
-	    current.queryTiming.elapsedMs = Date.now() - current.queryTiming.startedAt
-	  }, 200)
-	  queryTimerHandles.set(tabId, handle)
-	}
-
-const loadClusters = async () => {
-  dbLoading.value = true
-  try {
-    const clusters = await dorisClusterApi.list()
-    dataSources.value = Array.isArray(clusters) ? clusters : []
-    if (!clusterId.value && dataSources.value.length) {
-      const defaultCluster =
-        dataSources.value.find((item) => item.isDefault === 1) || dataSources.value[0]
-      clusterId.value = defaultCluster?.id || null
-    }
-    if (!activeSource.value && dataSources.value.length) {
-      const defaultSource =
-        dataSources.value.find((item) => item.isDefault === 1) || dataSources.value[0]
-      activeSource.value = defaultSource?.id ? String(defaultSource.id) : ''
-      if (activeSource.value) {
-        const ok = await loadSchemas(activeSource.value)
-        if (ok) {
-          await nextTick()
-          await ensureCatalogPathExpanded(activeSource.value, activeSchema[String(activeSource.value)])
-        }
-      }
-    }
-  } catch (error) {
-    ElMessage.error('加载数据源失败')
-  } finally {
-    dbLoading.value = false
-  }
-}
-
-const loadBusinessDomains = async () => {
-  try {
-    const options = await businessDomainApi.list()
-    businessDomainOptions.value = Array.isArray(options) ? options : []
-  } catch (error) {
-    businessDomainOptions.value = []
-    console.error('加载业务域失败', error)
-  }
-}
-
-const loadMetaDataDomainOptions = async (tabId, businessDomain) => {
-  const state = tabStates[tabId]
-  if (!state) return
-  if (!businessDomain) {
-    state.metaDataDomainOptions = []
-    return
-  }
-  try {
-    const options = await dataDomainApi.list({ businessDomain })
-    state.metaDataDomainOptions = Array.isArray(options) ? options : []
-  } catch (error) {
-    state.metaDataDomainOptions = []
-    console.error('加载数据域失败', error)
-  }
-}
-
-const getMetaDataDomainOptions = (tabId) => {
-  const state = tabStates[tabId]
-  if (!state?.metaDataDomainOptions) return []
-  return state.metaDataDomainOptions
-}
-
-const handleMetaBusinessDomainChange = async (tabId) => {
-  const state = tabStates[tabId]
-  if (!state) return
-  state.metaForm.dataDomain = ''
-  await loadMetaDataDomainOptions(tabId, state.metaForm.businessDomain)
-}
-
-const getDatasourceById = (sourceId) => {
-  const id = String(sourceId || '')
-  const list = Array.isArray(dataSources.value) ? dataSources.value : []
-  return list.find((item) => String(item.id) === id) || null
-}
-
-const activateDatasource = async (sourceId) => {
-  if (!sourceId) return false
-  const key = String(sourceId)
-  const source = getDatasourceById(key)
-  if (source?.status && source.status !== 'active') {
-    ElMessage.warning('数据源已停用')
-    return false
-  }
-  if (activatedSources[key]) return true
-  if (datasourceActivationTasks.has(key)) {
-    return datasourceActivationTasks.get(key)
-  }
-
-  const task = (async () => {
-    try {
-      await dorisClusterApi.testConnection(sourceId)
-      activatedSources[key] = true
-      return true
-    } catch (error) {
-      activatedSources[key] = false
-      ElMessage.error('数据源连接失败')
-      return false
-    } finally {
-      datasourceActivationTasks.delete(key)
-    }
-  })()
-
-  datasourceActivationTasks.set(key, task)
-  return task
-}
-
-const toSafeCount = (value) => {
-  const num = Number(value)
-  if (!Number.isFinite(num) || num <= 0) return 0
-  return Math.floor(num)
-}
-
-const normalizeSchemaCounts = (item) => {
-  const tableCount = toSafeCount(item?.tableCount)
-  const viewCount = toSafeCount(item?.viewCount)
-  const totalFromPayload = toSafeCount(item?.totalCount)
-  const totalCount = totalFromPayload || tableCount + viewCount
-  return { tableCount, viewCount, totalCount }
-}
-
-const normalizeKeyword = (keyword) => String(keyword || '').trim()
-
-const getSchemaCountSnapshot = (sourceId, schemaName) => {
-  const sourceKey = String(sourceId || '')
-  if (!sourceKey || !schemaName) return EMPTY_SCHEMA_COUNTS
-  return schemaCountStore[sourceKey]?.[schemaName] || EMPTY_SCHEMA_COUNTS
-}
-
-const isSchemaTablesLoaded = (sourceId, database) => {
-  const sourceKey = String(sourceId || '')
-  return Array.isArray(tableStore[sourceKey]?.[database])
-}
-
-const loadSchemaCounts = async (sourceId, keyword = searchKeyword.value, force = false) => {
-  if (!sourceId) return false
-  const sourceKey = String(sourceId)
-  const normalizedKeyword = normalizeKeyword(keyword)
-  if (!force && schemaCountStore[sourceKey] && schemaCountKeyword[sourceKey] === normalizedKeyword) {
-    return true
-  }
-
-  const requestSeq = (schemaCountRequestSeq[sourceKey] || 0) + 1
-  schemaCountRequestSeq[sourceKey] = requestSeq
-  schemaCountLoading[sourceKey] = true
-  try {
-    const params = {}
-    if (normalizedKeyword) {
-      params.keyword = normalizedKeyword
-    }
-    const counts = await dorisClusterApi.getSchemaObjectCounts(sourceId, params)
-    if (schemaCountRequestSeq[sourceKey] !== requestSeq) {
-      return false
-    }
-    const normalizedStore = {}
-    ;(Array.isArray(counts) ? counts : []).forEach((item) => {
-      const schemaName = String(item?.schemaName || '')
-      if (!schemaName) return
-      normalizedStore[schemaName] = normalizeSchemaCounts(item)
-    })
-    schemaCountStore[sourceKey] = normalizedStore
-    schemaCountKeyword[sourceKey] = normalizedKeyword
-    return true
-  } catch (error) {
-    if (schemaCountRequestSeq[sourceKey] === requestSeq && !schemaCountStore[sourceKey]) {
-      schemaCountStore[sourceKey] = {}
-    }
-    console.error('加载 schema 计数失败', error)
-    return false
-  } finally {
-    if (schemaCountRequestSeq[sourceKey] === requestSeq) {
-      schemaCountLoading[sourceKey] = false
-    }
-  }
-}
-
-const loadSchemas = async (sourceId, force = false) => {
-  if (!sourceId) return false
-  const key = String(sourceId)
-  if (schemaStore[key] && !force) {
-    activatedSources[key] = true
-    await loadSchemaCounts(sourceId, searchKeyword.value)
-    return true
-  }
-  schemaLoading[key] = true
-  try {
-    const activated = await activateDatasource(sourceId)
-    if (!activated) return false
-    const schemas = await dorisClusterApi.getDatabases(sourceId)
-    schemaStore[key] = Array.isArray(schemas) ? schemas : []
-    activatedSources[key] = true
-    refreshDatasourceChildrenInTree(sourceId)
-    await loadSchemaCounts(sourceId, searchKeyword.value, true)
-    if (!activeSchema[key] && schemaStore[key].length) {
-      activeSchema[key] = schemaStore[key][0]
-    }
-    return true
-  } catch (error) {
-    ElMessage.error('加载数据库列表失败')
-    return false
-  } finally {
-    schemaLoading[key] = false
-  }
-}
-
-const loadTables = async (sourceId, database, force = false, refreshTree = true) => {
-  if (!sourceId || !database) return false
-  const sourceKey = String(sourceId)
-  const sourceType = String(getDatasourceById(sourceKey)?.sourceType || '').toUpperCase()
-  tableStore[sourceKey] = tableStore[sourceKey] || {}
-  if (tableStore[sourceKey][database] && !force) return true
-  const loadingKey = `${sourceKey}::${database}`
-  tableLoading[loadingKey] = true
-  try {
-    const activated = await activateDatasource(sourceId)
-    if (!activated) return false
-    const [tables, metaTables] = await Promise.all([
-      dorisClusterApi.getTables(sourceId, database),
-      tableApi.listByDatabase(database, sortField.value, sortOrder.value, sourceId).catch(() => [])
-    ])
-    const metaList = Array.isArray(metaTables) ? metaTables : []
-    const metaMap = new Map(metaList.map((item) => [item.tableName, item]))
-    const list = (Array.isArray(tables) ? tables : []).map((item) => {
-      const tableName = item.tableName || item.TABLE_NAME || ''
-      const meta = metaMap.get(tableName)
-      const base = {
-        ...item,
-        sourceId: sourceKey,
-        sourceType,
-        dbName: database,
-        tableName,
-        tableType: item.tableType || item.TABLE_TYPE || '',
-        tableComment: item.tableComment || item.TABLE_COMMENT || '',
-        rowCount: item.tableRows ?? item.table_rows ?? item.rowCount,
-        storageSize: item.dataLength ?? item.data_length ?? item.storageSize,
-        createdAt: item.createTime || item.CREATE_TIME || item.createdAt || meta?.dorisCreateTime || meta?.createdAt,
-        dorisCreateTime: item.createTime || item.CREATE_TIME || meta?.dorisCreateTime || null,
-        dorisUpdateTime: item.updateTime || item.UPDATE_TIME || meta?.dorisUpdateTime || null
-      }
-      if (!meta) {
-        return {
-          ...base,
-          id: undefined,
-          metadataMissing: true,
-          metadataStatus: 'missing'
-        }
-      }
-      return {
-        ...meta,
-        ...base,
-        id: meta.id,
-        tableComment: base.tableComment || meta.tableComment,
-        metadataMissing: false,
-        metadataStatus: 'synced'
-      }
-    })
-    tableStore[sourceKey][database] = list
-    if (refreshTree) {
-      refreshSchemaChildrenInTree(sourceId, database)
-      refreshObjectGroupChildrenInTree(sourceId, database, 'table')
-      refreshObjectGroupChildrenInTree(sourceId, database, 'view')
-    }
-    return true
-  } catch (error) {
-    ElMessage.error('加载表列表失败')
-    return false
-  } finally {
-    tableLoading[loadingKey] = false
-  }
-}
-
-const handleSourceChange = async (sourceId) => {
-  if (!sourceId) return
-  await loadSchemas(sourceId)
-}
-
-const handleSchemaChange = async (sourceId, database) => {
-  if (!sourceId || !database) return
-  await loadTables(sourceId, database)
-}
-
-const getFilteredTables = (sourceId, database) => {
-  const sourceKey = String(sourceId || '')
-  const list = tableStore[sourceKey]?.[database] || []
-  if (!searchKeyword.value) return list
-  const keyword = searchKeyword.value.toLowerCase()
-  return list.filter((item) => {
-    return (
-      item.tableName?.toLowerCase().includes(keyword) ||
-      item.tableComment?.toLowerCase().includes(keyword)
-    )
-  })
-}
-
-const getDisplayedTables = (sourceId, database) => {
-  const list = [...getFilteredTables(sourceId, database)]
-  const field = sortField.value
-  const order = sortOrder.value
-  list.sort((a, b) => {
-    const aVal = a[field]
-    const bVal = b[field]
-    if (aVal == null && bVal == null) return 0
-    if (aVal == null) return order === 'asc' ? -1 : 1
-    if (bVal == null) return order === 'asc' ? 1 : -1
-    if (typeof aVal === 'number' && typeof bVal === 'number') {
-      return order === 'asc' ? aVal - bVal : bVal - aVal
-    }
-    return order === 'asc'
-      ? String(aVal).localeCompare(String(bVal))
-      : String(bVal).localeCompare(String(aVal))
-  })
-  return list
-}
-
-const getTableCount = (sourceId, database) => {
-  if (isSchemaTablesLoaded(sourceId, database)) {
-    return getFilteredTables(sourceId, database).length
-  }
-  return getSchemaCountSnapshot(sourceId, database).totalCount
-}
-
-const getTableCountByType = (sourceId, database, objectType) => {
-  if (isSchemaTablesLoaded(sourceId, database)) {
-    return getFilteredTables(sourceId, database).filter((item) =>
-      objectType === 'view' ? isViewTable(item) : !isViewTable(item)
-    ).length
-  }
-  const snapshot = getSchemaCountSnapshot(sourceId, database)
-  return objectType === 'view' ? snapshot.viewCount : snapshot.tableCount
-}
-
-const setTableRef = (key, el, tableId) => {
-  if (!key || !el) return
-  tableRefs.value[key] = el
-  if (tableId) {
-    el.dataset.tableId = String(tableId)
-  }
-  if (tableObserver.value) {
-    tableObserver.value.observe(el)
-  }
-}
-
-const setLeftPaneRef = (key, el) => {
-  if (!key || !el) return
-  leftPaneRefs.value[key] = el
-}
-
-const getLeftPaneStyle = (key) => {
-  const height = leftPaneHeights[key]
-  if (!height) return {}
-  return { '--left-top': `${height}px` }
-}
-
-const getTableKey = (table, fallbackDb = '', fallbackSource = '') => {
-  if (!table) return ''
-  const sourceId = table.sourceId || table.clusterId || fallbackSource || ''
-  const dbName = table.dbName || table.databaseName || table.database || fallbackDb || ''
-  const tableName = table.tableName || ''
-  const core = dbName && tableName ? `${dbName}.${tableName}` : tableName || dbName
-  return sourceId ? `${sourceId}::${core}` : core
-}
-
-const findCachedTableById = (tableId) => {
-  const targetId = String(tableId || '')
-  if (!targetId) return null
-  for (const sourceId of Object.keys(tableStore)) {
-    const dbMap = tableStore[sourceId]
-    if (!dbMap || typeof dbMap !== 'object') continue
-    for (const dbName of Object.keys(dbMap)) {
-      const list = Array.isArray(dbMap[dbName]) ? dbMap[dbName] : []
-      const found = list.find((item) => item && String(item.id) === targetId)
-      if (!found) continue
-      return {
-        ...found,
-        sourceId: String(found.sourceId || found.clusterId || sourceId),
-        dbName: found.dbName || dbName
-      }
-    }
-  }
-  return null
-}
-
-const buildSchemaNode = (sourceId, schemaName) => ({
-  nodeKey: getSchemaNodeKey(sourceId, schemaName),
-  type: 'schema',
-  name: schemaName,
-  sourceId: String(sourceId),
-  schemaName,
-  leaf: false
-})
-
-const buildObjectGroupNode = (sourceId, schemaName, objectType) => ({
-  nodeKey: getObjectGroupNodeKey(sourceId, schemaName, objectType),
-  type: 'object_group',
-  objectType,
-  name: objectType === 'view' ? '视图' : '表',
-  sourceId: String(sourceId),
-  schemaName,
-  leaf: false
-})
-
-const isDatasourceIconInactive = (nodeData) => {
-  if (!nodeData || nodeData.type !== 'datasource') return false
-  if (nodeData.status && nodeData.status !== 'active') return true
-  return !activatedSources[String(nodeData.sourceId)]
-}
-
-const getDatasourceIconUrl = (sourceType) => {
-  const type = String(sourceType || '').toUpperCase()
-  if (type === 'MYSQL') return '/datasource-icons/mysql.svg'
-  if (type === 'DORIS') return '/datasource-icons/doris.svg'
-  return ''
-}
-
-const normalizeTableType = (tableType) => {
-  const normalized = String(tableType || '').trim().toUpperCase()
-  return normalized || 'BASE TABLE'
-}
-
-const isViewTableType = (tableType) => normalizeTableType(tableType).includes('VIEW')
-
-const isViewTable = (table) => isViewTableType(table?.tableType)
-
-const buildTableNode = (table, sourceId, schemaName) => {
-  const key = getTableKey(table, schemaName, sourceId)
-  return {
-    nodeKey: key || `table:${String(sourceId)}::${schemaName}.${table?.tableName || ''}`,
-    type: 'table',
-    name: table?.tableName || '',
-    sourceId: String(sourceId),
-    schemaName,
-    table,
-    objectType: isViewTable(table) ? 'view' : 'table',
-    leaf: true
-  }
-}
-
-const parseTimeValue = (value) => {
-  if (!value) return 0
-  if (typeof value === 'number') return value
-  const text = String(value)
-  const parsed = Date.parse(text)
-  if (!Number.isNaN(parsed)) return parsed
-  const fallback = Date.parse(text.replace(' ', 'T'))
-  return Number.isNaN(fallback) ? 0 : fallback
-}
-
-const getTableSortValue = (table) => {
-  const field = sortField.value
-  if (field === 'rowCount') return getTableRowCount(table)
-  if (field === 'storageSize') return getTableStorageSize(table)
-  if (field === 'dorisUpdateTime') {
-    return parseTimeValue(table?.dorisUpdateTime)
-  }
-  if (field === 'createdAt') {
-    return parseTimeValue(table?.dorisCreateTime ?? table?.createTime ?? table?.CREATE_TIME ?? table?.createdAt)
-  }
-  return String(table?.tableName || '').toLowerCase()
-}
-
-const getSortedTablesForTree = (sourceId, database, objectType = 'all') => {
-  const sourceKey = String(sourceId || '')
-  let list = [...(tableStore[sourceKey]?.[database] || [])]
-  if (objectType === 'view') {
-    list = list.filter((item) => isViewTable(item))
-  } else if (objectType === 'table') {
-    list = list.filter((item) => !isViewTable(item))
-  }
-  const order = sortOrder.value
-  list.sort((a, b) => {
-    const aVal = getTableSortValue(a)
-    const bVal = getTableSortValue(b)
-    if (aVal === bVal) return 0
-    if (order === 'asc') return aVal > bVal ? 1 : -1
-    return aVal < bVal ? 1 : -1
-  })
-  return list
-}
-
-const buildSchemaChildren = (sourceId, database) => ([
-  buildObjectGroupNode(sourceId, database, 'table'),
-  buildObjectGroupNode(sourceId, database, 'view')
-])
-
-const buildTableChildren = (sourceId, database, objectType = 'all') =>
-  getSortedTablesForTree(sourceId, database, objectType).map((table) => buildTableNode(table, sourceId, database))
-
-const refreshDatasourceChildrenInTree = (sourceId) => {
-  const tree = catalogTreeRef.value
-  if (!tree || !sourceId) return
-  const key = getDatasourceNodeKey(sourceId)
-  const node = tree.getNode(key)
-  if (!node?.loaded) return
-  const schemas = schemaStore[String(sourceId)] || []
-  tree.updateKeyChildren(key, schemas.map((schemaName) => buildSchemaNode(sourceId, schemaName)))
-  nextTick(() => tree.filter(searchKeyword.value))
-}
-
-const refreshSchemaChildrenInTree = (sourceId, database) => {
-  const tree = catalogTreeRef.value
-  if (!tree || !sourceId || !database) return
-  const key = getSchemaNodeKey(sourceId, database)
-  const node = tree.getNode(key)
-  if (!node?.loaded) return
-  tree.updateKeyChildren(key, buildSchemaChildren(sourceId, database))
-  nextTick(() => tree.filter(searchKeyword.value))
-}
-
-const refreshObjectGroupChildrenInTree = (sourceId, database, objectType) => {
-  const tree = catalogTreeRef.value
-  if (!tree || !sourceId || !database || !objectType) return
-  const key = getObjectGroupNodeKey(sourceId, database, objectType)
-  const node = tree.getNode(key)
-  if (!node?.loaded) return
-  tree.updateKeyChildren(key, buildTableChildren(sourceId, database, objectType))
-  nextTick(() => tree.filter(searchKeyword.value))
-}
-
-const refreshLoadedSchemaNodesInTree = () => {
-  Object.keys(tableStore).forEach((sourceId) => {
-    const dbMap = tableStore[sourceId]
-    if (!dbMap || typeof dbMap !== 'object') return
-    Object.keys(dbMap).forEach((schemaName) => {
-      refreshSchemaChildrenInTree(sourceId, schemaName)
-      refreshObjectGroupChildrenInTree(sourceId, schemaName, 'table')
-      refreshObjectGroupChildrenInTree(sourceId, schemaName, 'view')
-    })
-  })
-}
-
-const reloadSchemaCountsForLoadedDatasources = async (keyword) => {
-  const tree = catalogTreeRef.value
-  if (!tree) return
-  const loadedSources = dataSources.value
-    .map((item) => String(item.id))
-    .filter((sourceId) => tree.getNode(getDatasourceNodeKey(sourceId))?.loaded)
-  if (!loadedSources.length) return
-  await Promise.allSettled(
-    loadedSources.map((sourceId) => loadSchemaCounts(sourceId, keyword, true))
-  )
-}
-
-const filterCatalogNode = (value, data) => {
-  if (!value) return true
-  const keyword = String(value).toLowerCase()
-  if (data?.type === 'datasource') {
-    const nameMatched = String(data?.name || '').toLowerCase().includes(keyword)
-    if (nameMatched) return true
-    const schemas = schemaStore[String(data.sourceId)] || []
-    return schemas.some((schemaName) => getTableCount(data.sourceId, schemaName) > 0)
-  }
-  if (data?.type === 'schema') {
-    const nameMatched = String(data?.name || '').toLowerCase().includes(keyword)
-    if (nameMatched) return true
-    return getTableCount(data.sourceId, data.schemaName) > 0
-  }
-  if (data?.type === 'object_group') {
-    const nameMatched = String(data?.name || '').toLowerCase().includes(keyword)
-    if (nameMatched) return true
-    return getTableCountByType(data.sourceId, data.schemaName, data.objectType) > 0
-  }
-  if (data?.type === 'table') {
-    const name = String(data.table?.tableName || data.name || '').toLowerCase()
-    const comment = String(data.table?.tableComment || '').toLowerCase()
-    return name.includes(keyword) || comment.includes(keyword)
-  }
-  return String(data?.name || '').toLowerCase().includes(keyword)
-}
-
-const loadCatalogNode = async (node, resolve, reject) => {
-  const data = node?.data
-  if (!data?.type) {
-    resolve([])
-    return
-  }
-
-  if (data.type === 'datasource') {
-    const ok = await loadSchemas(data.sourceId)
-    if (!ok) {
-      reject?.()
-      return
-    }
-    const schemas = schemaStore[String(data.sourceId)] || []
-    resolve(schemas.map((schemaName) => buildSchemaNode(data.sourceId, schemaName)))
-    nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
-    return
-  }
-
-  if (data.type === 'schema') {
-    resolve(buildSchemaChildren(data.sourceId, data.schemaName))
-    nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
-    return
-  }
-
-  if (data.type === 'object_group') {
-    // Keep current expand transition stable: do not rebuild schema/group nodes
-    // while this group is being lazily expanded.
-    const ok = await loadTables(data.sourceId, data.schemaName, false, false)
-    if (!ok) {
-      reject?.()
-      return
-    }
-    resolve(buildTableChildren(data.sourceId, data.schemaName, data.objectType))
-    nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
-    return
-  }
-
-  resolve([])
-}
-
-const isExpandIconClick = (event) => {
-  const target = event?.target
-  if (!target || typeof target.closest !== 'function') return false
-  return Boolean(target.closest('.el-tree-node__expand-icon'))
-}
-
-const handleCatalogNodeClick = async (data, _node, _component, event) => {
-  if (!data) return
-  if (isExpandIconClick(event)) return
-  const currentTab = activeTab.value
-    ? openTabs.value.find((item) => String(item.id) === String(activeTab.value))
-    : null
-
-  if (currentTab?.kind === 'query') {
-    if (data.type === 'datasource') {
-      await handleQuerySourceSelect(currentTab.id, data.sourceId)
-      return
-    }
-    if (data.type === 'schema') {
-      await handleQuerySourceSelect(currentTab.id, data.sourceId)
-      await handleQueryDatabaseSelect(currentTab.id, data.schemaName)
-      return
-    }
-    if (data.type === 'object_group') {
-      await handleQuerySourceSelect(currentTab.id, data.sourceId)
-      await handleQueryDatabaseSelect(currentTab.id, data.schemaName)
-      return
-    }
-  }
-  if (data.type === 'table') {
-    openTableTab(data.table, data.schemaName, data.sourceId)
-    return
-  }
-}
-
-const expandCatalogNode = (key) => {
-  return new Promise((resolve) => {
-    const tree = catalogTreeRef.value
-    if (!tree || !key) {
-      resolve(false)
-      return
-    }
-    const node = tree.getNode(key)
-    if (!node) {
-      resolve(false)
-      return
-    }
-    if (node.expanded) {
-      resolve(true)
-      return
-    }
-    node.expand(() => resolve(true), true)
-  })
-}
-
-const ensureCatalogPathExpanded = async (sourceId, schemaName) => {
-  if (!catalogTreeRef.value || !sourceId) return
-  await expandCatalogNode(getDatasourceNodeKey(sourceId))
-  await nextTick()
-  if (schemaName) {
-    await expandCatalogNode(getSchemaNodeKey(sourceId, schemaName))
-    await nextTick()
-  }
-}
 
 const getSourceName = (sourceId) => {
   if (!sourceId) return ''
@@ -2201,39 +1424,10 @@ const getLayerType = (layer) => {
   return map[layer] || 'info'
 }
 
-const formatNumber = (num) => {
-  if (num === null || num === undefined) return '-'
-  const value = Number(num)
-  if (Number.isNaN(value)) return num
-  return value.toLocaleString('zh-CN')
-}
-
-const formatRowCount = (rowCount) => {
-  if (rowCount === null || rowCount === undefined) return '-'
-  if (rowCount === 0) return '0'
-  if (rowCount < 1000) return rowCount.toString()
-  if (rowCount < 1000000) return (rowCount / 1000).toFixed(1) + 'K'
-  if (rowCount < 1000000000) return (rowCount / 1000000).toFixed(1) + 'M'
-  return (rowCount / 1000000000).toFixed(1) + 'B'
-}
-
-const ensureClusterSelected = (table) => {
-  if (isDorisTable(table) && !clusterId.value) {
-    ElMessage.warning('请选择 Doris 集群')
-    return false
-  }
-  return true
-}
-
 const isReplicaWarning = (value) => {
   if (value === null || value === undefined || value === '') return false
   const num = Number(value)
   return Number.isFinite(num) && num > 0 && num < 3
-}
-
-const isAggregateTable = (table) => {
-  if (!table?.tableModel) return false
-  return String(table.tableModel).toUpperCase() === 'AGGREGATE'
 }
 
 const hasText = (value) => value !== null && value !== undefined && String(value).trim() !== ''
@@ -2285,244 +1479,35 @@ const warnPlatformMetadataMissing = (table) => {
   return true
 }
 
-const formatStorageSize = (size) => {
-  if (size === null || size === undefined) return '-'
-  if (size === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-  let value = size
-  let unitIndex = 0
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024
-    unitIndex++
-  }
-  return value >= 10 ? `${value.toFixed(0)} ${units[unitIndex]}` : `${value.toFixed(1)} ${units[unitIndex]}`
-}
-
-const formatDuration = (ms) => {
-  if (!ms) return '0ms'
-  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(2)}s`
-}
-
-const formatDateTime = (value) => {
-  if (!value) return '-'
-  return String(value).replace('T', ' ').split('.')[0]
-}
-
-const INFO_TAB_NAME = 'info'
-const RESULT_TYPE_RESULT_SET = 'RESULT_SET'
-const RESULT_TYPE_UPDATE_COUNT = 'UPDATE_COUNT'
-
-const EMPTY_RESULT_SET = Object.freeze({
-  index: 1,
-  statementIndex: 1,
-  status: 'SUCCESS',
-  resultType: RESULT_TYPE_RESULT_SET,
-  affectedRows: null,
-  message: '',
-  sqlSnippet: '',
-  durationMs: 0,
-  columns: [],
-  rows: [],
-  hasMore: false,
-  previewRowCount: 0
+// 表元数据与字段编辑（P2-2 F10b）：保存、取消回滚、字段草稿和业务域加载从主组件抽离
+const {
+  businessDomainOptions,
+  loadBusinessDomains,
+  loadMetaDataDomainOptions,
+  getMetaDataDomainOptions,
+  handleMetaBusinessDomainChange,
+  getFieldRows,
+  startMetaEdit,
+  cancelMetaEdit,
+  saveMetaEdit,
+  startFieldsEdit,
+  cancelFieldsEdit,
+  saveFieldsEdit,
+  addField,
+  removeField,
+} = useTableMetaEditing({
+  clusterId,
+  tabStates,
+  openTabs,
+  activeTab,
+  selectedTableKey,
+  tableRefs,
+  tableStore,
+  getTableKey,
+  isDorisTable,
+  isAggregateTable,
+  warnPlatformMetadataMissing,
 })
-
-const splitSqlStatements = (sqlText) => {
-  const text = String(sqlText || '')
-  const statements = []
-  let current = ''
-  let inSingle = false
-  let inDouble = false
-  let inLineComment = false
-  let inHashComment = false
-  let inBlockComment = false
-
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i]
-    const next = text[i + 1] || ''
-
-    if (inLineComment) {
-      current += ch
-      if (ch === '\n' || ch === '\r') inLineComment = false
-      continue
-    }
-    if (inHashComment) {
-      current += ch
-      if (ch === '\n' || ch === '\r') inHashComment = false
-      continue
-    }
-    if (inBlockComment) {
-      current += ch
-      if (ch === '*' && next === '/') {
-        current += next
-        inBlockComment = false
-        i += 1
-      }
-      continue
-    }
-    if (inSingle) {
-      current += ch
-      if (ch === '\'' && next === '\'') {
-        current += next
-        i += 1
-        continue
-      }
-      if (ch === '\'') inSingle = false
-      continue
-    }
-    if (inDouble) {
-      current += ch
-      if (ch === '"' && next === '"') {
-        current += next
-        i += 1
-        continue
-      }
-      if (ch === '"') inDouble = false
-      continue
-    }
-
-    if (ch === '-' && next === '-') {
-      inLineComment = true
-      current += ch + next
-      i += 1
-      continue
-    }
-    if (ch === '#') {
-      inHashComment = true
-      current += ch
-      continue
-    }
-    if (ch === '/' && next === '*') {
-      inBlockComment = true
-      current += ch + next
-      i += 1
-      continue
-    }
-    if (ch === '\'') {
-      inSingle = true
-      current += ch
-      continue
-    }
-    if (ch === '"') {
-      inDouble = true
-      current += ch
-      continue
-    }
-
-    if (ch === ';') {
-      const stmt = current.trim()
-      if (stmt) statements.push(stmt)
-      current = ''
-      continue
-    }
-    current += ch
-  }
-
-  const tail = current.trim()
-  if (tail) statements.push(tail)
-  return statements
-}
-
-const buildRunningStatementInfos = (sqlText) => {
-  const statements = splitSqlStatements(sqlText)
-  return statements.map((statement, idx) => ({
-    statementIndex: idx + 1,
-    status: idx === 0 ? 'RUNNING' : 'PENDING',
-    durationMs: 0,
-    sqlSnippet: abbreviateSql(statement),
-    resultInfo: idx === 0 ? '正在执行' : '等待执行'
-  }))
-}
-
-const buildStatementInfosFromResultSets = (resultSets) => {
-  const sets = Array.isArray(resultSets) ? resultSets : []
-  return sets.map((set, idx) => {
-    const status = String(set?.status || (set?.resultType === 'ERROR' ? 'ERROR' : 'SUCCESS')).toUpperCase()
-    let resultInfo = set?.message || ''
-    if (!resultInfo) {
-      if (String(set?.resultType || '') === RESULT_TYPE_UPDATE_COUNT) {
-        const affected = set?.affectedRows
-        resultInfo = affected === null || affected === undefined ? '语句执行成功' : `影响 ${affected} 行`
-      } else {
-        const rows = Array.isArray(set?.rows) ? set.rows.length : 0
-        resultInfo = `返回 ${rows} 行`
-      }
-    }
-    return {
-      statementIndex: Number(set?.statementIndex || idx + 1),
-      status,
-      durationMs: Number(set?.durationMs || 0),
-      sqlSnippet: set?.sqlSnippet || '',
-      resultInfo
-    }
-  })
-}
-
-const getStatementStatusTagType = (status) => {
-  const value = String(status || '').toUpperCase()
-  if (value === 'SUCCESS') return 'success'
-  if (value === 'RUNNING') return 'info'
-  if (value === 'BLOCKED' || value === 'ERROR') return 'danger'
-  if (value === 'SKIPPED') return 'warning'
-  return 'info'
-}
-
-const abbreviateSql = (sqlText) => {
-  const text = String(sqlText || '').replace(/\s+/g, ' ').trim()
-  if (!text) return ''
-  return text.length > 180 ? `${text.slice(0, 180)}...` : text
-}
-
-const isResultSetType = (resultSet) => String(resultSet?.resultType || RESULT_TYPE_RESULT_SET) === RESULT_TYPE_RESULT_SET
-
-const getResultSetCountText = (resultSet) => {
-  const type = String(resultSet?.resultType || RESULT_TYPE_RESULT_SET)
-  if (type === RESULT_TYPE_UPDATE_COUNT) {
-    const affected = resultSet?.affectedRows
-    return affected === null || affected === undefined ? '影响行数未知' : `影响 ${affected} 行`
-  }
-  return `${(resultSet?.rows || []).length} 行`
-}
-
-const getResultSetAlertType = (resultSet) => {
-  const status = String(resultSet?.status || '').toUpperCase()
-  if (status === 'ERROR' || status === 'BLOCKED') return 'error'
-  if (status === 'SKIPPED') return 'warning'
-  return 'success'
-}
-
-const getDisplayResultSets = (tabId) => {
-  const state = tabStates[tabId]
-  const sets = Array.isArray(state?.queryResult?.resultSets) ? state.queryResult.resultSets : []
-  return sets.length ? sets : [EMPTY_RESULT_SET]
-}
-
-const getTableRowCount = (table) => {
-  if (!table) return 0
-  const value = table.rowCount ?? table.tableRows ?? table.table_rows
-  if (value === null || value === undefined) return 0
-  return Number(value) || 0
-}
-
-const getTableStorageSize = (table) => {
-  if (!table) return 0
-  const value = table.storageSize ?? table.dataLength ?? table.data_length
-  if (value === null || value === undefined) return 0
-  return Number(value) || 0
-}
-
-const getProgressWidth = (sourceId, database, table) => {
-  const sourceKey = String(sourceId || '')
-  const list = tableStore[sourceKey]?.[database] || []
-  if (!list.length) return '0%'
-  const currentRowCount = getTableRowCount(table)
-  const maxRowCount = Math.max(...list.map((item) => getTableRowCount(item)))
-  if (!Number.isFinite(maxRowCount) || maxRowCount <= 0) {
-    return '0%'
-  }
-  const percentage = Math.max(10, (currentRowCount / maxRowCount) * 100)
-  return percentage.toFixed(1) + '%'
-}
 
 const getUpstreamCount = (tableId) => {
   if (!tableId) return 0
@@ -2532,12 +1517,6 @@ const getUpstreamCount = (tableId) => {
 const getDownstreamCount = (tableId) => {
   if (!tableId) return 0
   return lineageCache[tableId]?.downstreamTables?.length || 0
-}
-
-const getFieldRows = (tabId) => {
-  const state = tabStates[tabId]
-  if (!state) return []
-  return state.fieldsEditing ? state.fieldsDraft : state.fields
 }
 
 const loadLineageForTable = async (tableId) => {
@@ -2765,196 +1744,6 @@ const openTableTab = async (table, dbFallback = '', sourceFallback = '') => {
 
   await focusTableInSidebar(payload, key, resolvedDb, sourceId)
   await loadTabData(key)
-}
-
-const refreshCatalog = async () => {
-  if (dbLoading.value) return
-  dbLoading.value = true
-  try {
-    const clusters = await dorisClusterApi.list()
-    dataSources.value = Array.isArray(clusters) ? clusters : []
-    const ids = new Set(dataSources.value.map((item) => String(item.id)))
-    if (clusterId.value && !ids.has(String(clusterId.value))) {
-      const fallback =
-        dataSources.value.find((item) => item.isDefault === 1) || dataSources.value[0] || null
-      clusterId.value = fallback?.id || null
-    }
-    if (activeSource.value && !ids.has(String(activeSource.value))) {
-      const fallback =
-        dataSources.value.find((item) => item.isDefault === 1) || dataSources.value[0] || null
-      activeSource.value = fallback?.id ? String(fallback.id) : ''
-    }
-    await nextTick()
-    const tree = catalogTreeRef.value
-    if (!tree) return
-    const loadedSources = dataSources.value
-      .map((item) => String(item.id))
-      .filter((sourceId) => tree.getNode(getDatasourceNodeKey(sourceId))?.loaded)
-
-    for (const sourceId of loadedSources) {
-      const ok = await loadSchemas(sourceId, true)
-      if (!ok) continue
-      const schemas = schemaStore[String(sourceId)] || []
-      for (const schemaName of schemas) {
-        const tableGroupLoaded = tree.getNode(getObjectGroupNodeKey(sourceId, schemaName, 'table'))?.loaded
-        const viewGroupLoaded = tree.getNode(getObjectGroupNodeKey(sourceId, schemaName, 'view'))?.loaded
-        if (tableGroupLoaded || viewGroupLoaded) {
-          await loadTables(sourceId, schemaName, true)
-        }
-      }
-    }
-  } catch (error) {
-    ElMessage.error('刷新目录失败')
-  } finally {
-    dbLoading.value = false
-  }
-}
-
-const refreshDatasourceNode = async (nodeData) => {
-  const sourceId = nodeData?.sourceId
-  if (!sourceId) return
-  if (dbLoading.value || schemaLoading[String(sourceId)]) return
-  await loadSchemas(sourceId, true)
-}
-
-const refreshSchemaNode = async (nodeData) => {
-  const sourceId = nodeData?.sourceId
-  const schemaName = nodeData?.schemaName
-  if (!sourceId || !schemaName) return
-  const key = `${String(sourceId)}::${schemaName}`
-  if (dbLoading.value || schemaCountLoading[String(sourceId)] || tableLoading[key]) return
-  await loadSchemaCounts(sourceId, searchKeyword.value, true)
-  if (isSchemaTablesLoaded(sourceId, schemaName)) {
-    await loadTables(sourceId, schemaName, true)
-  } else {
-    nextTick(() => catalogTreeRef.value?.filter(searchKeyword.value))
-  }
-}
-
-const focusTableInSidebar = async (table, key, dbFallback = '', sourceFallback = '') => {
-  if (!table) return
-  const sourceId = table.sourceId || table.clusterId || sourceFallback
-  const dbName = table.dbName || table.databaseName || table.database || dbFallback
-  if (sourceId) {
-    activeSource.value = String(sourceId)
-    await loadSchemas(sourceId)
-  }
-  if (sourceId && dbName) {
-    activeSchema[String(sourceId)] = dbName
-  }
-  await nextTick()
-  await ensureCatalogPathExpanded(sourceId, dbName)
-  if (sourceId && dbName) {
-    await loadTables(sourceId, dbName)
-    const objectType = isViewTable(table) ? 'view' : 'table'
-    await expandCatalogNode(getObjectGroupNodeKey(sourceId, dbName, objectType))
-    await nextTick()
-    if (!catalogTreeRef.value?.getNode(key)) {
-      const fallbackType = objectType === 'view' ? 'table' : 'view'
-      await expandCatalogNode(getObjectGroupNodeKey(sourceId, dbName, fallbackType))
-    }
-  }
-  catalogTreeRef.value?.setCurrentKey(key)
-  await nextTick()
-  const ref = tableRefs.value[key]
-  if (ref?.scrollIntoView) {
-    ref.scrollIntoView({ block: 'nearest' })
-  }
-}
-
-const focusActiveTableInSidebar = async () => {
-  const currentTab = openTabs.value.find((item) => String(item.id) === String(activeTab.value))
-  if (!currentTab || currentTab.kind !== 'table') return
-  const state = tabStates[String(currentTab.id)]
-  const table = state?.table
-  if (!table) return
-  const sourceId = String(table.sourceId || table.clusterId || currentTab.sourceId || '')
-  const dbName = table.dbName || table.databaseName || table.database || currentTab.dbName || ''
-  const payload = { ...table, sourceId, dbName }
-  const key = getTableKey(payload, dbName, sourceId)
-  if (!key) return
-  selectedTableKey.value = key
-  await focusTableInSidebar(payload, key, dbName, sourceId)
-}
-
-const syncRouteWithTab = (tab, tabId) => {
-  if (suppressRouteSync.value) return
-  if (!tab) return
-  const kind = tab.kind === 'query' ? 'query' : 'table'
-  const id = String(tabId ?? tab.id ?? '')
-
-  const nextQuery = { ...route.query }
-  if (id) nextQuery.tab = id
-  if (tab.sourceId) nextQuery.clusterId = String(tab.sourceId)
-  if (tab.dbName) nextQuery.database = String(tab.dbName)
-
-  if (kind === 'table') {
-    const tableId = tabStates[id]?.table?.id
-    if (tableId) nextQuery.tableId = String(tableId)
-    else delete nextQuery.tableId
-    if (tab.tableName) nextQuery.tableName = String(tab.tableName)
-  } else {
-    delete nextQuery.tableId
-    delete nextQuery.tableName
-  }
-
-  router.replace({ path: route.path, query: nextQuery })
-}
-
-const clearRouteTabQuery = () => {
-  if (suppressRouteSync.value) return
-  const nextQuery = { ...route.query }
-  delete nextQuery.tab
-  delete nextQuery.tableId
-  delete nextQuery.tableName
-  router.replace({ path: route.path, query: nextQuery })
-}
-
-const clearCreateQuery = () => {
-  if (!route.query.create) return
-  const nextQuery = { ...route.query }
-  delete nextQuery.create
-  router.replace({ path: route.path, query: nextQuery })
-}
-
-const syncFromRoute = async () => {
-  const { clusterId: routeClusterId, database, tableId, tableName } = route.query
-  if (!routeClusterId || !database || (!tableId && !tableName)) return
-  const currentTab = openTabs.value.find((item) => String(item.id) === String(activeTab.value))
-  if (currentTab) {
-    const sameSource = String(currentTab.sourceId || '') === String(routeClusterId)
-    const sameDb = String(currentTab.dbName || '') === String(database)
-    const sameName = !tableName || String(currentTab.tableName || '') === String(tableName)
-    const currentId = tabStates[String(currentTab.id)]?.table?.id
-    const sameId = !tableId || (currentId && String(currentId) === String(tableId))
-    if (sameSource && sameDb && sameName && sameId) return
-  }
-  activeSource.value = String(routeClusterId)
-  activeSchema[String(routeClusterId)] = database
-  await loadSchemas(routeClusterId, true)
-  await loadTables(routeClusterId, database, true)
-  const list = tableStore[String(routeClusterId)]?.[database] || []
-  let target = null
-  if (tableId) {
-    target = list.find((item) => String(item.id) === String(tableId))
-  }
-  if (!target && tableName) {
-    target = list.find((item) => item.tableName === tableName)
-  }
-  if (!target && tableId) {
-    try {
-      const tableInfo = await tableApi.getById(tableId)
-      if (tableInfo) {
-        target = { ...tableInfo, sourceId: String(routeClusterId), dbName: database }
-      }
-    } catch (error) {
-      console.error('路由表加载失败', error)
-    }
-  }
-  if (!target) return
-  suppressRouteSync.value = true
-  await openTableTab(target, database, routeClusterId)
-  suppressRouteSync.value = false
 }
 
 const loadTabData = async (tabId) => {
@@ -3185,518 +1974,8 @@ const handleTabAdd = async () => {
   activeTab.value = queryId
 }
 
-const getSchemaOptions = (sourceId) => {
-  const sid = String(sourceId || '')
-  if (!sid) return []
-  return schemaStore[sid] || []
-}
-
-const getCompletionTablesBySchema = (sourceId) => {
-  const sourceKey = String(sourceId || '')
-  if (!sourceKey) return {}
-  return tableStore[sourceKey] || {}
-}
-
-const getColumnCacheKey = (sourceId, schema, tableName) =>
-  `${String(sourceId || '')}::${String(schema || '')}::${String(tableName || '')}`
-
-const loadCompletionTables = async (sourceId, schema) => {
-  const sourceKey = String(sourceId || '')
-  const schemaName = String(schema || '')
-  if (!sourceKey || !schemaName) return []
-  await loadTables(sourceKey, schemaName)
-  return tableStore[sourceKey]?.[schemaName] || []
-}
-
-const loadCompletionColumns = async (sourceId, schema, tableName) => {
-  const sourceKey = String(sourceId || '')
-  const schemaName = String(schema || '')
-  const objectName = String(tableName || '')
-  if (!sourceKey || !schemaName || !objectName) return []
-  const cacheKey = getColumnCacheKey(sourceKey, schemaName, objectName)
-  if (Array.isArray(columnStore[cacheKey])) {
-    return columnStore[cacheKey]
-  }
-  try {
-    const activated = await activateDatasource(sourceKey)
-    if (!activated) return []
-    const columns = await dorisClusterApi.getColumns(sourceKey, schemaName, objectName)
-    columnStore[cacheKey] = Array.isArray(columns) ? columns : []
-    return columnStore[cacheKey]
-  } catch (error) {
-    console.error('加载 SQL 补全字段失败', error)
-    columnStore[cacheKey] = []
-    return []
-  }
-}
-
-const searchCompletionTables = async (sourceId, keyword) => {
-  const sourceKey = String(sourceId || '')
-  const normalizedKeyword = String(keyword || '').trim()
-  if (!sourceKey || normalizedKeyword.length < 2) return []
-  try {
-    const activated = await activateDatasource(sourceKey)
-    if (!activated) return []
-    const objects = await dorisClusterApi.searchSchemaObjects(sourceKey, {
-      keyword: normalizedKeyword,
-      limit: 50
-    })
-    return Array.isArray(objects) ? objects : []
-  } catch (error) {
-    console.error('搜索 SQL 补全表失败', error)
-    return []
-  }
-}
-
-const getSqlCompletionContext = (tabId) => {
-  const state = tabStates[String(tabId || '')]
-  if (!state) return null
-  const sourceId = String(state.table?.sourceId || '')
-  if (!sourceId) return null
-  const currentSchema = String(state.table?.dbName || '')
-  return {
-    sourceId,
-    currentSchema,
-    schemas: getSchemaOptions(sourceId),
-    tablesBySchema: getCompletionTablesBySchema(sourceId),
-    loadTables: (schema) => loadCompletionTables(sourceId, schema),
-    loadColumns: ({ schema, table }) => loadCompletionColumns(sourceId, schema, table),
-    searchTables: (keyword) => searchCompletionTables(sourceId, keyword)
-  }
-}
-
 const getTabItemById = (tabId) => {
   return openTabs.value.find((tab) => String(tab.id) === String(tabId)) || null
-}
-
-const handleSqlSelectionChange = (tabId, payload) => {
-  const state = tabStates[String(tabId || '')]
-  if (!state) return
-  state.query.selectionText = payload?.text ?? ''
-  state.query.hasSelection = !!payload?.hasSelection
-}
-
-const handleQuerySourceSelect = async (tabId, value) => {
-  const state = tabStates[tabId]
-  const tab = getTabItemById(tabId)
-  if (!state || !tab || tab.kind !== 'query') return
-
-  const sourceId = value ? String(value) : ''
-  state.table.sourceId = sourceId
-  tab.sourceId = sourceId
-
-  state.table.dbName = ''
-  state.table.tableName = ''
-  state.table.id = undefined
-  tab.dbName = ''
-
-  if (String(activeTab.value) === String(tabId)) {
-    clusterId.value = sourceId || null
-    activeSource.value = sourceId
-  }
-
-  if (!sourceId) {
-    if (String(activeTab.value) === String(tabId)) {
-      syncRouteWithTab(tab, tabId)
-    }
-    return
-  }
-
-  const ok = await loadSchemas(sourceId)
-  if (!ok) return
-
-  const nextDb = activeSchema[sourceId] || schemaStore[sourceId]?.[0] || ''
-  if (nextDb) {
-    state.table.dbName = nextDb
-    tab.dbName = nextDb
-    activeSchema[sourceId] = nextDb
-    await loadTables(sourceId, nextDb)
-  }
-
-  if (String(activeTab.value) === String(tabId)) {
-    syncRouteWithTab(tab, tabId)
-  }
-}
-
-const handleQueryDatabaseSelect = async (tabId, value) => {
-  const state = tabStates[tabId]
-  const tab = getTabItemById(tabId)
-  if (!state || !tab || tab.kind !== 'query') return
-
-  const dbName = value ? String(value) : ''
-  state.table.dbName = dbName
-  tab.dbName = dbName
-
-  state.table.tableName = ''
-  state.table.id = undefined
-
-  const sourceId = String(state.table.sourceId || tab.sourceId || '')
-  if (sourceId && dbName) {
-    activeSchema[sourceId] = dbName
-    await loadTables(sourceId, dbName)
-  }
-
-  if (String(activeTab.value) === String(tabId)) {
-    clusterId.value = sourceId || null
-    activeSource.value = sourceId
-    syncRouteWithTab(tab, tabId)
-  }
-}
-
-const buildDefaultSql = (table) => {
-  if (!table?.dbName || !table?.tableName) return ''
-  return `SELECT *\nFROM \`${table.dbName}\`.\`${table.tableName}\`\nLIMIT 200;`
-}
-
-const parseAutoSelectSql = (sql) => {
-  const text = String(sql || '').trim()
-  if (!text) return null
-  const match = text.match(/^select\s+\*\s+from\s+`([^`]+)`\.`([^`]+)`\s+limit\s+(\d+)\s*;?$/i)
-  if (!match) return null
-  return { schema: match[1], table: match[2], limit: Number(match[3]) }
-}
-
-const syncAutoSelectSqlIfSchemaMismatch = (state) => {
-  if (!state?.table?.dbName || !state?.table?.tableName) return
-  const nextDefault = buildDefaultSql(state.table)
-  if (!String(state.query?.sql || '').trim()) {
-    state.query.sql = nextDefault
-    return
-  }
-  const parsed = parseAutoSelectSql(state.query.sql)
-  if (!parsed) return
-  if (parsed.table === state.table.tableName && parsed.schema !== state.table.dbName) {
-    state.query.sql = nextDefault
-  }
-}
-
-	const executeQuery = async (tabId) => {
-	  const state = tabStates[tabId]
-	  if (!state) return
-	  const runId = Number(state.queryRunId || 0) + 1
-	  state.queryRunId = runId
-	  const selectedSql = String(state?.query?.selectionText || '')
-	  const sqlToRun = selectedSql.trim() ? selectedSql : String(state?.query?.sql || '')
-  if (!sqlToRun.trim()) {
-    state.queryResult.errorMessage = '请输入 SQL'
-    state.queryResult.message = ''
-    state.resultTab = INFO_TAB_NAME
-    return
-  }
-  if (!state.table?.dbName) {
-    state.queryResult.errorMessage = '请先选择数据库'
-    state.queryResult.message = ''
-    state.resultTab = INFO_TAB_NAME
-    return
-  }
-  const sourceId = state.table?.sourceId || clusterId.value
-	  if (!sourceId) {
-	    state.queryResult.errorMessage = '请选择数据源'
-	    state.queryResult.message = ''
-	    state.resultTab = INFO_TAB_NAME
-	    return
-	  }
-
-  let analyzeRes = null
-  try {
-    analyzeRes = await dataQueryApi.analyze({
-      clientQueryId: String(tabId),
-      clusterId: sourceId || undefined,
-      database: state.table.dbName || undefined,
-      sql: sqlToRun
-    })
-  } catch (error) {
-    const message = error?.response?.data?.message || error?.message || 'SQL 分析失败'
-    state.queryResult = {
-      resultSets: [],
-      columns: [],
-      rows: [],
-      hasMore: false,
-      durationMs: 0,
-      executedAt: '',
-      cancelled: false,
-      statementInfos: [
-        {
-          statementIndex: 1,
-          status: 'ERROR',
-          durationMs: 0,
-          sqlSnippet: abbreviateSql(sqlToRun),
-          resultInfo: message
-        }
-      ],
-      message: '',
-      errorMessage: message
-    }
-    state.resultTab = INFO_TAB_NAME
-    return
-  }
-
-  const blockedRiskItem = Array.isArray(analyzeRes?.riskItems)
-    ? analyzeRes.riskItems.find((item) => item?.blocked)
-    : null
-  const blockedStatementIndex = Number(blockedRiskItem?.statementIndex || 0) || null
-  const confirmChallenges = Array.isArray(analyzeRes?.confirmChallenges)
-    ? [...analyzeRes.confirmChallenges]
-      .filter((item) => {
-        const idx = Number(item?.statementIndex || 0)
-        return !blockedStatementIndex || (idx > 0 && idx < blockedStatementIndex)
-      })
-      .sort((a, b) => Number(a?.statementIndex || 0) - Number(b?.statementIndex || 0))
-    : []
-  const confirmations = []
-  for (const challenge of confirmChallenges) {
-    const expected = String(challenge?.targetObject || '').trim()
-    try {
-      const { value } = await ElMessageBox.prompt(
-        `语句 #${challenge.statementIndex} 为高风险操作，请输入对象名确认执行：${expected}`,
-        '高风险 SQL 强确认',
-        {
-          type: 'warning',
-          confirmButtonText: '确认执行',
-          cancelButtonText: '取消',
-          inputValue: '',
-          inputPlaceholder: expected,
-          inputValidator: (input) => {
-            if (String(input || '').trim() !== expected) {
-              return `请输入对象名：${expected}`
-            }
-            return true
-          }
-        }
-      )
-      confirmations.push({
-        statementIndex: Number(challenge?.statementIndex || 0),
-        targetObject: expected,
-        inputText: String(value || '').trim(),
-        confirmToken: challenge?.confirmToken || ''
-      })
-    } catch (error) {
-      if (error === 'cancel' || error === 'close') {
-        break
-      }
-      const message = error?.response?.data?.message || error?.message || '强确认失败'
-      state.queryResult = {
-        resultSets: [],
-        columns: [],
-        rows: [],
-        hasMore: false,
-        durationMs: 0,
-        executedAt: '',
-        cancelled: false,
-        statementInfos: [
-          {
-            statementIndex: Number(challenge?.statementIndex || 1),
-            status: 'ERROR',
-            durationMs: 0,
-            sqlSnippet: challenge?.targetObject || abbreviateSql(sqlToRun),
-            resultInfo: message
-          }
-        ],
-        message: '',
-        errorMessage: message
-      }
-      state.resultTab = INFO_TAB_NAME
-      return
-    }
-  }
-
-		  if (state.queryAbortController) {
-	    try {
-	      state.queryAbortController.abort()
-	    } catch (_) {
-	      // ignored
-	    }
-	  }
-	  state.queryAbortController = new AbortController()
-	  state.queryLoading = true
-	  state.queryStopping = false
-	  state.queryCancelable = true
-	  startNowTicker()
-	  state.queryResult.errorMessage = ''
-	  state.queryResult.message = ''
-	  state.queryResult.cancelled = false
-	  state.queryResult.statementInfos = buildRunningStatementInfos(sqlToRun)
-	  state.resultTab = INFO_TAB_NAME
-	  startQueryTimer(tabId)
-	  disposeChart(tabId)
-	  try {
-	    const res = await dataQueryApi.execute({
-	      clientQueryId: String(tabId),
-	      clusterId: sourceId || undefined,
-	      database: state.table.dbName || undefined,
-	      sql: sqlToRun,
-	      limit: state.query.limit,
-	      confirmations
-	    }, { signal: state.queryAbortController?.signal })
-	    if (state.queryRunId !== runId) return
-
-	    const resultSets = Array.isArray(res.resultSets) ? res.resultSets : []
-    const fallbackResultSet = {
-      index: 1,
-      statementIndex: 1,
-      status: 'SUCCESS',
-      resultType: RESULT_TYPE_RESULT_SET,
-      affectedRows: null,
-      message: res.message || '',
-      sqlSnippet: abbreviateSql(sqlToRun),
-      durationMs: Number(res.durationMs || 0),
-      columns: res.columns || [],
-      rows: res.rows || [],
-      hasMore: !!res.hasMore,
-      previewRowCount: (res.rows || []).length
-    }
-    const normalizedSets = normalizeResultSetsForDisplay(resultSets.length ? resultSets : [fallbackResultSet], tabId)
-    const statementInfos = buildStatementInfosFromResultSets(normalizedSets)
-    const hasFailure = normalizedSets.some((item) => {
-      const status = String(item?.status || '').toUpperCase()
-      return status === 'BLOCKED' || status === 'ERROR' || status === 'SKIPPED'
-    })
-
-		    state.queryResult = {
-		      resultSets: normalizedSets,
-		      columns: normalizedSets[0]?.columns || [],
-		      rows: normalizedSets[0]?.rows || [],
-      hasMore: res.hasMore,
-      durationMs: res.durationMs,
-      executedAt: res.executedAt,
-      cancelled: !!res.cancelled,
-		      statementInfos,
-		      message: res.message || '',
-		      errorMessage: ''
-		    }
-		    state.queryCancelable = false
-		    state.queryAbortController = null
-		    stopNowTickerIfIdle()
-		    state.page.current = 1
-		    state.resultTab = !res.cancelled && !hasFailure ? 'result-0' : INFO_TAB_NAME
-			    state.charts = normalizedSets.map(() => ({
-			      type: 'bar',
-		      xAxis: '',
-		      yAxis: []
-		    }))
-			    state.resultViewTabs = normalizedSets.map((_, idx) => state.resultViewTabs?.[idx] || 'table')
-			    applyDefaultChartSelection(tabId)
-			    await nextTick()
-			    syncResultPaneLayout(tabId)
-			    fetchHistory()
-		  } catch (error) {
-		    if (state.queryRunId !== runId) return
-		    const isCanceled =
-		      String(error?.code || '') === 'ERR_CANCELED' ||
-		      String(error?.name || '') === 'CanceledError' ||
-		      /canceled/i.test(String(error?.message || ''))
-		    if (isCanceled) {
-		      return
-		    }
-		    const message = error?.response?.data?.message || error?.message || '查询失败'
-		    const hasResponse = !!error?.response
-		    const maybeStillRunning = !hasResponse
-		    if (!maybeStillRunning) {
-		      state.queryCancelable = false
-		    }
-		    if (!state.queryCancelable) {
-		      state.queryAbortController = null
-		      stopNowTickerIfIdle()
-		    }
-		    state.queryResult = {
-	      resultSets: [],
-	      columns: [],
-	      rows: [],
-      hasMore: false,
-	      durationMs: 0,
-	      executedAt: '',
-	      cancelled: false,
-		      statementInfos: maybeStillRunning
-		        ? (Array.isArray(state.queryResult?.statementInfos) ? state.queryResult.statementInfos : buildRunningStatementInfos(sqlToRun))
-		        : [
-		          {
-		            statementIndex: 1,
-		            status: 'ERROR',
-		            durationMs: 0,
-		            sqlSnippet: abbreviateSql(sqlToRun),
-		            resultInfo: message
-		          }
-		        ],
-		      message: maybeStillRunning ? '查询请求超时/网络异常，可能仍在执行，可点击“停止”' : '',
-		      errorMessage: message
-		    }
-			    state.resultTab = INFO_TAB_NAME
-		    state.charts = [
-		      {
-		        type: 'bar',
-		        xAxis: '',
-		        yAxis: []
-		      }
-			    ]
-			    state.resultViewTabs = ['table']
-				  } finally {
-			    if (state.queryRunId !== runId) return
-			    state.queryLoading = false
-			    if (!state.queryCancelable) {
-			      clearQueryTimer(tabId)
-			    }
-			  }
-	}
-
-	const stopQuery = async (tabId) => {
-	  const state = tabStates[tabId]
-	  if (!state?.queryCancelable || state.queryStopping) return
-	  state.queryStopping = true
-	  try {
-	    state.queryAbortController?.abort()
-	  } catch (_) {
-	    // ignored
-	  }
-	  state.queryAbortController = null
-	  try {
-	    await dataQueryApi.stop({ clientQueryId: String(tabId) })
-	    state.queryCancelable = false
-	    state.queryLoading = false
-	    state.queryStopping = false
-	    clearQueryTimer(tabId)
-	    stopNowTickerIfIdle()
-	    state.queryResult.cancelled = true
-	    state.queryResult.message = '查询已停止'
-	    state.queryResult.errorMessage = ''
-	    const existingInfos = Array.isArray(state.queryResult.statementInfos) ? state.queryResult.statementInfos : []
-	    state.queryResult.statementInfos = existingInfos.map((item, idx) => {
-	      const status = String(item?.status || '').toUpperCase()
-	      if (status === 'SUCCESS' || status === 'ERROR' || status === 'BLOCKED') return item
-	      return {
-	        statementIndex: Number(item?.statementIndex || idx + 1),
-	        status: 'SKIPPED',
-	        durationMs: Number(item?.durationMs || 0),
-	        sqlSnippet: item?.sqlSnippet || '',
-	        resultInfo: '查询已停止'
-	      }
-	    })
-	    state.resultTab = INFO_TAB_NAME
-	  } catch (error) {
-	    state.queryStopping = false
-	    const message = error?.response?.data?.message || error?.message || '停止失败'
-	    state.queryResult.errorMessage = message
-	    state.queryResult.message = ''
-	    state.resultTab = INFO_TAB_NAME
-	  }
-	}
-
-	const getLiveDurationMs = (tabId) => {
-	  const state = tabStates[String(tabId || '')]
-	  if (!state) return 0
-	  if (state.queryCancelable) {
-	    const startedAt = Number(state.queryTiming?.startedAt || 0)
-	    if (!Number.isFinite(startedAt) || startedAt <= 0) return 0
-	    return Math.max(0, nowTick.value - startedAt)
-	  }
-	  return Number(state.queryResult?.durationMs || 0)
-	}
-
-const resetQuery = (tabId) => {
-  const state = tabStates[tabId]
-  if (!state) return
-  state.query.sql = buildDefaultSql(state.table)
-  state.query.selectionText = ''
-  state.query.hasSelection = false
 }
 
 const saveAsTask = (tabId) => {
@@ -3715,58 +1994,6 @@ const saveAsTask = (tabId) => {
     taskName: `新建查询任务_${Date.now()}`,
     taskDesc: `From DataStudio\nCluster: ${sourceId}\nDatabase: ${state.table.dbName || ''}`
   })
-}
-
-const exportResult = (tabId, resultIndex = 0) => {
-  const state = tabStates[tabId]
-  if (!state?.queryResult) return
-  const idx = Number(resultIndex)
-  const set = Array.isArray(state.queryResult.resultSets) ? state.queryResult.resultSets[idx] : null
-  const columns = set?.columns || state.queryResult.columns || []
-  const rows = set?.rows || state.queryResult.rows || []
-  if (!rows.length || !columns.length) return
-
-  const blob = new Blob([buildCsvContent(columns, rows)], { type: 'text/csv;charset=utf-8;' })
-  const link = document.createElement('a')
-  link.href = URL.createObjectURL(blob)
-  link.download = `export_${Date.now()}.csv`
-  link.click()
-}
-
-const fetchHistory = async () => {
-  historyLoading.value = true
-  try {
-    const res = await dataQueryApi.history({
-      pageNum: historyPager.pageNum,
-      pageSize: historyPager.pageSize
-    })
-    historyData.value = res.records || []
-    historyPager.total = res.total || 0
-  } catch (error) {
-    console.error('加载历史查询失败', error)
-  } finally {
-    historyLoading.value = false
-  }
-}
-
-const applyHistory = (row, tabId) => {
-  const state = tabStates[tabId]
-  if (!state || !row) return
-  state.query.sql = row.sqlText || ''
-  if (row.clusterId) {
-    const sourceId = String(row.clusterId)
-    clusterId.value = row.clusterId
-    activeSource.value = sourceId
-    loadSchemas(row.clusterId)
-    const tab = getTabItemById(tabId)
-    if (tab?.kind === 'query') {
-      tab.sourceId = sourceId
-      state.table.sourceId = sourceId
-      if (String(activeTab.value) === String(tabId)) {
-        syncRouteWithTab(tab, tabId)
-      }
-    }
-  }
 }
 
 const handleCreateTable = () => {
@@ -3932,612 +2159,6 @@ const handleCreateSuccess = async (result) => {
   }
 }
 
-
-const getPaginatedRows = (tabId) => {
-  const state = tabStates[tabId]
-  if (!state) return []
-  const start = (state.page.current - 1) * state.page.size
-  const end = start + state.page.size
-  return state.queryResult.rows.slice(start, end)
-}
-
-const parseResultTabIndex = (value) => {
-  const match = String(value || '').match(/^result-(\d+)$/)
-  return match ? Number(match[1]) : null
-}
-
-const getChartKey = (tabId, resultIndex) => `${String(tabId)}::${Number(resultIndex)}`
-const getResultRowKeyPrefix = (tabId, resultIndex) => `${String(tabId)}::${Number(resultIndex)}`
-
-const normalizeResultSetForDisplay = (resultSet, tabId, resultIndex) => {
-  const rows = Array.isArray(resultSet?.rows) ? resultSet.rows : []
-  const columns = Array.isArray(resultSet?.columns) ? resultSet.columns : []
-  return markRaw({
-    ...resultSet,
-    columns,
-    rows: markRaw(buildResultGridRows(rows, getResultRowKeyPrefix(tabId, resultIndex))),
-    hasMore: !!resultSet?.hasMore,
-    previewRowCount: Number.isFinite(Number(resultSet?.previewRowCount))
-      ? Number(resultSet.previewRowCount)
-      : rows.length
-  })
-}
-
-const normalizeResultSetsForDisplay = (resultSets, tabId) => {
-  const sets = Array.isArray(resultSets) ? resultSets : []
-  return markRaw(sets.map((set, idx) => normalizeResultSetForDisplay(set, tabId, idx)))
-}
-
-	const getResultSetByIndex = (tabId, resultIndex = 0) => {
-	  const state = tabStates[tabId]
-  const sets = Array.isArray(state?.queryResult?.resultSets) ? state.queryResult.resultSets : []
-  const set = sets[resultIndex] || EMPTY_RESULT_SET
-  return {
-    columns: Array.isArray(set?.columns) ? set.columns : [],
-    rows: Array.isArray(set?.rows) ? set.rows : [],
-    hasMore: !!set?.hasMore
-  }
-}
-
-const getNumericColumns = (tabId, resultIndex = 0) => {
-  const set = getResultSetByIndex(tabId, resultIndex)
-  if (!set.rows.length || !set.columns.length) return []
-  const sample = set.rows.slice(0, 10)
-  return set.columns.filter((col) => {
-    return sample.every((row) => {
-      const val = row?.[col]
-      return val === null || val === '' || !Number.isNaN(Number(val))
-    })
-  })
-}
-
-const scoreColumnName = (name, keywords) => {
-  if (!name) return 0
-  const lower = String(name).toLowerCase()
-  return keywords.reduce((score, keyword) => (lower.includes(keyword) ? score + 10 : score), 0)
-}
-
-const scoreDimensionColumn = (column) => {
-  const keywords = [
-    'dt', 'date', 'day', 'week', 'month', 'year', 'hour', 'time',
-    'category', 'type', 'name', 'region', 'province', 'city', 'status'
-  ]
-  const suffixBoost = /(_dt|_date|_day|_month|_year|_time)$/i.test(String(column)) ? 15 : 0
-  return scoreColumnName(column, keywords) + suffixBoost
-}
-
-const scoreMetricColumn = (column) => {
-  const keywords = [
-    'count', 'cnt', 'sum', 'avg', 'mean', 'max', 'min',
-    'total', 'num', 'qty', 'amount', 'amt', 'value', 'rate', 'ratio', 'pct', 'percent',
-    '数量', '金额', '总', '均', '最大', '最小', '比率', '比例'
-  ]
-  const suffixBoost = /(_cnt|_count|_sum|_avg|_max|_min|_total)$/i.test(String(column)) ? 15 : 0
-  return scoreColumnName(column, keywords) + suffixBoost
-}
-
-const applyDefaultChartSelection = (tabId) => {
-  const state = tabStates[tabId]
-  if (!state) return
-
-  const sets = Array.isArray(state?.queryResult?.resultSets) ? state.queryResult.resultSets : []
-  sets.forEach((set, idx) => {
-    const columns = Array.isArray(set?.columns) ? set.columns : []
-    const rows = Array.isArray(set?.rows) ? set.rows : []
-    if (!columns.length || rows.length === 0) return
-
-    const chart = state.charts?.[idx]
-    if (!chart) return
-    if (chart.xAxis || (Array.isArray(chart.yAxis) && chart.yAxis.length)) return
-
-    const numericColumns = getNumericColumns(tabId, idx)
-    if (!numericColumns.length || columns.length < 2) return
-
-    const dimensionCandidates = columns.filter((col) => !numericColumns.includes(col))
-    const xCandidates = dimensionCandidates.length ? dimensionCandidates : columns
-    const xAxis = xCandidates
-      .map((col, order) => ({ col, order, score: scoreDimensionColumn(col) }))
-      .sort((a, b) => (b.score - a.score) || (a.order - b.order))[0]?.col
-
-    const metricCandidates = numericColumns.filter((col) => col !== xAxis)
-    if (!xAxis || !metricCandidates.length) return
-
-    const yAxis = metricCandidates
-      .map((col, order) => ({ col, order, score: scoreMetricColumn(col) }))
-      .sort((a, b) => (b.score - a.score) || (a.order - b.order))[0]?.col
-
-    if (!yAxis) return
-
-    chart.xAxis = xAxis
-    chart.yAxis = [yAxis]
-  })
-}
-
-const canRenderChart = (tabId, resultIndex = 0) => {
-  const state = tabStates[tabId]
-  if (!state) return false
-  const set = getResultSetByIndex(tabId, resultIndex)
-  const chart = state.charts?.[resultIndex]
-  return (
-    set.rows.length > 0 &&
-    !!chart?.xAxis &&
-    Array.isArray(chart?.yAxis) &&
-    chart.yAxis.length > 0
-  )
-}
-
-const setChartRef = (tabId, resultIndex, el) => {
-  if (!tabId || el == null) return
-  const key = getChartKey(tabId, resultIndex)
-  chartRefs.value[key] = el
-
-  // ECharts may capture wheel events and block scrolling the result pane.
-  // Stop propagation in capture phase so outer scroll can work naturally.
-  if (el?.dataset?.scrollGuard !== '1') {
-    el.dataset.scrollGuard = '1'
-	    el.addEventListener(
-	      'wheel',
-	      (event) => {
-	        event.stopPropagation()
-	      },
-	      { capture: true, passive: true }
-	    )
-	  }
-	}
-
-const syncResultPaneLayout = (tabId) => {
-  const state = tabStates[tabId]
-  if (!state) return
-  const idx = parseResultTabIndex(state?.resultTab)
-  if (idx === null) return
-  const view = state?.resultViewTabs?.[idx] || 'table'
-  if (view === 'chart') {
-    chartInstances.get(getChartKey(tabId, idx))?.resize()
-  }
-}
-
-const renderChart = async (tabId, resultIndex = 0) => {
-  const state = tabStates[tabId]
-  if (!state) return
-  const key = getChartKey(tabId, resultIndex)
-  const container = chartRefs.value[key]
-  if (!container) return
-
-  const set = getResultSetByIndex(tabId, resultIndex)
-  const chart = state.charts?.[resultIndex]
-  if (!chart) return
-
-  const shouldRender = canRenderChart(tabId, resultIndex)
-  let instance = chartInstances.get(key)
-  if (!shouldRender) {
-    instance?.clear()
-    return
-  }
-  if (!instance) {
-    const echarts = await loadEcharts()
-    if (!chartRefs.value[key] || chartRefs.value[key] !== container || !container.isConnected) {
-      return
-    }
-    if (!canRenderChart(tabId, resultIndex)) {
-      return
-    }
-    instance = echarts.init(container)
-    chartInstances.set(key, instance)
-  }
-
-  if (chart.type === 'pie') {
-    const xKey = chart.xAxis
-    const yKey = chart.yAxis[0]
-    if (!xKey || !yKey) {
-      instance.clear()
-      return
-    }
-    const data = set.rows.map((row) => ({
-      name: row?.[xKey],
-      value: Number(row?.[yKey] || 0)
-    }))
-    instance.clear()
-    instance.setOption({
-      tooltip: { trigger: 'item' },
-      legend: { bottom: 0 },
-      series: [
-        {
-          type: 'pie',
-          radius: ['20%', '65%'],
-          data
-        }
-      ]
-    })
-    instance.resize()
-    return
-  }
-
-  const xData = set.rows.map((row) => row?.[chart.xAxis])
-  const series = chart.yAxis.map((keyName) => ({
-    name: keyName,
-    type: chart.type,
-    data: set.rows.map((row) => Number(row?.[keyName] || 0)),
-    smooth: chart.type === 'line'
-  }))
-  instance.clear()
-  instance.setOption({
-    tooltip: { trigger: 'axis' },
-    legend: { bottom: 0 },
-    grid: { top: 40, left: 50, right: 30, bottom: 60, containLabel: true },
-    xAxis: { type: 'category', data: xData },
-    yAxis: { type: 'value' },
-    series
-  })
-  instance.resize()
-}
-
-const disposeChart = (tabId, resultIndex = null) => {
-  const id = String(tabId || '')
-  if (!id) return
-  if (resultIndex !== null && resultIndex !== undefined) {
-    const key = getChartKey(id, resultIndex)
-    const instance = chartInstances.get(key)
-    if (instance) {
-      instance.dispose()
-      chartInstances.delete(key)
-    }
-    if (chartRefs.value?.[key]) {
-      delete chartRefs.value[key]
-    }
-    return
-  }
-
-  const prefix = `${id}::`
-  Array.from(chartInstances.keys()).forEach((key) => {
-    if (!String(key).startsWith(prefix)) return
-    const instance = chartInstances.get(key)
-    if (instance) {
-      instance.dispose()
-    }
-    chartInstances.delete(key)
-  })
-  Object.keys(chartRefs.value).forEach((key) => {
-    if (String(key).startsWith(prefix)) {
-      delete chartRefs.value[key]
-    }
-  })
-}
-
-const handleResize = () => {
-  normalizePaneRatios()
-  const tabId = activeTab.value
-  if (!tabId) return
-  syncResultPaneLayout(tabId)
-}
-
-const startMetaEdit = async (tabId) => {
-  if (isDemoMode) {
-    showDemoReadonlyMessage('编辑表信息')
-    return
-  }
-  const state = tabStates[tabId]
-  if (!state) return
-  if (warnPlatformMetadataMissing(state.table)) return
-  if (!ensureClusterSelected(state.table)) return
-  if (!businessDomainOptions.value.length) {
-    await loadBusinessDomains()
-  }
-  await loadMetaDataDomainOptions(tabId, state.metaForm.businessDomain)
-  state.metaEditing = true
-  state.metaForm = { ...state.metaForm }
-}
-
-const cancelMetaEdit = async (tabId) => {
-  const state = tabStates[tabId]
-  if (!state) return
-  state.metaEditing = false
-  state.metaForm = { ...state.metaOriginal }
-  await loadMetaDataDomainOptions(tabId, state.metaForm.businessDomain)
-}
-
-const saveMetaEdit = async (tabId) => {
-  if (isDemoMode) {
-    showDemoReadonlyMessage('保存表信息')
-    return
-  }
-  const state = tabStates[tabId]
-  if (warnPlatformMetadataMissing(state?.table)) return
-  if (!state?.table?.id) return
-  if (!ensureClusterSelected(state.table)) return
-  if (!state.metaForm.layer) {
-    ElMessage.warning('请选择数据分层')
-    return
-  }
-  try {
-    await ElMessageBox.confirm('确认保存表信息与 Doris 配置的修改吗？', '提示', {
-      type: 'warning',
-      confirmButtonText: '确认',
-      cancelButtonText: '取消'
-    })
-  } catch (error) {
-    return
-  }
-  state.metaSaving = true
-  try {
-    const payload = {
-      tableName: state.metaForm.tableName,
-      tableComment: state.metaForm.tableComment,
-      layer: state.metaForm.layer,
-      businessDomain: state.metaForm.businessDomain,
-      dataDomain: state.metaForm.dataDomain,
-      owner: state.metaForm.owner,
-      bucketNum: state.metaForm.bucketNum,
-      replicaNum: state.metaForm.replicaNum
-    }
-    const updated = await tableApi.update(state.table.id, payload, clusterId.value || null)
-    state.table = { ...state.table, ...updated }
-    state.metaForm = {
-      tableName: state.table.tableName || '',
-      tableComment: state.table.tableComment || '',
-      layer: state.table.layer || '',
-      businessDomain: state.table.businessDomain || '',
-      dataDomain: state.table.dataDomain || '',
-      owner: state.table.owner || '',
-      bucketNum: state.table.bucketNum ?? '',
-      replicaNum: state.table.replicaNum ?? ''
-    }
-    state.metaDataDomainOptions = []
-    if (state.metaForm.businessDomain) {
-      await loadMetaDataDomainOptions(tabId, state.metaForm.businessDomain)
-    }
-    state.metaOriginal = { ...state.metaForm }
-    state.metaEditing = false
-    updateTableCache(state.table)
-    const newKey = syncTabKey(tabId, state.table)
-    const tab = openTabs.value.find((item) => String(item.id) === String(newKey))
-    if (tab) {
-      tab.tableName = state.table.tableName
-      tab.dbName = state.table.dbName
-    }
-    ElMessage.success('表信息已更新')
-  } catch (error) {
-    ElMessage.error('更新失败')
-  } finally {
-    state.metaSaving = false
-  }
-}
-
-const updateTableCache = (updated) => {
-  if (!updated?.dbName) return
-  const sourceId = updated.sourceId || clusterId.value
-  if (!sourceId) return
-  const sourceKey = String(sourceId)
-  const list = tableStore[sourceKey]?.[updated.dbName] || []
-  const idx = list.findIndex((item) => String(item.id) === String(updated.id))
-  if (idx === -1) return
-  const next = [...list]
-  next[idx] = { ...next[idx], ...updated }
-  tableStore[sourceKey][updated.dbName] = next
-}
-
-const refreshFields = async (tabId) => {
-  const state = tabStates[tabId]
-  if (!state?.table?.id) return
-  try {
-    const fieldList = await tableApi.getFields(state.table.id)
-    state.fields = Array.isArray(fieldList) ? fieldList : []
-  } catch (error) {
-    console.error('刷新字段失败', error)
-  }
-}
-
-const syncTabKey = (oldKey, updatedTable) => {
-  const newKey = getTableKey(updatedTable, updatedTable?.dbName || '', updatedTable?.sourceId || clusterId.value)
-  if (!newKey || newKey === oldKey) return oldKey
-  const oldIndex = openTabs.value.findIndex((tab) => String(tab.id) === String(oldKey))
-  const existingIndex = openTabs.value.findIndex((tab) => String(tab.id) === String(newKey))
-  if (existingIndex !== -1 && existingIndex !== oldIndex) {
-    if (oldIndex !== -1) {
-      openTabs.value.splice(oldIndex, 1)
-    }
-    delete tabStates[oldKey]
-    activeTab.value = String(newKey)
-    selectedTableKey.value = String(newKey)
-    return newKey
-  }
-  if (oldIndex !== -1) {
-    openTabs.value[oldIndex].id = newKey
-  }
-  tabStates[newKey] = tabStates[oldKey]
-  if (oldKey !== newKey) {
-    delete tabStates[oldKey]
-    delete tableRefs.value[oldKey]
-  }
-  if (String(activeTab.value) === String(oldKey)) {
-    activeTab.value = String(newKey)
-  }
-  selectedTableKey.value = String(newKey)
-  return newKey
-}
-
-const startFieldsEdit = (tabId) => {
-  if (isDemoMode) {
-    showDemoReadonlyMessage('编辑字段')
-    return
-  }
-  const state = tabStates[tabId]
-  if (!state) return
-  if (warnPlatformMetadataMissing(state.table)) return
-  if (!ensureClusterSelected(state.table)) return
-  state.fieldsEditing = true
-  state.fieldsDraft = state.fields.map((item) => ({ ...item }))
-  state.fieldsRemoved = []
-}
-
-const cancelFieldsEdit = (tabId) => {
-  const state = tabStates[tabId]
-  if (!state) return
-  state.fieldsEditing = false
-  state.fieldsDraft = []
-  state.fieldsRemoved = []
-}
-
-const addField = (tabId, afterRow = null) => {
-  const state = tabStates[tabId]
-  if (!state) return
-  if (isAggregateTable(state.table)) {
-    ElMessage.warning('AGGREGATE 表仅支持修改注释，无法新增字段')
-    return
-  }
-  const newRow = {
-    id: null,
-    fieldName: '',
-    fieldType: '',
-    fieldOrder: 0,
-    isNullable: 1,
-    isPrimary: 0,
-    defaultValue: '',
-    fieldComment: ''
-  }
-  if (!afterRow) {
-    state.fieldsDraft.unshift(newRow)
-    return
-  }
-  const index = state.fieldsDraft.indexOf(afterRow)
-  if (index === -1) {
-    state.fieldsDraft.unshift(newRow)
-    return
-  }
-  state.fieldsDraft.splice(index + 1, 0, newRow)
-}
-
-const removeField = (tabId, row) => {
-  const state = tabStates[tabId]
-  if (!state) return
-  if (isAggregateTable(state.table)) {
-    ElMessage.warning('AGGREGATE 表仅支持修改注释，无法删除字段')
-    return
-  }
-  if (row?.id) {
-    state.fieldsRemoved = [...new Set([...(state.fieldsRemoved || []), row.id])]
-  }
-  state.fieldsDraft = state.fieldsDraft.filter((item) => item !== row)
-}
-
-const buildFieldPayload = (row) => ({
-  fieldName: (row.fieldName || '').trim(),
-  fieldType: (row.fieldType || '').trim(),
-  fieldComment: row.fieldComment || '',
-  isNullable: row.isNullable ?? 1,
-  isPrimary: row.isPrimary ?? 0,
-  defaultValue: row.defaultValue || '',
-  fieldOrder: row.fieldOrder || 0
-})
-
-const isFieldChanged = (next, original) => {
-  if (!original) return true
-  const payload = buildFieldPayload(next)
-  return (
-    payload.fieldName !== (original.fieldName || '') ||
-    payload.fieldType !== (original.fieldType || '') ||
-    payload.fieldComment !== (original.fieldComment || '') ||
-    Number(payload.isNullable ?? 1) !== Number(original.isNullable ?? 1) ||
-    Number(payload.isPrimary ?? 0) !== Number(original.isPrimary ?? 0) ||
-    payload.defaultValue !== (original.defaultValue || '') ||
-    Number(payload.fieldOrder || 0) !== Number(original.fieldOrder || 0)
-  )
-}
-
-const isOnlyCommentChanged = (next, original) => {
-  if (!original) return false
-  const payload = buildFieldPayload(next)
-  return (
-    payload.fieldName === (original.fieldName || '') &&
-    payload.fieldType === (original.fieldType || '') &&
-    Number(payload.isNullable ?? 1) === Number(original.isNullable ?? 1) &&
-    Number(payload.isPrimary ?? 0) === Number(original.isPrimary ?? 0) &&
-    payload.defaultValue === (original.defaultValue || '') &&
-    Number(payload.fieldOrder || 0) === Number(original.fieldOrder || 0) &&
-    payload.fieldComment !== (original.fieldComment || '')
-  )
-}
-
-const saveFieldsEdit = async (tabId) => {
-  if (isDemoMode) {
-    showDemoReadonlyMessage('保存字段')
-    return
-  }
-  const state = tabStates[tabId]
-  if (warnPlatformMetadataMissing(state?.table)) return
-  if (!state?.table?.id) return
-  if (!ensureClusterSelected(state.table)) return
-  const draft = state.fieldsDraft || []
-  const removedIds = [...new Set(state.fieldsRemoved || [])]
-  for (const row of draft) {
-    const payload = buildFieldPayload(row)
-    if (!payload.fieldName || !payload.fieldType) {
-      ElMessage.warning('请填写字段名和类型')
-      return
-    }
-  }
-  const originalMap = new Map(state.fields.map((item) => [item.id, item]))
-  const createList = draft.filter((row) => !row.id)
-  const updateList = draft.filter((row) => row.id && isFieldChanged(row, originalMap.get(row.id)))
-  if (isAggregateTable(state.table)) {
-    const invalidUpdates = updateList.filter(
-      (row) => !isOnlyCommentChanged(row, originalMap.get(row.id))
-    )
-    if (createList.length || removedIds.length || invalidUpdates.length) {
-      ElMessage.warning('AGGREGATE 表仅支持修改字段注释')
-      return
-    }
-  }
-  if (isDorisTable(state.table)) {
-    const primaryChanged = updateList.some((row) => {
-      const original = originalMap.get(row.id)
-      return Number(row.isPrimary ?? 0) !== Number(original?.isPrimary ?? 0)
-    })
-    const primaryAdded = createList.some((row) => Number(row.isPrimary ?? 0) === 1)
-    if (primaryChanged || primaryAdded) {
-      ElMessage.warning('Doris 不支持在线修改主键列')
-      return
-    }
-  }
-  if (!createList.length && !updateList.length && !removedIds.length) {
-    ElMessage.info('暂无字段变更')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      `确认保存字段变更（新增 ${createList.length}、修改 ${updateList.length}、删除 ${removedIds.length}）吗？`,
-      '提示',
-      {
-        type: 'warning',
-        confirmButtonText: '确认',
-        cancelButtonText: '取消'
-      }
-    )
-  } catch (error) {
-    return
-  }
-  state.fieldSubmitting = true
-  try {
-    for (const row of createList) {
-      await tableApi.createField(state.table.id, buildFieldPayload(row), clusterId.value || null)
-    }
-    for (const row of updateList) {
-      await tableApi.updateField(state.table.id, row.id, buildFieldPayload(row), clusterId.value || null)
-    }
-    for (const id of removedIds) {
-      await tableApi.deleteField(state.table.id, id, clusterId.value || null)
-    }
-    await refreshFields(tabId)
-    state.fieldsEditing = false
-    state.fieldsDraft = []
-    state.fieldsRemoved = []
-    ElMessage.success('字段已保存')
-  } catch (error) {
-    ElMessage.error('字段保存失败')
-  } finally {
-    state.fieldSubmitting = false
-  }
-}
-
 const loadDdl = async (tabId) => {
   const state = tabStates[tabId]
   if (!state?.table) return
@@ -4647,120 +2268,6 @@ const goLineage = (tabId) => {
   router.push({ path: '/lineage', query: { tableId: state.table.id } })
 }
 
-const startResize = (event) => {
-  event.preventDefault()
-  const startX = event.clientX
-  const startWidth = getSidebarWidthPx()
-  isResizing.value = true
-
-  resizeMoveHandler = (moveEvent) => {
-    const delta = moveEvent.clientX - startX
-    const next = clampSidebarWidth(startWidth + delta)
-    sidebarWidthRatio.value = next / getLayoutWidth()
-  }
-  resizeUpHandler = () => {
-    isResizing.value = false
-    window.removeEventListener('mousemove', resizeMoveHandler)
-    window.removeEventListener('mouseup', resizeUpHandler)
-    resizeMoveHandler = null
-    resizeUpHandler = null
-  }
-  window.addEventListener('mousemove', resizeMoveHandler)
-  window.addEventListener('mouseup', resizeUpHandler)
-}
-
-const startRightResize = (event) => {
-  event.preventDefault()
-  const startX = event.clientX
-  const startWidth = getRightPanelWidthPx()
-  isResizing.value = true
-
-  resizeRightMoveHandler = (moveEvent) => {
-    const delta = startX - moveEvent.clientX
-    const next = clampRightWidth(startWidth + delta)
-    rightPanelWidthRatio.value = next / getLayoutWidth()
-  }
-  resizeRightUpHandler = () => {
-    isResizing.value = false
-    window.removeEventListener('mousemove', resizeRightMoveHandler)
-    window.removeEventListener('mouseup', resizeRightUpHandler)
-    resizeRightMoveHandler = null
-    resizeRightUpHandler = null
-  }
-  window.addEventListener('mousemove', resizeRightMoveHandler)
-  window.addEventListener('mouseup', resizeRightUpHandler)
-}
-
-const startLeftResize = (tabId, event) => {
-  event.preventDefault()
-  const container = leftPaneRefs.value[tabId]
-  if (!container) return
-  const queryPanel = container.querySelector('.query-panel')
-  const containerRect = container.getBoundingClientRect()
-  const startY = event.clientY
-  const startHeight = queryPanel?.getBoundingClientRect().height || 220
-  const minTop = 160
-  const minBottom = 220
-  const resizerHeight = 6
-  isResizing.value = true
-  let layoutRaf = 0
-
-  resizeLeftMoveHandler = (moveEvent) => {
-    const delta = moveEvent.clientY - startY
-    let next = startHeight + delta
-    const maxTop = Math.max(minTop, containerRect.height - minBottom - resizerHeight)
-    next = Math.max(minTop, Math.min(maxTop, next))
-    leftPaneHeights[tabId] = next
-    if (layoutRaf) cancelAnimationFrame(layoutRaf)
-    layoutRaf = requestAnimationFrame(() => syncResultPaneLayout(tabId))
-  }
-  resizeLeftUpHandler = () => {
-    isResizing.value = false
-    window.removeEventListener('mousemove', resizeLeftMoveHandler)
-    window.removeEventListener('mouseup', resizeLeftUpHandler)
-    resizeLeftMoveHandler = null
-    resizeLeftUpHandler = null
-    if (layoutRaf) cancelAnimationFrame(layoutRaf)
-    layoutRaf = requestAnimationFrame(() => syncResultPaneLayout(tabId))
-  }
-  window.addEventListener('mousemove', resizeLeftMoveHandler)
-  window.addEventListener('mouseup', resizeLeftUpHandler)
-}
-
-watch(
-  () => [historyPager.pageNum, historyPager.pageSize],
-  () => {
-    fetchHistory()
-  }
-)
-
-watch(
-  () => {
-	    const tabId = activeTab.value
-	    if (!tabId) return null
-	    const state = tabStates[tabId]
-	    const idx = parseResultTabIndex(state?.resultTab)
-	    if (idx === null) return null
-	    const view = state?.resultViewTabs?.[idx] || 'table'
-	    const chart = state?.charts?.[idx]
-	    const set = Array.isArray(state?.queryResult?.resultSets) ? state.queryResult.resultSets[idx] : null
-	    const rowsLen = Array.isArray(set?.rows) ? set.rows.length : 0
-	    return [tabId, idx, view, chart?.type, chart?.xAxis, chart?.yAxis?.join(','), rowsLen]
-	  },
-		  async (payload) => {
-		    if (!payload) return
-		    const [tabId, idx, view] = payload
-		    await nextTick()
-		    if (view === 'chart') {
-		      void renderChart(tabId, idx)
-		      return
-		    }
-		    if (view === 'table') {
-		      syncResultPaneLayout(tabId)
-		    }
-		  }
-		)
-
 watch(
   () => [activeTab.value, tabStates[activeTab.value]?.metaTab],
   ([tabId, metaTab]) => {
@@ -4824,31 +2331,6 @@ watch(
   }
 )
 
-watch(searchKeyword, (value) => {
-  catalogTreeRef.value?.filter(value)
-  if (schemaCountReloadTimer) {
-    clearTimeout(schemaCountReloadTimer)
-  }
-  schemaCountReloadTimer = setTimeout(() => {
-    schemaCountReloadTimer = null
-    void (async () => {
-      await reloadSchemaCountsForLoadedDatasources(value)
-      catalogTreeRef.value?.filter(value)
-    })()
-  }, 300)
-})
-
-watch([sortField, sortOrder], () => {
-  refreshLoadedSchemaNodesInTree()
-})
-
-watch(selectedTableKey, (value) => {
-  if (!value) return
-  catalogTreeRef.value?.setCurrentKey(value, false)
-})
-
-
-
   provide('dataStudioCtx', {
     clusterId,
     openTabs,
@@ -4884,6 +2366,18 @@ watch(selectedTableKey, (value) => {
     openTableTab
   })
 
+// Tab 工作区持久化（P2-2 F4）：在 createTabState 之后装配，依赖共享响应式状态
+const { flushPersistTabs, restoreTabsFromStorage } = useTabPersistence({
+  openTabs,
+  activeTab,
+  tabStates,
+  queryTabCounter,
+  createTabState,
+  storageKey: isDemoMode
+    ? 'odw:datastudio:workspace-tabs:demo-v1'
+    : 'odw:datastudio:workspace-tabs:v1',
+})
+
 onMounted(async () => {
   setupTableObserver()
   const restored = restoreTabsFromStorage()
@@ -4901,46 +2395,12 @@ onMounted(async () => {
   }
   await nextTick()
   normalizePaneRatios()
-  window.addEventListener('resize', handleResize)
 })
 
 onBeforeUnmount(() => {
   flushPersistTabs()
-  window.removeEventListener('resize', handleResize)
-  if (schemaCountReloadTimer) {
-    clearTimeout(schemaCountReloadTimer)
-    schemaCountReloadTimer = null
-  }
-				chartInstances.forEach((instance) => instance.dispose())
-				chartInstances.clear()
-			queryTimerHandles.forEach((handle) => clearInterval(handle))
-			queryTimerHandles.clear()
   if (tableObserver.value) {
     tableObserver.value.disconnect()
-  }
-  if (resizeMoveHandler) {
-    window.removeEventListener('mousemove', resizeMoveHandler)
-    resizeMoveHandler = null
-  }
-  if (resizeUpHandler) {
-    window.removeEventListener('mouseup', resizeUpHandler)
-    resizeUpHandler = null
-  }
-  if (resizeRightMoveHandler) {
-    window.removeEventListener('mousemove', resizeRightMoveHandler)
-    resizeRightMoveHandler = null
-  }
-  if (resizeRightUpHandler) {
-    window.removeEventListener('mouseup', resizeRightUpHandler)
-    resizeRightUpHandler = null
-  }
-  if (resizeLeftMoveHandler) {
-    window.removeEventListener('mousemove', resizeLeftMoveHandler)
-    resizeLeftMoveHandler = null
-  }
-  if (resizeLeftUpHandler) {
-    window.removeEventListener('mouseup', resizeLeftUpHandler)
-    resizeLeftUpHandler = null
   }
 })
 </script>

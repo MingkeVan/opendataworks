@@ -44,6 +44,7 @@ const manualChunks = (id) => {
 
 export default defineConfig(() => {
   const isTest = process.env.VITEST === 'true'
+  const backendProxyTarget = process.env.VITE_BACKEND_PROXY_TARGET || 'http://localhost:8080'
 
   return {
     plugins: [
@@ -98,7 +99,7 @@ export default defineConfig(() => {
           changeOrigin: true
         },
         '/api': {
-          target: 'http://localhost:8080',
+          target: backendProxyTarget,
           changeOrigin: true
         }
       }
