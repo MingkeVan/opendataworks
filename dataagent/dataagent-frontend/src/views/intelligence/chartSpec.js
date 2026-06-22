@@ -1,6 +1,11 @@
-const CHART_TYPES = new Set(['table', 'bar', 'line', 'pie'])
-const ECHART_TYPES = new Set(['bar', 'line', 'pie'])
-const SERIES_TYPES = new Set(['bar', 'line', 'pie'])
+const CHART_TYPES = new Set(['table', 'bar', 'line', 'area', 'scatter', 'combo', 'radar', 'funnel', 'gauge', 'pie'])
+const ECHART_TYPES = new Set(['bar', 'line', 'area', 'scatter', 'combo', 'radar', 'funnel', 'gauge', 'pie'])
+// 笛卡尔轴类图表（共用 x 轴 + series 数组）
+const AXIS_CHART_TYPES = new Set(['bar', 'line', 'area', 'combo'])
+// 必须且只能一个 series 的类型
+const SINGLE_SERIES_TYPES = new Set(['pie', 'funnel', 'gauge'])
+// series.type 允许的 ECharts 系列类型
+const SERIES_TYPES = new Set(['bar', 'line', 'pie', 'scatter'])
 const DEFAULT_CHART_COLORS = ['#0f8c7b', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#14b8a6', '#f97316']
 
 const isPlainObject = (value) => value && typeof value === 'object' && !Array.isArray(value)
@@ -80,21 +85,27 @@ const normalizeColumns = (value) => (
     : []
 )
 
-const normalizeSeries = (value, fallbackType) => (
-  Array.isArray(value)
+// area 在 ECharts 中由 line + areaStyle 实现，没有独立的 'area' 系列类型。
+const seriesEchartsType = (fallbackType) => (fallbackType === 'area' ? 'line' : fallbackType)
+
+const normalizeSeries = (value, fallbackType) => {
+  const defaultType = seriesEchartsType(fallbackType)
+  return Array.isArray(value)
     ? value
       .filter(isPlainObject)
       .map((item) => {
-        const type = textOrEmpty(item.type || fallbackType).toLowerCase()
+        const type = textOrEmpty(item.type || defaultType).toLowerCase()
+        const axis = textOrEmpty(item.axis).toLowerCase() === 'right' ? 'right' : 'left'
         return {
           name: textOrEmpty(item.name || item.field || '指标'),
           field: textOrEmpty(item.field),
-          type: SERIES_TYPES.has(type) ? type : fallbackType
+          type: SERIES_TYPES.has(type) ? type : (SERIES_TYPES.has(defaultType) ? defaultType : 'line'),
+          axis
         }
       })
       .filter((item) => item.field)
     : []
-)
+}
 
 export const parseChartSpec = (value) => {
   if (typeof value === 'string') {
@@ -143,7 +154,7 @@ export const validateChartSpec = (specInput) => {
     errors.push('仅支持 chart_spec version=1')
   }
   if (!CHART_TYPES.has(spec.chart_type)) {
-    errors.push('chart_type 必须为 table、bar、line 或 pie')
+    errors.push('chart_type 必须为 table、bar、line、area、scatter、combo、radar、funnel、gauge 或 pie')
   }
   if (!spec.title) {
     errors.push('title 不能为空')
@@ -157,14 +168,15 @@ export const validateChartSpec = (specInput) => {
       errors.push('table 类型必须提供 columns')
     }
   } else if (ECHART_TYPES.has(spec.chart_type)) {
-    if (!spec.x_field) {
+    // gauge 取单一 KPI，不要求 x_field；其余图表必须有 x_field。
+    if (spec.chart_type !== 'gauge' && !spec.x_field) {
       errors.push(`${spec.chart_type} 类型必须提供 x_field`)
     }
     if (!spec.series.length) {
       errors.push(`${spec.chart_type} 类型必须提供 series`)
     }
-    if (spec.chart_type === 'pie' && spec.series.length !== 1) {
-      errors.push('pie 类型必须且只能提供一个 series')
+    if (SINGLE_SERIES_TYPES.has(spec.chart_type) && spec.series.length !== 1) {
+      errors.push(`${spec.chart_type} 类型必须且只能提供一个 series`)
     }
   }
 
@@ -210,38 +222,48 @@ const buildPieOption = (spec) => {
   }
 }
 
+const buildTitleOption = (spec) => (spec.title
+  ? {
+      text: spec.title,
+      subtext: spec.description || '',
+      left: 'left',
+      top: 6,
+      textStyle: { fontSize: 14, fontWeight: 600, color: '#162131' },
+      subtextStyle: { color: '#607185', fontSize: 12 }
+    }
+  : undefined)
+
+const valueAxisOption = (name) => ({
+  type: 'value',
+  name: name || '',
+  scale: true,
+  axisLabel: { color: '#607185' },
+  splitLine: { lineStyle: { color: '#eef3f8' } }
+})
+
+// 柱状 / 折线 / 面积 / 组合双轴：共用类目 x 轴 + series 数组。
 const buildAxisOption = (spec) => {
+  const isCombo = spec.chart_type === 'combo'
+  const isArea = spec.chart_type === 'area'
   const horizontal = spec.chart_type === 'bar' && spec.orientation === 'horizontal'
   const categoryAxis = {
     type: 'category',
     data: spec.dataset.map((row) => row[spec.x_field]),
     axisLabel: {
       color: '#607185',
-      rotate: spec.chart_type === 'bar' && !horizontal && spec.dataset.length > 8 ? 25 : 0
+      rotate: (spec.chart_type === 'bar' || isCombo) && !horizontal && spec.dataset.length > 8 ? 25 : 0
     },
     axisLine: { lineStyle: { color: '#d7e4ef' } }
   }
-  const valueAxis = {
-    type: 'value',
-    name: spec.unit || '',
-    scale: true,
-    axisLabel: { color: '#607185' },
-    splitLine: { lineStyle: { color: '#eef3f8' } }
-  }
+  const valueAxis = valueAxisOption(spec.unit)
+  const yAxis = isCombo
+    ? [valueAxisOption(spec.series[0] ? spec.series[0].name : spec.unit), valueAxisOption('')]
+    : (horizontal ? categoryAxis : valueAxis)
 
   return {
     backgroundColor: 'transparent',
     color: spec.colors.length ? spec.colors : DEFAULT_CHART_COLORS,
-    title: spec.title
-      ? {
-          text: spec.title,
-          subtext: spec.description || '',
-          left: 'left',
-          top: 6,
-          textStyle: { fontSize: 14, fontWeight: 600, color: '#162131' },
-          subtextStyle: { color: '#607185', fontSize: 12 }
-        }
-      : undefined,
+    title: buildTitleOption(spec),
     tooltip: {
       trigger: 'axis',
       transitionDuration: 0,
@@ -251,19 +273,158 @@ const buildAxisOption = (spec) => {
     legend: { top: 8, right: 0, textStyle: { color: '#607185' } },
     grid: { left: 24, right: 16, top: spec.title ? 68 : 32, bottom: 40, containLabel: true },
     xAxis: horizontal ? valueAxis : categoryAxis,
-    yAxis: horizontal ? categoryAxis : valueAxis,
-    series: spec.series.map((series) => ({
-      type: series.type,
-      name: series.name,
-      smooth: spec.chart_type === 'line',
-      stack: spec.stack ? 'total' : undefined,
-      areaStyle: spec.chart_type === 'line' && spec.area ? {} : undefined,
-      lineStyle: spec.chart_type === 'line' ? { width: 3 } : undefined,
-      symbolSize: spec.chart_type === 'line' ? 8 : undefined,
-      barMaxWidth: spec.chart_type === 'bar' ? 34 : undefined,
-      itemStyle: spec.chart_type === 'bar' ? { borderRadius: horizontal ? [0, 8, 8, 0] : [8, 8, 0, 0] } : undefined,
-      data: spec.dataset.map((row) => toNumeric(row[series.field]))
-    }))
+    yAxis,
+    series: spec.series.map((series) => {
+      const seriesType = isCombo ? series.type : (isArea ? 'line' : series.type)
+      const isLineLike = seriesType === 'line'
+      return {
+        type: seriesType,
+        name: series.name,
+        yAxisIndex: isCombo ? (series.axis === 'right' ? 1 : 0) : undefined,
+        smooth: spec.chart_type === 'line' || isArea,
+        stack: spec.stack && !isCombo ? 'total' : undefined,
+        areaStyle: isArea || (isLineLike && spec.area && !isCombo) ? {} : undefined,
+        lineStyle: isLineLike ? { width: 3 } : undefined,
+        symbolSize: isLineLike ? 8 : undefined,
+        barMaxWidth: seriesType === 'bar' ? 34 : undefined,
+        itemStyle: seriesType === 'bar' ? { borderRadius: horizontal ? [0, 8, 8, 0] : [8, 8, 0, 0] } : undefined,
+        data: spec.dataset.map((row) => toNumeric(row[series.field]))
+      }
+    })
+  }
+}
+
+// 散点图：x、y 均为数值轴，数据点为 [x, y]。
+const buildScatterOption = (spec) => ({
+  backgroundColor: 'transparent',
+  color: spec.colors.length ? spec.colors : DEFAULT_CHART_COLORS,
+  title: buildTitleOption(spec),
+  tooltip: {
+    trigger: 'item',
+    valueFormatter: spec.unit ? (value) => `${value}${spec.unit}` : undefined
+  },
+  legend: { top: 8, right: 0, textStyle: { color: '#607185' } },
+  grid: { left: 24, right: 16, top: spec.title ? 68 : 32, bottom: 40, containLabel: true },
+  xAxis: { ...valueAxisOption(spec.x_field), name: spec.x_field },
+  yAxis: valueAxisOption(spec.unit),
+  series: spec.series.map((series) => ({
+    type: 'scatter',
+    name: series.name,
+    symbolSize: 12,
+    data: spec.dataset.map((row) => [toNumeric(row[spec.x_field]), toNumeric(row[series.field])])
+  }))
+})
+
+// 雷达图：每行作为一个指标轴，每个 series 为一圈。
+const buildRadarOption = (spec) => {
+  const indicators = spec.dataset.map((row) => {
+    const max = spec.series.reduce((acc, series) => {
+      const value = toNumeric(row[series.field])
+      return typeof value === 'number' && value > acc ? value : acc
+    }, 0)
+    return { name: String(row[spec.x_field] ?? ''), max: max > 0 ? max : undefined }
+  })
+  return {
+    backgroundColor: 'transparent',
+    color: spec.colors.length ? spec.colors : DEFAULT_CHART_COLORS,
+    title: buildTitleOption(spec),
+    tooltip: { trigger: 'item' },
+    legend: { top: 8, right: 0, textStyle: { color: '#607185' } },
+    radar: {
+      indicator: indicators,
+      radius: '62%',
+      center: ['50%', '55%'],
+      axisName: { color: '#607185' },
+      splitLine: { lineStyle: { color: '#e3ebf3' } },
+      splitArea: { areaStyle: { color: ['rgba(15,140,123,0.03)', 'rgba(15,140,123,0.06)'] } }
+    },
+    series: [
+      {
+        type: 'radar',
+        data: spec.series.map((series) => ({
+          name: series.name,
+          value: spec.dataset.map((row) => toNumeric(row[series.field])),
+          areaStyle: { opacity: 0.1 }
+        }))
+      }
+    ]
+  }
+}
+
+// 漏斗图：阶段 + 单数值。
+const buildFunnelOption = (spec) => {
+  const primarySeries = spec.series[0]
+  return {
+    backgroundColor: 'transparent',
+    color: spec.colors.length ? spec.colors : DEFAULT_CHART_COLORS,
+    title: buildTitleOption(spec),
+    tooltip: {
+      trigger: 'item',
+      valueFormatter: spec.unit ? (value) => `${value}${spec.unit}` : undefined
+    },
+    legend: { bottom: 0, textStyle: { color: '#607185' } },
+    series: [
+      {
+        type: 'funnel',
+        left: '10%',
+        right: '10%',
+        top: spec.title ? 68 : 24,
+        bottom: 32,
+        minSize: '20%',
+        sort: 'descending',
+        gap: 2,
+        label: { color: '#425466' },
+        labelLine: { lineStyle: { color: '#c5d2df' } },
+        itemStyle: { borderColor: '#ffffff', borderWidth: 1 },
+        data: spec.dataset.map((row) => ({
+          name: String(row[spec.x_field] ?? ''),
+          value: toNumeric(row[primarySeries.field] ?? 0)
+        }))
+      }
+    ]
+  }
+}
+
+const niceCeil = (value) => {
+  const num = typeof value === 'number' && Number.isFinite(value) ? value : 0
+  if (num <= 0) return 100
+  const magnitude = 10 ** Math.floor(Math.log10(num))
+  return Math.ceil(num / magnitude) * magnitude
+}
+
+// 仪表盘：取首行单一 KPI。
+const buildGaugeOption = (spec) => {
+  const primarySeries = spec.series[0]
+  const firstRow = spec.dataset[0] || {}
+  const value = toNumeric(firstRow[primarySeries.field] ?? 0)
+  const numericValue = typeof value === 'number' ? value : 0
+  const name = spec.x_field ? String(firstRow[spec.x_field] ?? primarySeries.name) : primarySeries.name
+  const max = spec.unit === '%' ? 100 : niceCeil(numericValue * 1.2)
+  return {
+    backgroundColor: 'transparent',
+    color: spec.colors.length ? spec.colors : DEFAULT_CHART_COLORS,
+    title: buildTitleOption(spec),
+    series: [
+      {
+        type: 'gauge',
+        min: 0,
+        max,
+        center: ['50%', '58%'],
+        radius: '78%',
+        progress: { show: true, width: 14 },
+        axisLine: { lineStyle: { width: 14 } },
+        axisLabel: { color: '#607185', distance: 18 },
+        pointer: { width: 5 },
+        detail: {
+          valueAnimation: true,
+          fontSize: 22,
+          color: '#162131',
+          formatter: spec.unit ? `{value}${spec.unit}` : '{value}'
+        },
+        title: { color: '#607185', offsetCenter: [0, '72%'] },
+        data: [{ value: numericValue, name }]
+      }
+    ]
   }
 }
 
@@ -321,9 +482,22 @@ export const buildChartRenderModel = (specInput) => {
     state: 'renderable',
     kind: 'echarts',
     spec,
-    option: spec.chart_type === 'pie' ? buildPieOption(spec) : buildAxisOption(spec),
+    option: buildEchartsOption(spec),
     errorText: ''
   }
+}
+
+const ECHART_OPTION_BUILDERS = {
+  pie: buildPieOption,
+  scatter: buildScatterOption,
+  radar: buildRadarOption,
+  funnel: buildFunnelOption,
+  gauge: buildGaugeOption
+}
+
+const buildEchartsOption = (spec) => {
+  const builder = ECHART_OPTION_BUILDERS[spec.chart_type]
+  return builder ? builder(spec) : buildAxisOption(spec)
 }
 
 export const buildChartOption = (specInput) => {
@@ -339,6 +513,26 @@ const CHART_SPEC_FENCE_PATTERNS = [
   /```(?:chart|json)?\s*([\s\S]*?)```/gi,
   /<chart_spec>\s*([\s\S]*?)<\/chart_spec>/gi
 ]
+
+// A model sometimes hallucinates a chart as a markdown image/link pointing at a
+// fake `chart_spec://` URL (full-width colon included), which marked turns into a
+// broken <img>. Charts are never images (the spec contract forbids static image
+// URLs), so we always neutralize this form: recover an embedded spec from the URL
+// when one is actually there, otherwise drop the artifact entirely so no broken
+// image leaks to the user. `!?` covers both `![alt](...)` and `[text](...)`.
+const CHART_SPEC_PSEUDO_URL_PATTERN = /!?\[[^\]]*\]\(\s*(chart_spec[:：][^)]*?)\s*\)/gi
+
+// Try to pull a real chart_spec JSON out of a `chart_spec://...` URL body; the
+// model may cram the JSON into the URL, but usually it is just a placeholder.
+const recoverSpecFromPseudoUrl = (url) => {
+  let body = String(url || '').replace(/^chart_spec[:：]/i, '').replace(/^\/*/, '')
+  try {
+    body = decodeURIComponent(body)
+  } catch (_error) {
+    // keep the raw body when it is not valid percent-encoding
+  }
+  return parseChartSpec(body)
+}
 
 // Locate the index of the brace that closes the object opened at `start`,
 // ignoring braces inside JSON strings. Returns -1 when unbalanced (e.g. a spec
@@ -375,6 +569,19 @@ const findMatchingBrace = (source, start) => {
 // what the conclusion area renders.
 const collectChartSpecRanges = (source) => {
   const ranges = []
+
+  // Neutralize pseudo `chart_spec://` image/link artifacts first and claim their
+  // span, so the brace scanner below never re-parses the URL body and the text
+  // splitter can drop (spec === null) or render (recovered spec) the range.
+  CHART_SPEC_PSEUDO_URL_PATTERN.lastIndex = 0
+  let pseudoMatch
+  while ((pseudoMatch = CHART_SPEC_PSEUDO_URL_PATTERN.exec(source)) !== null) {
+    ranges.push({
+      start: pseudoMatch.index,
+      end: pseudoMatch.index + pseudoMatch[0].length,
+      spec: recoverSpecFromPseudoUrl(pseudoMatch[1])
+    })
+  }
 
   for (const pattern of CHART_SPEC_FENCE_PATTERNS) {
     pattern.lastIndex = 0
@@ -416,7 +623,9 @@ const collectChartSpecRanges = (source) => {
   return resolved
 }
 
-export const extractChartSpecsFromText = (text) => collectChartSpecRanges(String(text || '')).map((range) => range.spec)
+export const extractChartSpecsFromText = (text) => collectChartSpecRanges(String(text || ''))
+  .map((range) => range.spec)
+  .filter(Boolean)
 
 // Split answer text into ordered segments so the conclusion area can render the
 // surrounding prose as markdown and each embedded chart_spec as a real chart,
@@ -433,7 +642,9 @@ export const splitChartSpecText = (text) => {
   let cursor = 0
   for (const range of ranges) {
     pushText(source.slice(cursor, range.start))
-    segments.push({ type: 'chart', spec: range.spec })
+    // A null spec is an unrecoverable artifact (e.g. a broken `chart_spec://`
+    // image): drop its text without emitting a chart so nothing renders.
+    if (range.spec) segments.push({ type: 'chart', spec: range.spec })
     cursor = range.end
   }
   pushText(source.slice(cursor))

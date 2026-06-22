@@ -207,4 +207,190 @@ describe('chartSpec', () => {
     expect(extractChartSpecsFromText(message)).toHaveLength(0)
     expect(stripChartSpecsFromText(message)).toContain('"foo":"bar"')
   })
+
+  it('builds an area chart with filled line series', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'area',
+      title: '活跃用户趋势',
+      x_field: 'stat_day',
+      area: true,
+      series: [{ name: '活跃用户', field: 'active_users', type: 'line' }],
+      dataset: [
+        { stat_day: '2026-03-01', active_users: 120 },
+        { stat_day: '2026-03-02', active_users: 150 }
+      ],
+      error: null
+    })
+
+    expect(renderModel.state).toBe('renderable')
+    expect(renderModel.kind).toBe('echarts')
+    expect(renderModel.option.series[0].type).toBe('line')
+    expect(renderModel.option.series[0].areaStyle).toEqual({})
+    expect(renderModel.option.series[0].data).toEqual([120, 150])
+  })
+
+  it('builds a scatter chart with numeric x and [x, y] points', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'scatter',
+      title: '行数与字段数相关性',
+      x_field: 'table_rows',
+      series: [{ name: '字段数', field: 'column_count', type: 'scatter' }],
+      dataset: [
+        { table_rows: 100, column_count: 12 },
+        { table_rows: 250, column_count: 18 }
+      ],
+      error: null
+    })
+
+    expect(renderModel.state).toBe('renderable')
+    expect(renderModel.option.xAxis.type).toBe('value')
+    expect(renderModel.option.series[0].type).toBe('scatter')
+    expect(renderModel.option.series[0].data).toEqual([[100, 12], [250, 18]])
+  })
+
+  it('builds a combo chart with dual value axes', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'combo',
+      title: '金额与增速',
+      x_field: 'month',
+      series: [
+        { name: '金额', field: 'amount', type: 'bar', axis: 'left' },
+        { name: '增速', field: 'growth_rate', type: 'line', axis: 'right' }
+      ],
+      dataset: [
+        { month: '2026-01', amount: 1200, growth_rate: 0.12 },
+        { month: '2026-02', amount: 1500, growth_rate: 0.25 }
+      ],
+      error: null
+    })
+
+    expect(renderModel.state).toBe('renderable')
+    expect(Array.isArray(renderModel.option.yAxis)).toBe(true)
+    expect(renderModel.option.yAxis).toHaveLength(2)
+    expect(renderModel.option.series[0].type).toBe('bar')
+    expect(renderModel.option.series[0].yAxisIndex).toBe(0)
+    expect(renderModel.option.series[1].type).toBe('line')
+    expect(renderModel.option.series[1].yAxisIndex).toBe(1)
+  })
+
+  it('builds a radar chart with one indicator per dataset row', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'radar',
+      title: '数据质量评估',
+      x_field: 'metric',
+      series: [{ name: '评分', field: 'score', type: 'radar' }],
+      dataset: [
+        { metric: '完整性', score: 90 },
+        { metric: '及时性', score: 80 },
+        { metric: '准确性', score: 85 }
+      ],
+      error: null
+    })
+
+    expect(renderModel.state).toBe('renderable')
+    expect(renderModel.option.radar.indicator.map((i) => i.name)).toEqual(['完整性', '及时性', '准确性'])
+    expect(renderModel.option.series[0].type).toBe('radar')
+    expect(renderModel.option.series[0].data[0].value).toEqual([90, 80, 85])
+  })
+
+  it('builds a funnel chart from stage + single value rows', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'funnel',
+      title: '转化漏斗',
+      x_field: 'stage',
+      series: [{ name: '人数', field: 'cnt', type: 'funnel' }],
+      dataset: [
+        { stage: '曝光', cnt: 1000 },
+        { stage: '点击', cnt: 400 }
+      ],
+      error: null
+    })
+
+    expect(renderModel.state).toBe('renderable')
+    expect(renderModel.option.series[0].type).toBe('funnel')
+    expect(renderModel.option.series[0].data).toEqual([
+      { name: '曝光', value: 1000 },
+      { name: '点击', value: 400 }
+    ])
+  })
+
+  it('builds a gauge chart from the first row without requiring x_field', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'gauge',
+      title: '完成率',
+      series: [{ name: '完成率', field: 'completion_rate', type: 'gauge' }],
+      dataset: [{ completion_rate: 73 }],
+      error: null
+    })
+
+    expect(renderModel.state).toBe('renderable')
+    expect(renderModel.option.series[0].type).toBe('gauge')
+    expect(renderModel.option.series[0].data[0].value).toBe(73)
+  })
+
+  it('drops a broken chart_spec:// markdown image instead of leaking a broken image', () => {
+    const message = '结论如下：发布次数整体上升。\n![趋势图](chart_spec://chart_1)\n以上为本次结论。'
+
+    const segments = splitChartSpecText(message)
+    const stripped = stripChartSpecsFromText(message)
+
+    expect(segments.every((seg) => seg.type === 'text')).toBe(true)
+    expect(extractChartSpecsFromText(message)).toHaveLength(0)
+    expect(stripped).toContain('结论如下：发布次数整体上升。')
+    expect(stripped).toContain('以上为本次结论。')
+    expect(stripped).not.toContain('chart_spec')
+    expect(stripped).not.toContain('![')
+  })
+
+  it('handles a full-width colon chart_spec：// link the same way', () => {
+    const message = '见图：[图表](chart_spec：//placeholder) 结束。'
+
+    const stripped = stripChartSpecsFromText(message)
+    expect(stripped).not.toContain('chart_spec')
+    expect(stripped).not.toContain('](')
+  })
+
+  it('recovers a real spec embedded in a chart_spec:// image url', () => {
+    const spec = '{"kind":"chart_spec","version":1,"chart_type":"bar","title":"层级表数量","x_field":"layer","series":[{"name":"表数量","field":"table_cnt","type":"bar"}],"dataset":[{"layer":"DWD","table_cnt":18}],"error":null}'
+    const message = `结论：\n![图](chart_spec://${spec})`
+
+    const specs = extractChartSpecsFromText(message)
+    const segments = splitChartSpecText(message)
+
+    expect(specs).toHaveLength(1)
+    expect(specs[0].chart_type).toBe('bar')
+    expect(segments.some((seg) => seg.type === 'chart')).toBe(true)
+    expect(stripChartSpecsFromText(message)).not.toContain('chart_spec')
+  })
+
+  it('rejects funnel specs with more than one series', () => {
+    const validation = validateChartSpec({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'funnel',
+      title: '转化漏斗',
+      x_field: 'stage',
+      series: [
+        { name: '人数', field: 'cnt', type: 'funnel' },
+        { name: '占比', field: 'ratio', type: 'funnel' }
+      ],
+      dataset: [{ stage: '曝光', cnt: 1000, ratio: 1 }],
+      error: null
+    })
+
+    expect(validation.valid).toBe(false)
+    expect(validation.errors).toContain('funnel 类型必须且只能提供一个 series')
+  })
 })

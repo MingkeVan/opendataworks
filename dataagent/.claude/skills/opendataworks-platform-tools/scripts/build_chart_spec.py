@@ -76,6 +76,42 @@ def choose_chart(
             return "pie", dimension_fields[0], numeric_fields[:1]
         return None, None, []
 
+    if preferred == "area":
+        x_field = time_field or (dimension_fields[0] if dimension_fields else None)
+        if x_field and numeric_fields:
+            return "area", x_field, numeric_fields[: min(3, len(numeric_fields))]
+        return None, None, []
+
+    if preferred == "scatter":
+        # 散点图需要两个数值轴：x 为数值字段，y 为其余数值字段。
+        if len(numeric_fields) >= 2:
+            return "scatter", numeric_fields[0], numeric_fields[1 : 1 + min(3, len(numeric_fields) - 1)]
+        return None, None, []
+
+    if preferred == "combo":
+        # 组合双轴：首个数值走柱状/左轴，其余走折线/右轴。
+        if dimension_fields and len(numeric_fields) >= 2:
+            x_field = time_field or dimension_fields[0]
+            return "combo", x_field, numeric_fields[: min(3, len(numeric_fields))]
+        return None, None, []
+
+    if preferred == "radar":
+        # 雷达图：每行作为一个指标轴，至少 3 个指标轴才有意义。
+        if dimension_fields and numeric_fields and len(rows) >= 3:
+            return "radar", dimension_fields[0], numeric_fields[: min(3, len(numeric_fields))]
+        return None, None, []
+
+    if preferred == "funnel":
+        if dimension_fields and numeric_fields:
+            return "funnel", dimension_fields[0], numeric_fields[:1]
+        return None, None, []
+
+    if preferred == "gauge":
+        # 单 KPI：x_field 可选，仅取首行首个数值。
+        if numeric_fields:
+            return "gauge", (dimension_fields[0] if dimension_fields else None), numeric_fields[:1]
+        return None, None, []
+
     if preferred == "table":
         return "table", None, []
 
@@ -126,6 +162,7 @@ def main():
     parser.add_argument("--data", default="")
     parser.add_argument("--category-field", "--x-field", dest="category_field", default="")
     parser.add_argument("--value-field", "--y-field", dest="value_field", default="")
+    parser.add_argument("--stack", dest="stack", action="store_true")
     args = parser.parse_args()
 
     try:
@@ -185,7 +222,8 @@ def main():
             print_json(chart_payload)
             return
 
-        if not chart_type or not x_field or not series_fields:
+        # gauge 允许空 x_field（单 KPI 取首行），其余轴类图表必须有 x_field。
+        if not chart_type or not series_fields or (chart_type != "gauge" and not x_field):
             print_json(
                 error_payload(
                     "chart_spec",
@@ -200,22 +238,37 @@ def main():
             )
             return
 
-        series = [
-            {"name": field, "field": field, "type": chart_type}
-            for field in series_fields
-        ]
+        def series_type_for(index: int) -> str:
+            if chart_type == "combo":
+                return "bar" if index == 0 else "line"
+            if chart_type == "area":
+                return "line"
+            if chart_type == "scatter":
+                return "scatter"
+            return chart_type
+
+        series = []
+        for index, field in enumerate(series_fields):
+            item = {"name": field, "field": field, "type": series_type_for(index)}
+            if chart_type == "combo":
+                item["axis"] = "left" if index == 0 else "right"
+            series.append(item)
+
         chart_payload = base_chart_payload(
             chart_type,
             title,
-            f"基于 {x_field} 绘制 {chart_type} 图",
+            f"基于 {x_field} 绘制 {chart_type} 图" if x_field else f"绘制 {chart_type} 图",
             normalized_rows,
         )
-        chart_payload["x_field"] = x_field
+        if x_field:
+            chart_payload["x_field"] = x_field
         chart_payload["series"] = series
+        if bool(args.stack) and chart_type in ("bar", "area", "line"):
+            chart_payload["stack"] = True
         if chart_type == "pie":
             chart_payload["donut"] = False
-        if chart_type == "line":
-            chart_payload["area"] = False
+        if chart_type in ("line", "area"):
+            chart_payload["area"] = chart_type == "area"
         if chart_type == "bar":
             chart_payload["orientation"] = "vertical"
         print_json(chart_payload)
