@@ -632,6 +632,42 @@ describe('NL2SqlChatV2 URL location', () => {
     resolveStream()
   })
 
+  it('keeps the loading indicator after re-entering a running topic that has not streamed content yet', async () => {
+    let resolveStream
+    apiMocks.topicApi.listTopics.mockResolvedValue({
+      list: [
+        { ...makeTopic('topic-run', 'Running topic'), current_task_id: 'task-run', current_task_status: 'running' }
+      ]
+    })
+    // The persisted placeholder assistant message (created at deliver time with
+    // status "waiting") rehydrates with a single empty turn — the case where the
+    // old `!turns.length` indicator condition wrongly hid the spinner on resume.
+    apiMocks.topicApi.getTopicMessages.mockImplementation(async (topicId) => ({
+      topic_id: topicId,
+      page: 1,
+      page_size: 500,
+      order: 'asc',
+      total: 2,
+      items: [
+        { message_id: 'u-run', topic_id: topicId, sender_type: 'user', content: 'running question', created_at: '2026-05-30T02:00:00Z' },
+        { message_id: 'a-run', topic_id: topicId, sender_type: 'assistant', task_id: 'task-run', content: '', status: 'waiting', blocks: [], created_at: '2026-05-30T02:00:01Z' }
+      ]
+    }))
+    // Resume re-attaches but the backend has produced nothing yet (still waiting).
+    apiMocks.taskApi.streamSdkEvents.mockImplementation(() => new Promise((resolve) => { resolveStream = resolve }))
+    routeState.query = { tab: 'chat-v2', topic_id: 'topic-run' }
+
+    const wrapper = mountChat()
+    await flushPromises()
+    await nextTick()
+
+    expect(apiMocks.taskApi.streamSdkEvents).toHaveBeenCalledWith('task-run', expect.objectContaining({ afterId: 0 }))
+    // The "thinking" dots stay visible because the resumed run is still live.
+    expect(wrapper.find('.v2-typing-indicator').exists()).toBe(true)
+
+    resolveStream()
+  })
+
   it('forwards the selected assistant to the widget topic query', async () => {
     routeState.query = { tab: 'chat-v2', agent_id: 'agent_sales' }
     const wrapper = mountChat()

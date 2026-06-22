@@ -186,8 +186,9 @@
               <div class="v2-assistant-body">
                 <!-- Streaming: render turns from v2 state -->
                 <template v-if="msg._v2state">
-                  <!-- Loading indicator: waiting for first block -->
-                  <div v-if="!msg._v2state.turns.length && isStreaming" class="v2-typing-indicator">
+                  <!-- Loading indicator: live run with no rendered content yet
+                       (initial send or a resumed run re-entered while waiting) -->
+                  <div v-if="showTypingIndicator(msg)" class="v2-typing-indicator">
                     <span /><span /><span />
                   </div>
 
@@ -1021,6 +1022,26 @@ function cleanTextForDisplay(content) {
 // (fenced, tagged, or raw JSON) renders as a real chart instead of leaking JSON.
 function answerSegments(content) {
   return splitChartSpecText(String(content || ''))
+}
+
+// The "thinking" dots show while a run is live but has not rendered any content
+// yet. Keying off rendered blocks (not turn count) keeps the indicator visible
+// after switching away and back: a resumed run rehydrates its assistant message
+// from the still-empty persisted placeholder, whose _v2state already carries one
+// empty turn, so `turns.length` is no longer 0 even though nothing has streamed.
+function hasRenderedBlocks(msg) {
+  const turns = msg?._v2state?.turns
+  return Array.isArray(turns) && turns.some((t) => Array.isArray(t.blocks) && t.blocks.length > 0)
+}
+
+function showTypingIndicator(msg) {
+  if (!isStreaming.value) return false
+  if (msg?._v2state?.status === 'error') return false
+  if (hasRenderedBlocks(msg)) return false
+  // Scope to the live message: the resumed/active task, or the just-sent message
+  // whose backend task id has not been assigned yet (task_id still '').
+  const taskId = String(msg?.task_id || '')
+  return taskId ? taskId === activeTaskId.value : true
 }
 
 // ── Suggestions ───────────────────────────────────────────────────────────
