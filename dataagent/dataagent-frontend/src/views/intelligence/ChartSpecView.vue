@@ -56,12 +56,21 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
 import { use } from 'echarts/core'
-import { BarChart, LineChart, PieChart } from 'echarts/charts'
+import {
+  BarChart,
+  LineChart,
+  PieChart,
+  ScatterChart,
+  RadarChart,
+  FunnelChart,
+  GaugeChart
+} from 'echarts/charts'
 import {
   GridComponent,
   LegendComponent,
   TitleComponent,
-  TooltipComponent
+  TooltipComponent,
+  RadarComponent
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { buildChartRenderModel } from './chartSpec'
@@ -73,10 +82,15 @@ use([
   LineChart,
   BarChart,
   PieChart,
+  ScatterChart,
+  RadarChart,
+  FunnelChart,
+  GaugeChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
-  TitleComponent
+  TitleComponent,
+  RadarComponent
 ])
 
 const props = defineProps({

@@ -48,10 +48,10 @@
 
 - 必须通过 Bash 工具实际调用 `build_chart_spec.py` 生成图表契约，不得凭记忆把契约 JSON 输出到文本里，也不得用 ASCII 或 Unicode 字符模拟图表。`build_chart_spec.py` 不是独立注册的工具名，它是通过 Bash 工具执行的脚本，调用命令模板：
   ```
-  "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_PLATFORM_SKILL_ROOT}/scripts/build_chart_spec.py" --chart-type <bar|line|pie|table> --input '<sql_execution JSON>' [--title "<标题>"] [--x-field <维度字段>] [--y-field <度量字段>]
+  "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_PLATFORM_SKILL_ROOT}/scripts/build_chart_spec.py" --chart-type <bar|line|area|scatter|combo|radar|funnel|gauge|pie|table> --input '<sql_execution JSON>' [--title "<标题>"] [--x-field <维度字段>] [--y-field <度量字段>] [--stack]
   ```
 - 图表契约必须基于真实且完整的查询结果构建，不得捏造、抽样或只截取前 N 个数据点；若 SQL 结果已被 `has_more`、`truncated_by_size` 或 `result_truncated` 标记为不完整，不得生成图表，必须先改写 SQL 聚合/过滤到完整有界结果；
-- 图表类型与数据结构匹配：趋势用折线图、占比用饼图、排行/对比用柱状图、明细用表格；
+- 图表类型与数据结构匹配：趋势用折线图（强调累积量用面积图 area）、占比用饼图、排行/对比用柱状图（多分组堆叠加 `--stack`）、明细用表格；相关性用散点图 scatter、量级+比率混合对比用组合双轴 combo、少数对象多指标对比用雷达图 radar、阶段转化用漏斗图 funnel、单一关键指标用仪表盘 gauge；
 - 查询结果为空或不足以构成有意义的图表时，说明原因，不强行生成空图表；纯元数据或语义解释类回答不需要图表。
 
 **结论与图表的关联要求：**

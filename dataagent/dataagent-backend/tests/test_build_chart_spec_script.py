@@ -211,3 +211,122 @@ def test_x_y_field_aliases_are_supported():
     assert chart["chart_type"] == "line"
     assert chart["x_field"] == "stat_day"
     assert chart["series"][0]["field"] == "publish_cnt"
+
+
+def test_area_chart_sets_area_flag_and_line_series():
+    payload = {
+        "kind": "sql_execution",
+        "rows": [
+            {"stat_day": "2026-03-01", "active_users": 120},
+            {"stat_day": "2026-03-02", "active_users": 150},
+        ],
+    }
+
+    chart = _run_chart_spec(payload, "--chart-type", "area")
+
+    assert chart["chart_type"] == "area"
+    assert chart["x_field"] == "stat_day"
+    assert chart["area"] is True
+    assert chart["series"][0]["type"] == "line"
+
+
+def test_bar_chart_stack_flag_sets_stack_true():
+    payload = {
+        "kind": "sql_execution",
+        "rows": [
+            {"layer": "ODS", "a_count": 10, "b_count": 4},
+            {"layer": "DWD", "a_count": 6, "b_count": 9},
+        ],
+    }
+
+    chart = _run_chart_spec(payload, "--chart-type", "bar", "--stack")
+
+    assert chart["chart_type"] == "bar"
+    assert chart["stack"] is True
+    assert len(chart["series"]) == 2
+
+
+def test_scatter_chart_uses_numeric_x_and_y_series():
+    payload = {
+        "kind": "sql_execution",
+        "rows": [
+            {"table_rows": 100, "column_count": 12},
+            {"table_rows": 250, "column_count": 18},
+            {"table_rows": 80, "column_count": 7},
+        ],
+    }
+
+    chart = _run_chart_spec(payload, "--chart-type", "scatter")
+
+    assert chart["chart_type"] == "scatter"
+    assert chart["x_field"] == "table_rows"
+    assert chart["series"][0]["field"] == "column_count"
+    assert chart["series"][0]["type"] == "scatter"
+
+
+def test_combo_chart_splits_bar_left_and_line_right():
+    payload = {
+        "kind": "sql_execution",
+        "rows": [
+            {"month": "2026-01", "amount": 1200, "growth_rate": 0.12},
+            {"month": "2026-02", "amount": 1500, "growth_rate": 0.25},
+        ],
+    }
+
+    chart = _run_chart_spec(payload, "--chart-type", "combo")
+
+    assert chart["chart_type"] == "combo"
+    assert chart["x_field"] == "month"
+    assert chart["series"][0]["type"] == "bar"
+    assert chart["series"][0]["axis"] == "left"
+    assert chart["series"][1]["type"] == "line"
+    assert chart["series"][1]["axis"] == "right"
+
+
+def test_radar_chart_requires_three_indicators():
+    payload = {
+        "kind": "sql_execution",
+        "rows": [
+            {"metric": "完整性", "score": 90},
+            {"metric": "及时性", "score": 80},
+            {"metric": "准确性", "score": 85},
+        ],
+    }
+
+    chart = _run_chart_spec(payload, "--chart-type", "radar")
+
+    assert chart["chart_type"] == "radar"
+    assert chart["x_field"] == "metric"
+    assert chart["series"][0]["field"] == "score"
+
+
+def test_funnel_chart_keeps_single_series():
+    payload = {
+        "kind": "sql_execution",
+        "rows": [
+            {"stage": "曝光", "cnt": 1000},
+            {"stage": "点击", "cnt": 400},
+            {"stage": "下单", "cnt": 120},
+        ],
+    }
+
+    chart = _run_chart_spec(payload, "--chart-type", "funnel")
+
+    assert chart["chart_type"] == "funnel"
+    assert chart["x_field"] == "stage"
+    assert len(chart["series"]) == 1
+
+
+def test_gauge_chart_allows_missing_x_field():
+    payload = {
+        "kind": "sql_execution",
+        "rows": [
+            {"completion_rate": 73},
+        ],
+    }
+
+    chart = _run_chart_spec(payload, "--chart-type", "gauge")
+
+    assert chart["chart_type"] == "gauge"
+    assert "x_field" not in chart or not chart["x_field"]
+    assert chart["series"][0]["field"] == "completion_rate"
