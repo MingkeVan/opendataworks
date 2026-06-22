@@ -22,6 +22,8 @@ import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DorisClusterMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
+import com.onedata.portal.service.table.TableEngineHandler;
+import com.onedata.portal.service.table.TableEngineHandlerRegistry;
 import com.onedata.portal.util.DatasourceType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,7 +54,7 @@ public class DataTableService {
     private final TaskExecutionLogMapper taskExecutionLogMapper;
     private final DataLineageMapper dataLineageMapper;
     private final DorisClusterMapper dorisClusterMapper;
-    private final DorisConnectionService dorisConnectionService;
+    private final TableEngineHandlerRegistry tableEngineHandlerRegistry;
     private final TableMetadataVersionService tableMetadataVersionService;
 
     /**
@@ -235,6 +237,7 @@ public class DataTableService {
     @Transactional
     public DataTable create(DataTable dataTable) {
         dataTable.setLayer(normalizeLayer(dataTable.getLayer(), true));
+        normalizeCreateMetadata(dataTable);
 
         // 检查表名是否已存在（在同一数据库下）
         DataTable exists = getByDbAndTableName(dataTable.getClusterId(), dataTable.getDbName(), dataTable.getTableName());
@@ -247,6 +250,31 @@ public class DataTableService {
         tableMetadataVersionService.captureVersion(dataTable.getId(),
                 TableMetadataVersionService.TRIGGER_TABLE_CREATE, null);
         return dataTable;
+    }
+
+    private void normalizeCreateMetadata(DataTable dataTable) {
+        if (dataTable == null) {
+            return;
+        }
+        Long clusterId = dataTable.getClusterId();
+        if (clusterId == null) {
+            TableEngineHandler.clearDorisPhysicalMetadata(dataTable);
+            return;
+        }
+        DorisCluster cluster = dorisClusterMapper.selectById(clusterId);
+        if (cluster == null) {
+            throw new RuntimeException("数据源不存在: " + clusterId);
+        }
+        DatasourceType sourceType = DatasourceType.from(cluster.getSourceType());
+        if (sourceType == DatasourceType.DORIS) {
+            return;
+        }
+        TableEngineHandler handler = tableEngineHandlerRegistry.find(sourceType);
+        if (handler != null) {
+            handler.prepareCreateMetadata(dataTable, null, null);
+            return;
+        }
+        TableEngineHandler.clearDorisPhysicalMetadata(dataTable);
     }
 
     /**
@@ -403,6 +431,21 @@ public class DataTableService {
     }
 
     /**
+     * 按所属数据源类型清理物理表；未同步表仅清理平台元数据。
+     */
+    public void dropPhysicalTableIfRequired(DataTable table) {
+        ResolvedTableEngine engine = resolveSyncedPhysicalEngine(table, null);
+        if (engine == null) {
+            return;
+        }
+        TableRef tableRef = resolveTableRef(table);
+        if (tableRef == null) {
+            throw new RuntimeException("缺少数据库名或表名");
+        }
+        engine.handler.dropTable(engine.clusterId, tableRef.database, tableRef.tableName);
+    }
+
+    /**
      * 解析表的物理位置（库名 + 去前缀后的实际表名）。
      * 优先使用 dbName 字段，否则从 {@code db.table} 形式的表名解析；无法解析时抛出标准提示。
      */
@@ -448,41 +491,47 @@ public class DataTableService {
         String newActualName = extractActualTableName(tableRef != null ? tableRef.database : existing.getDbName(),
                 newTableName);
         boolean physicalTableUpdate = hasPhysicalTableUpdate(existing, dataTable, oldTableName, newActualName);
-        Long actualClusterId = resolveActualClusterId(existing, clusterId);
-        boolean syncDoris = physicalTableUpdate && requiresDorisPhysicalSync(existing, actualClusterId);
-        if (syncDoris && tableRef == null) {
+        ResolvedTableEngine engine = physicalTableUpdate ? resolveSyncedPhysicalEngine(existing, clusterId) : null;
+        if (engine != null && tableRef == null) {
             throw new RuntimeException("表未配置数据库名，请先设置 dbName 字段");
         }
-        if (syncDoris) {
+        if (engine != null) {
             try {
                 if (StringUtils.hasText(newTableName) && !Objects.equals(oldTableName, newActualName)) {
-                    dorisConnectionService.renameTable(actualClusterId, tableRef.database, oldTableName, newActualName);
+                    engine.handler.renameTable(engine.clusterId, tableRef.database, oldTableName, newActualName);
                 }
                 if (StringUtils.hasText(dataTable.getTableComment())
                         && !Objects.equals(existing.getTableComment(), dataTable.getTableComment())) {
-                    dorisConnectionService.alterTableComment(actualClusterId, tableRef.database, newActualName,
+                    engine.handler.alterTableComment(engine.clusterId, tableRef.database, newActualName,
                             dataTable.getTableComment());
                 }
                 if (dataTable.getBucketNum() != null && !Objects.equals(existing.getBucketNum(), dataTable.getBucketNum())) {
-                    if (!StringUtils.hasText(existing.getDistributionColumn())) {
-                        throw new DorisSyncRejectedException("缺少分桶字段，无法同步分桶数到 Doris");
-                    }
-                    dorisConnectionService.modifyDistribution(
-                            actualClusterId,
-                            tableRef.database,
-                            newActualName,
-                            existing.getDistributionColumn(),
+                    engine.handler.modifyDistribution(engine.clusterId, existing, tableRef.database, newActualName,
                             dataTable.getBucketNum());
                 }
                 if (dataTable.getReplicaNum() != null && !Objects.equals(existing.getReplicaNum(), dataTable.getReplicaNum())) {
-                    dorisConnectionService.setReplicationNum(actualClusterId, tableRef.database, newActualName,
+                    engine.handler.setReplicationNum(engine.clusterId, tableRef.database, newActualName,
                             dataTable.getReplicaNum());
                 }
-            } catch (DorisSyncRejectedException e) {
-                // 校验类拒绝：复刻原控制器在 rename/comment 之后直接返回的原始文案（不加同步失败前缀）
-                throw new RuntimeException(e.getMessage());
             } catch (Exception e) {
-                throw new RuntimeException("同步 Doris 失败: " + e.getMessage());
+                if ("缺少分桶字段，无法同步分桶数到 Doris".equals(e.getMessage())) {
+                    throw new RuntimeException(e.getMessage());
+                }
+                if (e.getMessage() != null && (e.getMessage().startsWith("暂不支持同步 ")
+                        || e.getMessage().startsWith("MySQL 数据源不支持"))) {
+                    throw new RuntimeException(e.getMessage());
+                }
+                String engineName = engine.handler.sourceType().name();
+                if (engine.handler.sourceType() == DatasourceType.DORIS) {
+                    engineName = "Doris";
+                }
+                throw new RuntimeException("同步 " + engineName + " 失败: " + e.getMessage());
+            }
+        } else if (physicalTableUpdate && isSyncedPhysicalTable(existing)) {
+            try {
+                resolveSyncedPhysicalEngine(existing, clusterId);
+            } catch (Exception e) {
+                throw new RuntimeException(e.getMessage());
             }
         }
         dataTable.setId(id);
@@ -511,12 +560,11 @@ public class DataTableService {
         if (table == null) {
             throw new RuntimeException("表不存在");
         }
-        Long actualClusterId = resolveActualClusterId(table, clusterId);
-        boolean syncDoris = requiresDorisPhysicalSync(table, actualClusterId);
+        ResolvedTableEngine engine = resolveSyncedPhysicalEngine(table, clusterId);
         try {
-            if (syncDoris) {
+            if (engine != null) {
                 TableLocation location = requireTableLocation(table);
-                dorisConnectionService.alterTableComment(actualClusterId,
+                engine.handler.alterTableComment(engine.clusterId,
                         location.getDatabase(), location.getTableName(), comment);
             }
 
@@ -540,8 +588,7 @@ public class DataTableService {
         if ("deprecated".equalsIgnoreCase(table.getStatus())) {
             throw new RuntimeException("表已处于待删除状态");
         }
-        Long actualClusterId = clusterId != null ? clusterId : table.getClusterId();
-        boolean syncDoris = requiresDorisPhysicalSync(table, actualClusterId);
+        ResolvedTableEngine engine = resolveSyncedPhysicalEngine(table, clusterId);
 
         TableLocation location = requireTableLocation(table);
         String database = location.getDatabase();
@@ -556,9 +603,8 @@ public class DataTableService {
             String timestamp = now.format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
             String newTableName = actualTableName + "_deprecated_" + timestamp;
 
-            if (syncDoris) {
-                // 在Doris中重命名表
-                dorisConnectionService.renameTable(actualClusterId, database, actualTableName, newTableName);
+            if (engine != null) {
+                engine.handler.renameTable(engine.clusterId, database, actualTableName, newTableName);
             }
 
             // 更新本地记录
@@ -600,11 +646,10 @@ public class DataTableService {
             throw new RuntimeException("恢复失败：目标表名冲突 " + restoreTableName);
         }
 
-        Long actualClusterId = clusterId != null ? clusterId : table.getClusterId();
-        boolean syncDoris = requiresDorisPhysicalSync(table, actualClusterId);
+        ResolvedTableEngine engine = resolveSyncedPhysicalEngine(table, clusterId);
         try {
-            if (syncDoris) {
-                dorisConnectionService.renameTable(actualClusterId, tableRef.database, tableRef.tableName, restoreTableName);
+            if (engine != null) {
+                engine.handler.renameTable(engine.clusterId, tableRef.database, tableRef.tableName, restoreTableName);
             }
             return restoreDeprecatedTable(table, restoreTableName);
         } catch (Exception e) {
@@ -625,7 +670,6 @@ public class DataTableService {
             throw new RuntimeException("仅支持清理已废弃表");
         }
 
-        Long actualClusterId = clusterId != null ? clusterId : table.getClusterId();
         TableRef tableRef = resolveTableRef(table);
         if (tableRef == null) {
             throw new RuntimeException("表未配置数据库名，请先设置 dbName 字段");
@@ -633,11 +677,11 @@ public class DataTableService {
         if (!isConfirmTableNameMatched(confirmTableName, tableRef.tableName)) {
             throw new RuntimeException("确认失败：请输入正确的表名 " + tableRef.tableName);
         }
-        boolean syncDoris = requiresDorisPhysicalSync(table, actualClusterId);
+        ResolvedTableEngine engine = resolveSyncedPhysicalEngine(table, clusterId);
 
         try {
-            if (syncDoris) {
-                dorisConnectionService.dropTable(actualClusterId, tableRef.database, tableRef.tableName);
+            if (engine != null) {
+                engine.handler.dropTable(engine.clusterId, tableRef.database, tableRef.tableName);
             }
             purgeTableMetadata(id);
         } catch (Exception e) {
@@ -699,16 +743,6 @@ public class DataTableService {
             return 0L;
         }
         return (seconds + 86_399) / 86_400;
-    }
-
-    /**
-     * Doris 同步过程中的「校验拒绝」标记异常：用于复刻原控制器在 rename/comment 之后
-     * 仍以原始文案直接返回的语义，避免被「同步 Doris 失败:」前缀包裹。
-     */
-    private static class DorisSyncRejectedException extends RuntimeException {
-        DorisSyncRejectedException(String message) {
-            super(message);
-        }
     }
 
     /**
@@ -820,21 +854,13 @@ public class DataTableService {
             throw new RuntimeException("字段名和类型不能为空");
         }
 
-        if (requiresDorisPhysicalSync(table, clusterId)) {
+        ResolvedTableEngine engine = resolveSyncedPhysicalEngine(table, clusterId);
+        if (engine != null) {
             TableRef tableRef = resolveTableRef(table);
             if (tableRef == null) {
                 throw new RuntimeException("表未配置数据库名，请先设置 dbName 字段");
             }
-            if (isAggregateTable(table)) {
-                throw new RuntimeException("AGGREGATE 表字段变更需指定聚合方式，暂不支持同步");
-            }
-            boolean isKey = isKeyColumn(table, field);
-            if (isKey) {
-                throw new RuntimeException("Doris 不支持在线新增主键列");
-            }
-            String columnDef = dorisConnectionService.buildColumnDefinition(field, isKey);
-            dorisConnectionService.addColumn(resolveActualClusterId(table, clusterId),
-                    tableRef.database, tableRef.tableName, columnDef);
+            engine.handler.addColumn(engine.clusterId, table, tableRef.database, tableRef.tableName, field);
         }
 
         dataFieldMapper.insert(field);
@@ -868,37 +894,13 @@ public class DataTableService {
 
         DataField toUpdate = mergeField(exists, field);
 
-        if (requiresDorisPhysicalSync(table, clusterId)) {
+        ResolvedTableEngine engine = resolveSyncedPhysicalEngine(table, clusterId);
+        if (engine != null) {
             TableRef tableRef = resolveTableRef(table);
             if (tableRef == null) {
                 throw new RuntimeException("表未配置数据库名，请先设置 dbName 字段");
             }
-            if (!Objects.equals(exists.getIsPrimary(), toUpdate.getIsPrimary())) {
-                throw new RuntimeException("Doris 不支持在线修改主键列");
-            }
-            boolean nameChanged = !Objects.equals(exists.getFieldName(), toUpdate.getFieldName());
-            if (isAggregateTable(table)) {
-                if (nameChanged || hasNonCommentChanges(exists, toUpdate)) {
-                    throw new RuntimeException("AGGREGATE 表字段变更需指定聚合方式，暂不支持同步");
-                }
-                if (onlyCommentChanged(exists, toUpdate)) {
-                    dorisConnectionService.modifyColumnComment(resolveActualClusterId(table, clusterId),
-                            tableRef.database, tableRef.tableName,
-                            toUpdate.getFieldName(), toUpdate.getFieldComment());
-                }
-            } else {
-                if (nameChanged) {
-                    dorisConnectionService.renameColumn(resolveActualClusterId(table, clusterId),
-                            tableRef.database, tableRef.tableName,
-                            exists.getFieldName(), toUpdate.getFieldName());
-                }
-                if (isColumnChanged(exists, toUpdate)) {
-                    boolean isKey = isKeyColumn(table, toUpdate);
-                    String columnDef = dorisConnectionService.buildColumnDefinition(toUpdate, isKey);
-                    dorisConnectionService.modifyColumn(resolveActualClusterId(table, clusterId),
-                            tableRef.database, tableRef.tableName, columnDef);
-                }
-            }
+            engine.handler.updateColumn(engine.clusterId, table, tableRef.database, tableRef.tableName, exists, toUpdate);
         }
 
         dataFieldMapper.updateById(toUpdate);
@@ -917,13 +919,13 @@ public class DataTableService {
         if (exists == null) {
             throw new RuntimeException("字段不存在");
         }
-        if (requiresDorisPhysicalSync(table, clusterId)) {
+        ResolvedTableEngine engine = resolveSyncedPhysicalEngine(table, clusterId);
+        if (engine != null) {
             TableRef tableRef = resolveTableRef(table);
             if (tableRef == null) {
                 throw new RuntimeException("表未配置数据库名，请先设置 dbName 字段");
             }
-            dorisConnectionService.dropColumn(resolveActualClusterId(table, clusterId),
-                    tableRef.database, tableRef.tableName, exists.getFieldName());
+            engine.handler.dropColumn(engine.clusterId, tableRef.database, tableRef.tableName, exists.getFieldName());
         }
         dataFieldMapper.deleteById(fieldId);
         log.info("Deleted field: {}", fieldId);
@@ -975,22 +977,8 @@ public class DataTableService {
     }
 
     public boolean requiresDorisPhysicalSync(DataTable table, Long clusterId) {
-        if (!isSyncedPhysicalTable(table)) {
-            return false;
-        }
-        Long actualClusterId = resolveActualClusterId(table, clusterId);
-        if (actualClusterId == null) {
-            throw new RuntimeException("请指定数据源");
-        }
-        DorisCluster cluster = dorisClusterMapper.selectById(actualClusterId);
-        if (cluster == null) {
-            throw new RuntimeException("数据源不存在: " + actualClusterId);
-        }
-        DatasourceType sourceType = DatasourceType.from(cluster.getSourceType());
-        if (sourceType == DatasourceType.DORIS) {
-            return true;
-        }
-        throw new RuntimeException("暂不支持同步 " + sourceType.name() + " 数据源的表变更");
+        ResolvedTableEngine engine = resolveSyncedPhysicalEngine(table, clusterId);
+        return engine != null && engine.handler.sourceType() == DatasourceType.DORIS;
     }
 
     public boolean isSyncedPhysicalTable(DataTable table) {
@@ -1007,65 +995,21 @@ public class DataTableService {
         return table == null ? null : table.getClusterId();
     }
 
-    private boolean isAggregateTable(DataTable table) {
-        return table != null && StringUtils.hasText(table.getTableModel())
-                && "AGGREGATE".equalsIgnoreCase(table.getTableModel());
-    }
-
-    private boolean isKeyColumn(DataTable table, DataField field) {
-        if (field != null && field.getIsPrimary() != null && field.getIsPrimary() == 1) {
-            return true;
+    private ResolvedTableEngine resolveSyncedPhysicalEngine(DataTable table, Long clusterId) {
+        if (!isSyncedPhysicalTable(table)) {
+            return null;
         }
-        if (table == null || !StringUtils.hasText(table.getKeyColumns()) || field == null
-                || !StringUtils.hasText(field.getFieldName())) {
-            return false;
+        Long actualClusterId = resolveActualClusterId(table, clusterId);
+        if (actualClusterId == null) {
+            throw new RuntimeException("请指定数据源");
         }
-        String[] keys = table.getKeyColumns().split(",");
-        for (String key : keys) {
-            if (field.getFieldName().equalsIgnoreCase(key.trim())) {
-                return true;
-            }
+        DorisCluster cluster = dorisClusterMapper.selectById(actualClusterId);
+        if (cluster == null) {
+            throw new RuntimeException("数据源不存在: " + actualClusterId);
         }
-        return false;
-    }
-
-    private boolean isColumnChanged(DataField oldField, DataField newField) {
-        if (oldField == null || newField == null) {
-            return false;
-        }
-        return !Objects.equals(normalize(oldField.getFieldType()), normalize(newField.getFieldType()))
-                || !Objects.equals(normalize(oldField.getFieldComment()), normalize(newField.getFieldComment()))
-                || !Objects.equals(normalize(oldField.getDefaultValue()), normalize(newField.getDefaultValue()))
-                || !Objects.equals(normalize(oldField.getIsNullable()), normalize(newField.getIsNullable()))
-                || !Objects.equals(normalize(oldField.getIsPrimary()), normalize(newField.getIsPrimary()));
-    }
-
-    private boolean hasNonCommentChanges(DataField oldField, DataField newField) {
-        if (oldField == null || newField == null) {
-            return false;
-        }
-        return !Objects.equals(normalize(oldField.getFieldType()), normalize(newField.getFieldType()))
-                || !Objects.equals(normalize(oldField.getDefaultValue()), normalize(newField.getDefaultValue()))
-                || !Objects.equals(normalize(oldField.getIsNullable()), normalize(newField.getIsNullable()))
-                || !Objects.equals(normalize(oldField.getIsPrimary()), normalize(newField.getIsPrimary()));
-    }
-
-    private boolean onlyCommentChanged(DataField oldField, DataField newField) {
-        if (oldField == null || newField == null) {
-            return false;
-        }
-        return Objects.equals(normalize(oldField.getFieldType()), normalize(newField.getFieldType()))
-                && Objects.equals(normalize(oldField.getDefaultValue()), normalize(newField.getDefaultValue()))
-                && Objects.equals(normalize(oldField.getIsNullable()), normalize(newField.getIsNullable()))
-                && Objects.equals(normalize(oldField.getIsPrimary()), normalize(newField.getIsPrimary()))
-                && !Objects.equals(normalize(oldField.getFieldComment()), normalize(newField.getFieldComment()));
-    }
-
-    private Object normalize(Object value) {
-        if (value instanceof String) {
-            return ((String) value).trim();
-        }
-        return value;
+        DatasourceType sourceType = DatasourceType.from(cluster.getSourceType());
+        TableEngineHandler handler = tableEngineHandlerRegistry.require(sourceType);
+        return new ResolvedTableEngine(handler, actualClusterId);
     }
 
     private DataField mergeField(DataField exists, DataField incoming) {
@@ -1127,6 +1071,16 @@ public class DataTableService {
         private TableRef(String database, String tableName) {
             this.database = database;
             this.tableName = tableName;
+        }
+    }
+
+    private static class ResolvedTableEngine {
+        private final TableEngineHandler handler;
+        private final Long clusterId;
+
+        private ResolvedTableEngine(TableEngineHandler handler, Long clusterId) {
+            this.handler = handler;
+            this.clusterId = clusterId;
         }
     }
 
