@@ -38,7 +38,7 @@ public class DataTableAutoPurgeTask {
 
         for (DataTable table : dueTables) {
             try {
-                if (isDorisTable(table)) {
+                if (dataTableService.requiresDorisPhysicalSync(table)) {
                     String database = table.getDbName();
                     String actualTableName = extractActualTableName(table.getTableName());
                     if (!StringUtils.hasText(database) || !StringUtils.hasText(actualTableName)) {
@@ -58,25 +58,6 @@ public class DataTableAutoPurgeTask {
                         table.getId(), table.getDbName(), table.getTableName(), e);
             }
         }
-    }
-
-    private boolean isDorisTable(DataTable table) {
-        if (table == null) {
-            return false;
-        }
-        if (table.getIsSynced() != null && table.getIsSynced() == 1) {
-            return true;
-        }
-        return StringUtils.hasText(table.getTableModel())
-                || isPositive(table.getBucketNum())
-                || isPositive(table.getReplicaNum())
-                || StringUtils.hasText(table.getDistributionColumn())
-                || StringUtils.hasText(table.getKeyColumns())
-                || StringUtils.hasText(table.getPartitionColumn());
-    }
-
-    private boolean isPositive(Integer value) {
-        return value != null && value > 0;
     }
 
     private String extractActualTableName(String tableName) {
