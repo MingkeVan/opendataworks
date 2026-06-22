@@ -2,12 +2,10 @@ package com.onedata.portal.scheduled;
 
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.service.DataTableService;
-import com.onedata.portal.service.DorisConnectionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,7 +21,6 @@ public class DataTableAutoPurgeTask {
     private static final int BATCH_SIZE = 200;
 
     private final DataTableService dataTableService;
-    private final DorisConnectionService dorisConnectionService;
 
     /**
      * 每天凌晨 03:15 清理到期废弃表
@@ -38,17 +35,7 @@ public class DataTableAutoPurgeTask {
 
         for (DataTable table : dueTables) {
             try {
-                if (dataTableService.requiresDorisPhysicalSync(table)) {
-                    String database = table.getDbName();
-                    String actualTableName = extractActualTableName(table.getTableName());
-                    if (!StringUtils.hasText(database) || !StringUtils.hasText(actualTableName)) {
-                        throw new RuntimeException("缺少数据库名或表名");
-                    }
-                    if (table.getClusterId() == null) {
-                        throw new RuntimeException("缺少 clusterId");
-                    }
-                    dorisConnectionService.dropTable(table.getClusterId(), database, actualTableName);
-                }
+                dataTableService.dropPhysicalTableIfRequired(table);
                 dataTableService.purgeTableMetadata(table.getId());
                 log.info("Auto purged deprecated table, tableId={}, db={}, table={}",
                         table.getId(), table.getDbName(), table.getTableName());
@@ -58,18 +45,5 @@ public class DataTableAutoPurgeTask {
                         table.getId(), table.getDbName(), table.getTableName(), e);
             }
         }
-    }
-
-    private String extractActualTableName(String tableName) {
-        if (!StringUtils.hasText(tableName)) {
-            return null;
-        }
-        if (tableName.contains(".")) {
-            String[] parts = tableName.split("\\.", 2);
-            if (parts.length == 2 && StringUtils.hasText(parts[1])) {
-                return parts[1];
-            }
-        }
-        return tableName;
     }
 }

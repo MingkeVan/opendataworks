@@ -7,8 +7,13 @@ import com.onedata.portal.dto.TableDesignPreviewResponse;
 import com.onedata.portal.dto.TableNameGenerateRequest;
 import com.onedata.portal.entity.DataField;
 import com.onedata.portal.entity.DataTable;
+import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.mapper.DataFieldMapper;
 import com.onedata.portal.mapper.DataTableMapper;
+import com.onedata.portal.mapper.DorisClusterMapper;
+import com.onedata.portal.service.table.TableEngineHandler;
+import com.onedata.portal.service.table.TableEngineHandlerRegistry;
+import com.onedata.portal.util.DatasourceType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -17,11 +22,7 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /**
  * 表创建服务
@@ -31,12 +32,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class TableCreateService {
 
-    private static final Pattern NUMERIC_PATTERN = Pattern.compile("^-?\\d+(\\.\\d+)?$");
-
     private final DataTableMapper dataTableMapper;
     private final DataFieldMapper dataFieldMapper;
+    private final DorisClusterMapper dorisClusterMapper;
     private final TableNameGeneratorService tableNameGeneratorService;
-    private final DorisConnectionService dorisConnectionService;
+    private final TableEngineHandlerRegistry tableEngineHandlerRegistry;
     private final TableMetadataVersionService tableMetadataVersionService;
 
     /**
@@ -45,7 +45,8 @@ public class TableCreateService {
     public TableDesignPreviewResponse preview(TableCreateRequest request) {
         validateRequest(request);
         TableNameComponentsWrapper components = buildComponents(request);
-        String ddl = buildCreateDdl(components.getTableName(), request);
+        TableEngineHandler dorisHandler = tableEngineHandlerRegistry.require(DatasourceType.DORIS);
+        String ddl = dorisHandler.buildCreateDdl(components.getTableName(), request);
         return new TableDesignPreviewResponse(components.getTableName(), ddl);
     }
 
@@ -55,21 +56,24 @@ public class TableCreateService {
     @Transactional
     public DataTable create(TableCreateRequest request) {
         validateRequest(request);
+        validateDorisDatasource(request);
         TableNameComponentsWrapper components = buildComponents(request);
+        TableEngineHandler dorisHandler = tableEngineHandlerRegistry.require(DatasourceType.DORIS);
 
         ensureTableNotExists(components.getTableName(), request.getDbName(), request.getDorisClusterId());
 
         String ddl = StringUtils.hasText(request.getDorisDdl())
             ? request.getDorisDdl().trim()
-            : buildCreateDdl(components.getTableName(), request);
+            : dorisHandler.buildCreateDdl(components.getTableName(), request);
 
-        DataTable dataTable = buildDataTableEntity(request, components, ddl);
+        DataTable dataTable = buildDataTableEntity(request, components);
+        dorisHandler.prepareCreateMetadata(dataTable, request, ddl);
         dataTableMapper.insert(dataTable);
 
         persistColumns(dataTable.getId(), request);
 
         if (!Boolean.FALSE.equals(request.getSyncToDoris())) {
-            dorisConnectionService.execute(request.getDorisClusterId(), request.getDbName(), ddl);
+            dorisHandler.executeCreateTable(request.getDorisClusterId(), request.getDbName(), ddl);
             dataTable.setIsSynced(1);
             dataTable.setSyncTime(LocalDateTime.now());
         }
@@ -117,6 +121,24 @@ public class TableCreateService {
         }
     }
 
+    private void validateDorisDatasource(TableCreateRequest request) {
+        Long datasourceId = request.getDorisClusterId();
+        if (datasourceId == null) {
+            if (!Boolean.FALSE.equals(request.getSyncToDoris())) {
+                throw new RuntimeException("请指定 Doris 数据源");
+            }
+            return;
+        }
+        DorisCluster datasource = dorisClusterMapper.selectById(datasourceId);
+        if (datasource == null) {
+            throw new RuntimeException("数据源不存在: " + datasourceId);
+        }
+        DatasourceType sourceType = DatasourceType.from(datasource.getSourceType());
+        if (sourceType != DatasourceType.DORIS) {
+            throw new RuntimeException("表设计器仅支持 Doris 数据源: " + sourceType.name());
+        }
+    }
+
     private TableNameComponentsWrapper buildComponents(TableCreateRequest request) {
         TableNameGenerateRequest generateRequest = tableNameGeneratorService.fromCreateRequest(request);
         TableNameGeneratorService.TableNameComponents components = tableNameGeneratorService.buildComponents(generateRequest);
@@ -125,9 +147,8 @@ public class TableCreateService {
             components.getCustomIdentifier(), components.getStatisticsCycle(), components.getUpdateType());
     }
 
-    private DataTable buildDataTableEntity(TableCreateRequest request, TableNameComponentsWrapper components, String ddl) {
+    private DataTable buildDataTableEntity(TableCreateRequest request, TableNameComponentsWrapper components) {
         DataTable table = new DataTable();
-        table.setClusterId(request.getDorisClusterId());
         table.setTableName(components.getTableName());
         table.setTableComment(request.getTableComment());
         table.setLayer(components.getLayer());
@@ -138,13 +159,6 @@ public class TableCreateService {
         table.setUpdateType(components.getUpdateType());
         table.setDbName(request.getDbName());
         table.setOwner(request.getOwner());
-        table.setTableModel(resolveTableModel(request.getTableModel()));
-        table.setBucketNum(request.getBucketNum() != null ? request.getBucketNum() : 10);
-        table.setReplicaNum(request.getReplicaNum() != null ? request.getReplicaNum() : 3);
-        table.setPartitionColumn(request.getPartitionColumn());
-        table.setDistributionColumn(joinColumns(request.getDistributionColumns()));
-        table.setKeyColumns(joinColumns(request.getKeyColumns()));
-        table.setDorisDdl(ddl);
         table.setIsSynced(0);
         table.setStatus("active");
         return table;
@@ -177,68 +191,6 @@ public class TableCreateService {
         }
     }
 
-    private String buildCreateDdl(String tableName, TableCreateRequest request) {
-        List<String> columnDefinitions = new ArrayList<>();
-        for (TableColumnRequest column : request.getColumns()) {
-            columnDefinitions.add(buildColumnDefinition(column));
-        }
-
-        String tableModel = resolveTableModel(request.getTableModel());
-        List<String> keyColumns = normalizeList(request.getKeyColumns());
-        String tableModelClause = buildTableModelClause(tableModel, keyColumns);
-
-        StringBuilder ddl = new StringBuilder();
-        ddl.append("CREATE TABLE `").append(request.getDbName()).append("`.`").append(tableName).append("` (\n  ");
-        ddl.append(String.join(",\n  ", columnDefinitions));
-        ddl.append("\n) ENGINE=OLAP\n");
-
-        if (StringUtils.hasText(tableModelClause)) {
-            ddl.append(tableModelClause).append("\n");
-        }
-
-        if (StringUtils.hasText(request.getTableComment())) {
-            ddl.append("COMMENT '").append(escapeSingleQuote(request.getTableComment())).append("'\n");
-        }
-
-        if (StringUtils.hasText(request.getPartitionColumn())) {
-            ddl.append("PARTITION BY RANGE(").append(wrapColumn(request.getPartitionColumn())).append(") ()\n");
-        }
-
-        List<String> distributionColumns = normalizeList(request.getDistributionColumns());
-        if (!distributionColumns.isEmpty()) {
-            ddl.append("DISTRIBUTED BY HASH(")
-                .append(distributionColumns.stream().map(this::wrapColumn).collect(Collectors.joining(", ")))
-                .append(") BUCKETS ")
-                .append(request.getBucketNum() != null ? request.getBucketNum() : 10)
-                .append("\n");
-        }
-
-        ddl.append("PROPERTIES (\n");
-        ddl.append("  \"replication_num\" = \"").append(request.getReplicaNum() != null ? request.getReplicaNum() : 3).append("\",\n");
-        ddl.append("  \"storage_format\" = \"V2\",\n");
-        ddl.append("  \"compression\" = \"LZ4\"\n");
-        ddl.append(");");
-
-        return ddl.toString();
-    }
-
-    private String buildColumnDefinition(TableColumnRequest column) {
-        StringBuilder builder = new StringBuilder();
-        builder.append(wrapColumn(column.getColumnName())).append(" ").append(buildColumnType(column));
-        if (Boolean.FALSE.equals(column.getNullable())) {
-            builder.append(" NOT NULL");
-        } else {
-            builder.append(" NULL");
-        }
-        if (StringUtils.hasText(column.getDefaultValue())) {
-            builder.append(" DEFAULT ").append(formatDefaultValue(column.getDefaultValue()));
-        }
-        if (StringUtils.hasText(column.getComment())) {
-            builder.append(" COMMENT '").append(escapeSingleQuote(column.getComment())).append("'");
-        }
-        return builder.toString();
-    }
-
     private String buildColumnType(TableColumnRequest column) {
         String dataType = column.getDataType() != null ? column.getDataType().toUpperCase() : "";
         String typeParams = column.getTypeParams();
@@ -252,48 +204,14 @@ public class TableCreateService {
         return dataType;
     }
 
-    private String resolveTableModel(String model) {
-        if (!StringUtils.hasText(model)) {
-            return "DUPLICATE";
-        }
-        String upper = model.trim().toUpperCase();
-        if (upper.endsWith(" KEY")) {
-            upper = upper.substring(0, upper.length() - 4).trim();
-        }
-        return upper;
-    }
-
-    private String buildTableModelClause(String model, List<String> keyColumns) {
-        if (!StringUtils.hasText(model)) {
-            return null;
-        }
-        StringBuilder builder = new StringBuilder();
-        builder.append(model).append(" KEY");
-        if (!CollectionUtils.isEmpty(keyColumns)) {
-            builder.append("(")
-                .append(keyColumns.stream().map(this::wrapColumn).collect(Collectors.joining(", ")))
-                .append(")");
-        }
-        return builder.toString();
-    }
-
-    private String joinColumns(List<String> columns) {
-        if (CollectionUtils.isEmpty(columns)) {
-            return null;
-        }
-        return columns.stream()
-            .filter(StringUtils::hasText)
-            .collect(Collectors.joining(","));
-    }
-
     private List<String> normalizeList(List<String> columns) {
         if (CollectionUtils.isEmpty(columns)) {
-            return Collections.emptyList();
+            return java.util.Collections.emptyList();
         }
         return columns.stream()
             .filter(StringUtils::hasText)
             .map(String::trim)
-            .collect(Collectors.toList());
+            .collect(java.util.stream.Collectors.toList());
     }
 
     private boolean containsIgnoreCase(List<String> list, String value) {
@@ -306,31 +224,6 @@ public class TableCreateService {
             }
         }
         return false;
-    }
-
-    private String wrapColumn(String column) {
-        return "`" + column + "`";
-    }
-
-    private String formatDefaultValue(String defaultValue) {
-        String value = defaultValue.trim();
-        if ("null".equalsIgnoreCase(value)) {
-            return "NULL";
-        }
-        if ("current_timestamp".equalsIgnoreCase(value) || value.toUpperCase().startsWith("NOW(")) {
-            return value;
-        }
-        if (NUMERIC_PATTERN.matcher(value).matches()) {
-            return value;
-        }
-        if (value.startsWith("'") && value.endsWith("'")) {
-            return value;
-        }
-        return "'" + escapeSingleQuote(value) + "'";
-    }
-
-    private String escapeSingleQuote(String input) {
-        return input.replace("'", "''");
     }
 
     /**
