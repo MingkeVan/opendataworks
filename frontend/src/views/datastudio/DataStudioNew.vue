@@ -1183,6 +1183,8 @@ import {
   formatDuration,
   formatDateTime,
   isAggregateTable,
+  getLayerType,
+  isReplicaWarning,
 } from './tableFormat'
 import { useTabPersistence } from './composables/useTabPersistence'
 import { useResizablePanes } from './composables/useResizablePanes'
@@ -1411,23 +1413,6 @@ const getTabSubtitle = (tab) => {
     return `${sourceName} / ${dbName}`
   }
   return sourceName || dbName || ''
-}
-
-const getLayerType = (layer) => {
-  const map = {
-    ODS: 'info',
-    DWD: 'success',
-    DIM: 'warning',
-    DWS: 'primary',
-    ADS: 'danger'
-  }
-  return map[layer] || 'info'
-}
-
-const isReplicaWarning = (value) => {
-  if (value === null || value === undefined || value === '') return false
-  const num = Number(value)
-  return Number.isFinite(num) && num > 0 && num < 3
 }
 
 const hasText = (value) => value !== null && value !== undefined && String(value).trim() !== ''
