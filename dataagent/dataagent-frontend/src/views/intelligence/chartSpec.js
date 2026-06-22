@@ -514,6 +514,26 @@ const CHART_SPEC_FENCE_PATTERNS = [
   /<chart_spec>\s*([\s\S]*?)<\/chart_spec>/gi
 ]
 
+// A model sometimes hallucinates a chart as a markdown image/link pointing at a
+// fake `chart_spec://` URL (full-width colon included), which marked turns into a
+// broken <img>. Charts are never images (the spec contract forbids static image
+// URLs), so we always neutralize this form: recover an embedded spec from the URL
+// when one is actually there, otherwise drop the artifact entirely so no broken
+// image leaks to the user. `!?` covers both `![alt](...)` and `[text](...)`.
+const CHART_SPEC_PSEUDO_URL_PATTERN = /!?\[[^\]]*\]\(\s*(chart_spec[:：][^)]*?)\s*\)/gi
+
+// Try to pull a real chart_spec JSON out of a `chart_spec://...` URL body; the
+// model may cram the JSON into the URL, but usually it is just a placeholder.
+const recoverSpecFromPseudoUrl = (url) => {
+  let body = String(url || '').replace(/^chart_spec[:：]/i, '').replace(/^\/*/, '')
+  try {
+    body = decodeURIComponent(body)
+  } catch (_error) {
+    // keep the raw body when it is not valid percent-encoding
+  }
+  return parseChartSpec(body)
+}
+
 // Locate the index of the brace that closes the object opened at `start`,
 // ignoring braces inside JSON strings. Returns -1 when unbalanced (e.g. a spec
 // still streaming in), so partial output is left as plain text until complete.
@@ -549,6 +569,19 @@ const findMatchingBrace = (source, start) => {
 // what the conclusion area renders.
 const collectChartSpecRanges = (source) => {
   const ranges = []
+
+  // Neutralize pseudo `chart_spec://` image/link artifacts first and claim their
+  // span, so the brace scanner below never re-parses the URL body and the text
+  // splitter can drop (spec === null) or render (recovered spec) the range.
+  CHART_SPEC_PSEUDO_URL_PATTERN.lastIndex = 0
+  let pseudoMatch
+  while ((pseudoMatch = CHART_SPEC_PSEUDO_URL_PATTERN.exec(source)) !== null) {
+    ranges.push({
+      start: pseudoMatch.index,
+      end: pseudoMatch.index + pseudoMatch[0].length,
+      spec: recoverSpecFromPseudoUrl(pseudoMatch[1])
+    })
+  }
 
   for (const pattern of CHART_SPEC_FENCE_PATTERNS) {
     pattern.lastIndex = 0
@@ -590,7 +623,9 @@ const collectChartSpecRanges = (source) => {
   return resolved
 }
 
-export const extractChartSpecsFromText = (text) => collectChartSpecRanges(String(text || '')).map((range) => range.spec)
+export const extractChartSpecsFromText = (text) => collectChartSpecRanges(String(text || ''))
+  .map((range) => range.spec)
+  .filter(Boolean)
 
 // Split answer text into ordered segments so the conclusion area can render the
 // surrounding prose as markdown and each embedded chart_spec as a real chart,
@@ -607,7 +642,9 @@ export const splitChartSpecText = (text) => {
   let cursor = 0
   for (const range of ranges) {
     pushText(source.slice(cursor, range.start))
-    segments.push({ type: 'chart', spec: range.spec })
+    // A null spec is an unrecoverable artifact (e.g. a broken `chart_spec://`
+    // image): drop its text without emitting a chart so nothing renders.
+    if (range.spec) segments.push({ type: 'chart', spec: range.spec })
     cursor = range.end
   }
   pushText(source.slice(cursor))

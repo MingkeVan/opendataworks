@@ -340,6 +340,41 @@ describe('chartSpec', () => {
     expect(renderModel.option.series[0].data[0].value).toBe(73)
   })
 
+  it('drops a broken chart_spec:// markdown image instead of leaking a broken image', () => {
+    const message = '结论如下：发布次数整体上升。\n![趋势图](chart_spec://chart_1)\n以上为本次结论。'
+
+    const segments = splitChartSpecText(message)
+    const stripped = stripChartSpecsFromText(message)
+
+    expect(segments.every((seg) => seg.type === 'text')).toBe(true)
+    expect(extractChartSpecsFromText(message)).toHaveLength(0)
+    expect(stripped).toContain('结论如下：发布次数整体上升。')
+    expect(stripped).toContain('以上为本次结论。')
+    expect(stripped).not.toContain('chart_spec')
+    expect(stripped).not.toContain('![')
+  })
+
+  it('handles a full-width colon chart_spec：// link the same way', () => {
+    const message = '见图：[图表](chart_spec：//placeholder) 结束。'
+
+    const stripped = stripChartSpecsFromText(message)
+    expect(stripped).not.toContain('chart_spec')
+    expect(stripped).not.toContain('](')
+  })
+
+  it('recovers a real spec embedded in a chart_spec:// image url', () => {
+    const spec = '{"kind":"chart_spec","version":1,"chart_type":"bar","title":"层级表数量","x_field":"layer","series":[{"name":"表数量","field":"table_cnt","type":"bar"}],"dataset":[{"layer":"DWD","table_cnt":18}],"error":null}'
+    const message = `结论：\n![图](chart_spec://${spec})`
+
+    const specs = extractChartSpecsFromText(message)
+    const segments = splitChartSpecText(message)
+
+    expect(specs).toHaveLength(1)
+    expect(specs[0].chart_type).toBe('bar')
+    expect(segments.some((seg) => seg.type === 'chart')).toBe(true)
+    expect(stripChartSpecsFromText(message)).not.toContain('chart_spec')
+  })
+
   it('rejects funnel specs with more than one series', () => {
     const validation = validateChartSpec({
       kind: 'chart_spec',
