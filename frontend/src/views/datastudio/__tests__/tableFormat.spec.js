@@ -7,6 +7,8 @@ import {
   formatDateTime,
   abbreviateSql,
   isAggregateTable,
+  getLayerType,
+  isReplicaWarning,
 } from '../tableFormat'
 
 describe('formatNumber', () => {
@@ -81,5 +83,36 @@ describe('isAggregateTable', () => {
     expect(isAggregateTable({ tableModel: 'UNIQUE' })).toBe(false)
     expect(isAggregateTable({})).toBe(false)
     expect(isAggregateTable(null)).toBe(false)
+  })
+})
+
+describe('getLayerType', () => {
+  it('maps known data layers to Element Plus tag types', () => {
+    expect(getLayerType('ODS')).toBe('info')
+    expect(getLayerType('DWD')).toBe('success')
+    expect(getLayerType('DIM')).toBe('warning')
+    expect(getLayerType('DWS')).toBe('primary')
+    expect(getLayerType('ADS')).toBe('danger')
+  })
+
+  it('uses info by default and allows callers to preserve a custom fallback', () => {
+    expect(getLayerType('UNKNOWN')).toBe('info')
+    expect(getLayerType('UNKNOWN', '')).toBe('')
+  })
+})
+
+describe('isReplicaWarning', () => {
+  it('flags positive replica counts below 3', () => {
+    expect(isReplicaWarning(1)).toBe(true)
+    expect(isReplicaWarning('2')).toBe(true)
+  })
+
+  it('does not flag empty, non-numeric, zero, or healthy replica counts', () => {
+    expect(isReplicaWarning(null)).toBe(false)
+    expect(isReplicaWarning(undefined)).toBe(false)
+    expect(isReplicaWarning('')).toBe(false)
+    expect(isReplicaWarning('abc')).toBe(false)
+    expect(isReplicaWarning(0)).toBe(false)
+    expect(isReplicaWarning(3)).toBe(false)
   })
 })

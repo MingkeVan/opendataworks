@@ -37,7 +37,7 @@
                 <div class="node-name" :title="item.tableName">{{ item.tableName }}</div>
                 <div class="node-desc" :title="item.tableComment || '-'">{{ item.tableComment || '-' }}</div>
               </div>
-              <el-tag v-if="item.layer" size="small" :type="getLayerType(item.layer)">{{ item.layer }}</el-tag>
+              <el-tag v-if="item.layer" size="small" :type="getLayerType(item.layer, '')">{{ item.layer }}</el-tag>
             </div>
             <div v-if="!upstreamTables.length" class="empty-placeholder">暂无上游表</div>
           </div>
@@ -198,7 +198,7 @@
                 <div class="node-name" :title="item.tableName">{{ item.tableName }}</div>
                 <div class="node-desc" :title="item.tableComment || '-'">{{ item.tableComment || '-' }}</div>
               </div>
-              <el-tag v-if="item.layer" size="small" :type="getLayerType(item.layer)">{{ item.layer }}</el-tag>
+              <el-tag v-if="item.layer" size="small" :type="getLayerType(item.layer, '')">{{ item.layer }}</el-tag>
             </div>
             <div v-if="!orderedDownstreamTables.length" class="empty-placeholder">暂无下游表</div>
           </div>
@@ -250,6 +250,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { Grid, Operation, Plus, QuestionFilled } from '@element-plus/icons-vue'
 import { isDemoMode } from '@/demo/runtime'
+import { getLayerType } from '../tableFormat'
 
 const props = defineProps({
   currentTable: {
@@ -354,17 +355,6 @@ const orderedReadTasks = computed(() => {
     return (originalOrder.get(aId) || 0) - (originalOrder.get(bId) || 0)
   })
 })
-
-const getLayerType = (layer) => {
-  const typeMap = {
-    ODS: 'info',
-    DWD: 'success',
-    DIM: 'warning',
-    DWS: 'primary',
-    ADS: 'danger'
-  }
-  return typeMap[layer] || ''
-}
 
 const openTablePreview = (table) => {
   if (!table) return

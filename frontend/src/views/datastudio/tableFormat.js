@@ -50,3 +50,20 @@ export const isAggregateTable = (table) => {
   if (!table?.tableModel) return false
   return String(table.tableModel).toUpperCase() === 'AGGREGATE'
 }
+
+export const getLayerType = (layer, fallback = 'info') => {
+  const map = {
+    ODS: 'info',
+    DWD: 'success',
+    DIM: 'warning',
+    DWS: 'primary',
+    ADS: 'danger'
+  }
+  return map[layer] || fallback
+}
+
+export const isReplicaWarning = (value) => {
+  if (value === null || value === undefined || value === '') return false
+  const num = Number(value)
+  return Number.isFinite(num) && num > 0 && num < 3
+}
