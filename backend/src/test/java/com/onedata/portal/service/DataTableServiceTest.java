@@ -10,6 +10,9 @@ import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DorisClusterMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
+import com.onedata.portal.service.table.TableEngineHandler;
+import com.onedata.portal.service.table.TableEngineHandlerRegistry;
+import com.onedata.portal.util.DatasourceType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,11 +20,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -51,7 +54,13 @@ class DataTableServiceTest {
     private DorisClusterMapper dorisClusterMapper;
 
     @Mock
-    private DorisConnectionService dorisConnectionService;
+    private TableEngineHandlerRegistry tableEngineHandlerRegistry;
+
+    @Mock
+    private TableEngineHandler dorisHandler;
+
+    @Mock
+    private TableEngineHandler mysqlHandler;
 
     @Mock
     private TableMetadataVersionService tableMetadataVersionService;
@@ -68,8 +77,64 @@ class DataTableServiceTest {
                 taskExecutionLogMapper,
                 dataLineageMapper,
                 dorisClusterMapper,
-                dorisConnectionService,
+                tableEngineHandlerRegistry,
                 tableMetadataVersionService);
+    }
+
+    @Test
+    void createClearsDorisPhysicalFieldsWhenTableHasNoDatasource() {
+        DataTable table = table(null, null, 0);
+        table.setDbName("dw");
+        table.setTableName("metadata_table");
+        table.setTableModel("DUPLICATE");
+        table.setBucketNum(10);
+        table.setReplicaNum(1);
+        table.setPartitionColumn("dt");
+        table.setDistributionColumn("id");
+        table.setKeyColumns("id");
+        table.setDorisDdl("CREATE TABLE ...");
+        when(dataTableMapper.selectOne(any())).thenReturn(null);
+
+        DataTable result = service.create(table);
+
+        assertSame(table, result);
+        assertNull(table.getTableModel());
+        assertNull(table.getBucketNum());
+        assertNull(table.getReplicaNum());
+        assertNull(table.getPartitionColumn());
+        assertNull(table.getDistributionColumn());
+        assertNull(table.getKeyColumns());
+        assertNull(table.getDorisDdl());
+        verify(dataTableMapper).insert(table);
+        verifyNoInteractions(dorisClusterMapper);
+        verifyNoInteractions(tableEngineHandlerRegistry);
+    }
+
+    @Test
+    void createClearsDorisPhysicalFieldsForMysqlDatasource() {
+        DataTable table = table(null, 8L, 0);
+        table.setDbName("dw");
+        table.setTableName("metadata_table");
+        table.setTableModel("DUPLICATE");
+        table.setBucketNum(10);
+        table.setReplicaNum(1);
+        table.setDistributionColumn("id");
+        when(dorisClusterMapper.selectById(8L)).thenReturn(cluster(8L, "MYSQL"));
+        when(tableEngineHandlerRegistry.find(DatasourceType.MYSQL)).thenReturn(mysqlHandler);
+        doAnswer(invocation -> {
+            TableEngineHandler.clearDorisPhysicalMetadata(invocation.getArgument(0));
+            return null;
+        }).when(mysqlHandler).prepareCreateMetadata(eq(table), isNull(), isNull());
+        when(dataTableMapper.selectOne(any())).thenReturn(null);
+
+        DataTable result = service.create(table);
+
+        assertSame(table, result);
+        assertNull(table.getTableModel());
+        assertNull(table.getBucketNum());
+        assertNull(table.getReplicaNum());
+        assertNull(table.getDistributionColumn());
+        verify(dataTableMapper).insert(table);
     }
 
     @Test
@@ -88,7 +153,7 @@ class DataTableServiceTest {
         verify(tableMetadataVersionService).captureVersion(
                 eq(10L), eq(TableMetadataVersionService.TRIGGER_MANUAL_EDIT), eq(null));
         verifyNoInteractions(dorisClusterMapper);
-        verifyNoInteractions(dorisConnectionService);
+        verifyNoInteractions(tableEngineHandlerRegistry);
     }
 
     @Test
@@ -99,33 +164,33 @@ class DataTableServiceTest {
         when(dataTableMapper.selectById(10L)).thenReturn(table);
         when(dataFieldMapper.selectOne(any())).thenReturn(null);
         when(dorisClusterMapper.selectById(7L)).thenReturn(cluster(7L, "DORIS"));
+        when(tableEngineHandlerRegistry.require(DatasourceType.DORIS)).thenReturn(dorisHandler);
 
         DataField field = field("amount", "BIGINT");
-        when(dorisConnectionService.buildColumnDefinition(field, false)).thenReturn("`amount` BIGINT");
 
         DataField result = service.createField(10L, field, null);
 
         assertSame(field, result);
-        verify(dorisConnectionService).addColumn(7L, "dw", "fact_orders", "`amount` BIGINT");
+        verify(dorisHandler).addColumn(7L, table, "dw", "fact_orders", field);
         verify(dataFieldMapper).insert(field);
     }
 
     @Test
-    void createFieldRejectsSyncedNonDorisTableInsteadOfCallingDorisDdl() {
+    void createFieldDelegatesSyncedMysqlTableToMysqlHandler() {
         DataTable table = table(10L, 8L, 1);
         table.setDbName("dw");
         table.setTableName("fact_orders");
         when(dataTableMapper.selectById(10L)).thenReturn(table);
         when(dataFieldMapper.selectOne(any())).thenReturn(null);
         when(dorisClusterMapper.selectById(8L)).thenReturn(cluster(8L, "MYSQL"));
+        when(tableEngineHandlerRegistry.require(DatasourceType.MYSQL)).thenReturn(mysqlHandler);
 
-        RuntimeException exception = assertThrows(RuntimeException.class,
-                () -> service.createField(10L, field("amount", "BIGINT"), null));
+        DataField field = field("amount", "BIGINT");
+        DataField result = service.createField(10L, field, null);
 
-        assertEquals("暂不支持同步 MYSQL 数据源的表变更", exception.getMessage());
-        verify(dorisConnectionService, never()).addColumn(any(), any(), any(), any());
-        verify(dataFieldMapper, never()).insert(any());
-        verifyNoInteractions(tableMetadataVersionService);
+        assertSame(field, result);
+        verify(mysqlHandler).addColumn(8L, table, "dw", "fact_orders", field);
+        verify(dataFieldMapper).insert(field);
     }
 
     @Test
@@ -144,11 +209,11 @@ class DataTableServiceTest {
         assertSame(update, result);
         verify(dataTableMapper).updateById(update);
         verifyNoInteractions(dorisClusterMapper);
-        verifyNoInteractions(dorisConnectionService);
+        verifyNoInteractions(tableEngineHandlerRegistry);
     }
 
     @Test
-    void updateTableRejectsPhysicalChangeForSyncedNonDorisTable() {
+    void updateTableDelegatesPhysicalChangeForSyncedMysqlTable() {
         DataTable existing = table(10L, 8L, 1);
         existing.setDbName("dw");
         existing.setTableName("fact_orders");
@@ -159,13 +224,13 @@ class DataTableServiceTest {
         DataTable update = new DataTable();
         update.setLayer("DWD");
         update.setTableComment("new comment");
+        when(tableEngineHandlerRegistry.require(DatasourceType.MYSQL)).thenReturn(mysqlHandler);
 
-        RuntimeException exception = assertThrows(RuntimeException.class,
-                () -> service.updateTable(10L, update, null));
+        DataTable result = service.updateTable(10L, update, null);
 
-        assertEquals("暂不支持同步 MYSQL 数据源的表变更", exception.getMessage());
-        verify(dataTableMapper, never()).updateById(any());
-        verifyNoInteractions(dorisConnectionService);
+        assertSame(update, result);
+        verify(mysqlHandler).alterTableComment(8L, "dw", "fact_orders", "new comment");
+        verify(dataTableMapper).updateById(update);
     }
 
     private DataTable table(Long id, Long clusterId, Integer isSynced) {

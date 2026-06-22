@@ -77,7 +77,26 @@ AND datasource.source_type = DORIS
 
 本轮不扩大 `DorisClusterService` 当前支持范围；未知或未来类型仅用于避免误走 Doris DDL。
 
-### 5.2 收敛 Doris DDL 判定
+### 5.2 引擎 handler 分发
+
+新增 `TableEngineHandler` 策略接口和 registry:
+
+- `DorisTableEngineHandler`
+  - 负责 Doris 建表 DDL 生成。
+  - 负责 Doris 专属元数据字段填充: `table_model`、`bucket_num`、`replica_num`、`distribution_column`、`key_columns`、`partition_column`、`doris_ddl`。
+  - 负责 Doris 物理变更: rename/drop table、alter comment、add/modify/drop column、分桶和副本调整。
+- `MysqlTableEngineHandler`
+  - 负责清理 Doris 专属元数据字段，确保 MySQL 表不会保存 `replica_num` 等 Doris 属性。
+  - 负责 MySQL 物理变更: rename/drop table、alter comment、add/modify/drop column。
+  - 对 Doris 专属的分桶、副本调整明确拒绝。
+- `UNKNOWN`/无数据源
+  - 按 metadata-only 处理，清理 Doris 专属字段，不执行外部物理 DDL。
+
+`DataTableService` 只根据 `cluster_id -> source_type` 选择 handler，并维护本地元数据事务；不再直接拼接或执行具体引擎 DDL。
+
+`TableCreateService` 保留现有 API，但 Doris 建表 DDL 和 Doris 专属字段写入委托给 `DorisTableEngineHandler`。创建时会校验 `dorisClusterId` 对应的数据源必须是 `source_type=DORIS`；后续如果新增 MySQL/OceanBase 建表入口，应新增对应 request/handler，而不是在 Doris 建表器中加分支。
+
+### 5.3 收敛 Doris DDL 判定
 
 在 `DataTableService` 内新增统一判定:
 
@@ -85,7 +104,7 @@ AND datasource.source_type = DORIS
   - 未同步表直接返回 `false`
   - 已同步表必须解析实际数据源
   - `source_type=DORIS` 返回 `true`
-  - 非 Doris 类型抛出明确“不支持同步该数据源表变更”的异常，避免静默只改本地导致物理库不一致
+  - 非 Doris 类型返回 `false`；写路径不再依赖它决定是否同步，而是通过 `resolveSyncedPhysicalEngine` 委托给对应 handler
 
 所有表结构和生命周期写路径使用该判定:
 
@@ -98,25 +117,38 @@ AND datasource.source_type = DORIS
 - `updateField`
 - `deleteField`
 
-### 5.3 自动清理任务
+### 5.4 自动清理任务
 
-`DataTableAutoPurgeTask` 不再复制 `isDorisTable` 启发式逻辑。它委托 `DataTableService.requiresDorisPhysicalSync(table)` 判断是否需要 Doris 物理删除:
+`DataTableAutoPurgeTask` 不再复制 `isDorisTable` 启发式逻辑。它委托 `DataTableService.dropPhysicalTableIfRequired(table)` 判断并执行物理删除:
 
 - 未同步表: 只清理元数据。
-- 已同步 Doris 表: 先 drop Doris 表，再清理元数据。
-- 已同步非 Doris 表或缺失数据源: 抛出明确异常并保留记录，等待后续对应 handler。
+- 已同步 Doris 表: Doris handler 先 drop Doris 表，再清理元数据。
+- 已同步 MySQL 表: MySQL handler 先 drop MySQL 表，再清理元数据。
+- 已同步未知类型或缺失数据源: 抛出明确异常并保留记录，等待补充对应 handler 或修复归属数据。
+
+### 5.5 schema 默认值修正
+
+`replica_num` 默认值改为 `NULL`。该字段是 Doris 专属副本数，不应污染 metadata-only 或 MySQL 表。迁移同时清理无数据源或非 Doris 数据源表上的 Doris 专属字段:
+
+- `table_model`
+- `bucket_num`
+- `replica_num`
+- `partition_column`
+- `distribution_column`
+- `key_columns`
+- `doris_ddl`
 
 ## 6. 不做范围
 
 - 不重命名 `doris_cluster` 表；这是更大规模的数据源模型重命名。
 - 不新增 OceanBase 物理 DDL handler。
 - 不把 Doris 建表字段迁移到独立扩展表。
-- 不修改 `replica_num` schema 默认值；误判根因由判定逻辑修复，后续如需清理历史数据可单独做数据修正。
+- 不实现 MySQL 建表设计器；本轮只覆盖已同步 MySQL 表的常见物理变更。
 
 ## 7. 风险与权衡
 
 - 已同步但 `cluster_id` 缺失的历史记录将不再凭 `is_synced=1` 直接走 Doris DDL；调用方需要传入 `clusterId`，或先修复表归属数据。
-- 已同步非 Doris 表的结构/生命周期写操作会从“误调用 Doris API”变为明确拒绝。这是行为修正，但可能暴露以前被错误路径掩盖的数据源类型问题。
+- 已同步 MySQL 表的结构/生命周期写操作会改走 MySQL DDL；Doris 专属属性如分桶/副本调整会被明确拒绝。
 - 本轮保持 `source_type` 字符串模型，不引入跨模块 datasource 抽象，避免扩大 PR #376 的 refactor 面。
 
 ## 8. 验证
@@ -124,6 +156,8 @@ AND datasource.source_type = DORIS
 - 新增 `DataTableServiceTest` 覆盖:
   - `replicaNum=1` 的未同步表新增字段不要求 Doris 集群、不调用 Doris DDL。
   - 已同步 Doris 表使用表所属 `cluster_id` 执行 Doris DDL。
-  - 已同步 MySQL 表拒绝 Doris DDL 路径。
+  - 已同步 MySQL 表委托 MySQL handler，不调用 Doris DDL。
+  - MySQL handler 生成 rename/comment/field DDL，并拒绝 Doris 专属副本设置。
+  - Doris 表设计器拒绝 MySQL 数据源。
 - 运行 PR #376 既有目标测试。
 - 如本地 MySQL/Redis 可用，重复表生命周期 HTTP smoke，确认不再需要手工清空 `replica_num`。
