@@ -3,6 +3,7 @@ package com.onedata.portal.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.onedata.portal.dto.TableLineageItem;
+import com.onedata.portal.dto.TableLocation;
 import com.onedata.portal.dto.TableOption;
 import com.onedata.portal.dto.TableRelatedLineageResponse;
 import com.onedata.portal.dto.TableRelatedTasksResponse;
@@ -27,7 +28,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -399,6 +402,311 @@ public class DataTableService {
     }
 
     /**
+     * 解析表的物理位置（库名 + 去前缀后的实际表名）。
+     * 优先使用 dbName 字段，否则从 {@code db.table} 形式的表名解析；无法解析时抛出标准提示。
+     */
+    public TableLocation requireTableLocation(DataTable table) {
+        String database;
+        String actualTableName;
+        if (table.getDbName() != null && !table.getDbName().isEmpty()) {
+            database = table.getDbName();
+            actualTableName = table.getTableName().contains(".")
+                    ? table.getTableName().split("\\.", 2)[1]
+                    : table.getTableName();
+        } else if (table.getTableName().contains(".")) {
+            String[] parts = table.getTableName().split("\\.", 2);
+            database = parts[0];
+            actualTableName = parts[1];
+        } else {
+            throw new RuntimeException("表未配置数据库名，请先设置 dbName 字段");
+        }
+        return new TableLocation(database, actualTableName);
+    }
+
+    /**
+     * 更新表（含 Doris 改名/注释/分桶/副本同步）。
+     */
+    @Transactional
+    public DataTable updateTable(Long id, DataTable dataTable, Long clusterId) {
+        DataTable existing = getById(id);
+        if (existing == null) {
+            throw new RuntimeException("表不存在");
+        }
+        if (!StringUtils.hasText(dataTable.getLayer())) {
+            throw new RuntimeException("数据分层不能为空");
+        }
+        dataTable.setLayer(normalizeLayer(dataTable.getLayer(), true));
+        boolean syncDoris = isDorisTable(existing);
+        if (syncDoris && clusterId == null) {
+            throw new RuntimeException("请指定 Doris 集群");
+        }
+        TableRef tableRef = null;
+        String oldTableName = null;
+        if (syncDoris) {
+            tableRef = resolveTableRef(existing);
+            if (tableRef == null) {
+                throw new RuntimeException("表未配置数据库名，请先设置 dbName 字段");
+            }
+            oldTableName = tableRef.tableName;
+        }
+
+        dataTable.setId(id);
+        String newTableName = StringUtils.hasText(dataTable.getTableName())
+                ? dataTable.getTableName()
+                : existing.getTableName();
+        String newActualName = extractActualTableName(tableRef != null ? tableRef.database : existing.getDbName(),
+                newTableName);
+        if (syncDoris) {
+            try {
+                if (StringUtils.hasText(newTableName) && !Objects.equals(oldTableName, newActualName)) {
+                    dorisConnectionService.renameTable(clusterId, tableRef.database, oldTableName, newActualName);
+                }
+                if (StringUtils.hasText(dataTable.getTableComment())
+                        && !Objects.equals(existing.getTableComment(), dataTable.getTableComment())) {
+                    dorisConnectionService.alterTableComment(clusterId, tableRef.database, newActualName,
+                            dataTable.getTableComment());
+                }
+                if (dataTable.getBucketNum() != null && !Objects.equals(existing.getBucketNum(), dataTable.getBucketNum())) {
+                    if (!StringUtils.hasText(existing.getDistributionColumn())) {
+                        throw new DorisSyncRejectedException("缺少分桶字段，无法同步分桶数到 Doris");
+                    }
+                    dorisConnectionService.modifyDistribution(
+                            clusterId,
+                            tableRef.database,
+                            newActualName,
+                            existing.getDistributionColumn(),
+                            dataTable.getBucketNum());
+                }
+                if (dataTable.getReplicaNum() != null && !Objects.equals(existing.getReplicaNum(), dataTable.getReplicaNum())) {
+                    dorisConnectionService.setReplicationNum(clusterId, tableRef.database, newActualName,
+                            dataTable.getReplicaNum());
+                }
+            } catch (DorisSyncRejectedException e) {
+                // 校验类拒绝：复刻原控制器在 rename/comment 之后直接返回的原始文案（不加同步失败前缀）
+                throw new RuntimeException(e.getMessage());
+            } catch (Exception e) {
+                throw new RuntimeException("同步 Doris 失败: " + e.getMessage());
+            }
+        }
+        dataTable.setId(id);
+        return update(dataTable);
+    }
+
+    /**
+     * 修改表注释（同时更新 Doris 和本地）。
+     */
+    @Transactional
+    public void updateTableComment(Long id, String comment, Long clusterId) {
+        if (comment == null) {
+            throw new RuntimeException("注释内容不能为空");
+        }
+        DataTable table = getById(id);
+        if (table == null) {
+            throw new RuntimeException("表不存在");
+        }
+        TableLocation location = requireTableLocation(table);
+        try {
+            // 更新Doris表注释
+            dorisConnectionService.alterTableComment(clusterId, location.getDatabase(), location.getTableName(), comment);
+
+            // 更新本地表注释
+            table.setTableComment(comment);
+            update(table);
+        } catch (Exception e) {
+            throw new RuntimeException("修改表注释失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 软删除表（重命名为 tableName_deprecated_时间戳）。
+     */
+    @Transactional
+    public void softDeleteTable(Long id, Long clusterId, String confirmTableName) {
+        DataTable table = getById(id);
+        if (table == null) {
+            throw new RuntimeException("表不存在");
+        }
+        if ("deprecated".equalsIgnoreCase(table.getStatus())) {
+            throw new RuntimeException("表已处于待删除状态");
+        }
+        Long actualClusterId = clusterId != null ? clusterId : table.getClusterId();
+        if (isDorisTable(table) && actualClusterId == null) {
+            throw new RuntimeException("请指定数据源");
+        }
+
+        TableLocation location = requireTableLocation(table);
+        String database = location.getDatabase();
+        String actualTableName = location.getTableName();
+        if (!isConfirmTableNameMatched(confirmTableName, actualTableName)) {
+            throw new RuntimeException("确认失败：请输入正确的表名 " + actualTableName);
+        }
+
+        try {
+            // 生成新表名
+            LocalDateTime now = LocalDateTime.now();
+            String timestamp = now.format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+            String newTableName = actualTableName + "_deprecated_" + timestamp;
+
+            if (isDorisTable(table)) {
+                // 在Doris中重命名表
+                dorisConnectionService.renameTable(actualClusterId, database, actualTableName, newTableName);
+            }
+
+            // 更新本地记录
+            table.setOriginTableName(actualTableName);
+            table.setTableName(newTableName);
+            table.setStatus("deprecated");
+            table.setDeprecatedAt(now);
+            table.setPurgeAt(now.plusDays(30));
+            update(table);
+        } catch (Exception e) {
+            throw new RuntimeException("删除表失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 恢复待删除表。
+     */
+    @Transactional
+    public DataTable restoreTable(Long id, Long clusterId) {
+        DataTable table = getById(id);
+        if (table == null) {
+            throw new RuntimeException("表不存在");
+        }
+        if (!"deprecated".equalsIgnoreCase(table.getStatus())) {
+            throw new RuntimeException("仅支持恢复已废弃表");
+        }
+
+        TableRef tableRef = resolveTableRef(table);
+        if (tableRef == null) {
+            throw new RuntimeException("表未配置数据库名，请先设置 dbName 字段");
+        }
+
+        String restoreTableName = resolveRestoreTableName(table, tableRef.tableName);
+        if (!StringUtils.hasText(restoreTableName)) {
+            throw new RuntimeException("恢复失败：缺少原始表名");
+        }
+        DataTable duplicate = getByDbAndTableName(table.getClusterId(), tableRef.database, restoreTableName);
+        if (duplicate != null && !Objects.equals(duplicate.getId(), table.getId())) {
+            throw new RuntimeException("恢复失败：目标表名冲突 " + restoreTableName);
+        }
+
+        Long actualClusterId = clusterId != null ? clusterId : table.getClusterId();
+        if (isDorisTable(table) && actualClusterId == null) {
+            throw new RuntimeException("请指定数据源");
+        }
+        try {
+            if (isDorisTable(table)) {
+                dorisConnectionService.renameTable(actualClusterId, tableRef.database, tableRef.tableName, restoreTableName);
+            }
+            return restoreDeprecatedTable(table, restoreTableName);
+        } catch (Exception e) {
+            throw new RuntimeException("恢复表失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 立即物理删除表。
+     */
+    @Transactional
+    public void purgeTableNow(Long id, Long clusterId, String confirmTableName) {
+        DataTable table = getById(id);
+        if (table == null) {
+            throw new RuntimeException("表不存在");
+        }
+        if (!"deprecated".equalsIgnoreCase(table.getStatus())) {
+            throw new RuntimeException("仅支持清理已废弃表");
+        }
+
+        Long actualClusterId = clusterId != null ? clusterId : table.getClusterId();
+        TableRef tableRef = resolveTableRef(table);
+        if (tableRef == null) {
+            throw new RuntimeException("表未配置数据库名，请先设置 dbName 字段");
+        }
+        if (!isConfirmTableNameMatched(confirmTableName, tableRef.tableName)) {
+            throw new RuntimeException("确认失败：请输入正确的表名 " + tableRef.tableName);
+        }
+        if (isDorisTable(table) && actualClusterId == null) {
+            throw new RuntimeException("请指定数据源");
+        }
+
+        try {
+            if (isDorisTable(table)) {
+                dorisConnectionService.dropTable(actualClusterId, tableRef.database, tableRef.tableName);
+            }
+            purgeTableMetadata(id);
+        } catch (Exception e) {
+            throw new RuntimeException("立即清理失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 待删除表视图（含剩余天数计算），用于列表展示。
+     */
+    public List<Map<String, Object>> listPendingDeletionView(Long clusterId) {
+        List<DataTable> tables = listPendingDeletion(clusterId);
+        LocalDateTime now = LocalDateTime.now();
+        List<Map<String, Object>> result = new ArrayList<>(tables.size());
+        for (DataTable table : tables) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("id", table.getId());
+            item.put("clusterId", table.getClusterId());
+            item.put("dbName", table.getDbName());
+            item.put("tableName", table.getTableName());
+            item.put("originTableName", table.getOriginTableName());
+            item.put("tableComment", table.getTableComment());
+            item.put("status", table.getStatus());
+            item.put("isSynced", table.getIsSynced());
+            item.put("deprecatedAt", table.getDeprecatedAt());
+            item.put("purgeAt", table.getPurgeAt());
+            item.put("remainingDays", calculateRemainingDays(now, table.getPurgeAt()));
+            result.add(item);
+        }
+        return result;
+    }
+
+    /**
+     * 确认表名是否匹配（用于删除/清理二次确认）。
+     */
+    public static boolean isConfirmTableNameMatched(String confirmTableName, String expectedTableName) {
+        if (!StringUtils.hasText(confirmTableName) || !StringUtils.hasText(expectedTableName)) {
+            return false;
+        }
+        return confirmTableName.trim().equals(expectedTableName.trim());
+    }
+
+    private String resolveRestoreTableName(DataTable table, String currentActualTableName) {
+        if (table != null && StringUtils.hasText(table.getOriginTableName())) {
+            return table.getOriginTableName().trim();
+        }
+        if (!StringUtils.hasText(currentActualTableName)) {
+            return null;
+        }
+        return currentActualTableName.replaceFirst("_deprecated_\\d{14}$", "");
+    }
+
+    private Long calculateRemainingDays(LocalDateTime now, LocalDateTime purgeAt) {
+        if (now == null || purgeAt == null) {
+            return null;
+        }
+        long seconds = Duration.between(now, purgeAt).getSeconds();
+        if (seconds <= 0) {
+            return 0L;
+        }
+        return (seconds + 86_399) / 86_400;
+    }
+
+    /**
+     * Doris 同步过程中的「校验拒绝」标记异常：用于复刻原控制器在 rename/comment 之后
+     * 仍以原始文案直接返回的语义，避免被「同步 Doris 失败:」前缀包裹。
+     */
+    private static class DorisSyncRejectedException extends RuntimeException {
+        DorisSyncRejectedException(String message) {
+            super(message);
+        }
+    }
+
+    /**
      * 获取所有表（用于任务配置）
      */
     public List<DataTable> listAll() {
@@ -613,6 +921,54 @@ public class DataTableService {
                 TableMetadataVersionService.TRIGGER_MANUAL_EDIT, null);
     }
 
+    /**
+     * 新增字段（按表 ID，含表存在性与 Doris 集群校验）。
+     */
+    @Transactional
+    public DataField createField(Long tableId, DataField field, Long clusterId) {
+        DataTable table = getById(tableId);
+        if (table == null) {
+            throw new RuntimeException("表不存在");
+        }
+        if (isDorisTable(table) && clusterId == null) {
+            throw new RuntimeException("请指定 Doris 集群");
+        }
+        field.setTableId(tableId);
+        return createField(table, field, clusterId);
+    }
+
+    /**
+     * 更新字段（按表 ID，含表存在性与 Doris 集群校验）。
+     */
+    @Transactional
+    public DataField updateField(Long tableId, Long fieldId, DataField field, Long clusterId) {
+        DataTable table = getById(tableId);
+        if (table == null) {
+            throw new RuntimeException("表不存在");
+        }
+        if (isDorisTable(table) && clusterId == null) {
+            throw new RuntimeException("请指定 Doris 集群");
+        }
+        field.setId(fieldId);
+        field.setTableId(tableId);
+        return updateField(table, field, clusterId);
+    }
+
+    /**
+     * 删除字段（按表 ID，含表存在性与 Doris 集群校验）。
+     */
+    @Transactional
+    public void deleteField(Long tableId, Long fieldId, Long clusterId) {
+        DataTable table = getById(tableId);
+        if (table == null) {
+            throw new RuntimeException("表不存在");
+        }
+        if (isDorisTable(table) && clusterId == null) {
+            throw new RuntimeException("请指定 Doris 集群");
+        }
+        deleteField(table, fieldId, clusterId);
+    }
+
     private boolean isDorisTable(DataTable table) {
         if (table == null) {
             return false;
@@ -732,7 +1088,7 @@ public class DataTableService {
         return null;
     }
 
-    private String extractActualTableName(String database, String tableName) {
+    public String extractActualTableName(String database, String tableName) {
         if (!StringUtils.hasText(tableName)) {
             return null;
         }

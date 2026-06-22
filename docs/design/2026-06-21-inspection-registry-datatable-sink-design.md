@@ -108,6 +108,8 @@ InspectionSupport（@Component：insertIssue/createIssue/parseRuleConfig/applyTa
 - **主要风险：行为漂移**。控制措施：辅助/规则方法**逐字迁移**；保留控制器薄 `try/catch`，服务抛「最终态消息」异常以复刻响应体与状态码；新增/更新单测锁定分发与同步链路。
 - **风险：异常语义**。下沉的校验失败必须复刻原文案（如「请指定数据源」「表未配置数据库名，请先设置 dbName 字段」「修改表注释失败: …」），由控制器 `catch` 原样回填，避免被 `GlobalExceptionHandler` 改写。
 - **风险：同步异常吞没语义**。`syncAllMetadata` 等原本**内部捕获**同步异常并落为 FAIL 结果后仍返回 200，下沉时须保留该「捕获-记录-返回」语义，仅对 clusterId/cluster 前置校验抛异常。
+- **有意的两处一致化（已知、可接受）**：原 `DataTableController` 错误处理是异质的——多数失败 `return Result.fail(原文)`（HTTP 200 / code 500），少数未包裹的最终持久化调用（如 `update` 末尾的 `dataTableService.update`）异常会逃逸到 `GlobalExceptionHandler`（HTTP 500 / `"操作失败: "` 前缀）。下沉后控制器对每个用例统一 `try/catch → Result.fail(e.getMessage())`，因此：(1) 绝大多数校验与 `"同步 Doris 失败: "`/`"修改表注释失败: "` 等带前缀路径**逐字保持**（含既有测试断言的 `"请指定数据源"`）；(2) 极少数原本逃逸到 `GlobalExceptionHandler` 的边角失败（如改表触发重名校验 `update()` 抛错）由 `500/"操作失败: "` 一致化为 `200/code500/原文`。此变化使错误响应与主流路径一致，影响面仅限未覆盖的边角用例。`delete` 因混合语义（校验 200 + 删除失败 500 逃逸）不下沉，保留控制器内薄实现（仅复用 `DataTableService.isConfirmTableNameMatched` 静态方法去重）。
+- **风险：事务内远程调用**。生命周期写命令（`updateTable`/`updateTableComment`/`softDeleteTable`/`restoreTable`/`purgeTableNow`）下沉为 facade 级 `@Transactional`，以在自调用既有 `@Transactional` 持久化方法时保持本地写的原子性。代价是 Doris DDL（JDBC，独立连接、快速、低频管理操作）落入 MySQL 事务窗口内；相较 WorkflowService 的 DolphinScheduler HTTP 远程调用风险更低，故按一致的 facade 事务模型处理，不再为每个用例拆分「prepare + persist」两段。
 - **替代方案**：
   - 「仅把 `switch` 换成 `Map<String,BiFunction>` 内联注册表、不拆 handler」——改动更小但不解决上帝类与可测性，且偏离 roadmap 明确的「策略 + 注册表承载各规则」，否决。
   - 「控制器逻辑全塞进 `DataTableService` 单类」——会把它推成新的上帝类，否决；改为按读/写/同步三聚焦协作者下沉。
