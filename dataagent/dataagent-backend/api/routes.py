@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import mimetypes
 import json
@@ -568,6 +569,13 @@ async def api_stream_sdk_events(task_id: str, request: Request, after_id: int = 
     task = store.get_task(task_id, context=context)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    logger.info(
+        "sdk_events.stream.open task_id=%s topic_id=%s after_id=%s task_status=%s",
+        task_id,
+        str(task.get("topic_id") or ""),
+        after_id,
+        str(task.get("task_status") or ""),
+    )
     return StreamingResponse(
         _stream_sdk_events(task_id=task_id, after_id=after_id, context=context),
         media_type="text/event-stream",
@@ -585,29 +593,66 @@ async def _stream_sdk_events(task_id: str, after_id: int, context: dict[str, str
     ping_seconds = max(5, int(cfg.run_events_stream_ping_seconds or 10))
     next_after_id = max(0, after_id)
     since_ping = 0
+    delivered = 0
+    last_task_status = ""
     store = _get_store()
 
-    while True:
-        records = store.list_sdk_records(task_id=task_id, after_id=next_after_id, limit=200)
-        for rec in records:
-            next_after_id = max(next_after_id, int(rec.get("seq_id") or 0))
-            yield _encode_sse(rec)
-        if records:
-            since_ping = 0
-        else:
-            since_ping += poll_interval
-            if since_ping >= ping_seconds:
-                yield ": ping\n\n"
+    try:
+        while True:
+            records = store.list_sdk_records(task_id=task_id, after_id=next_after_id, limit=200)
+            for rec in records:
+                next_after_id = max(next_after_id, int(rec.get("seq_id") or 0))
+                delivered += 1
+                yield _encode_sse(rec)
+            if records:
                 since_ping = 0
+            else:
+                since_ping += poll_interval
+                if since_ping >= ping_seconds:
+                    yield ": ping\n\n"
+                    since_ping = 0
 
-        task = store.get_task(task_id, context=context)
-        if not task:
-            break
-        # Stop when: task is terminal AND we've delivered all SDK records (look for 'done'/'error')
-        if str(task.get("task_status") or "") in TERMINAL_TASK_STATUSES and not records:
-            # Check if we've already yielded a done/error record
-            break
-        await anyio.sleep(poll_interval)
+            task = store.get_task(task_id, context=context)
+            if not task:
+                last_task_status = "missing"
+                logger.info(
+                    "sdk_events.stream.terminate task_id=%s reason=missing_task last_seq=%s delivered=%s",
+                    task_id,
+                    next_after_id,
+                    delivered,
+                )
+                break
+            last_task_status = str(task.get("task_status") or "")
+            # Stop when: task is terminal and the latest DB poll had no new SDK records.
+            if last_task_status in TERMINAL_TASK_STATUSES and not records:
+                logger.info(
+                    "sdk_events.stream.terminate task_id=%s reason=terminal task_status=%s last_seq=%s delivered=%s",
+                    task_id,
+                    last_task_status,
+                    next_after_id,
+                    delivered,
+                )
+                break
+            await anyio.sleep(poll_interval)
+    except asyncio.CancelledError:
+        logger.info(
+            "sdk_events.stream.disconnected task_id=%s requested_after_id=%s last_seq=%s task_status=%s delivered=%s",
+            task_id,
+            after_id,
+            next_after_id,
+            last_task_status,
+            delivered,
+        )
+        raise
+    finally:
+        logger.info(
+            "sdk_events.stream.close task_id=%s requested_after_id=%s last_seq=%s task_status=%s delivered=%s",
+            task_id,
+            after_id,
+            next_after_id,
+            last_task_status,
+            delivered,
+        )
 
 
 @task_router.post("/{task_id}/cancel", response_model=CancelTaskResponse)

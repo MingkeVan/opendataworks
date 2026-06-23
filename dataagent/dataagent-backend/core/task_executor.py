@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 import os
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -62,6 +63,8 @@ from core.topic_task_store import get_topic_task_store
 from core.topic_workspace import prepare_topic_workspace
 
 logger = logging.getLogger(__name__)
+
+_SDK_TURN_PROGRESS_THRESHOLDS = (1000, 3000, 6000, 10000)
 
 
 @dataclass
@@ -708,13 +711,16 @@ async def execute_task_stream(
     emit: Callable[[dict[str, Any]], Awaitable[None] | None],
     is_cancel_requested: Callable[[], Awaitable[bool] | bool] | None = None,
 ) -> TaskExecutionResult:
-    """Execute one NL2SQL run, streaming events via ``emit``, return the terminal result.
+    """Execute one NL2SQL run and return the terminal result.
 
     Dispatches to the sandbox runner when ``dataagent_sandbox_mode`` is set,
-    otherwise runs in-process. ``emit`` receives SDK/widget event dicts as they
-    occur (text deltas, tool calls, permission/question cards); the awaited return
-    value is the final :class:`TaskExecutionResult` (status, content, usage, error,
-    session id). ``is_cancel_requested`` is polled to abort a long/stalled run.
+    otherwise runs in-process. The current local/child execution path writes SDK
+    stream records directly through ``SdkBlockWriter`` into ``da_agent_sdk_record``;
+    ``emit`` is for records forwarded by the sandbox-runner protocol and should
+    not be read as the single persistence boundary for all SDK records. The
+    awaited return value is the final :class:`TaskExecutionResult` (status,
+    content, usage, error, session id). ``is_cancel_requested`` is polled to
+    abort a long/stalled run.
     """
     cfg = get_settings()
     if _should_use_sandbox_runner(cfg):
@@ -1015,10 +1021,35 @@ async def _execute_task_stream_local(
         phase: str,
     ) -> TaskExecutionResult:
         nonlocal terminal_error_record_written
+        sdk_message_count = 0
+        sdk_stream_event_count = 0
+        next_progress_threshold_index = 0
+        turn_started_at = time.monotonic()
         try:
             with anyio.fail_after(turn_timeout_seconds):
                 sdk_prompt = _single_user_prompt_stream(turn_prompt) if can_use_tool is not None else turn_prompt
                 async for msg in claude_query(prompt=sdk_prompt, options=turn_options):
+                    sdk_message_count += 1
+                    if type(msg).__name__ == "StreamEvent":
+                        sdk_stream_event_count += 1
+                    while (
+                        next_progress_threshold_index < len(_SDK_TURN_PROGRESS_THRESHOLDS)
+                        and sdk_message_count >= _SDK_TURN_PROGRESS_THRESHOLDS[next_progress_threshold_index]
+                    ):
+                        threshold = _SDK_TURN_PROGRESS_THRESHOLDS[next_progress_threshold_index]
+                        next_progress_threshold_index += 1
+                        logger.info(
+                            "task.sdk_turn.progress task_id=%s topic_id=%s provider=%s model=%s phase=%s sdk_messages=%s stream_events=%s threshold=%s elapsed_ms=%s",
+                            params.task_id,
+                            params.topic_id,
+                            provider_id,
+                            model,
+                            phase,
+                            sdk_message_count,
+                            sdk_stream_event_count,
+                            threshold,
+                            int((time.monotonic() - turn_started_at) * 1000),
+                        )
                     if await _cancelled():
                         error = {"code": "task_cancelled", "message": "任务已取消"}
                         sdk_writer.append_error(**error)
@@ -1099,6 +1130,17 @@ async def _execute_task_stream_local(
                 session_id=accumulator.session_id,
             )
 
+        logger.info(
+            "task.sdk_turn.end task_id=%s topic_id=%s provider=%s model=%s phase=%s sdk_messages=%s stream_events=%s elapsed_ms=%s",
+            params.task_id,
+            params.topic_id,
+            provider_id,
+            model,
+            phase,
+            sdk_message_count,
+            sdk_stream_event_count,
+            int((time.monotonic() - turn_started_at) * 1000),
+        )
         return accumulator.build_result()
 
     result = await _run_sdk_turn(

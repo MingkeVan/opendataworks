@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -199,3 +200,34 @@ def test_sdk_dataclass_tool_use_without_type_field_is_recorded() -> None:
         "id": "call_skill_1",
         "name": "Skill",
     }
+
+
+def test_thinking_stream_observability_logs_repeated_segment(caplog) -> None:
+    store = FakeStore()
+    writer = SdkBlockWriter(store, task_id="task-obs", topic_id="topic-obs")
+    caplog.set_level(logging.WARNING, logger="core.sdk_block_writer")
+
+    writer.ingest(StreamEvent({"type": "message_start"}))
+    writer.ingest(
+        StreamEvent(
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "thinking"},
+            }
+        )
+    )
+    for _ in range(3):
+        writer.ingest(
+            StreamEvent(
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "thinking_delta", "thinking": "让我生成。"},
+                }
+            )
+        )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("sdk_stream.thinking_repeated_segment" in message for message in messages)
+    assert any("task_id=task-obs" in message for message in messages)

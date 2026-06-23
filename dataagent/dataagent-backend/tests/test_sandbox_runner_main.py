@@ -107,6 +107,25 @@ def test_sandbox_runner_cancel_endpoint_marks_task_cancelled():
     assert "task-1" in sandbox_runner_main.CANCELLED_TASK_IDS
 
 
+def test_sandbox_runner_task_log_captures_child_sdk_stream_stderr(tmp_path: Path):
+    log_path = tmp_path / "topic-1" / "logs" / "task-1.log"
+
+    async def scenario() -> None:
+        reader = asyncio.StreamReader()
+        reader.feed_data(
+            b"sdk_stream.thinking_repeated_segment task_id=task-1 topic_id=topic-1 repeat_count=3\n"
+        )
+        reader.feed_eof()
+        await sandbox_runner_main._log_stderr(reader, "task-1", log_path=log_path)
+
+    asyncio.run(scenario())
+
+    text = log_path.read_text(encoding="utf-8")
+    assert "stderr sdk_stream.thinking_repeated_segment" in text
+    assert "task_id=task-1" in text
+    assert "topic_id=topic-1" in text
+
+
 def test_sandbox_runner_container_command_mounts_only_topic_workspace(monkeypatch, tmp_path: Path):
     settings = get_settings()
     originals = {
