@@ -3,13 +3,40 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import time
+from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_THINKING_CHAR_WARN_THRESHOLDS = (4096, 8192, 16384, 32768)
+_THINKING_DELTA_WARN_THRESHOLDS = (1000, 3000, 6000, 10000)
+_THINKING_DURATION_WARN_SECONDS = 60
+_REPEATED_SEGMENT_WARN_COUNTS = {3, 5, 10, 20, 50}
+_SEGMENT_SPLIT_RE = re.compile(r"\n+|(?<=[。！？.!?])\s*")
+
+
+@dataclass
+class _BlockStats:
+    index: int
+    block_type: str
+    started_at: float = field(default_factory=time.monotonic)
+    delta_count: int = 0
+    char_count: int = 0
+    next_char_threshold_index: int = 0
+    next_delta_threshold_index: int = 0
+    long_logged: bool = False
+    segment_counts: dict[str, int] = field(default_factory=dict)
+
 
 class SdkBlockWriter:
-    """Writes raw Claude SDK messages into da_agent_sdk_record for the v2 stream endpoint."""
+    """Writes raw Claude SDK messages into da_agent_sdk_record for the v2 stream endpoint.
+
+    In sandbox mode this writer normally runs inside the task child process. Its
+    ``sdk_stream.*`` logs are execution-process observability: the sandbox runner
+    captures child stderr and mirrors those lines into the per-task log.
+    """
 
     def __init__(self, store: Any, task_id: str, topic_id: str) -> None:
         self._store = store
@@ -17,6 +44,7 @@ class SdkBlockWriter:
         self._topic_id = topic_id
         self._turn_index = 0
         self._saw_stream_event = False
+        self._active_blocks: dict[int, _BlockStats] = {}
 
     def ingest(self, msg: Any) -> None:
         """Process one SDK message from the claude_query() stream."""
@@ -170,6 +198,7 @@ class SdkBlockWriter:
         etype = str(evt.get("type") or "")
         if etype == "message_start":
             self._turn_index += 1
+        self._observe_stream_event(evt, etype)
         self._store.append_sdk_record(
             task_id=self._task_id,
             topic_id=self._topic_id,
@@ -178,6 +207,157 @@ class SdkBlockWriter:
             event_type=etype or None,
             data=evt,
         )
+
+    def _observe_stream_event(self, evt: dict[str, Any], etype: str) -> None:
+        if etype == "message_start":
+            logger.info(
+                "sdk_stream.message_start task_id=%s topic_id=%s turn_index=%s",
+                self._task_id,
+                self._topic_id,
+                self._turn_index,
+            )
+            return
+        if etype == "message_stop":
+            if self._active_blocks:
+                logger.warning(
+                    "sdk_stream.message_stop_unclosed_blocks task_id=%s topic_id=%s turn_index=%s block_indexes=%s",
+                    self._task_id,
+                    self._topic_id,
+                    self._turn_index,
+                    ",".join(str(index) for index in sorted(self._active_blocks)),
+                )
+            logger.info(
+                "sdk_stream.message_stop task_id=%s topic_id=%s turn_index=%s",
+                self._task_id,
+                self._topic_id,
+                self._turn_index,
+            )
+            self._active_blocks.clear()
+            return
+
+        if etype == "content_block_start":
+            index = _event_index(evt)
+            if index is None:
+                return
+            content_block = evt.get("content_block")
+            block_type = ""
+            if isinstance(content_block, dict):
+                block_type = str(content_block.get("type") or "")
+            self._active_blocks[index] = _BlockStats(index=index, block_type=block_type)
+            logger.info(
+                "sdk_stream.block_start task_id=%s topic_id=%s turn_index=%s block_index=%s block_type=%s",
+                self._task_id,
+                self._topic_id,
+                self._turn_index,
+                index,
+                block_type,
+            )
+            return
+
+        if etype == "content_block_delta":
+            self._observe_stream_delta(evt)
+            return
+
+        if etype == "content_block_stop":
+            index = _event_index(evt)
+            if index is None:
+                return
+            stats = self._active_blocks.pop(index, None)
+            if stats is None:
+                return
+            elapsed_ms = int((time.monotonic() - stats.started_at) * 1000)
+            logger.info(
+                "sdk_stream.block_stop task_id=%s topic_id=%s turn_index=%s block_index=%s block_type=%s char_count=%s delta_count=%s elapsed_ms=%s",
+                self._task_id,
+                self._topic_id,
+                self._turn_index,
+                index,
+                stats.block_type,
+                stats.char_count,
+                stats.delta_count,
+                elapsed_ms,
+            )
+
+    def _observe_stream_delta(self, evt: dict[str, Any]) -> None:
+        index = _event_index(evt)
+        if index is None:
+            return
+        delta = evt.get("delta")
+        if not isinstance(delta, dict):
+            return
+        delta_type = str(delta.get("type") or "")
+        if delta_type != "thinking_delta":
+            return
+        text = str(delta.get("thinking") or "")
+        if not text:
+            return
+        stats = self._active_blocks.setdefault(index, _BlockStats(index=index, block_type="thinking"))
+        stats.delta_count += 1
+        stats.char_count += len(text)
+        elapsed_seconds = time.monotonic() - stats.started_at
+
+        while (
+            stats.next_char_threshold_index < len(_THINKING_CHAR_WARN_THRESHOLDS)
+            and stats.char_count >= _THINKING_CHAR_WARN_THRESHOLDS[stats.next_char_threshold_index]
+        ):
+            threshold = _THINKING_CHAR_WARN_THRESHOLDS[stats.next_char_threshold_index]
+            stats.next_char_threshold_index += 1
+            logger.warning(
+                "sdk_stream.thinking_large task_id=%s topic_id=%s turn_index=%s block_index=%s char_count=%s threshold=%s delta_count=%s elapsed_ms=%s",
+                self._task_id,
+                self._topic_id,
+                self._turn_index,
+                index,
+                stats.char_count,
+                threshold,
+                stats.delta_count,
+                int(elapsed_seconds * 1000),
+            )
+
+        while (
+            stats.next_delta_threshold_index < len(_THINKING_DELTA_WARN_THRESHOLDS)
+            and stats.delta_count >= _THINKING_DELTA_WARN_THRESHOLDS[stats.next_delta_threshold_index]
+        ):
+            threshold = _THINKING_DELTA_WARN_THRESHOLDS[stats.next_delta_threshold_index]
+            stats.next_delta_threshold_index += 1
+            logger.warning(
+                "sdk_stream.thinking_many_deltas task_id=%s topic_id=%s turn_index=%s block_index=%s delta_count=%s threshold=%s char_count=%s elapsed_ms=%s",
+                self._task_id,
+                self._topic_id,
+                self._turn_index,
+                index,
+                stats.delta_count,
+                threshold,
+                stats.char_count,
+                int(elapsed_seconds * 1000),
+            )
+
+        if not stats.long_logged and elapsed_seconds >= _THINKING_DURATION_WARN_SECONDS:
+            stats.long_logged = True
+            logger.warning(
+                "sdk_stream.thinking_long task_id=%s topic_id=%s turn_index=%s block_index=%s elapsed_ms=%s char_count=%s delta_count=%s",
+                self._task_id,
+                self._topic_id,
+                self._turn_index,
+                index,
+                int(elapsed_seconds * 1000),
+                stats.char_count,
+                stats.delta_count,
+            )
+
+        for segment in _meaningful_segments(text):
+            count = stats.segment_counts.get(segment, 0) + 1
+            stats.segment_counts[segment] = count
+            if count in _REPEATED_SEGMENT_WARN_COUNTS:
+                logger.warning(
+                    "sdk_stream.thinking_repeated_segment task_id=%s topic_id=%s turn_index=%s block_index=%s repeat_count=%s segment_preview=%s",
+                    self._task_id,
+                    self._topic_id,
+                    self._turn_index,
+                    index,
+                    count,
+                    _clip_log_text(segment),
+                )
 
     def append_permission_request(
         self,
@@ -305,6 +485,23 @@ class SdkBlockWriter:
 
     def _append_terminal_record(self, *, record_type: str, data: dict[str, Any]) -> None:
         try:
+            if self._active_blocks:
+                logger.warning(
+                    "sdk_stream.terminal_unclosed_blocks task_id=%s topic_id=%s turn_index=%s record_type=%s block_indexes=%s",
+                    self._task_id,
+                    self._topic_id,
+                    self._turn_index,
+                    record_type,
+                    ",".join(str(index) for index in sorted(self._active_blocks)),
+                )
+                self._active_blocks.clear()
+            logger.info(
+                "sdk_stream.terminal_record task_id=%s topic_id=%s turn_index=%s record_type=%s",
+                self._task_id,
+                self._topic_id,
+                self._turn_index,
+                record_type,
+            )
             self._store.append_sdk_record(
                 task_id=self._task_id,
                 topic_id=self._topic_id,
@@ -328,6 +525,29 @@ def _serialise_blocks(blocks: Any) -> Any:
         else:
             result.append(str(b))
     return result
+
+
+def _event_index(evt: dict[str, Any]) -> int | None:
+    try:
+        return int(evt.get("index"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _meaningful_segments(text: str) -> list[str]:
+    segments: list[str] = []
+    for raw in _SEGMENT_SPLIT_RE.split(str(text or "")):
+        segment = raw.strip()
+        if len(segment) >= 4:
+            segments.append(segment)
+    return segments
+
+
+def _clip_log_text(text: str, limit: int = 120) -> str:
+    value = " ".join(str(text or "").split())
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3] + "..."
 
 
 def _block_type(block: Any) -> str:

@@ -259,9 +259,11 @@ class TaskCoordinator:
                     is_cancel_requested=lambda: self._should_stop_task(task_id, lease_lost),
                 )
                 logger.info(
-                    "task.run.result task_id=%s topic_id=%s task_status=%s error_code=%s content_len=%s session_id_set=%s usage_set=%s",
+                    "task.run.result task_id=%s topic_id=%s provider=%s model=%s task_status=%s error_code=%s content_len=%s session_id_set=%s usage_set=%s",
                     task_id,
                     topic_id,
+                    str(task.get("provider_id") or ""),
+                    str(task.get("model") or ""),
                     result.task_status,
                     str((result.error or {}).get("code") or ""),
                     len(str(result.content or "")),
@@ -297,9 +299,11 @@ class TaskCoordinator:
                     )
                 self.store.finish_task(task_id=task_id, task_status=result.task_status, error=result.error)
                 logger.info(
-                    "task.run.finished task_id=%s topic_id=%s task_status=%s error_code=%s",
+                    "task.run.finished task_id=%s topic_id=%s provider=%s model=%s task_status=%s error_code=%s",
                     task_id,
                     topic_id,
+                    str(task.get("provider_id") or ""),
+                    str(task.get("model") or ""),
                     result.task_status,
                     str((result.error or {}).get("code") or ""),
                 )
@@ -362,6 +366,9 @@ class TaskCoordinator:
             return []
 
     def _persist_emitted_sdk_record(self, *, topic_id: str, task_id: str, record: dict[str, Any]) -> None:
+        # This is the sandbox-runner protocol sink. The current local/child
+        # execution path also writes SDK rows directly through SdkBlockWriter, so
+        # this method is intentionally not the only da_agent_sdk_record writer.
         if not isinstance(record, dict):
             return
         record_type = str(record.get("record_type") or "").strip()

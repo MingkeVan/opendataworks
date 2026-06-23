@@ -49,6 +49,14 @@ class _RecordingStore:
         self.question_answer_records.append(kwargs)
 
 
+class _SdkRecordStore:
+    def __init__(self):
+        self.records = []
+
+    def append_sdk_record(self, **kwargs):
+        self.records.append(kwargs)
+
+
 def _build_gate(monkeypatch, decision, *, mode="default"):
     writer = _RecordingWriter()
     store = _RecordingStore()
@@ -478,6 +486,47 @@ def test_execute_task_stream_persists_sdk_records_without_magic_records(monkeypa
     assert ClaudeAgentOptions.last_kwargs["env"]["DISABLE_PROMPT_CACHING"] == ""
 
     assert emitted == []
+
+
+def test_execute_task_stream_logs_sdk_iterator_progress(monkeypatch, tmp_path: Path, caplog):
+    monkeypatch.setenv("DATAAGENT_CLAUDE_CLI_PATH", "/tmp/claude-cli")
+    monkeypatch.setattr(task_executor, "_SDK_TURN_PROGRESS_THRESHOLDS", (3,))
+    monkeypatch.setattr(task_executor, "get_topic_task_store", lambda: _SdkRecordStore())
+    _install_fake_sdk(
+        monkeypatch,
+        [
+            StreamEvent({"type": "message_start", "message": {"id": "req-progress"}}),
+            StreamEvent({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            StreamEvent({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "ok"}}),
+            StreamEvent({"type": "content_block_stop", "index": 0}),
+            StreamEvent({"type": "message_stop"}),
+            ResultMessage("success", session_id="sdk-session-progress"),
+        ],
+    )
+    monkeypatch.setattr(
+        task_executor,
+        "resolve_runtime_provider_selection",
+        lambda provider_id, model: {
+            "provider_id": provider_id,
+            "model": model,
+            "api_key": "",
+            "auth_token": "",
+            "base_url": "https://example.invalid",
+            "supports_partial_messages": True,
+        },
+    )
+    _patch_skill_runtime(monkeypatch, tmp_path)
+    caplog.set_level(logging.INFO, logger="core.task_executor")
+
+    async def _run():
+        return await task_executor.execute_task_stream(_build_input(), emit=lambda record: None)
+
+    result = asyncio.run(_run())
+
+    assert result.task_status == "finished"
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("task.sdk_turn.progress" in message and "sdk_messages=3" in message for message in messages)
+    assert any("task.sdk_turn.end" in message and "sdk_messages=6" in message for message in messages)
 
 
 def test_execute_task_stream_logs_safe_runtime_base_url_and_preserves_env(monkeypatch, tmp_path: Path, caplog):

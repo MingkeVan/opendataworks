@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -802,6 +803,58 @@ def test_topic_permission_mode_lifecycle(monkeypatch):
         # PUT with neither field is a 400.
         empty = client.put(f"/api/v1/nl2sql/topics/{topic_id}", json={})
         assert empty.status_code == 400
+
+
+def test_sdk_events_stream_reads_persisted_records_in_seq_order(monkeypatch):
+    client, store, _coordinator, _submit_calls = _build_client(monkeypatch)
+    with client:
+        topic_id = client.post("/api/v1/nl2sql/topics", json={"title": "SDK SSE"}).json()["topic_id"]
+        delivered = client.post(
+            "/api/v1/nl2sql/tasks/deliver-message",
+            json={"topic_id": topic_id, "content": "stream test"},
+        ).json()
+        task_id = delivered["task_id"]
+        store.append_sdk_record(
+            task_id=task_id,
+            topic_id=topic_id,
+            turn_index=1,
+            record_type="stream",
+            event_type="message_start",
+            data={"type": "message_start"},
+        )
+        store.append_sdk_record(
+            task_id=task_id,
+            topic_id=topic_id,
+            turn_index=1,
+            record_type="stream",
+            event_type="content_block_delta",
+            data={"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hello"}},
+        )
+        store.append_sdk_record(
+            task_id=task_id,
+            topic_id=topic_id,
+            turn_index=1,
+            record_type="done",
+            event_type=None,
+            data={"is_error": False, "subtype": "success"},
+        )
+        store.tasks[task_id]["task_status"] = "finished"
+
+        with client.stream(
+            "GET",
+            f"/api/v1/nl2sql/tasks/{task_id}/sdk-events/stream",
+            params={"after_id": 1},
+        ) as response:
+            assert response.status_code == 200
+            events = [
+                json.loads(line.removeprefix("data: "))
+                for line in response.iter_lines()
+                if line.startswith("data: ")
+            ]
+
+        assert [event["seq_id"] for event in events] == [2, 3]
+        assert [event["record_type"] for event in events] == ["stream", "done"]
+        assert events[0]["data"]["delta"]["text"] == "hello"
 
 
 def test_permission_decision_endpoint(monkeypatch):

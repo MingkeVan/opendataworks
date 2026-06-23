@@ -127,9 +127,12 @@ async def submit_message_task(
         store.mark_message_queue_submitted(queue_id=source_queue_id, task_id=task_id)
     task = await coordinator.submit_task(task_id) or task
     logger.info(
-        "task.submit.enqueued task_id=%s topic_id=%s task_status=%s user_message_id=%s assistant_message_id=%s",
+        "task.submit.enqueued task_id=%s topic_id=%s provider=%s model=%s mode=%s task_status=%s user_message_id=%s assistant_message_id=%s",
         task_id,
         topic_id,
+        str(runtime_target.get("provider_id") or ""),
+        str(runtime_target.get("model") or ""),
+        str(execution_mode or ""),
         str(task.get("task_status") or "waiting"),
         str(user_message.get("message_id") or ""),
         str(assistant_message.get("message_id") or ""),
