@@ -309,8 +309,6 @@ describe('useNl2SqlChat engine', () => {
       ],
     })
     const chat = await ready(api)
-    // Even a stale topic row that still claims a current task must not re-stream a
-    // run whose assistant message is already terminal.
     chat.topics.value = [{ topic_id: 'topic-done', title: '已完成', current_task_id: 'task-done', current_task_status: '' }]
 
     await chat.selectTopic('topic-done')
@@ -319,6 +317,31 @@ describe('useNl2SqlChat engine', () => {
     expect(api.taskApi.streamSdkEvents).not.toHaveBeenCalled()
     expect(chat.activeTaskId.value).toBe('')
     expect(chat.isBusy.value).toBe(false)
+  })
+
+  it('does not re-stream a finished task when a stale topic row still says running', async () => {
+    const api = makeApi()
+    // The completed run's terminal assistant message must win over a topic-list
+    // row whose mirrored current_task_status lagged behind on 'running'.
+    api.topicApi.getTopicMessages.mockResolvedValue({
+      items: [
+        { message_id: 'u1', sender_type: 'user', content: '问题', seq_id: 1 },
+        { message_id: 'a1', sender_type: 'assistant', task_id: 'task-done', status: 'success', blocks: [{ kind: 'main_text', text: '完成' }], seq_id: 2 },
+      ],
+    })
+    const chat = await ready(api)
+    chat.topics.value = [{ topic_id: 'topic-done', title: '已完成', current_task_id: 'task-done', current_task_status: 'running' }]
+
+    await chat.selectTopic('topic-done')
+    await flushPromises()
+
+    expect(api.taskApi.streamSdkEvents).not.toHaveBeenCalled()
+    expect(chat.activeTaskId.value).toBe('')
+    expect(chat.isBusy.value).toBe(false)
+    // The finished reply stays terminal — not flipped back to running/streaming.
+    const assistant = chat.messages.value.find((m) => m.role === 'assistant')
+    expect(assistant.status).toBe('success')
+    expect(assistant._v2state.status).toBe('done')
   })
 
   it('cancel aborts locally and cancels the backend task (suspended)', async () => {
