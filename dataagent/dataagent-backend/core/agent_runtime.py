@@ -108,8 +108,42 @@ def _path_is_allowed(path: Path, allowed_roots: list[Path]) -> bool:
     return any(_path_is_under(path, root) for root in allowed_roots)
 
 
-def _build_workspace_allowed_roots(project_cwd: str | Path, skill_runtime: dict[str, Any] | None) -> list[Path]:
-    roots = [Path(project_cwd).expanduser().resolve(strict=False)]
+def _resolve_claude_project_data_dir(workspace: Path, runtime_env: dict[str, str] | None) -> Path | None:
+    """Per-project Claude data dir holding this run's transcripts and offloaded
+    (too-large) tool-result files.
+
+    Mirrors the Claude Code CLI layout ``<config_dir>/projects/<encoded_cwd>``,
+    where ``config_dir`` is ``$CLAUDE_CONFIG_DIR`` or ``$HOME/.claude`` and
+    ``encoded_cwd`` is ``realpath(cwd)`` with every non-alphanumeric char replaced
+    by ``-``. When a tool result exceeds the inline size limit the CLI offloads it
+    to ``<this dir>/<session_id>/tool-results/<tool_use_id>.{txt,json}`` and asks
+    the agent to ``Read`` that path; without this root the follow-up read is denied
+    as "outside workspace". Scoped to the current workspace's encoded cwd so it
+    stays per-topic (no cross-topic transcript access) even when HOME is shared.
+    """
+    env = runtime_env or {}
+    config_dir = str(env.get("CLAUDE_CONFIG_DIR") or "").strip()
+    if config_dir:
+        base = Path(config_dir).expanduser()
+    else:
+        home = str(env.get("HOME") or "").strip()
+        if not home:
+            return None
+        base = Path(home).expanduser() / ".claude"
+    encoded_cwd = re.sub(r"[^a-zA-Z0-9]", "-", str(workspace))
+    return (base / "projects" / encoded_cwd).resolve(strict=False)
+
+
+def _build_workspace_allowed_roots(
+    project_cwd: str | Path,
+    skill_runtime: dict[str, Any] | None,
+    runtime_env: dict[str, str] | None = None,
+) -> list[Path]:
+    workspace = Path(project_cwd).expanduser().resolve(strict=False)
+    roots = [workspace]
+    project_data_dir = _resolve_claude_project_data_dir(workspace, runtime_env)
+    if project_data_dir is not None:
+        roots.append(project_data_dir)
     enabled_folders = set(_dedupe_strings((skill_runtime or {}).get("enabled_folders")))
     enabled_roots = dict((skill_runtime or {}).get("enabled_roots") or {})
     for root in enabled_roots.values():
@@ -217,7 +251,7 @@ def _build_workspace_boundary_hooks(
     runtime_env: dict[str, str] | None,
 ) -> dict[str, list[Any]]:
     workspace = Path(project_cwd).expanduser().resolve(strict=False)
-    allowed_roots = _build_workspace_allowed_roots(workspace, skill_runtime)
+    allowed_roots = _build_workspace_allowed_roots(workspace, skill_runtime, runtime_env)
 
     async def _pre_tool_use(input_data: dict[str, Any], tool_use_id: str | None, context: dict[str, Any]) -> dict[str, Any]:
         tool_name = str((input_data or {}).get("tool_name") or "")
