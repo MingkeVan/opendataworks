@@ -554,18 +554,15 @@
     <Teleport to="body">
       <div
         v-if="previewExpanded && previewArtifact"
-        ref="modalOverlayRef"
         class="v2-artifact-modal"
-        tabindex="-1"
         @click.self="closeExpandedPreview"
-        @keydown.esc="closeExpandedPreview"
       >
         <div class="v2-artifact-modal-card">
           <div class="v2-artifact-modal-head">
             <span class="v2-artifact-modal-name" :title="previewArtifact.name">{{ previewArtifact.name }}</span>
             <span class="v2-artifact-modal-actions">
               <a class="v2-artifact-dl-link" :href="artifactDownloadUrl(previewArtifact)" download>下载</a>
-              <button type="button" class="v2-artifact-modal-close" title="关闭（Esc）" @click="closeExpandedPreview">
+              <button type="button" class="v2-artifact-modal-close" title="关闭" @click="closeExpandedPreview">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
               </button>
             </span>
@@ -1384,7 +1381,6 @@ const previewArtifact = ref(null)
 const previewText = ref('')
 const previewError = ref('')
 const previewExpanded = ref(false)
-const modalOverlayRef = ref(null)
 
 function readArtifactsPref() {
   try { return localStorage.getItem(ARTIFACTS_PREF_KEY) === '1' } catch (_e) { return false }
@@ -1502,7 +1498,6 @@ function closeArtifactPreview() {
 function openExpandedPreview() {
   if (!canExpandPreview.value) return
   previewExpanded.value = true
-  nextTick(() => modalOverlayRef.value?.focus())
 }
 function closeExpandedPreview() {
   previewExpanded.value = false
@@ -1701,7 +1696,7 @@ onBeforeUnmount(() => {
 .v2-artifact-modal {
   position: fixed; inset: 0; z-index: 3000;
   display: flex; align-items: center; justify-content: center;
-  padding: 24px; background: rgba(15, 23, 42, 0.45); outline: none;
+  padding: 24px; background: rgba(15, 23, 42, 0.45);
 }
 .v2-artifact-modal-card {
   display: flex; flex-direction: column;
