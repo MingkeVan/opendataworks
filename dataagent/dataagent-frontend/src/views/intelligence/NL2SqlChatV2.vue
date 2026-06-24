@@ -484,9 +484,11 @@
             v-if="canExpandPreview"
             type="button"
             class="v2-artifact-expand"
-            title="放大预览（更宽的窗口）"
+            title="放大预览"
             @click="openExpandedPreview"
-          >放大</button>
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
+          </button>
           <a class="v2-artifact-dl-link" :href="artifactDownloadUrl(previewArtifact)" download>下载</a>
         </div>
         <div class="v2-artifact-preview-body">
@@ -552,8 +554,11 @@
     <Teleport to="body">
       <div
         v-if="previewExpanded && previewArtifact"
+        ref="modalOverlayRef"
         class="v2-artifact-modal"
+        tabindex="-1"
         @click.self="closeExpandedPreview"
+        @keydown.esc="closeExpandedPreview"
       >
         <div class="v2-artifact-modal-card">
           <div class="v2-artifact-modal-head">
@@ -566,8 +571,9 @@
             </span>
           </div>
           <div class="v2-artifact-modal-body">
+            <div v-if="previewError" class="v2-artifact-empty">{{ previewError }}</div>
             <iframe
-              v-if="isHtmlArtifact(previewArtifact)"
+              v-else-if="isHtmlArtifact(previewArtifact)"
               class="v2-artifact-modal-frame"
               sandbox=""
               referrerpolicy="no-referrer"
@@ -1378,6 +1384,7 @@ const previewArtifact = ref(null)
 const previewText = ref('')
 const previewError = ref('')
 const previewExpanded = ref(false)
+const modalOverlayRef = ref(null)
 
 function readArtifactsPref() {
   try { return localStorage.getItem(ARTIFACTS_PREF_KEY) === '1' } catch (_e) { return false }
@@ -1493,20 +1500,13 @@ function closeArtifactPreview() {
   previewError.value = ''
 }
 function openExpandedPreview() {
-  if (canExpandPreview.value) previewExpanded.value = true
+  if (!canExpandPreview.value) return
+  previewExpanded.value = true
+  nextTick(() => modalOverlayRef.value?.focus())
 }
 function closeExpandedPreview() {
   previewExpanded.value = false
 }
-// Esc closes the enlarged preview; listener is only attached while it is open.
-function onPreviewKeydown(event) {
-  if (event.key === 'Escape') closeExpandedPreview()
-}
-watch(previewExpanded, (open) => {
-  if (open) document.addEventListener('keydown', onPreviewKeydown)
-  else document.removeEventListener('keydown', onPreviewKeydown)
-})
-onBeforeUnmount(() => document.removeEventListener('keydown', onPreviewKeydown))
 
 function formatBytes(size) {
   const n = Number(size) || 0
@@ -1691,16 +1691,17 @@ onBeforeUnmount(() => {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 .v2-artifact-expand {
-  flex: none; border: none; background: transparent; padding: 0;
-  font-size: 13px; color: #4F46E5; cursor: pointer;
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border: none; border-radius: 7px;
+  background: transparent; color: #6B7280; cursor: pointer;
 }
-.v2-artifact-expand:hover { text-decoration: underline; }
+.v2-artifact-expand:hover { background: #EEF1F5; color: #4F46E5; }
 
 /* ── Enlarged artifact preview (modal) ───────────────────────────────────── */
 .v2-artifact-modal {
   position: fixed; inset: 0; z-index: 3000;
   display: flex; align-items: center; justify-content: center;
-  padding: 24px; background: rgba(15, 23, 42, 0.45);
+  padding: 24px; background: rgba(15, 23, 42, 0.45); outline: none;
 }
 .v2-artifact-modal-card {
   display: flex; flex-direction: column;
