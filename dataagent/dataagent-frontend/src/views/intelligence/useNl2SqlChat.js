@@ -344,13 +344,40 @@ export function useNl2SqlChat(options) {
     message?.role === 'assistant' && String(message?.task_id || '') === String(taskId || '')
   ))
 
+  // Assistant-message statuses whose run is still live: waiting in the queue,
+  // running, or parked on the user. Anything else — success / failed / cancelled
+  // / suspended / error / finished — is terminal with nothing to re-attach to.
+  const RESUMABLE_ASSISTANT_STATUSES = new Set([
+    'queued', 'waiting', 'running', 'waiting_input', 'waiting_permission',
+  ])
+
+  // The newest assistant message is the only resume candidate. Its persisted
+  // task_id + status are reloaded on every topic entry, so reading the run state
+  // from the message (not just the cached topic-list row) lets resume re-attach
+  // even when current_task_status on the row is stale or was never set locally —
+  // e.g. detaching while delivery was still in flight, or re-entering a topic
+  // whose list row has not been refreshed since the run began.
+  const findResumableAssistant = () => {
+    for (let i = messages.value.length - 1; i >= 0; i -= 1) {
+      const message = messages.value[i]
+      if (message?.role !== 'assistant') continue
+      const taskId = String(message?.task_id || '').trim()
+      return taskId && RESUMABLE_ASSISTANT_STATUSES.has(String(message?.status || '')) ? message : null
+    }
+    return null
+  }
+
   const resumeActiveTopicTask = (targetTopicId = topicId.value) => {
     if (!targetTopicId || targetTopicId !== topicId.value) return
     const topic = topics.value.find((item) => item.topic_id === targetTopicId)
-    const taskId = String(topic?.current_task_id || '').trim()
-    if (!taskId || !isTopicTaskActive(topic) || activeTaskId.value === taskId) return
+    // Prefer the per-message run signal (authoritative, always freshly loaded);
+    // fall back to the topic-list row's current task.
+    const resumable = findResumableAssistant()
+    const taskId = String(resumable?.task_id || topic?.current_task_id || '').trim()
+    if (!taskId || activeTaskId.value === taskId) return
+    if (!resumable && !isTopicTaskActive(topic)) return
 
-    const assistant = findAssistantForTask(taskId) || appendAssistantMessage(taskId)
+    const assistant = resumable || findAssistantForTask(taskId) || appendAssistantMessage(taskId)
     assistant.task_id = taskId
     assistant.status = 'running'
     if (assistant._v2state && assistant._v2state.status !== 'error') {

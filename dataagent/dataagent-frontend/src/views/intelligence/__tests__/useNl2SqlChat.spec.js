@@ -274,6 +274,53 @@ describe('useNl2SqlChat engine', () => {
     await sendPromise
   })
 
+  it('resumes a running task from the loaded assistant message even when the topic row is not marked active', async () => {
+    const api = makeApi()
+    // The cached topic row lost its current_task_id/status, but the freshly
+    // loaded assistant message says the run is still going — re-entry must still
+    // re-attach the live stream (the leave-while-running / refresh recovery path).
+    api.topicApi.getTopicMessages.mockResolvedValue({
+      items: [
+        { message_id: 'u1', sender_type: 'user', content: '问题', seq_id: 1 },
+        { message_id: 'a1', sender_type: 'assistant', task_id: 'task-run', status: 'running', blocks: [], resume_after_seq: 5, seq_id: 2 },
+      ],
+    })
+    let resolveStream
+    api.taskApi.streamSdkEvents.mockImplementation(() => new Promise((resolve) => { resolveStream = resolve }))
+    const chat = await ready(api)
+    chat.topics.value = [{ topic_id: 'topic-run', title: '运行中', current_task_id: '', current_task_status: '' }]
+
+    await chat.selectTopic('topic-run')
+    await flushPromises()
+
+    expect(api.taskApi.streamSdkEvents).toHaveBeenCalledWith('task-run', expect.objectContaining({ afterId: 5 }))
+    expect(chat.activeTaskId.value).toBe('task-run')
+    expect(chat.isBusy.value).toBe(true)
+
+    resolveStream()
+  })
+
+  it('does not resume when the latest assistant message is already terminal', async () => {
+    const api = makeApi()
+    api.topicApi.getTopicMessages.mockResolvedValue({
+      items: [
+        { message_id: 'u1', sender_type: 'user', content: '问题', seq_id: 1 },
+        { message_id: 'a1', sender_type: 'assistant', task_id: 'task-done', status: 'success', blocks: [{ kind: 'main_text', text: '完成' }], seq_id: 2 },
+      ],
+    })
+    const chat = await ready(api)
+    // Even a stale topic row that still claims a current task must not re-stream a
+    // run whose assistant message is already terminal.
+    chat.topics.value = [{ topic_id: 'topic-done', title: '已完成', current_task_id: 'task-done', current_task_status: '' }]
+
+    await chat.selectTopic('topic-done')
+    await flushPromises()
+
+    expect(api.taskApi.streamSdkEvents).not.toHaveBeenCalled()
+    expect(chat.activeTaskId.value).toBe('')
+    expect(chat.isBusy.value).toBe(false)
+  })
+
   it('cancel aborts locally and cancels the backend task (suspended)', async () => {
     const api = makeApi()
     // Honor the abort signal so the in-flight send unwinds like a real fetch.

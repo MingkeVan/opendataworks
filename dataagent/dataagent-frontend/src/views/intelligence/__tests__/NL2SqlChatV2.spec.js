@@ -668,6 +668,55 @@ describe('NL2SqlChatV2 URL location', () => {
     resolveStream()
   })
 
+  it('keeps a trailing loading indicator between rendered content and completion, then clears it when done', async () => {
+    let resolveStream
+    let recordSink
+    apiMocks.topicApi.listTopics.mockResolvedValue({
+      list: [
+        { ...makeTopic('topic-run', 'Running topic'), current_task_id: 'task-run', current_task_status: 'running' }
+      ]
+    })
+    apiMocks.topicApi.getTopicMessages.mockImplementation(async (topicId) => ({
+      topic_id: topicId,
+      page: 1,
+      page_size: 500,
+      order: 'asc',
+      total: 1,
+      items: [
+        { message_id: 'u-run', topic_id: topicId, sender_type: 'user', content: 'running question', created_at: '2026-05-30T02:00:00Z' }
+      ]
+    }))
+    // Stream one settled text block, then keep the run open: the tail block is no
+    // longer streaming but the run is still live, so the trailing dots must show.
+    apiMocks.taskApi.streamSdkEvents.mockImplementation((_taskId, opts) => {
+      recordSink = opts.onRecord
+      opts.onRecord({ record_type: 'stream', data: { type: 'message_start', usage: {} } })
+      opts.onRecord({ record_type: 'stream', data: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } })
+      opts.onRecord({ record_type: 'stream', data: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'partial answer' } } })
+      opts.onRecord({ record_type: 'stream', data: { type: 'content_block_stop', index: 0 } })
+      return new Promise((resolve) => { resolveStream = resolve })
+    })
+    routeState.query = { tab: 'chat-v2', topic_id: 'topic-run' }
+
+    const wrapper = mountChat()
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('partial answer')
+    // The pre-content top indicator is gone (content rendered) but the trailing
+    // cue keeps the run visibly active while it continues.
+    expect(wrapper.find('.v2-typing-indicator-trailing').exists()).toBe(true)
+
+    recordSink({ record_type: 'done', data: {} })
+    resolveStream()
+    await flushPromises()
+    await nextTick()
+
+    // Completion clears every activity cue.
+    expect(wrapper.find('.v2-typing-indicator-trailing').exists()).toBe(false)
+    expect(wrapper.find('.v2-typing-indicator').exists()).toBe(false)
+  })
+
   it('forwards the selected assistant to the widget topic query', async () => {
     routeState.query = { tab: 'chat-v2', agent_id: 'agent_sales' }
     const wrapper = mountChat()
