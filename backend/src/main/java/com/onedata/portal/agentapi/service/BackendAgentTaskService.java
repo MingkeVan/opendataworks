@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.agentapi.dto.AgentTaskUpsertRequest;
 import com.onedata.portal.agentapi.scope.AgentDataScopeContext;
 import com.onedata.portal.entity.DataTask;
+import com.onedata.portal.exception.BusinessException;
 import com.onedata.portal.service.DataTaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,7 +47,14 @@ public class BackendAgentTaskService implements AgentTaskService {
 
     @Override
     public Object getTask(Long taskId) {
-        return dataTaskService.getById(taskId);
+        DataTask task = dataTaskService.getById(taskId);
+        if (task == null) {
+            // A missing task would otherwise serialize as a null body (empty
+            // response), which the portal MCP client rejects as "not valid JSON".
+            // Throw so the global handler returns a proper JSON error instead.
+            throw new BusinessException("任务不存在: " + taskId);
+        }
+        return task;
     }
 
     @Override
