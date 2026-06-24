@@ -344,13 +344,57 @@ export function useNl2SqlChat(options) {
     message?.role === 'assistant' && String(message?.task_id || '') === String(taskId || '')
   ))
 
+  // Assistant-message statuses whose run is still live: waiting in the queue,
+  // running, or parked on the user. Anything else — success / failed / cancelled
+  // / suspended / error / finished — is terminal with nothing to re-attach to.
+  const RESUMABLE_ASSISTANT_STATUSES = new Set([
+    'queued', 'waiting', 'running', 'waiting_input', 'waiting_permission',
+  ])
+  const isResumableAssistant = (message) => Boolean(
+    message
+    && message.role === 'assistant'
+    && String(message?.task_id || '').trim()
+    && RESUMABLE_ASSISTANT_STATUSES.has(String(message?.status || '')),
+  )
+
+  // The newest assistant message is the only resume candidate. Its persisted
+  // task_id + status are reloaded on every topic entry, so reading the run state
+  // from the message (not just the cached topic-list row) lets resume re-attach
+  // even when current_task_status on the row is stale or was never set locally —
+  // e.g. detaching while delivery was still in flight, or re-entering a topic
+  // whose list row has not been refreshed since the run began.
+  const findResumableAssistant = () => {
+    for (let i = messages.value.length - 1; i >= 0; i -= 1) {
+      const message = messages.value[i]
+      if (message?.role !== 'assistant') continue
+      return isResumableAssistant(message) ? message : null
+    }
+    return null
+  }
+
   const resumeActiveTopicTask = (targetTopicId = topicId.value) => {
     if (!targetTopicId || targetTopicId !== topicId.value) return
     const topic = topics.value.find((item) => item.topic_id === targetTopicId)
-    const taskId = String(topic?.current_task_id || '').trim()
-    if (!taskId || !isTopicTaskActive(topic) || activeTaskId.value === taskId) return
 
-    const assistant = findAssistantForTask(taskId) || appendAssistantMessage(taskId)
+    // Prefer the per-message run signal (authoritative, always freshly loaded).
+    let assistant = findResumableAssistant()
+    let taskId = String(assistant?.task_id || '').trim()
+
+    // Fall back to the topic-list row only when the freshly loaded history does
+    // not contradict it: a terminal assistant message already on file for that
+    // task means the row is stale (the run finished but the mirrored status
+    // lagged), so trust the message and never re-stream a completed task.
+    if (!taskId) {
+      const rowTaskId = String(topic?.current_task_id || '').trim()
+      const persisted = rowTaskId ? findAssistantForTask(rowTaskId) : null
+      if (rowTaskId && isTopicTaskActive(topic) && (!persisted || isResumableAssistant(persisted))) {
+        taskId = rowTaskId
+        assistant = persisted || appendAssistantMessage(rowTaskId)
+      }
+    }
+
+    if (!taskId || activeTaskId.value === taskId) return
+
     assistant.task_id = taskId
     assistant.status = 'running'
     if (assistant._v2state && assistant._v2state.status !== 'error') {

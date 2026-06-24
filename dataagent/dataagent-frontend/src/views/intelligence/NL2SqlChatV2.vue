@@ -248,6 +248,15 @@
                     </template>
                   </template>
 
+                  <!-- Trailing activity cue: keeps a loading indicator visible
+                       at the bottom for the whole run once content has started
+                       rendering, so the user always sees that work continues
+                       between turns / tool calls (the pre-content case uses the
+                       top indicator above). -->
+                  <div v-if="showTrailingActivity(msg)" class="v2-typing-indicator v2-typing-indicator-trailing">
+                    <span /><span /><span />
+                  </div>
+
                   <!-- Error from stream -->
                   <div v-if="msg._v2state.status === 'error'" class="v2-error-card">
                     <span class="v2-error-label">错误</span>
@@ -1042,6 +1051,36 @@ function showTypingIndicator(msg) {
   // whose backend task id has not been assigned yet (task_id still '').
   const taskId = String(msg?.task_id || '')
   return taskId ? taskId === activeTaskId.value : true
+}
+
+// A block conveys its own live progress: streaming text/thinking shows the
+// blinking cursor (or the "深度思考" badge dot) and a running tool_use shows its
+// own pending state. While one of those is the tail block, trailing dots would
+// duplicate that cue.
+function isBlockActivelyProgressing(block) {
+  if (!block) return false
+  if (block.type === 'text' || block.type === 'thinking') return block.status === 'streaming'
+  if (block.type === 'tool_use') return block.output == null
+  return false
+}
+
+// Keep a loading cue at the bottom of the reply for the whole run, not just
+// before the first block: show trailing dots whenever the active run has already
+// rendered content but its tail block is not itself streaming (between turns,
+// before a new turn's first block, after a tool/text block settled). The
+// pre-content case is covered by showTypingIndicator; a pending permission /
+// question card means the run is parked on the user, so suppress.
+function showTrailingActivity(msg) {
+  if (!isStreaming.value) return false
+  if (String(msg?.task_id || '') !== activeTaskId.value || !activeTaskId.value) return false
+  if (!hasRenderedBlocks(msg)) return false
+  const state = msg?._v2state
+  if (!state || state.status === 'done' || state.status === 'error') return false
+  const lastTurn = state.turns?.[state.turns.length - 1]
+  const lastBlock = lastTurn?.blocks?.[lastTurn.blocks.length - 1]
+  if (lastBlock?.type === 'permission_request' && lastBlock.decision === 'pending') return false
+  if (lastBlock?.type === 'question_request' && !lastBlock.answered) return false
+  return !isBlockActivelyProgressing(lastBlock)
 }
 
 // ── Suggestions ───────────────────────────────────────────────────────────
@@ -2438,6 +2477,10 @@ onBeforeUnmount(() => {
 
 .v2-typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
 .v2-typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+/* Trailing variant sits below already-rendered content; a touch of top spacing
+   separates it from the preceding block. */
+.v2-typing-indicator-trailing { padding-top: 4px; }
 
 @keyframes v2-typing {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.35; }
