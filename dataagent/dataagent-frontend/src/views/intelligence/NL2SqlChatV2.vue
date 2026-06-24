@@ -480,6 +480,15 @@
         <div class="v2-artifact-preview-head">
           <button type="button" class="v2-artifact-back" @click="closeArtifactPreview">← 返回</button>
           <span class="v2-artifact-preview-name" :title="previewArtifact.name">{{ previewArtifact.name }}</span>
+          <button
+            v-if="canExpandPreview"
+            type="button"
+            class="v2-artifact-expand"
+            title="放大预览"
+            @click="openExpandedPreview"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
+          </button>
           <a class="v2-artifact-dl-link" :href="artifactDownloadUrl(previewArtifact)" download>下载</a>
         </div>
         <div class="v2-artifact-preview-body">
@@ -539,6 +548,45 @@
         </div>
       </el-scrollbar>
     </aside>
+
+    <!-- Enlarged preview: pops the artifact out of the narrow side panel so
+         HTML reports get full desktop width. -->
+    <Teleport to="body">
+      <div
+        v-if="previewExpanded && previewArtifact"
+        class="v2-artifact-modal"
+        @click.self="closeExpandedPreview"
+      >
+        <div class="v2-artifact-modal-card">
+          <div class="v2-artifact-modal-head">
+            <span class="v2-artifact-modal-name" :title="previewArtifact.name">{{ previewArtifact.name }}</span>
+            <span class="v2-artifact-modal-actions">
+              <a class="v2-artifact-dl-link" :href="artifactDownloadUrl(previewArtifact)" download>下载</a>
+              <button type="button" class="v2-artifact-modal-close" title="关闭" @click="closeExpandedPreview">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
+              </button>
+            </span>
+          </div>
+          <div class="v2-artifact-modal-body">
+            <div v-if="previewError" class="v2-artifact-empty">{{ previewError }}</div>
+            <iframe
+              v-else-if="isHtmlArtifact(previewArtifact)"
+              class="v2-artifact-modal-frame"
+              sandbox=""
+              referrerpolicy="no-referrer"
+              :srcdoc="previewText"
+            ></iframe>
+            <img
+              v-else-if="isImageArtifact(previewArtifact)"
+              class="v2-artifact-modal-img"
+              :src="artifactInlineUrl(previewArtifact)"
+              :alt="previewArtifact.name"
+            />
+            <pre v-else-if="isTextArtifact(previewArtifact)" class="v2-artifact-modal-text">{{ previewText }}</pre>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1332,6 +1380,7 @@ const artifactsLoading = ref(false)
 const previewArtifact = ref(null)
 const previewText = ref('')
 const previewError = ref('')
+const previewExpanded = ref(false)
 
 function readArtifactsPref() {
   try { return localStorage.getItem(ARTIFACTS_PREF_KEY) === '1' } catch (_e) { return false }
@@ -1421,8 +1470,14 @@ function isImageArtifact(file) {
 function isTextArtifact(file) {
   return /^text\/|application\/json|csv/.test(file?.content_type || '') || /\.(txt|csv|json|md|log|yaml|yml)$/i.test(file?.name || '')
 }
+// Only offer the enlarge action for types we actually render inline.
+const canExpandPreview = computed(() => {
+  const f = previewArtifact.value
+  return !!f && !previewError.value && (isHtmlArtifact(f) || isImageArtifact(f) || isTextArtifact(f))
+})
 
 async function openArtifact(file) {
+  previewExpanded.value = false
   previewArtifact.value = file
   previewText.value = ''
   previewError.value = ''
@@ -1435,9 +1490,17 @@ async function openArtifact(file) {
   }
 }
 function closeArtifactPreview() {
+  previewExpanded.value = false
   previewArtifact.value = null
   previewText.value = ''
   previewError.value = ''
+}
+function openExpandedPreview() {
+  if (!canExpandPreview.value) return
+  previewExpanded.value = true
+}
+function closeExpandedPreview() {
+  previewExpanded.value = false
 }
 
 function formatBytes(size) {
@@ -1619,6 +1682,48 @@ onBeforeUnmount(() => {
 .v2-artifact-img { max-width: 100%; display: block; margin: 0 auto; }
 .v2-artifact-text {
   margin: 0; padding: 12px 14px; font-size: 12px; line-height: 1.6;
+  white-space: pre-wrap; word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.v2-artifact-expand {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border: none; border-radius: 7px;
+  background: transparent; color: #6B7280; cursor: pointer;
+}
+.v2-artifact-expand:hover { background: #EEF1F5; color: #4F46E5; }
+
+/* ── Enlarged artifact preview (modal) ───────────────────────────────────── */
+.v2-artifact-modal {
+  position: fixed; inset: 0; z-index: 3000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: rgba(15, 23, 42, 0.45);
+}
+.v2-artifact-modal-card {
+  display: flex; flex-direction: column;
+  width: min(1200px, 92vw); height: min(88vh, 100%);
+  background: #fff; border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
+}
+.v2-artifact-modal-head {
+  flex: none; display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid #EDF0F4;
+}
+.v2-artifact-modal-name {
+  flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: #1F2937;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.v2-artifact-modal-actions { display: flex; align-items: center; gap: 12px; }
+.v2-artifact-modal-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: none; border-radius: 8px;
+  background: #F2F4F7; color: #6B7280; cursor: pointer;
+}
+.v2-artifact-modal-close:hover { background: #E6EAF0; color: #111827; }
+.v2-artifact-modal-body { flex: 1; min-height: 0; overflow: auto; background: #fff; }
+.v2-artifact-modal-frame { width: 100%; height: 100%; border: none; background: #fff; }
+.v2-artifact-modal-img { display: block; max-width: 100%; margin: 0 auto; }
+.v2-artifact-modal-text {
+  margin: 0; padding: 16px 18px; font-size: 13px; line-height: 1.6;
   white-space: pre-wrap; word-break: break-word;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
