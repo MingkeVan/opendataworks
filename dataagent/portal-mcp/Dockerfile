@@ -19,4 +19,4 @@ EXPOSE 8801
 # connection during model "thinking" gaps between tool calls and surfaces as
 # `MCP server "portal" session expired` deeper into a conversation. Raise it well
 # above the interactive agent run timeout (360s); env-configurable for tuning.
-CMD ["sh", "-c", "uvicorn portal_mcp.app:app --host 0.0.0.0 --port 8801 --timeout-keep-alive ${PORTAL_MCP_KEEPALIVE_TIMEOUT_SECONDS:-600}"]
+CMD ["sh", "-c", "exec uvicorn portal_mcp.app:app --host 0.0.0.0 --port 8801 --timeout-keep-alive ${PORTAL_MCP_KEEPALIVE_TIMEOUT_SECONDS:-600}"]
