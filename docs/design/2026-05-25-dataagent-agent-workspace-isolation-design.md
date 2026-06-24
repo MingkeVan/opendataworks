@@ -66,6 +66,8 @@ For each task:
 
 Enabled Skill roots are allowed because the workspace exposes them through symlinks under `.claude/skills`; the hook still resolves symlinks and only allows roots for Skills enabled for the current profile.
 
+The hook also makes one narrow, read-only exception for offloaded tool results. When a tool result exceeds the inline size limit, Claude Code writes the full result to `<config_dir>/projects/<encoded_cwd>/<session_id>/tool-results/<tool_use_id>.{txt,json}` (where `config_dir` is `$CLAUDE_CONFIG_DIR` or `$HOME/.claude`, and `encoded_cwd` is `realpath(cwd)` with every non-alphanumeric char replaced by `-`) and instructs the agent to `Read` that path; without an allowance the follow-up read is denied as "outside workspace". Rather than add the per-project data dir as a general allowed root (which would also expose session `.jsonl` transcripts, `subagents/` logs, and meta files to `Read`/`LS`/`Glob`/`Grep`), the hook allows only a `Read` whose resolved path matches exactly `<config_dir>/projects/<encoded_cwd>/<session>/tool-results/<file>.{txt,json}`. The project root and its session-state files stay outside the boundary, `LS`/`Glob`/`Grep`/`Bash` get no exception, and the encoded-cwd scoping keeps it to this run only — never another topic's data or shared credentials, even when `HOME` is shared across topics in the default in-process mode.
+
 ## Interfaces
 
 No public API shape changes are required.

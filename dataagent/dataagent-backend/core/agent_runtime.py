@@ -50,6 +50,9 @@ _FILE_BOUNDARY_PATH_KEYS = {
 }
 _BASH_PARENT_SEGMENT_RE = re.compile(r"(^|[\s;&|()])\.\.(?=$|[/\s;&|()])")
 _URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+# Claude Code offloads oversized tool results as either a ".txt" (string result)
+# or ".json" (structured result) file under the per-project tool-results dir.
+_OFFLOADED_TOOL_RESULT_SUFFIXES = frozenset({".txt", ".json"})
 
 
 def _build_prompt(history: list[dict[str, str]], question: str) -> str:
@@ -106,6 +109,57 @@ def _path_is_under(path: Path, root: Path) -> bool:
 
 def _path_is_allowed(path: Path, allowed_roots: list[Path]) -> bool:
     return any(_path_is_under(path, root) for root in allowed_roots)
+
+
+def _resolve_claude_project_data_dir(workspace: Path, runtime_env: dict[str, str] | None) -> Path | None:
+    """Per-project Claude data dir for the current run.
+
+    Mirrors the Claude Code CLI layout ``<config_dir>/projects/<encoded_cwd>``,
+    where ``config_dir`` is ``$CLAUDE_CONFIG_DIR`` or ``$HOME/.claude`` and
+    ``encoded_cwd`` is ``realpath(cwd)`` with every non-alphanumeric char replaced
+    by ``-``. This dir holds session ``.jsonl`` transcripts, ``subagents/`` logs,
+    and offloaded (too-large) tool results. It is intentionally *not* added to the
+    workspace allow-list: only the offloaded tool-result files under it are
+    readable (see ``_is_offloaded_tool_result_read``); transcripts and other
+    session state stay outside the boundary.
+    """
+    env = runtime_env or {}
+    config_dir = str(env.get("CLAUDE_CONFIG_DIR") or "").strip()
+    if config_dir:
+        base = Path(config_dir).expanduser()
+    else:
+        home = str(env.get("HOME") or "").strip()
+        if not home:
+            return None
+        base = Path(home).expanduser() / ".claude"
+    encoded_cwd = re.sub(r"[^a-zA-Z0-9]", "-", str(workspace))
+    return (base / "projects" / encoded_cwd).resolve(strict=False)
+
+
+def _is_offloaded_tool_result_read(candidate: Path, tool_result_root: Path | None) -> bool:
+    """True when ``candidate`` is exactly an offloaded tool-result file the CLI
+    asked the agent to ``Read``.
+
+    The CLI offloads oversized tool results to
+    ``<project_data_dir>/<session_id>/tool-results/<tool_use_id>.{txt,json}`` and
+    rewrites the inline result with a "Use Read to view" pointer. Only that exact
+    shape is allowed: a ``.txt``/``.json`` file whose parent dir is
+    ``tool-results`` directly under a single session segment. Session ``.jsonl``
+    transcripts, ``subagents/`` logs, meta files, and the project root itself stay
+    denied so the agent cannot browse cross-run session state.
+    """
+    if tool_result_root is None:
+        return False
+    try:
+        rel = candidate.relative_to(tool_result_root)
+    except ValueError:
+        return False
+    parts = rel.parts
+    return (
+        len(parts) == 3
+        and parts[1] == "tool-results"
+        and candidate.suffix.lower() in _OFFLOADED_TOOL_RESULT_SUFFIXES
+    )
 
 
 def _build_workspace_allowed_roots(project_cwd: str | Path, skill_runtime: dict[str, Any] | None) -> list[Path]:
@@ -202,12 +256,24 @@ def _validate_workspace_tool_boundary(
             return _validate_bash_workspace_boundary(command, allowed_roots, runtime_env)
         return None
 
+    # The only path outside the workspace the agent may touch is an offloaded
+    # tool-result file, and only via Read. Resolve the per-project tool-result
+    # root for Read so the surrounding session transcripts stay denied; other
+    # tools never get this exception.
+    tool_result_root = (
+        _resolve_claude_project_data_dir(workspace, runtime_env)
+        if normalized_tool == "Read"
+        else None
+    )
     for key, value in _iter_tool_path_inputs(normalized_tool, input_payload):
         if _path_has_parent_segment(value):
             return f"{normalized_tool} {key} uses a parent directory segment; stay inside the current agent workspace."
         candidate = _resolve_workspace_candidate(value, workspace)
-        if not _path_is_allowed(candidate, allowed_roots):
-            return f"{normalized_tool} {key} is outside workspace or enabled Skill roots: {value}"
+        if _path_is_allowed(candidate, allowed_roots):
+            continue
+        if _is_offloaded_tool_result_read(candidate, tool_result_root):
+            continue
+        return f"{normalized_tool} {key} is outside workspace or enabled Skill roots: {value}"
     return None
 
 
