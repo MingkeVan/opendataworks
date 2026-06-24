@@ -366,30 +366,69 @@ def _encode_claude_project_key(workspace: Path) -> str:
     return re.sub(r"[^a-zA-Z0-9]", "-", str(workspace.resolve()))
 
 
-def test_workspace_boundary_allows_offloaded_tool_result_under_home(tmp_path: Path):
+def _claude_project_dir(home: Path, workspace: Path) -> Path:
+    return home / ".claude" / "projects" / _encode_claude_project_key(workspace)
+
+
+def test_workspace_boundary_allows_offloaded_tool_result_read(tmp_path: Path):
     home = tmp_path / "home"
     workspace = tmp_path / "runtime" / "topic_1" / "workspace"
     workspace.mkdir(parents=True)
     runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable, "HOME": str(home)}
-    allowed_roots = agent_runtime._build_workspace_allowed_roots(
-        workspace, {"enabled_roots": {}}, runtime_env
-    )
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
 
     # Oversized tool results are offloaded to
-    # <HOME>/.claude/projects/<encoded-cwd>/<session>/tool-results/<id>.txt and the
-    # agent is told to Read that path; the boundary must allow it.
-    encoded = _encode_claude_project_key(workspace)
-    persisted = (
-        home / ".claude" / "projects" / encoded / "session-abc" / "tool-results" / "toolu_01.txt"
-    )
+    # <HOME>/.claude/projects/<encoded-cwd>/<session>/tool-results/<id>.{txt,json}
+    # and the agent is told to Read that path; only that read is allowed.
+    tool_results = _claude_project_dir(home, workspace) / "session-abc" / "tool-results"
+    for name in ("toolu_01.txt", "toolu_02.json"):
+        assert agent_runtime._validate_workspace_tool_boundary(
+            "Read",
+            {"file_path": str(tool_results / name)},
+            workspace,
+            allowed_roots,
+            runtime_env,
+        ) is None
 
-    assert agent_runtime._validate_workspace_tool_boundary(
-        "Read",
-        {"file_path": str(persisted)},
-        workspace,
-        allowed_roots,
-        runtime_env,
-    ) is None
+
+def test_workspace_boundary_denies_session_state_and_non_read_tools(tmp_path: Path):
+    home = tmp_path / "home"
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable, "HOME": str(home)}
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
+
+    project_dir = _claude_project_dir(home, workspace)
+    session_dir = project_dir / "session-abc"
+    tool_results = session_dir / "tool-results"
+
+    # Read must NOT reach the surrounding per-project session state, only the
+    # offloaded tool-result files themselves.
+    denied_reads = [
+        project_dir / "session-abc.jsonl",           # top-level transcript
+        session_dir / "subagents" / "agent-1.jsonl",  # subagent transcript
+        session_dir / "session.meta.json",            # session meta
+        tool_results / "toolu_03.jsonl",               # right dir, wrong suffix
+        tool_results,                                  # the dir itself, not a file
+    ]
+    for target in denied_reads:
+        denial = agent_runtime._validate_workspace_tool_boundary(
+            "Read", {"file_path": str(target)}, workspace, allowed_roots, runtime_env
+        )
+        assert denial is not None, f"expected Read denial for {target}"
+        assert "outside workspace" in denial
+
+    # The exception is Read-only; LS/Glob/Grep into the tool-results dir stay denied.
+    for tool_name, payload in (
+        ("LS", {"path": str(tool_results)}),
+        ("Glob", {"path": str(tool_results), "pattern": "*.txt"}),
+        ("Grep", {"path": str(tool_results)}),
+    ):
+        denial = agent_runtime._validate_workspace_tool_boundary(
+            tool_name, payload, workspace, allowed_roots, runtime_env
+        )
+        assert denial is not None, f"expected {tool_name} denial"
+        assert "outside workspace" in denial
 
 
 def test_workspace_boundary_denies_other_topic_and_credentials_under_home(tmp_path: Path):
@@ -397,21 +436,13 @@ def test_workspace_boundary_denies_other_topic_and_credentials_under_home(tmp_pa
     workspace = tmp_path / "runtime" / "topic_1" / "workspace"
     workspace.mkdir(parents=True)
     runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable, "HOME": str(home)}
-    allowed_roots = agent_runtime._build_workspace_allowed_roots(
-        workspace, {"enabled_roots": {}}, runtime_env
-    )
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
 
     # The offloaded-result allowance is scoped to this workspace's encoded cwd, so
-    # a sibling topic's data dir and shared credentials stay blocked.
+    # a sibling topic's tool results and shared credentials stay blocked.
     other_workspace = tmp_path / "runtime" / "topic_2" / "workspace"
     other_topic_file = (
-        home
-        / ".claude"
-        / "projects"
-        / _encode_claude_project_key(other_workspace)
-        / "session-x"
-        / "tool-results"
-        / "toolu_02.txt"
+        _claude_project_dir(home, other_workspace) / "session-x" / "tool-results" / "toolu_02.txt"
     )
     credentials = home / ".claude" / ".credentials.json"
 
@@ -437,9 +468,7 @@ def test_workspace_boundary_honors_claude_config_dir_for_tool_results(tmp_path: 
         "HOME": str(home),
         "CLAUDE_CONFIG_DIR": str(config_dir),
     }
-    allowed_roots = agent_runtime._build_workspace_allowed_roots(
-        workspace, {"enabled_roots": {}}, runtime_env
-    )
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
 
     encoded = _encode_claude_project_key(workspace)
     persisted = config_dir / "projects" / encoded / "s1" / "tool-results" / "toolu_03.json"
