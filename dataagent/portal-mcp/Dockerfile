@@ -15,4 +15,8 @@ COPY dataagent/portal-mcp /app/portal-mcp
 
 EXPOSE 8801
 
-CMD ["uvicorn", "portal_mcp.app:app", "--host", "0.0.0.0", "--port", "8801"]
+# uvicorn's default --timeout-keep-alive is 5s, which closes the MCP client's idle
+# connection during model "thinking" gaps between tool calls and surfaces as
+# `MCP server "portal" session expired` deeper into a conversation. Raise it well
+# above the interactive agent run timeout (360s); env-configurable for tuning.
+CMD ["sh", "-c", "uvicorn portal_mcp.app:app --host 0.0.0.0 --port 8801 --timeout-keep-alive ${PORTAL_MCP_KEEPALIVE_TIMEOUT_SECONDS:-600}"]
