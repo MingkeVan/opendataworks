@@ -200,7 +200,7 @@ const buildPieOption = (spec) => {
     backgroundColor: 'transparent',
     color: spec.colors.length ? spec.colors : DEFAULT_CHART_COLORS,
     title: hasTitle
-      ? { text: spec.title, left: 'center', top: 8, textStyle: { fontSize: 14, fontWeight: 600, color: '#162131' } }
+      ? { text: spec.title, left: 'center', top: 8, textStyle: { fontSize: 13, fontWeight: 600, color: '#162131' } }
       : undefined,
     tooltip: {
       trigger: 'item',
@@ -213,12 +213,11 @@ const buildPieOption = (spec) => {
         // The centered title (top) and the bottom legend each need a clear band.
         // Unlike axis/funnel charts (which reserve top room via grid/top), a pie
         // only has center+radius, so when a title is present we nudge the pie
-        // down and shrink it; otherwise the slices and their outside labels
-        // overlap the title in short fixed-height containers (e.g. the embedded
-        // widget canvas). Shorter leader lines keep outside labels from poking
-        // back up into the title band.
-        radius: hasTitle ? (spec.donut ? ['38%', '56%'] : '54%') : (spec.donut ? ['44%', '70%'] : '68%'),
-        center: hasTitle ? ['50%', '54%'] : ['50%', '52%'],
+        // down so its slices and outside labels clear the title in short
+        // fixed-height containers (e.g. the embedded widget canvas). Shorter
+        // leader lines keep outside labels from poking back up into the title.
+        radius: hasTitle ? (spec.donut ? ['40%', '62%'] : '60%') : (spec.donut ? ['44%', '70%'] : '68%'),
+        center: hasTitle ? ['50%', '55%'] : ['50%', '52%'],
         avoidLabelOverlap: true,
         label: { color: '#425466' },
         labelLine: { length: 12, length2: 8 },
@@ -238,7 +237,7 @@ const buildTitleOption = (spec) => (spec.title
       subtext: spec.description || '',
       left: 'left',
       top: 6,
-      textStyle: { fontSize: 14, fontWeight: 600, color: '#162131' },
+      textStyle: { fontSize: 13, fontWeight: 600, color: '#162131' },
       subtextStyle: { color: '#607185', fontSize: 12 }
     }
   : undefined)
@@ -247,7 +246,7 @@ const valueAxisOption = (name) => ({
   type: 'value',
   name: name || '',
   scale: true,
-  axisLabel: { color: '#607185' },
+  axisLabel: { color: '#607185', fontSize: 11 },
   splitLine: { lineStyle: { color: '#eef3f8' } }
 })
 
@@ -256,12 +255,18 @@ const buildAxisOption = (spec) => {
   const isCombo = spec.chart_type === 'combo'
   const isArea = spec.chart_type === 'area'
   const horizontal = spec.chart_type === 'bar' && spec.orientation === 'horizontal'
+  const isBarLike = spec.chart_type === 'bar' || isCombo
   const categoryAxis = {
     type: 'category',
     data: spec.dataset.map((row) => row[spec.x_field]),
     axisLabel: {
       color: '#607185',
-      rotate: (spec.chart_type === 'bar' || isCombo) && !horizontal && spec.dataset.length > 8 ? 25 : 0
+      fontSize: 11,
+      // Bar/combo are categorical: show every label (interval 0) and rotate once
+      // they get crowded so none are silently dropped in the narrow widget panel.
+      // Time-series line/area keep auto thinning so dense x axes stay readable.
+      interval: isBarLike ? 0 : 'auto',
+      rotate: isBarLike && !horizontal && spec.dataset.length > 6 ? 30 : 0
     },
     axisLine: { lineStyle: { color: '#d7e4ef' } }
   }
@@ -281,7 +286,7 @@ const buildAxisOption = (spec) => {
       valueFormatter: spec.unit ? (value) => `${value}${spec.unit}` : undefined
     },
     legend: { top: 8, right: 0, textStyle: { color: '#607185' } },
-    grid: { left: 24, right: 16, top: spec.title ? 68 : 32, bottom: 40, containLabel: true },
+    grid: { left: 24, right: 16, top: spec.title ? 56 : 28, bottom: 40, containLabel: true },
     xAxis: horizontal ? valueAxis : categoryAxis,
     yAxis,
     series: spec.series.map((series) => {
@@ -314,7 +319,7 @@ const buildScatterOption = (spec) => ({
     valueFormatter: spec.unit ? (value) => `${value}${spec.unit}` : undefined
   },
   legend: { top: 8, right: 0, textStyle: { color: '#607185' } },
-  grid: { left: 24, right: 16, top: spec.title ? 68 : 32, bottom: 40, containLabel: true },
+  grid: { left: 24, right: 16, top: spec.title ? 56 : 28, bottom: 40, containLabel: true },
   xAxis: { ...valueAxisOption(spec.x_field), name: spec.x_field },
   yAxis: valueAxisOption(spec.unit),
   series: spec.series.map((series) => ({
@@ -378,7 +383,7 @@ const buildFunnelOption = (spec) => {
         type: 'funnel',
         left: '10%',
         right: '10%',
-        top: spec.title ? 68 : 24,
+        top: spec.title ? 56 : 24,
         bottom: 32,
         minSize: '20%',
         sort: 'descending',

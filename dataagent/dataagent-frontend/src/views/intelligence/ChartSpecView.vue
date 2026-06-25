@@ -358,8 +358,8 @@ onBeforeUnmount(() => {
 .chart-spec-canvas {
   display: block;
   box-sizing: border-box;
-  min-height: 340px;
-  height: 340px;
+  min-height: 360px;
+  height: 360px;
   width: 100%;
   max-width: 100%;
   min-width: 0;

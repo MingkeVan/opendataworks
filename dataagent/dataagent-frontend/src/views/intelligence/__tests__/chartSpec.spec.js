@@ -86,6 +86,52 @@ describe('chartSpec', () => {
     expect(series.labelLine.length).toBeLessThan(15)
   })
 
+  it('shows every bar category label (rotated when crowded) instead of dropping them', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'bar',
+      title: '各数据层表数量对比',
+      x_field: 'layer',
+      series: [{ name: '表数量', field: 'table_cnt', type: 'bar' }],
+      dataset: [
+        { layer: 'ODS原始层', table_cnt: 128 },
+        { layer: 'DWD明细层', table_cnt: 86 },
+        { layer: 'DWS汇总层', table_cnt: 42 },
+        { layer: 'ADS应用层', table_cnt: 27 },
+        { layer: 'DIM维度层', table_cnt: 19 },
+        { layer: 'TMP临时层', table_cnt: 12 },
+        { layer: 'BAK备份层', table_cnt: 8 }
+      ],
+      error: null
+    })
+
+    const { axisLabel } = renderModel.option.xAxis
+    // interval:0 forces all categories to render; rotation keeps them from
+    // colliding in the narrow widget panel (the previous default silently
+    // dropped every other label).
+    expect(axisLabel.interval).toBe(0)
+    expect(axisLabel.rotate).toBeGreaterThan(0)
+    expect(axisLabel.fontSize).toBeLessThanOrEqual(11)
+  })
+
+  it('keeps line/area x axes on auto label thinning so dense time series stay readable', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'line',
+      title: '最近30天工作流发布趋势',
+      x_field: 'stat_day',
+      series: [{ name: '发布次数', field: 'publish_cnt', type: 'line' }],
+      dataset: Array.from({ length: 30 }, (_, i) => ({ stat_day: `2026-03-${i + 1}`, publish_cnt: i })),
+      error: null
+    })
+
+    // Forcing interval:0 here would cram 30 date labels; line charts keep auto.
+    expect(renderModel.option.xAxis.axisLabel.interval).toBe('auto')
+    expect(renderModel.option.xAxis.axisLabel.rotate).toBe(0)
+  })
+
   it('builds table render models only when columns are explicit', () => {
     const renderModel = buildChartRenderModel({
       kind: 'chart_spec',
