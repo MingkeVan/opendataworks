@@ -195,10 +195,11 @@ const toNumeric = (value) => {
 
 const buildPieOption = (spec) => {
   const primarySeries = spec.series[0]
+  const hasTitle = Boolean(spec.title)
   return {
     backgroundColor: 'transparent',
     color: spec.colors.length ? spec.colors : DEFAULT_CHART_COLORS,
-    title: spec.title
+    title: hasTitle
       ? { text: spec.title, left: 'center', top: 8, textStyle: { fontSize: 14, fontWeight: 600, color: '#162131' } }
       : undefined,
     tooltip: {
@@ -209,9 +210,18 @@ const buildPieOption = (spec) => {
     series: [
       {
         type: 'pie',
-        radius: spec.donut ? ['44%', '70%'] : '68%',
-        center: ['50%', '52%'],
+        // The centered title (top) and the bottom legend each need a clear band.
+        // Unlike axis/funnel charts (which reserve top room via grid/top), a pie
+        // only has center+radius, so when a title is present we nudge the pie
+        // down and shrink it; otherwise the slices and their outside labels
+        // overlap the title in short fixed-height containers (e.g. the embedded
+        // widget canvas). Shorter leader lines keep outside labels from poking
+        // back up into the title band.
+        radius: hasTitle ? (spec.donut ? ['38%', '56%'] : '54%') : (spec.donut ? ['44%', '70%'] : '68%'),
+        center: hasTitle ? ['50%', '54%'] : ['50%', '52%'],
+        avoidLabelOverlap: true,
         label: { color: '#425466' },
+        labelLine: { length: 12, length2: 8 },
         itemStyle: { borderColor: '#ffffff', borderWidth: 2 },
         data: spec.dataset.map((row) => ({
           name: String(row[spec.x_field] ?? ''),

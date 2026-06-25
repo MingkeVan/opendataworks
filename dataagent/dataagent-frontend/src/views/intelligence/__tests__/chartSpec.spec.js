@@ -59,6 +59,33 @@ describe('chartSpec', () => {
     expect(renderModel.errorText).toContain('pie 类型必须且只能提供一个 series')
   })
 
+  it('reserves headroom for the pie title so it does not overlap the slices in short containers', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'pie',
+      title: '各工作流发布操作类型占比',
+      x_field: 'operation',
+      series: [{ name: '发布次数', field: 'publish_cnt', type: 'pie' }],
+      dataset: [
+        { operation: 'deploy', publish_cnt: 33 },
+        { operation: 'online', publish_cnt: 9 }
+      ],
+      error: null
+    })
+
+    expect(renderModel.state).toBe('renderable')
+    const [series] = renderModel.option.series
+    expect(series.type).toBe('pie')
+    // Title-aware layout: the pie sits lower and is smaller than an untitled pie
+    // (center 52% / radius 68%) so the centered title and bottom legend stay
+    // clear of the slices, and the leader lines are shortened so outside labels
+    // do not poke back into the title band.
+    expect(parseFloat(series.center[1])).toBeGreaterThan(52)
+    expect(parseFloat(series.radius)).toBeLessThan(68)
+    expect(series.labelLine.length).toBeLessThan(15)
+  })
+
   it('builds table render models only when columns are explicit', () => {
     const renderModel = buildChartRenderModel({
       kind: 'chart_spec',
