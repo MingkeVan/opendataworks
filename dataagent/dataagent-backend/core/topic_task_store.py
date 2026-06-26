@@ -1386,6 +1386,32 @@ class TopicTaskStore:
             conn.close()
         return [self._normalize_task_row(row) for row in rows]
 
+    def list_parked_tasks(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        self._ensure_ready()
+        conn = self._connect(database=self._schema_name())
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT task_id, topic_id, from_task_id, source_queue_id, source_schedule_id, source_schedule_log_id,
+                           task_status, prompt, provider_id, model_name,
+                           agent_id, agent_snapshot_json,
+                           database_hint, debug_enabled, timeout_seconds, sql_read_timeout_seconds,
+                           sql_write_timeout_seconds, last_event_seq, cancel_requested_at, started_at,
+                           heartbeat_at, finished_at, error_json, created_at, updated_at
+                    FROM da_agent_task
+                    WHERE task_status IN ('waiting_permission', 'waiting_input')
+                      AND finished_at IS NULL
+                    ORDER BY updated_at ASC
+                    LIMIT %s
+                    """,
+                    (max(1, limit),),
+                )
+                rows = cur.fetchall() or []
+        finally:
+            conn.close()
+        return [self._normalize_task_row(row) for row in rows]
+
     def has_active_child_task(self, parent_task_id: str) -> bool:
         self._ensure_ready()
         conn = self._connect(database=self._schema_name())
@@ -1572,6 +1598,37 @@ class TopicTaskStore:
         )
         return True
 
+    def get_current_permission_interaction(self, *, task_id: str, request_id: str) -> dict[str, Any] | None:
+        return self._get_interaction(task_id=task_id, request_id=request_id, kind="permission")
+
+    def get_resolved_permission_decision(self, *, task_id: str, request_id: str) -> str | None:
+        interaction = self.get_current_permission_interaction(task_id=task_id, request_id=request_id)
+        if not interaction or str(interaction.get("status") or "") != "resolved":
+            return None
+        return str(interaction.get("decision") or "") or None
+
+    def append_permission_decision_if_waiting(
+        self,
+        *,
+        task_id: str,
+        request_id: str,
+        decision: str,
+        note: str = "",
+        decided_at: str = "",
+    ) -> str:
+        return self._append_interaction_if_waiting(
+            task_id=task_id,
+            request_id=request_id,
+            kind="permission",
+            waiting_status="waiting_permission",
+            payload={
+                "request_id": str(request_id),
+                "decision": normalize_permission_decision(decision),
+                "note": str(note or ""),
+                "decided_at": decided_at or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            },
+        )
+
     def get_pending_question_request_id(self, task_id: str) -> str | None:
         """Return the request_id of the latest ``question_request`` record for a
         task that has no corresponding ``question_answer`` yet, or None."""
@@ -1642,6 +1699,234 @@ class TopicTaskStore:
             },
         )
         return True
+
+    def get_current_question_interaction(self, *, task_id: str, request_id: str) -> dict[str, Any] | None:
+        return self._get_interaction(task_id=task_id, request_id=request_id, kind="question")
+
+    def get_resolved_question_answer(self, *, task_id: str, request_id: str) -> list[dict[str, Any]] | None:
+        interaction = self.get_current_question_interaction(task_id=task_id, request_id=request_id)
+        if not interaction or str(interaction.get("status") or "") != "resolved":
+            return None
+        answers = interaction.get("answers")
+        return answers if isinstance(answers, list) else []
+
+    def append_question_answer_if_waiting(
+        self,
+        *,
+        task_id: str,
+        request_id: str,
+        answers: Any,
+        answered_at: str = "",
+    ) -> str:
+        return self._append_interaction_if_waiting(
+            task_id=task_id,
+            request_id=request_id,
+            kind="question",
+            waiting_status="waiting_input",
+            payload={
+                "request_id": str(request_id),
+                "answers": answers if isinstance(answers, list) else [],
+                "answered_at": answered_at or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            },
+        )
+
+    def has_resolved_waiting_interaction(self, task_id: str) -> bool:
+        self._ensure_ready()
+        conn = self._connect(database=self._schema_name())
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT record_type
+                    FROM da_agent_sdk_record
+                    WHERE task_id = %s
+                      AND record_type IN ('permission_decision', 'question_answer')
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (task_id,),
+                )
+                row = cur.fetchone()
+        finally:
+            conn.close()
+        return bool(row)
+
+    def _get_interaction(self, *, task_id: str, request_id: str, kind: str) -> dict[str, Any] | None:
+        request_id = str(request_id or "").strip()
+        if not request_id:
+            return None
+        if kind == "permission":
+            request_type = "permission_request"
+            resolved_type = "permission_decision"
+        else:
+            request_type = "question_request"
+            resolved_type = "question_answer"
+        rows = self._fetch_interaction_rows(task_id=task_id, record_types=(request_type, resolved_type))
+        return self._interaction_from_rows(rows, request_id=request_id, kind=kind)
+
+    def _append_interaction_if_waiting(
+        self,
+        *,
+        task_id: str,
+        request_id: str,
+        kind: str,
+        waiting_status: str,
+        payload: dict[str, Any],
+    ) -> str:
+        self._ensure_ready()
+        request_id = str(request_id or "").strip()
+        if not request_id:
+            return "not_found"
+        if kind == "permission":
+            request_type = "permission_request"
+            resolved_type = "permission_decision"
+        else:
+            request_type = "question_request"
+            resolved_type = "question_answer"
+        conn = self._connect(database=self._schema_name())
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT task_status, cancel_requested_at
+                    FROM da_agent_task
+                    WHERE task_id = %s
+                    LIMIT 1
+                    FOR UPDATE
+                    """,
+                    (task_id,),
+                )
+                task_row = cur.fetchone()
+                if not task_row:
+                    conn.rollback()
+                    return "not_found"
+                if str(task_row.get("task_status") or "") != waiting_status or task_row.get("cancel_requested_at") is not None:
+                    conn.rollback()
+                    return "status_mismatch"
+                cur.execute(
+                    """
+                    SELECT id, topic_id, turn_index, record_type, data
+                    FROM da_agent_sdk_record
+                    WHERE task_id = %s
+                      AND record_type IN (%s, %s)
+                    ORDER BY id ASC
+                    LIMIT 500
+                    """,
+                    (task_id, request_type, resolved_type),
+                )
+                interaction = self._interaction_from_rows(cur.fetchall() or [], request_id=request_id, kind=kind)
+                if not interaction:
+                    conn.rollback()
+                    return "not_found"
+                if str(interaction.get("status") or "") == "resolved":
+                    conn.rollback()
+                    return "already_resolved"
+                cur.execute(
+                    """
+                    INSERT INTO da_agent_sdk_record (topic_id, task_id, turn_index, record_type, event_type, data)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        str(interaction.get("topic_id") or ""),
+                        task_id,
+                        int(interaction.get("turn_index") or 0),
+                        resolved_type,
+                        None,
+                        json.dumps(payload, ensure_ascii=False, default=_json_default),
+                    ),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return "appended"
+
+    def _fetch_interaction_rows(self, *, task_id: str, record_types: tuple[str, str]) -> list[dict[str, Any]]:
+        self._ensure_ready()
+        conn = self._connect(database=self._schema_name())
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, topic_id, turn_index, record_type, data
+                    FROM da_agent_sdk_record
+                    WHERE task_id = %s
+                      AND record_type IN (%s, %s)
+                    ORDER BY id ASC
+                    LIMIT 500
+                    """,
+                    (task_id, record_types[0], record_types[1]),
+                )
+                rows = cur.fetchall() or []
+        finally:
+            conn.close()
+        return list(rows)
+
+    def _interaction_from_rows(self, rows: list[dict[str, Any]], *, request_id: str, kind: str) -> dict[str, Any] | None:
+        request: dict[str, Any] | None = None
+        resolved: dict[str, Any] | None = None
+        if kind == "permission":
+            request_type = "permission_request"
+            resolved_type = "permission_decision"
+        else:
+            request_type = "question_request"
+            resolved_type = "question_answer"
+        for row in rows:
+            data = _safe_json_load(row.get("data")) or {}
+            if str(data.get("request_id") or "") != request_id:
+                continue
+            record_type = str(row.get("record_type") or "")
+            if record_type == request_type:
+                request = {
+                    "request_id": request_id,
+                    "topic_id": str(row.get("topic_id") or ""),
+                    "turn_index": int(row.get("turn_index") or 0),
+                    "status": "pending",
+                }
+                if kind == "permission":
+                    request.update(
+                        {
+                            "tool_name": str(data.get("tool_name") or ""),
+                            "risk_level": str(data.get("risk_level") or ""),
+                            "title": str(data.get("title") or ""),
+                            "summary": str(data.get("summary") or ""),
+                            "payload_preview": data.get("payload_preview"),
+                        }
+                    )
+                else:
+                    questions = data.get("questions")
+                    request["questions"] = questions if isinstance(questions, list) else []
+            elif record_type == resolved_type:
+                resolved = {
+                    "request_id": request_id,
+                    "topic_id": str(row.get("topic_id") or ""),
+                    "turn_index": int(row.get("turn_index") or 0),
+                    "status": "resolved",
+                }
+                if kind == "permission":
+                    resolved.update(
+                        {
+                            "decision": str(data.get("decision") or ""),
+                            "note": str(data.get("note") or ""),
+                            "decided_at": str(data.get("decided_at") or ""),
+                        }
+                    )
+                else:
+                    answers = data.get("answers")
+                    resolved.update(
+                        {
+                            "answers": answers if isinstance(answers, list) else [],
+                            "answered_at": str(data.get("answered_at") or ""),
+                        }
+                    )
+        if resolved:
+            if request:
+                resolved.setdefault("topic_id", request.get("topic_id"))
+                resolved.setdefault("turn_index", request.get("turn_index"))
+            return resolved
+        return request
 
     def heartbeat_task(self, task_id: str):
         self._ensure_ready()

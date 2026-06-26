@@ -9,17 +9,16 @@ returning ``PermissionResultAllow(updated_input={questions, answers, ...})``.
 This module owns the host side of that round-trip, mirroring the
 permission-confirmation flow (``permission_wait`` / ``permission_gate``): record
 a ``question_request`` block (rendered as a selection card), park the task in
-``waiting_input``, wait on Redis for the user's answer, then map the answer onto
-the SDK ``updated_input`` shape so the same run resumes with the selection.
+``waiting_input``, wait on MySQL for the user's answer, then map the answer
+onto the SDK ``updated_input`` shape so the same run resumes with the selection.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from typing import Any
 
-from config import get_settings
+from core.task_control import RunnerStoppedError, TaskCancelledError
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +28,6 @@ ASK_USER_QUESTION_TOOL_NAME = "AskUserQuestion"
 
 def is_ask_user_question_tool(tool_name: str) -> bool:
     return str(tool_name or "").strip() == ASK_USER_QUESTION_TOOL_NAME
-
-
-def ask_question_answer_redis_key(task_id: str, request_id: str) -> str:
-    """Redis key carrying the user's answer for a waiting ``AskUserQuestion``.
-
-    Single source of truth shared by the API answer endpoint (writer, via the
-    coordinator) and the ``can_use_tool`` wait (reader), mirroring the
-    permission-decision key pattern.
-    """
-    return f"da:task:answer:{task_id}:{request_id}"
 
 
 def to_sdk_answer_input(questions: list[dict[str, Any]], answers: list[dict[str, Any]]) -> dict[str, Any]:
@@ -87,68 +76,43 @@ async def wait_for_answer(
     task_id: str,
     request_id: str,
     *,
-    timeout_seconds: int,
     poll_interval_seconds: float = 1.0,
-    is_cancel_requested: Any = None,
+    cancel_reason: Any = None,
 ) -> list[dict[str, Any]] | None:
-    """Poll Redis for the user's answer; return the answers list or ``None``.
+    """Poll MySQL for the user's answer; return the answers list."""
+    from core.topic_task_store import get_topic_task_store
 
-    ``None`` means the wait ended without an answer (timeout or cancellation).
-    Self-connects to Redis from settings so it works in-process and in the
-    sandbox runner subprocess, exactly like :func:`permission_wait.wait_for_decision`.
-    """
-    cfg = get_settings()
-    key = ask_question_answer_redis_key(task_id, request_id)
-    try:
-        import redis.asyncio as redis
-
-        client = redis.Redis(
-            host=cfg.redis_host,
-            port=int(cfg.redis_port or 6379),
-            password=cfg.redis_password or None,
-            db=int(cfg.redis_db or 0),
-            decode_responses=True,
-        )
-    except Exception:
-        logger.exception("ask_user wait: redis unavailable; request_id=%s", request_id)
-        return None
-
-    deadline = asyncio.get_event_loop().time() + max(1, int(timeout_seconds or 600))
-    try:
-        while True:
-            try:
-                value = await client.get(key)
-            except Exception:
-                logger.exception("ask_user wait: redis read failed; request_id=%s", request_id)
-                return None
-            if value:
-                return _parse_answers(value)
-            if is_cancel_requested is not None:
-                try:
-                    cancelled = is_cancel_requested()
-                    if asyncio.iscoroutine(cancelled):
-                        cancelled = await cancelled
-                    if cancelled:
-                        return None
-                except Exception:
-                    pass
-            if asyncio.get_event_loop().time() >= deadline:
-                return None
-            await asyncio.sleep(max(0.1, float(poll_interval_seconds)))
-    finally:
+    store = get_topic_task_store()
+    while True:
+        reason = await _read_cancel_reason(cancel_reason)
+        if reason == "user_cancel":
+            raise TaskCancelledError("task cancelled")
+        if reason == "runner_stop":
+            raise RunnerStoppedError("runner stopped")
         try:
-            await client.aclose()
+            answers = store.get_resolved_question_answer(task_id=task_id, request_id=request_id)
         except Exception:
-            pass
+            logger.warning(
+                "ask_user wait: durable read failed; retrying task_id=%s request_id=%s",
+                task_id,
+                request_id,
+                exc_info=True,
+            )
+        else:
+            if answers is not None:
+                return answers
+        await asyncio.sleep(max(0.1, float(poll_interval_seconds)))
 
 
-def _parse_answers(value: Any) -> list[dict[str, Any]]:
+async def _read_cancel_reason(cancel_reason: Any) -> str | None:
+    if cancel_reason is None:
+        return None
     try:
-        parsed = json.loads(value) if isinstance(value, str) else value
+        result = cancel_reason()
+        if asyncio.iscoroutine(result):
+            result = await result
+        reason = str(result or "").strip()
+        return reason if reason in {"user_cancel", "runner_stop"} else None
     except Exception:
-        return []
-    if isinstance(parsed, dict):
-        parsed = parsed.get("answers")
-    if not isinstance(parsed, list):
-        return []
-    return [item for item in parsed if isinstance(item, dict)]
+        logger.warning("ask_user wait: cancel_reason check failed; continuing", exc_info=True)
+        return None

@@ -61,7 +61,7 @@ def _build_gate(monkeypatch, decision, *, mode="default"):
     writer = _RecordingWriter()
     store = _RecordingStore()
 
-    async def fake_wait(task_id, request_id, *, timeout_seconds, is_cancel_requested=None, **kw):
+    async def fake_wait(task_id, request_id, *, cancel_reason=None, **kw):
         return decision
 
     monkeypatch.setattr(task_executor, "wait_for_decision", fake_wait)
@@ -70,8 +70,7 @@ def _build_gate(monkeypatch, decision, *, mode="default"):
         store=store,
         task_id="task-1",
         permission_mode=mode,
-        wait_seconds=5,
-        is_cancel_requested=None,
+        cancel_reason=None,
     )
     return cb, writer, store
 
@@ -107,7 +106,7 @@ def test_can_use_tool_confirms_write_tool_allowed(monkeypatch):
     assert _permission_behavior(result) == "allow"
     assert len(writer.requests) == 1
     assert writer.requests[0]["tool_name"] == "mcp__portal__portal_create_task"
-    assert writer.decisions[0]["decision"] == "allowed"
+    assert writer.decisions == []
     assert store.statuses == ["waiting_permission", "running"]
 
 
@@ -116,7 +115,7 @@ def test_can_use_tool_confirms_write_tool_denied(monkeypatch):
     result = asyncio.run(cb("mcp__portal__portal_publish_workflow", {"summary": "发布", "operation": "deploy"}))
     assert _permission_behavior(result) == "deny"
     assert writer.requests[0]["risk_level"] == "critical"
-    assert writer.decisions[0]["decision"] == "denied"
+    assert writer.decisions == []
     assert store.statuses == ["waiting_permission", "running"]
 
 
@@ -157,18 +156,18 @@ def test_can_use_tool_auto_allow_strips_card_annotations(monkeypatch):
     assert _permission_updated_input(result) == {"task": {"name": "t"}}
 
 
-def test_can_use_tool_timeout_denies(monkeypatch):
-    cb, writer, store = _build_gate(monkeypatch, "timeout")
+def test_can_use_tool_denies_after_persisted_denial(monkeypatch):
+    cb, writer, store = _build_gate(monkeypatch, "deny")
     result = asyncio.run(cb("mcp__portal__portal_create_task", {}))
     assert _permission_behavior(result) == "deny"
-    assert writer.decisions[0]["decision"] == "timeout"
+    assert writer.decisions == []
 
 
 def _build_ask_gate(monkeypatch, answers, *, mode="default"):
     writer = _RecordingWriter()
     store = _RecordingStore()
 
-    async def fake_answer(task_id, request_id, *, timeout_seconds, is_cancel_requested=None, **kw):
+    async def fake_answer(task_id, request_id, *, cancel_reason=None, **kw):
         return answers
 
     monkeypatch.setattr(task_executor, "wait_for_answer", fake_answer)
@@ -177,8 +176,7 @@ def _build_ask_gate(monkeypatch, answers, *, mode="default"):
         store=store,
         task_id="task-1",
         permission_mode=mode,
-        wait_seconds=5,
-        is_cancel_requested=None,
+        cancel_reason=None,
     )
     return cb, writer, store
 
@@ -205,7 +203,7 @@ def test_can_use_tool_ask_user_question_answers_in_any_mode(monkeypatch, mode):
     assert updated["answers"] == {"按哪个维度统计?": "按天"}
     assert updated["annotations"] == {"按哪个维度统计?": {"notes": "含节假日"}}
     assert writer.question_requests[0]["request_id"] == "tu-9"
-    assert store.question_answer_records[0]["answers"] == answers
+    assert store.question_answer_records == []
     assert store.statuses == ["waiting_input", "running"]
 
 
@@ -1388,6 +1386,32 @@ def _patch_default_provider(monkeypatch):
             "supports_partial_messages": True,
         },
     )
+
+
+def test_execute_task_stream_runner_stop_returns_suspended_without_sdk_error(monkeypatch, tmp_path: Path):
+    _install_fake_sdk(
+        monkeypatch,
+        [
+            StreamEvent({"type": "message_start", "message": {"id": "req-1"}}),
+        ],
+    )
+    _patch_default_provider(monkeypatch)
+    _patch_skill_runtime(monkeypatch, tmp_path)
+    store = _SdkRecordStore()
+    monkeypatch.setattr(task_executor, "get_topic_task_store", lambda: store)
+
+    async def _run():
+        return await task_executor.execute_task_stream(
+            _build_input(),
+            emit=lambda record: None,
+            is_cancel_requested=lambda: "runner_stop",
+        )
+
+    result = asyncio.run(_run())
+
+    assert result.task_status == "suspended"
+    assert result.error == {"code": "runner_stopped", "message": "执行资源已停止"}
+    assert not [record for record in store.records if record["record_type"] == "error"]
 
 
 def test_execute_task_stream_keeps_leaked_pseudo_tag_in_thinking_as_finish(monkeypatch, tmp_path: Path):

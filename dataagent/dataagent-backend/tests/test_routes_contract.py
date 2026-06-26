@@ -168,7 +168,6 @@ class _FakeStore:
         pending = self.get_pending_permission_request(task_id)
         if not pending or pending.get("request_id") != request_id:
             return False
-        normalized = {"allow": "allowed", "deny": "denied"}.get(decision, decision)
         self.append_sdk_record(
             task_id=task_id,
             topic_id=pending.get("topic_id") or "",
@@ -177,12 +176,108 @@ class _FakeStore:
             event_type=None,
             data={
                 "request_id": request_id,
-                "decision": normalized,
+                "decision": decision,
                 "note": note,
                 "decided_at": decided_at or _now(),
             },
         )
         return True
+
+    def get_current_permission_interaction(self, *, task_id: str, request_id: str):
+        return self._get_interaction(task_id=task_id, request_id=request_id, kind="permission")
+
+    def append_permission_decision_if_waiting(self, *, task_id: str, request_id: str, decision: str, note: str = "", decided_at: str = ""):
+        task = self.tasks.get(task_id)
+        if not task:
+            return "not_found"
+        if task.get("task_status") != "waiting_permission" or task.get("cancel_requested_at"):
+            return "status_mismatch"
+        interaction = self.get_current_permission_interaction(task_id=task_id, request_id=request_id)
+        if not interaction:
+            return "not_found"
+        if interaction.get("status") == "resolved":
+            return "already_resolved"
+        self.append_sdk_record(
+            task_id=task_id,
+            topic_id=interaction.get("topic_id") or "",
+            turn_index=int(interaction.get("turn_index") or 0),
+            record_type="permission_decision",
+            event_type=None,
+            data={
+                "request_id": request_id,
+                "decision": decision,
+                "note": note,
+                "decided_at": decided_at or _now(),
+            },
+        )
+        return "appended"
+
+    def get_current_question_interaction(self, *, task_id: str, request_id: str):
+        return self._get_interaction(task_id=task_id, request_id=request_id, kind="question")
+
+    def append_question_answer_if_waiting(self, *, task_id: str, request_id: str, answers, answered_at: str = ""):
+        task = self.tasks.get(task_id)
+        if not task:
+            return "not_found"
+        if task.get("task_status") != "waiting_input" or task.get("cancel_requested_at"):
+            return "status_mismatch"
+        interaction = self.get_current_question_interaction(task_id=task_id, request_id=request_id)
+        if not interaction:
+            return "not_found"
+        if interaction.get("status") == "resolved":
+            return "already_resolved"
+        self.append_sdk_record(
+            task_id=task_id,
+            topic_id=interaction.get("topic_id") or "",
+            turn_index=int(interaction.get("turn_index") or 0),
+            record_type="question_answer",
+            event_type=None,
+            data={
+                "request_id": request_id,
+                "answers": answers if isinstance(answers, list) else [],
+                "answered_at": answered_at or _now(),
+            },
+        )
+        return "appended"
+
+    def _get_interaction(self, *, task_id: str, request_id: str, kind: str):
+        if kind == "permission":
+            request_type = "permission_request"
+            resolved_type = "permission_decision"
+        else:
+            request_type = "question_request"
+            resolved_type = "question_answer"
+        request = None
+        resolved = None
+        for rec in self.sdk_records.get(task_id, []):
+            data = rec.get("data") or {}
+            if str(data.get("request_id") or "") != request_id:
+                continue
+            if rec.get("record_type") == request_type:
+                request = {
+                    "request_id": request_id,
+                    "topic_id": rec.get("topic_id") or "",
+                    "turn_index": int(rec.get("turn_index") or 0),
+                    "status": "pending",
+                }
+            elif rec.get("record_type") == resolved_type:
+                resolved = {
+                    "request_id": request_id,
+                    "topic_id": rec.get("topic_id") or "",
+                    "turn_index": int(rec.get("turn_index") or 0),
+                    "status": "resolved",
+                }
+                if kind == "permission":
+                    resolved["decision"] = str(data.get("decision") or "")
+                else:
+                    answers = data.get("answers")
+                    resolved["answers"] = answers if isinstance(answers, list) else []
+        if resolved:
+            if request:
+                resolved["topic_id"] = request["topic_id"]
+                resolved["turn_index"] = request["turn_index"]
+            return resolved
+        return request
 
     def delete_topic(self, topic_id: str, context=None):
         self.topics.pop(topic_id, None)
@@ -551,19 +646,6 @@ class _FakeCoordinator:
     async def request_cancel(self, task_id: str):
         self.cancelled.append(task_id)
 
-    def __init_decisions(self):
-        if not hasattr(self, "decisions"):
-            self.decisions = {}
-
-    async def submit_permission_decision(self, task_id: str, request_id: str, decision: str) -> str:
-        self.__init_decisions()
-        # first decision wins (idempotent)
-        return self.decisions.setdefault((task_id, request_id), decision)
-
-    async def read_permission_decision(self, task_id: str, request_id: str) -> str | None:
-        self.__init_decisions()
-        return self.decisions.get((task_id, request_id))
-
 
 def _submit_message_task_factory(store: _FakeStore, calls: list[dict]):
     async def _submit_message_task(**kwargs):
@@ -892,18 +974,17 @@ def test_permission_decision_endpoint(monkeypatch):
         # Valid allow.
         ok = client.post(base, json={"request_id": "req-1", "decision": "allow"})
         assert ok.status_code == 200
-        # Response uses the canonical persisted form, matching the SDK record below.
-        assert ok.json() == {"task_id": task_id, "request_id": "req-1", "decision": "allowed"}
+        assert ok.json() == {"task_id": task_id, "request_id": "req-1", "decision": "allow"}
         decisions = [
             rec for rec in store.sdk_records[task_id]
             if rec["record_type"] == "permission_decision"
         ]
         assert len(decisions) == 1
-        assert decisions[0]["data"]["decision"] == "allowed"
+        assert decisions[0]["data"]["decision"] == "allow"
 
         # Idempotent: a later deny for the same request_id returns the first decision.
         again = client.post(base, json={"request_id": "req-1", "decision": "deny"})
-        assert again.json()["decision"] == "allowed"
+        assert again.json()["decision"] == "allow"
         decisions = [
             rec for rec in store.sdk_records[task_id]
             if rec["record_type"] == "permission_decision"
@@ -916,6 +997,44 @@ def test_permission_decision_endpoint(monkeypatch):
             "/api/v1/nl2sql/tasks/task_missing/permission-decision",
             json={"request_id": "req-1", "decision": "allow"},
         ).status_code == 404
+
+
+def test_question_answer_endpoint(monkeypatch):
+    client, store, _coordinator, _submit_calls = _build_client(monkeypatch)
+    with client:
+        topic_id = client.post("/api/v1/nl2sql/topics", json={"title": "追问流"}).json()["topic_id"]
+        delivered = client.post(
+            "/api/v1/nl2sql/tasks/deliver-message",
+            json={"topic_id": topic_id, "content": "需要选择维度"},
+        ).json()
+        task_id = delivered["task_id"]
+        base = f"/api/v1/nl2sql/tasks/{task_id}/question-answer"
+
+        assert client.post(base, json={"request_id": "q-1", "answers": []}).status_code == 409
+
+        store.tasks[task_id]["task_status"] = "waiting_input"
+        store.append_sdk_record(
+            task_id=task_id,
+            topic_id=topic_id,
+            turn_index=1,
+            record_type="question_request",
+            event_type=None,
+            data={"request_id": "q-1", "questions": [{"question": "按哪个维度?"}]},
+        )
+
+        answers = [{"question": "按哪个维度?", "selected": ["按天"]}]
+        ok = client.post(base, json={"request_id": "q-1", "answers": answers})
+        assert ok.status_code == 200
+        assert ok.json() == {"task_id": task_id, "request_id": "q-1", "accepted": True}
+        records = [rec for rec in store.sdk_records[task_id] if rec["record_type"] == "question_answer"]
+        assert len(records) == 1
+        assert records[0]["data"]["answers"] == answers
+
+        again = client.post(base, json={"request_id": "q-1", "answers": []})
+        assert again.status_code == 200
+        records = [rec for rec in store.sdk_records[task_id] if rec["record_type"] == "question_answer"]
+        assert len(records) == 1
+        assert client.post(base, json={"request_id": "q-2", "answers": []}).status_code == 409
 
 
 def test_followup_suggestions_route_generates_without_changing_message_contract(monkeypatch):

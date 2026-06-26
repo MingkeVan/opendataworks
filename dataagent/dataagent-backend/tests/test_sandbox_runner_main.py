@@ -107,6 +107,28 @@ def test_sandbox_runner_cancel_endpoint_marks_task_cancelled():
     assert "task-1" in sandbox_runner_main.CANCELLED_TASK_IDS
 
 
+def test_sandbox_runner_cancel_endpoint_can_skip_container_kill(monkeypatch):
+    killed: list[tuple[str, str]] = []
+    sandbox_runner_main.CANCELLED_TASK_IDS.clear()
+    sandbox_runner_main.RUNNING_CONTAINERS["task-1"] = ("docker", "container-1")
+
+    async def fake_kill(backend: str, container_name: str) -> None:
+        killed.append((backend, container_name))
+
+    monkeypatch.setattr(sandbox_runner_main, "_kill_container", fake_kill)
+    client = TestClient(sandbox_runner_main.app)
+
+    response = client.post(
+        "/internal/sandbox/runs/task-1/cancel",
+        json={"task_id": "task-1", "reason": "user_cancel", "kill": False},
+    )
+
+    sandbox_runner_main.RUNNING_CONTAINERS.pop("task-1", None)
+    assert response.status_code == 200
+    assert sandbox_runner_main.CANCELLED_TASK_IDS["task-1"] == "user_cancel"
+    assert killed == []
+
+
 def test_sandbox_runner_task_log_captures_child_sdk_stream_stderr(tmp_path: Path):
     log_path = tmp_path / "topic-1" / "logs" / "task-1.log"
 
