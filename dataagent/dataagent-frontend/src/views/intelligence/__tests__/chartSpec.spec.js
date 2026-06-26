@@ -59,6 +59,110 @@ describe('chartSpec', () => {
     expect(renderModel.errorText).toContain('pie 类型必须且只能提供一个 series')
   })
 
+  it('reserves headroom for the pie title so it does not overlap the slices in short containers', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'pie',
+      title: '各工作流发布操作类型占比',
+      x_field: 'operation',
+      series: [{ name: '发布次数', field: 'publish_cnt', type: 'pie' }],
+      dataset: [
+        { operation: 'deploy', publish_cnt: 33 },
+        { operation: 'online', publish_cnt: 9 }
+      ],
+      error: null
+    })
+
+    expect(renderModel.state).toBe('renderable')
+    const [series] = renderModel.option.series
+    expect(series.type).toBe('pie')
+    // Title-aware layout: the pie sits lower and is smaller than an untitled pie
+    // (center 52% / radius 68%) so the centered title and bottom legend stay
+    // clear of the slices, and the leader lines are shortened so outside labels
+    // do not poke back into the title band.
+    expect(parseFloat(series.center[1])).toBeGreaterThan(52)
+    expect(parseFloat(series.radius)).toBeLessThan(68)
+    expect(series.labelLine.length).toBeLessThan(15)
+    // alignTo:'edge' keeps a wide slice's outside label from overflowing/being
+    // truncated at the narrow panel edge.
+    expect(series.label.alignTo).toBe('edge')
+  })
+
+  it('shows every bar category label (rotated when crowded) instead of dropping them', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'bar',
+      title: '各数据层表数量对比',
+      x_field: 'layer',
+      series: [{ name: '表数量', field: 'table_cnt', type: 'bar' }],
+      dataset: [
+        { layer: 'ODS原始层', table_cnt: 128 },
+        { layer: 'DWD明细层', table_cnt: 86 },
+        { layer: 'DWS汇总层', table_cnt: 42 },
+        { layer: 'ADS应用层', table_cnt: 27 },
+        { layer: 'DIM维度层', table_cnt: 19 },
+        { layer: 'TMP临时层', table_cnt: 12 },
+        { layer: 'BAK备份层', table_cnt: 8 }
+      ],
+      error: null
+    })
+
+    const { axisLabel } = renderModel.option.xAxis
+    // interval:0 forces all categories to render; rotation keeps them from
+    // colliding in the narrow widget panel (the previous default silently
+    // dropped every other label).
+    expect(axisLabel.interval).toBe(0)
+    expect(axisLabel.rotate).toBeGreaterThan(0)
+    expect(axisLabel.fontSize).toBeLessThanOrEqual(11)
+    // Bars encode value by length, so the value axis must start at 0.
+    expect(renderModel.option.yAxis.scale).toBe(false)
+  })
+
+  it('keeps line/area x axes on auto label thinning so dense time series stay readable', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'line',
+      title: '最近30天工作流发布趋势',
+      x_field: 'stat_day',
+      series: [{ name: '发布次数', field: 'publish_cnt', type: 'line' }],
+      dataset: Array.from({ length: 30 }, (_, i) => ({ stat_day: `2026-03-${i + 1}`, publish_cnt: i })),
+      error: null
+    })
+
+    // Forcing interval:0 here would cram 30 date labels; line charts keep auto.
+    expect(renderModel.option.xAxis.axisLabel.interval).toBe('auto')
+    expect(renderModel.option.xAxis.axisLabel.rotate).toBe(0)
+    // Lines keep scale:true to zoom into the trend range (unlike bars).
+    expect(renderModel.option.yAxis.scale).toBe(true)
+  })
+
+  it('keeps a dense time-series combo on auto label thinning instead of forcing every x label', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'combo',
+      title: '近30天金额与增速',
+      x_field: 'stat_day',
+      series: [
+        { name: '金额', field: 'amount', type: 'bar', axis: 'left' },
+        { name: '增速', field: 'growth_rate', type: 'line', axis: 'right' }
+      ],
+      dataset: Array.from({ length: 30 }, (_, i) => ({
+        stat_day: `2026-03-${i + 1}`, amount: 1000 + i * 20, growth_rate: i / 100
+      })),
+      error: null
+    })
+
+    // combo is typically a time-series dual-axis trend: forcing interval:0 would
+    // cram all 30 date labels in the narrow widget, so it keeps ECharts auto
+    // thinning (and no forced rotation) like line/area.
+    expect(renderModel.option.xAxis.axisLabel.interval).toBe('auto')
+    expect(renderModel.option.xAxis.axisLabel.rotate).toBe(0)
+  })
+
   it('builds table render models only when columns are explicit', () => {
     const renderModel = buildChartRenderModel({
       kind: 'chart_spec',

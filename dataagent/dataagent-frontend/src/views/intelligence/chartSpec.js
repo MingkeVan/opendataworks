@@ -195,11 +195,12 @@ const toNumeric = (value) => {
 
 const buildPieOption = (spec) => {
   const primarySeries = spec.series[0]
+  const hasTitle = Boolean(spec.title)
   return {
     backgroundColor: 'transparent',
     color: spec.colors.length ? spec.colors : DEFAULT_CHART_COLORS,
-    title: spec.title
-      ? { text: spec.title, left: 'center', top: 8, textStyle: { fontSize: 14, fontWeight: 600, color: '#162131' } }
+    title: hasTitle
+      ? { text: spec.title, left: 'center', top: 8, textStyle: { fontSize: 13, fontWeight: 600, color: '#162131' } }
       : undefined,
     tooltip: {
       trigger: 'item',
@@ -209,9 +210,20 @@ const buildPieOption = (spec) => {
     series: [
       {
         type: 'pie',
-        radius: spec.donut ? ['44%', '70%'] : '68%',
-        center: ['50%', '52%'],
-        label: { color: '#425466' },
+        // The centered title (top) and the bottom legend each need a clear band.
+        // Unlike axis/funnel charts (which reserve top room via grid/top), a pie
+        // only has center+radius, so when a title is present we nudge the pie
+        // down so its slices and outside labels clear the title in short
+        // fixed-height containers (e.g. the embedded widget canvas). Shorter
+        // leader lines keep outside labels from poking back up into the title.
+        radius: hasTitle ? (spec.donut ? ['40%', '62%'] : '60%') : (spec.donut ? ['44%', '70%'] : '68%'),
+        center: hasTitle ? ['50%', '55%'] : ['50%', '52%'],
+        avoidLabelOverlap: true,
+        // alignTo:'edge' pins outside labels to the container edge so a wide
+        // slice's label can't overflow and get truncated in the narrow widget
+        // panel; names stay on the chart (unlike inside-percentage labels).
+        label: { color: '#425466', alignTo: 'edge', edgeDistance: 6, minMargin: 4 },
+        labelLine: { length: 12, length2: 8 },
         itemStyle: { borderColor: '#ffffff', borderWidth: 2 },
         data: spec.dataset.map((row) => ({
           name: String(row[spec.x_field] ?? ''),
@@ -228,16 +240,18 @@ const buildTitleOption = (spec) => (spec.title
       subtext: spec.description || '',
       left: 'left',
       top: 6,
-      textStyle: { fontSize: 14, fontWeight: 600, color: '#162131' },
+      textStyle: { fontSize: 13, fontWeight: 600, color: '#162131' },
       subtextStyle: { color: '#607185', fontSize: 12 }
     }
   : undefined)
 
-const valueAxisOption = (name) => ({
+// Bar-family axes must start at 0 so bar length encodes value honestly;
+// line/scatter pass scale:true to zoom into the data range.
+const valueAxisOption = (name, scale = true) => ({
   type: 'value',
   name: name || '',
-  scale: true,
-  axisLabel: { color: '#607185' },
+  scale,
+  axisLabel: { color: '#607185', fontSize: 11 },
   splitLine: { lineStyle: { color: '#eef3f8' } }
 })
 
@@ -246,18 +260,29 @@ const buildAxisOption = (spec) => {
   const isCombo = spec.chart_type === 'combo'
   const isArea = spec.chart_type === 'area'
   const horizontal = spec.chart_type === 'bar' && spec.orientation === 'horizontal'
+  // Only a plain categorical bar force-shows every label (interval 0) and rotates
+  // when crowded — that is the case that previously dropped labels in the narrow
+  // widget. combo is usually a time-series dual-axis trend (e.g. 30 days / monthly),
+  // so it keeps ECharts auto thinning like line/area; forcing interval:0 there
+  // would cram every x label and overlap in a 360px container.
+  const isCategoricalBar = spec.chart_type === 'bar'
   const categoryAxis = {
     type: 'category',
     data: spec.dataset.map((row) => row[spec.x_field]),
     axisLabel: {
       color: '#607185',
-      rotate: (spec.chart_type === 'bar' || isCombo) && !horizontal && spec.dataset.length > 8 ? 25 : 0
+      fontSize: 11,
+      interval: isCategoricalBar ? 0 : 'auto',
+      rotate: isCategoricalBar && !horizontal && spec.dataset.length > 6 ? 30 : 0
     },
     axisLine: { lineStyle: { color: '#d7e4ef' } }
   }
-  const valueAxis = valueAxisOption(spec.unit)
+  // Bar/area/combo encode value by length, so their value axis starts at 0;
+  // line keeps scale:true to zoom into the trend range.
+  const startAtZero = spec.chart_type === 'bar' || isArea || isCombo
+  const valueAxis = valueAxisOption(spec.unit, !startAtZero)
   const yAxis = isCombo
-    ? [valueAxisOption(spec.series[0] ? spec.series[0].name : spec.unit), valueAxisOption('')]
+    ? [valueAxisOption(spec.series[0] ? spec.series[0].name : spec.unit, false), valueAxisOption('', false)]
     : (horizontal ? categoryAxis : valueAxis)
 
   return {
@@ -271,7 +296,7 @@ const buildAxisOption = (spec) => {
       valueFormatter: spec.unit ? (value) => `${value}${spec.unit}` : undefined
     },
     legend: { top: 8, right: 0, textStyle: { color: '#607185' } },
-    grid: { left: 24, right: 16, top: spec.title ? 68 : 32, bottom: 40, containLabel: true },
+    grid: { left: 24, right: 16, top: spec.title ? 56 : 28, bottom: 40, containLabel: true },
     xAxis: horizontal ? valueAxis : categoryAxis,
     yAxis,
     series: spec.series.map((series) => {
@@ -304,7 +329,7 @@ const buildScatterOption = (spec) => ({
     valueFormatter: spec.unit ? (value) => `${value}${spec.unit}` : undefined
   },
   legend: { top: 8, right: 0, textStyle: { color: '#607185' } },
-  grid: { left: 24, right: 16, top: spec.title ? 68 : 32, bottom: 40, containLabel: true },
+  grid: { left: 24, right: 16, top: spec.title ? 56 : 28, bottom: 40, containLabel: true },
   xAxis: { ...valueAxisOption(spec.x_field), name: spec.x_field },
   yAxis: valueAxisOption(spec.unit),
   series: spec.series.map((series) => ({
@@ -368,7 +393,7 @@ const buildFunnelOption = (spec) => {
         type: 'funnel',
         left: '10%',
         right: '10%',
-        top: spec.title ? 68 : 24,
+        top: spec.title ? 56 : 24,
         bottom: 32,
         minSize: '20%',
         sort: 'descending',
