@@ -9,6 +9,16 @@
 ### Changed
 - 待补充。
 
+## [1.4.0] - 2026-06-26
+
+### Changed
+- 按照版本发布流程，发布 1.4.0 版本。
+
+## [1.3.0] - 2026-06-04
+
+### Changed
+- 按照版本发布流程，发布 1.3.0 版本。
+
 ## [1.2.0] - 2026-05-11
 
 ### Added
@@ -153,7 +163,9 @@
 
 以上早期版本请参考 GitHub Releases 与 Git tags 历史记录。
 
-[Unreleased]: https://github.com/MingkeVan/opendataworks/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/MingkeVan/opendataworks/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/MingkeVan/opendataworks/releases/tag/v1.4.0
+[1.3.0]: https://github.com/MingkeVan/opendataworks/releases/tag/v1.3.0
 [1.2.0]: https://github.com/MingkeVan/opendataworks/releases/tag/v1.2.0
 [1.1.1]: https://github.com/MingkeVan/opendataworks/releases/tag/v1.1.1
 [1.1.0]: https://github.com/MingkeVan/opendataworks/releases/tag/v1.1.0
