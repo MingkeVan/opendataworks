@@ -50,9 +50,9 @@ const prettyPreview = computed(() => {
 })
 const resultLabel = computed(() => {
   switch (props.block.decision) {
-    case 'allowed':
+    case 'allow':
       return '✓ 已允许执行'
-    case 'denied':
+    case 'deny':
       return '✕ 已拒绝'
     case 'timeout':
       return '⏱ 等待确认超时，已自动拒绝'
@@ -122,6 +122,6 @@ function decide(decision) {
 .v2-perm-btn.allow { background: #2c9c5a; color: #fff; }
 .v2-perm-btn.deny { background: #eef1f6; color: #333; }
 .v2-perm-result { margin-top: 6px; font-size: 13px; font-weight: 600; }
-.v2-perm-result.allowed { color: #2c9c5a; }
-.v2-perm-result.denied, .v2-perm-result.timeout { color: #c0392b; }
+.v2-perm-result.allow { color: #2c9c5a; }
+.v2-perm-result.deny, .v2-perm-result.timeout { color: #c0392b; }
 </style>
