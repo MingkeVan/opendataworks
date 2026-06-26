@@ -23,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from config import get_settings
 from core.agent_profile_service import normalize_agent_snapshot
 from core.skill_admin_service import resolve_enabled_skill_runtime
+from core.task_control import CancelReason
 from core.task_executor import TaskExecutionInput, TaskExecutionResult, _execute_task_stream_local
 from core.topic_workspace import CONTAINER_RUNTIME_ROOT, LOGS_DIRNAME, sanitize_topic_id
 
@@ -81,7 +82,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-CANCELLED_TASK_IDS: set[str] = set()
+class _CancelledTaskMap(dict[str, CancelReason]):
+    def add(self, task_id: str) -> None:
+        self[str(task_id)] = "user_cancel"
+
+    def discard(self, task_id: str) -> None:
+        self.pop(str(task_id), None)
+
+
+CANCELLED_TASK_IDS: _CancelledTaskMap = _CancelledTaskMap()
 RUNNING_CONTAINERS: dict[str, tuple[str, str]] = {}
 RUNNING_CONTAINERS_LOCK = asyncio.Lock()
 
@@ -121,8 +130,8 @@ async def run_sandbox_task(payload: dict[str, Any]):
         async def emit(record: dict[str, Any]) -> None:
             await queue.put({"type": "record", "record": record})
 
-        async def is_cancel_requested() -> bool:
-            return params.task_id in CANCELLED_TASK_IDS
+        async def is_cancel_requested() -> CancelReason | None:
+            return CANCELLED_TASK_IDS.get(params.task_id)
 
         async def execute() -> None:
             try:
@@ -154,7 +163,7 @@ async def run_sandbox_task(payload: dict[str, Any]):
                     model=params.model,
                 )
             finally:
-                CANCELLED_TASK_IDS.discard(params.task_id)
+                CANCELLED_TASK_IDS.pop(params.task_id, None)
 
             await queue.put({"type": "result", "result": asdict(result)})
             await queue.put(None)
@@ -177,13 +186,21 @@ async def run_sandbox_task(payload: dict[str, Any]):
 @app.post("/internal/sandbox/runs/{task_id}/cancel")
 async def cancel_sandbox_task(task_id: str, payload: dict[str, Any] | None = None):
     normalized_task_id = str(task_id or "")
-    CANCELLED_TASK_IDS.add(normalized_task_id)
-    async with RUNNING_CONTAINERS_LOCK:
-        running = RUNNING_CONTAINERS.get(normalized_task_id)
-    if running:
-        backend, container_name = running
-        await _kill_container(backend, container_name)
+    reason = _normalize_cancel_reason((payload or {}).get("reason")) or "user_cancel"
+    should_kill = bool((payload or {}).get("kill", True))
+    CANCELLED_TASK_IDS[normalized_task_id] = reason
+    if should_kill:
+        async with RUNNING_CONTAINERS_LOCK:
+            running = RUNNING_CONTAINERS.get(normalized_task_id)
+        if running:
+            backend, container_name = running
+            await _kill_container(backend, container_name)
     return {"accepted": True, "task_id": task_id}
+
+
+def _normalize_cancel_reason(value: Any) -> CancelReason | None:
+    reason = str(value or "").strip()
+    return reason if reason in {"user_cancel", "runner_stop"} else None  # type: ignore[return-value]
 
 
 def _should_use_container_backend() -> bool:
@@ -681,12 +698,15 @@ async def _execute_task_stream_container(
 
     if result is not None:
         return result
-    if params.task_id in CANCELLED_TASK_IDS:
-        _append_task_log(log_path, "result task_status=suspended error=task cancelled")
+    cancel_reason = CANCELLED_TASK_IDS.get(params.task_id)
+    if cancel_reason:
+        code = "runner_stopped" if cancel_reason == "runner_stop" else "task_cancelled"
+        message = "执行资源已停止" if cancel_reason == "runner_stop" else "任务已取消"
+        _append_task_log(log_path, f"result task_status=suspended error={code}")
         return TaskExecutionResult(
             task_status="suspended",
-            content="task cancelled",
-            error={"code": "cancelled", "message": "task cancelled"},
+            content=message,
+            error={"code": code, "message": message},
             provider_id=params.provider_id,
             model=params.model,
         )
@@ -944,12 +964,15 @@ async def _run_on_warm_child(
     # No result line: the child stream ended (killed/cancelled/crashed). The
     # child can no longer be trusted for reuse, so mark it for removal on release.
     child.healthy = False
-    if params.task_id in CANCELLED_TASK_IDS:
-        _append_task_log(log_path, "result task_status=suspended error=task cancelled")
+    cancel_reason = CANCELLED_TASK_IDS.get(params.task_id)
+    if cancel_reason:
+        code = "runner_stopped" if cancel_reason == "runner_stop" else "task_cancelled"
+        message = "执行资源已停止" if cancel_reason == "runner_stop" else "任务已取消"
+        _append_task_log(log_path, f"result task_status=suspended error={code}")
         return TaskExecutionResult(
             task_status="suspended",
-            content="task cancelled",
-            error={"code": "cancelled", "message": "task cancelled"},
+            content=message,
+            error={"code": code, "message": message},
             provider_id=params.provider_id,
             model=params.model,
         )
@@ -981,7 +1004,7 @@ async def _release_warm_child(child: WarmChild, task_id: str) -> None:
     condition = _warm_pool_condition()
     async with condition:
         RUNNING_CONTAINERS.pop(task_id, None)
-        CANCELLED_TASK_IDS.discard(task_id)
+        CANCELLED_TASK_IDS.pop(task_id, None)
         child.busy = False
         child.current_task_id = None
         child.last_used = time.monotonic()

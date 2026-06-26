@@ -10,7 +10,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from core.task_control import CancelReason
 from core.task_executor import TaskExecutionInput, TaskExecutionResult, _execute_task_stream_local
+from core.topic_task_store import get_topic_task_store
 
 
 logging.basicConfig(level=logging.INFO, stream=sys.stderr)
@@ -38,6 +40,13 @@ async def _execute_and_emit(params: TaskExecutionInput) -> TaskExecutionResult:
     async def emit(record: dict[str, Any]) -> None:
         print(json.dumps({"type": "record", "record": record}, ensure_ascii=False), flush=True)
 
+    async def cancel_reason() -> CancelReason | None:
+        try:
+            return "user_cancel" if get_topic_task_store().is_task_cancel_requested(params.task_id) else None
+        except Exception:
+            logger.warning("sandbox task cancel check failed task_id=%s", params.task_id, exc_info=True)
+            return None
+
     try:
         logger.info(
             "sandbox.task.start task_id=%s topic_id=%s provider_id=%s model=%s "
@@ -56,7 +65,7 @@ async def _execute_and_emit(params: TaskExecutionInput) -> TaskExecutionResult:
         result = await _execute_task_stream_local(
             params,
             emit=emit,
-            is_cancel_requested=lambda: False,
+            is_cancel_requested=cancel_reason,
             prepared_workspace_dir=Path.cwd(),
         )
     except Exception as exc:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import socket
@@ -12,8 +11,7 @@ from typing import Any
 import redis.asyncio as redis
 
 from config import get_settings
-from core.ask_user_question import ask_question_answer_redis_key
-from core.permission_gate import permission_decision_redis_key
+from core.task_control import PARKED_TASK_STATUSES, CancelReason
 from core.task_submission_service import compute_next_run_at, current_utc_naive, submit_message_task
 from core.task_executor import TaskExecutionInput, execute_task_stream
 from core.topic_files import diff_generated_files, snapshot_workspace_state
@@ -118,50 +116,6 @@ class TaskCoordinator:
             return True
         return self.store.is_task_cancel_requested(task_id)
 
-    async def submit_permission_decision(self, task_id: str, request_id: str, decision: str) -> str:
-        """Publish a user permission decision for a waiting run (allow/deny).
-
-        Idempotent: the first decision for a ``request_id`` wins; later calls
-        return the recorded value. Mirrors the cancel-flag pattern so both the
-        in-process executor and the sandbox runner can observe it via Redis.
-        Returns the effective decision.
-        """
-        effective = str(decision or "denied")
-        if self._redis is None:
-            return effective
-        key = self._permission_key(task_id, request_id)
-        ttl = max(60, int(self.settings.task_permission_wait_seconds or 600) + 60)
-        await self._redis.set(key, effective, ex=ttl, nx=True)
-        current = await self._redis.get(key)
-        return str(current) if current is not None else effective
-
-    async def read_permission_decision(self, task_id: str, request_id: str) -> str | None:
-        if self._redis is None:
-            return None
-        value = await self._redis.get(self._permission_key(task_id, request_id))
-        return str(value) if value is not None else None
-
-    async def submit_question_answer(self, task_id: str, request_id: str, answers: list[dict[str, Any]]) -> bool:
-        """Publish the user's answer for a waiting ``ask_user_question`` run.
-
-        Idempotent: the first answer for a ``request_id`` wins. Mirrors the
-        permission-decision flow so the executor's tool handler observes it via
-        Redis. Returns whether a value is present after the call.
-        """
-        if self._redis is None:
-            return False
-        key = self._answer_key(task_id, request_id)
-        ttl = max(60, int(self.settings.task_permission_wait_seconds or 600) + 60)
-        payload = json.dumps({"answers": answers}, ensure_ascii=False)
-        await self._redis.set(key, payload, ex=ttl, nx=True)
-        return bool(await self._redis.exists(key))
-
-    async def read_question_answer(self, task_id: str, request_id: str) -> str | None:
-        if self._redis is None:
-            return None
-        value = await self._redis.get(self._answer_key(task_id, request_id))
-        return str(value) if value is not None else None
-
     async def _queue_loop(self) -> None:
         while not self._closing:
             task_id = await self._queue.get()
@@ -256,7 +210,7 @@ class TaskCoordinator:
                         task_id=task_id,
                         record=record,
                     ),
-                    is_cancel_requested=lambda: self._should_stop_task(task_id, lease_lost),
+                    is_cancel_requested=lambda: self._task_stop_reason(task_id, lease_lost),
                 )
                 logger.info(
                     "task.run.result task_id=%s topic_id=%s provider=%s model=%s task_status=%s error_code=%s content_len=%s session_id_set=%s usage_set=%s",
@@ -270,6 +224,15 @@ class TaskCoordinator:
                     bool(result.session_id),
                     bool(result.usage),
                 )
+                if self._is_parked_waiting(task_id) and str((result.error or {}).get("code") or "") != "task_cancelled":
+                    logger.info(
+                        "task.run.left_parked task_id=%s topic_id=%s result_status=%s error_code=%s",
+                        task_id,
+                        topic_id,
+                        result.task_status,
+                        str((result.error or {}).get("code") or ""),
+                    )
+                    return
                 attachments = self._collect_generated_files(topic_id, task_id, workspace_before)
                 self.store.update_assistant_message(
                     topic_id=topic_id,
@@ -311,6 +274,14 @@ class TaskCoordinator:
             raise
         except Exception as exc:
             logger.exception("Task execution crashed task_id=%s", task_id)
+            if topic_id and self._is_parked_waiting(task_id):
+                logger.info(
+                    "task.run.crash_left_parked task_id=%s topic_id=%s error_type=%s",
+                    task_id,
+                    topic_id,
+                    exc.__class__.__name__,
+                )
+                return
             error = {"code": "task_execution_failed", "message": str(exc)}
             if topic_id:
                 self.store.update_assistant_message(
@@ -415,10 +386,16 @@ class TaskCoordinator:
             self.store.heartbeat_task(task_id)
         return await self._renew_lease(task_id)
 
-    async def _should_stop_task(self, task_id: str, lease_lost: asyncio.Event) -> bool:
+    async def _task_stop_reason(self, task_id: str, lease_lost: asyncio.Event) -> CancelReason | None:
         if lease_lost.is_set():
-            return True
-        return await self.is_cancel_requested(task_id)
+            return "runner_stop"
+        if await self.is_cancel_requested(task_id):
+            return "user_cancel"
+        return None
+
+    def _is_parked_waiting(self, task_id: str) -> bool:
+        task = self.store.get_task(task_id)
+        return str((task or {}).get("task_status") or "") in PARKED_TASK_STATUSES
 
     def _build_history(self, *, topic_id: str, task_id: str) -> list[dict[str, str]]:
         messages = self.store.list_topic_messages(topic_id)
@@ -448,6 +425,7 @@ class TaskCoordinator:
                     try:
                         await self._recover_waiting_tasks(batch_size=batch_size)
                         await self._recover_expired_tasks(batch_size=batch_size)
+                        await self._recover_parked_tasks(batch_size=batch_size)
                     finally:
                         await self._release_recovery_lock()
             except asyncio.CancelledError:
@@ -488,6 +466,42 @@ class TaskCoordinator:
                     str(replacement.get("topic_id") or ""),
                 )
                 await self.submit_task(str(replacement.get("task_id") or ""))
+
+    async def _recover_parked_tasks(self, *, batch_size: int) -> None:
+        for task in self.store.list_parked_tasks(limit=batch_size):
+            task_id = str(task.get("task_id") or "")
+            topic_id = str(task.get("topic_id") or "")
+            if not task_id:
+                continue
+            if await self._lease_exists(task_id):
+                continue
+            error: dict[str, Any] | None = None
+            if self.store.is_task_cancel_requested(task_id):
+                error = {"code": "task_cancelled", "message": "任务已取消"}
+            elif self.store.has_resolved_waiting_interaction(task_id):
+                error = {
+                    "code": "run_lost",
+                    "message": "确认/输入已提交，但原运行器已释放，请重新发送请求继续。",
+                }
+            if not error:
+                continue
+            logger.warning(
+                "task.recovery.parked_suspend task_id=%s topic_id=%s task_status=%s error_code=%s",
+                task_id,
+                topic_id,
+                str(task.get("task_status") or ""),
+                str(error.get("code") or ""),
+            )
+            if topic_id:
+                self.store.update_assistant_message(
+                    topic_id=topic_id,
+                    task_id=task_id,
+                    status="suspended",
+                    content="",
+                    usage=None,
+                    error=error,
+                )
+            self.store.finish_task(task_id=task_id, task_status="suspended", error=error)
 
     async def _schedule_loop(self) -> None:
         interval = max(5, int(self.settings.schedule_scan_interval_seconds or 10))
@@ -650,12 +664,6 @@ class TaskCoordinator:
 
     def _cancel_key(self, task_id: str) -> str:
         return f"da:task:cancel:{task_id}"
-
-    def _permission_key(self, task_id: str, request_id: str) -> str:
-        return permission_decision_redis_key(task_id, request_id)
-
-    def _answer_key(self, task_id: str, request_id: str) -> str:
-        return ask_question_answer_redis_key(task_id, request_id)
 
     def _recovery_key(self) -> str:
         return "da:task:recovery:lock"

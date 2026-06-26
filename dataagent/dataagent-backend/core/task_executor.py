@@ -8,11 +8,9 @@ import os
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-import anyio
 import httpx
 
 from config import get_settings
@@ -26,7 +24,6 @@ from core.ask_user_question import (
 from core.permission_gate import (
     is_high_risk_tool,
     is_write_tool,
-    normalize_permission_decision,
     plan_denies_tool,
     requires_confirmation,
     strip_card_annotations,
@@ -59,6 +56,7 @@ from core.agent_runtime import (
 from core.claude_cli import resolve_claude_cli_path
 from core.sdk_block_writer import SdkBlockWriter
 from core.slash_command_cache import record_agent_slash_commands
+from core.task_control import PARKED_TASK_STATUSES, CancelReason, RunnerStoppedError, TaskCancelledError
 from core.topic_task_store import get_topic_task_store
 from core.topic_workspace import prepare_topic_workspace
 
@@ -84,7 +82,9 @@ class TaskExecutionInput:
         provider_id / model: selected runtime provider and model id.
         database_hint: optional default schema/database for SQL tools.
         debug: enable verbose runtime diagnostics.
-        timeout_seconds: total bounded wall-clock budget for this single run.
+        timeout_seconds: legacy submission-time budget retained for recovery
+            heuristics and compatibility; the SDK message loop is not wrapped in
+            this value while confirmation/input waits are parked.
         sql_read_timeout_seconds: per read-query budget exposed to skill SQL tools.
         sql_write_timeout_seconds: per write-statement budget.
         execution_mode: ``interactive`` or ``background``/``auto`` timeout tier.
@@ -528,16 +528,14 @@ async def _handle_ask_user_question(
     sdk_writer: SdkBlockWriter,
     store: Any,
     task_id: str,
-    wait_seconds: int,
-    is_cancel_requested: Callable[[], Awaitable[bool] | bool] | None,
+    cancel_reason: Callable[[], Awaitable[Any] | Any] | None,
 ):
     """Resolve a built-in ``AskUserQuestion`` call against the user.
 
     Records a question_request block (rendered as a selection card), parks the
-    task in ``waiting_input``, waits on Redis for the user's selection, records
-    question_answer, then returns ``PermissionResultAllow`` with the answer mapped
-    onto the tool's ``updated_input`` so the run resumes with the selection. With
-    no answer (timeout/cancel) the tool's own "did not answer" result is used.
+    task in ``waiting_input``, waits on MySQL for the user's persisted selection,
+    then returns ``PermissionResultAllow`` with the answer mapped onto the tool's
+    ``updated_input`` so the same live run resumes with the selection.
     """
     questions = tool_input.get("questions")
     if not isinstance(questions, list) or not questions:
@@ -554,23 +552,13 @@ async def _handle_ask_user_question(
     answers = await wait_for_answer(
         task_id,
         request_id,
-        timeout_seconds=wait_seconds,
-        is_cancel_requested=is_cancel_requested,
+        cancel_reason=cancel_reason,
     )
     answers = answers or []
     try:
-        append_answer = getattr(store, "append_question_answer_record", None)
-        if callable(append_answer):
-            append_answer(task_id=task_id, request_id=request_id, answers=answers)
-        else:
-            sdk_writer.append_question_answer(
-                request_id=request_id,
-                answers=answers,
-                answered_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            )
         store.set_task_status(task_id, "running")
     except Exception:
-        logger.exception("ask_user: failed to record question answer task_id=%s", task_id)
+        logger.exception("ask_user: failed to restore running status task_id=%s", task_id)
 
     return _allow_result(to_sdk_answer_input(questions, answers))
 
@@ -581,8 +569,7 @@ def _build_can_use_tool_callback(
     store: Any,
     task_id: str,
     permission_mode: str,
-    wait_seconds: int,
-    is_cancel_requested: Callable[[], Awaitable[bool] | bool] | None,
+    cancel_reason: Callable[[], Awaitable[Any] | Any] | None,
 ):
     """Build the SDK can_use_tool callback enforcing session permission policy.
 
@@ -590,8 +577,8 @@ def _build_can_use_tool_callback(
     a multiple-choice answer (recorded as a question_request/answer block and
     returned via updated_input). Write/high-risk tools (per session mode) pause
     the run: a permission_request block is recorded, the task moves to
-    waiting_permission, and the run waits for the user's decision (Redis) before
-    recording the decision and resuming. Plan-denied tools are rejected outright.
+    waiting_permission, and the run waits for the user's persisted decision before
+    resuming. Plan-denied tools are rejected outright.
     """
 
     async def can_use_tool(tool_name: str, tool_input: dict[str, Any] | None = None, context: Any = None):
@@ -603,8 +590,7 @@ def _build_can_use_tool_callback(
                 sdk_writer=sdk_writer,
                 store=store,
                 task_id=task_id,
-                wait_seconds=wait_seconds,
-                is_cancel_requested=is_cancel_requested,
+                cancel_reason=cancel_reason,
             )
         # For write tools the skill may attach card-annotation keys (title/summary)
         # that no downstream tool schema accepts; the card reads them from the raw
@@ -638,35 +624,15 @@ def _build_can_use_tool_callback(
         decision = await wait_for_decision(
             task_id,
             request_id,
-            timeout_seconds=wait_seconds,
-            is_cancel_requested=is_cancel_requested,
+            cancel_reason=cancel_reason,
         )
-        recorded = normalize_permission_decision(decision)
         try:
-            append_decision = getattr(store, "append_permission_decision_record", None)
-            if callable(append_decision):
-                appended = append_decision(
-                    task_id=task_id,
-                    request_id=request_id,
-                    decision=recorded,
-                    decided_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                )
-                if not appended and decision == "timeout":
-                    logger.warning("can_use_tool: timeout decision was already recorded task_id=%s request_id=%s", task_id, request_id)
-            else:
-                sdk_writer.append_permission_decision(
-                    request_id=request_id,
-                    decision=recorded,
-                    decided_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                )
             store.set_task_status(task_id, "running")
         except Exception:
-            logger.exception("can_use_tool: failed to record permission decision task_id=%s", task_id)
+            logger.exception("can_use_tool: failed to restore running status task_id=%s", task_id)
 
         if decision == "allow":
             return _allow_result(forwarded_input)
-        if decision == "timeout":
-            return _deny_result("等待确认超时，已自动拒绝该操作。")
         return _deny_result("用户拒绝了该操作。")
 
     return can_use_tool
@@ -709,7 +675,7 @@ async def execute_task_stream(
     params: TaskExecutionInput,
     *,
     emit: Callable[[dict[str, Any]], Awaitable[None] | None],
-    is_cancel_requested: Callable[[], Awaitable[bool] | bool] | None = None,
+    is_cancel_requested: Callable[[], Awaitable[Any] | Any] | None = None,
 ) -> TaskExecutionResult:
     """Execute one NL2SQL run and return the terminal result.
 
@@ -719,8 +685,8 @@ async def execute_task_stream(
     ``emit`` is for records forwarded by the sandbox-runner protocol and should
     not be read as the single persistence boundary for all SDK records. The
     awaited return value is the final :class:`TaskExecutionResult` (status,
-    content, usage, error, session id). ``is_cancel_requested`` is polled to
-    abort a long/stalled run.
+    content, usage, error, session id). ``is_cancel_requested`` is polled and may
+    return ``True``/``user_cancel`` or ``runner_stop``.
     """
     cfg = get_settings()
     if _should_use_sandbox_runner(cfg):
@@ -741,11 +707,27 @@ def _should_use_sandbox_runner(cfg: Any) -> bool:
     return bool(str(getattr(cfg, "dataagent_sandbox_mode", "") or "").strip())
 
 
+def _normalize_cancel_reason(value: Any) -> CancelReason | None:
+    if isinstance(value, str):
+        reason = value.strip()
+        return reason if reason in {"user_cancel", "runner_stop"} else None  # type: ignore[return-value]
+    return "user_cancel" if bool(value) else None
+
+
+def _task_is_parked(task_id: str) -> bool:
+    try:
+        task = get_topic_task_store().get_task(task_id)
+    except Exception:
+        logger.warning("task.cancel_watch: failed to read task status task_id=%s", task_id, exc_info=True)
+        return False
+    return str((task or {}).get("task_status") or "") in PARKED_TASK_STATUSES
+
+
 async def _execute_task_stream_via_runner(
     params: TaskExecutionInput,
     *,
     emit: Callable[[dict[str, Any]], Awaitable[None] | None],
-    is_cancel_requested: Callable[[], Awaitable[bool] | bool] | None = None,
+    is_cancel_requested: Callable[[], Awaitable[Any] | Any] | None = None,
 ) -> TaskExecutionResult:
     cfg = get_settings()
     runner_url = str(getattr(cfg, "dataagent_sandbox_runner_url", "") or "").strip().rstrip("/")
@@ -757,13 +739,13 @@ async def _execute_task_stream_via_runner(
     cancel_sent = False
     stream_done = False
 
-    async def _cancelled() -> bool:
+    async def _cancel_reason() -> CancelReason | None:
         if is_cancel_requested is None:
-            return False
+            return None
         result = is_cancel_requested()
         if inspect.isawaitable(result):
-            return bool(await result)
-        return bool(result)
+            result = await result
+        return _normalize_cancel_reason(result)
 
     async def _emit(record: dict[str, Any]) -> None:
         result = emit(record)
@@ -774,9 +756,20 @@ async def _execute_task_stream_via_runner(
         async def _watch_cancel() -> None:
             nonlocal cancel_sent
             while not stream_done:
-                if not cancel_sent and await _cancelled():
+                reason = await _cancel_reason()
+                if not cancel_sent and reason:
+                    if reason == "user_cancel" and _task_is_parked(params.task_id):
+                        cancel_sent = True
+                        await client.post(
+                            f"{runner_url}/internal/sandbox/runs/{params.task_id}/cancel",
+                            json={"task_id": params.task_id, "reason": reason, "kill": False},
+                        )
+                        return
                     cancel_sent = True
-                    await client.post(f"{runner_url}/internal/sandbox/runs/{params.task_id}/cancel", json={"task_id": params.task_id})
+                    await client.post(
+                        f"{runner_url}/internal/sandbox/runs/{params.task_id}/cancel",
+                        json={"task_id": params.task_id, "reason": reason},
+                    )
                     return
                 await asyncio.sleep(0.25)
 
@@ -828,7 +821,7 @@ async def _execute_task_stream_local(
     params: TaskExecutionInput,
     *,
     emit: Callable[[dict[str, Any]], Awaitable[None] | None],
-    is_cancel_requested: Callable[[], Awaitable[bool] | bool] | None = None,
+    is_cancel_requested: Callable[[], Awaitable[Any] | Any] | None = None,
     prepared_workspace_dir: str | Path | None = None,
 ) -> TaskExecutionResult:
     cfg = get_settings()
@@ -843,6 +836,14 @@ async def _execute_task_stream_local(
 
     accumulator = SdkResultAccumulator(params, provider_id=provider_id, model=model)
     sdk_writer = SdkBlockWriter(get_topic_task_store(), params.task_id, params.topic_id)
+
+    async def _cancel_reason() -> CancelReason | None:
+        if is_cancel_requested is None:
+            return None
+        result = is_cancel_requested()
+        if inspect.isawaitable(result):
+            result = await result
+        return _normalize_cancel_reason(result)
 
     prompt = str(params.question or "").strip() if params.resume_session_id else _build_prompt(params.history, params.question)
     agent_snapshot = normalize_agent_snapshot(params.agent_snapshot) if params.agent_snapshot else None
@@ -944,8 +945,7 @@ async def _execute_task_stream_local(
             store=get_topic_task_store(),
             task_id=params.task_id,
             permission_mode=logical_permission_mode,
-            wait_seconds=int(getattr(cfg, "task_permission_wait_seconds", 600) or 600),
-            is_cancel_requested=is_cancel_requested,
+            cancel_reason=_cancel_reason,
         )
 
     options_kwargs = dict(
@@ -976,7 +976,7 @@ async def _execute_task_stream_local(
     cli_path = resolve_claude_cli_path(cfg)
     if cli_path:
         options_kwargs["cli_path"] = cli_path
-    timeout_seconds = max(10, int(params.timeout_seconds or cfg.agent_timeout_seconds))
+    legacy_timeout_seconds = max(10, int(params.timeout_seconds or cfg.agent_timeout_seconds))
 
     def _make_options(resume_session_id: str | None = None):
         current_options = dict(options_kwargs)
@@ -1003,21 +1003,19 @@ async def _execute_task_stream_local(
         bool(str(runtime_target.get("api_key") or "").strip()),
     )
 
-    async def _cancelled() -> bool:
-        if is_cancel_requested is None:
-            return False
-        result = is_cancel_requested()
-        if inspect.isawaitable(result):
-            return bool(await result)
-        return bool(result)
-
     terminal_error_record_written = False
+
+    async def _raise_if_stopped() -> None:
+        reason = await _cancel_reason()
+        if reason == "user_cancel":
+            raise TaskCancelledError("task cancelled")
+        if reason == "runner_stop":
+            raise RunnerStoppedError("runner stopped")
 
     async def _run_sdk_turn(
         *,
         turn_prompt: str,
         turn_options: Any,
-        turn_timeout_seconds: int,
         phase: str,
     ) -> TaskExecutionResult:
         nonlocal terminal_error_record_written
@@ -1026,45 +1024,57 @@ async def _execute_task_stream_local(
         next_progress_threshold_index = 0
         turn_started_at = time.monotonic()
         try:
-            with anyio.fail_after(turn_timeout_seconds):
-                sdk_prompt = _single_user_prompt_stream(turn_prompt) if can_use_tool is not None else turn_prompt
-                async for msg in claude_query(prompt=sdk_prompt, options=turn_options):
-                    sdk_message_count += 1
-                    if type(msg).__name__ == "StreamEvent":
-                        sdk_stream_event_count += 1
-                    while (
-                        next_progress_threshold_index < len(_SDK_TURN_PROGRESS_THRESHOLDS)
-                        and sdk_message_count >= _SDK_TURN_PROGRESS_THRESHOLDS[next_progress_threshold_index]
-                    ):
-                        threshold = _SDK_TURN_PROGRESS_THRESHOLDS[next_progress_threshold_index]
-                        next_progress_threshold_index += 1
-                        logger.info(
-                            "task.sdk_turn.progress task_id=%s topic_id=%s provider=%s model=%s phase=%s sdk_messages=%s stream_events=%s threshold=%s elapsed_ms=%s",
-                            params.task_id,
-                            params.topic_id,
-                            provider_id,
-                            model,
-                            phase,
-                            sdk_message_count,
-                            sdk_stream_event_count,
-                            threshold,
-                            int((time.monotonic() - turn_started_at) * 1000),
-                        )
-                    if await _cancelled():
-                        error = {"code": "task_cancelled", "message": "任务已取消"}
-                        sdk_writer.append_error(**error)
-                        terminal_error_record_written = True
-                        return TaskExecutionResult(
-                            task_status="suspended",
-                            content=accumulator.current_answer_text(),
-                            usage=accumulator.usage or None,
-                            error=error,
-                            provider_id=provider_id,
-                            model=model,
-                            session_id=accumulator.session_id,
-                        )
-                    accumulator.ingest(msg)
-                    sdk_writer.ingest(msg)
+            sdk_prompt = _single_user_prompt_stream(turn_prompt) if can_use_tool is not None else turn_prompt
+            async for msg in claude_query(prompt=sdk_prompt, options=turn_options):
+                sdk_message_count += 1
+                if type(msg).__name__ == "StreamEvent":
+                    sdk_stream_event_count += 1
+                while (
+                    next_progress_threshold_index < len(_SDK_TURN_PROGRESS_THRESHOLDS)
+                    and sdk_message_count >= _SDK_TURN_PROGRESS_THRESHOLDS[next_progress_threshold_index]
+                ):
+                    threshold = _SDK_TURN_PROGRESS_THRESHOLDS[next_progress_threshold_index]
+                    next_progress_threshold_index += 1
+                    logger.info(
+                        "task.sdk_turn.progress task_id=%s topic_id=%s provider=%s model=%s phase=%s sdk_messages=%s stream_events=%s threshold=%s elapsed_ms=%s",
+                        params.task_id,
+                        params.topic_id,
+                        provider_id,
+                        model,
+                        phase,
+                        sdk_message_count,
+                        sdk_stream_event_count,
+                        threshold,
+                        int((time.monotonic() - turn_started_at) * 1000),
+                    )
+                await _raise_if_stopped()
+                accumulator.ingest(msg)
+                sdk_writer.ingest(msg)
+            await _raise_if_stopped()
+        except TaskCancelledError:
+            error = {"code": "task_cancelled", "message": "任务已取消"}
+            sdk_writer.append_error(**error)
+            terminal_error_record_written = True
+            return TaskExecutionResult(
+                task_status="suspended",
+                content=accumulator.current_answer_text(),
+                usage=accumulator.usage or None,
+                error=error,
+                provider_id=provider_id,
+                model=model,
+                session_id=accumulator.session_id,
+            )
+        except RunnerStoppedError:
+            error = {"code": "runner_stopped", "message": "执行资源已停止"}
+            return TaskExecutionResult(
+                task_status="suspended",
+                content=accumulator.current_answer_text(),
+                usage=accumulator.usage or None,
+                error=error,
+                provider_id=provider_id,
+                model=model,
+                session_id=accumulator.session_id,
+            )
         except Exception as exc:
             reason = _format_exception_reason(exc)
             partial = accumulator.current_answer_text()
@@ -1146,12 +1156,11 @@ async def _execute_task_stream_local(
     result = await _run_sdk_turn(
         turn_prompt=prompt,
         turn_options=_make_options(params.resume_session_id),
-        turn_timeout_seconds=timeout_seconds,
         phase="initial",
     )
     if _is_empty_completion_result(result):
         recovery_session_id = str(result.session_id or accumulator.session_id or params.resume_session_id or "").strip()
-        recovery_timeout = _empty_completion_recovery_timeout(timeout_seconds)
+        recovery_timeout = _empty_completion_recovery_timeout(legacy_timeout_seconds)
         logger.warning(
             "task.empty_completion.recover_start task_id=%s topic_id=%s provider=%s model=%s timeout=%s session_id_set=%s",
             params.task_id,
@@ -1164,7 +1173,6 @@ async def _execute_task_stream_local(
         result = await _run_sdk_turn(
             turn_prompt=_build_empty_completion_recovery_prompt(params.question),
             turn_options=_make_options(recovery_session_id or None),
-            turn_timeout_seconds=recovery_timeout,
             phase="empty_completion_recovery",
         )
         logger.info(

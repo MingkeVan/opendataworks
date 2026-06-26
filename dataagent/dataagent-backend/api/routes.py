@@ -680,26 +680,26 @@ async def api_submit_permission_decision(task_id: str, payload: PermissionDecisi
     decision = str(payload.decision or "").strip().lower()
     if decision not in {"allow", "deny"}:
         raise HTTPException(status_code=400, detail="decision must be allow or deny")
-    if str(task.get("task_status") or "") != "waiting_permission":
-        raise HTTPException(status_code=409, detail="task is not awaiting a permission decision")
-    pending_request_id = store.get_pending_permission_request_id(task_id)
-    if pending_request_id and pending_request_id != request_id:
-        raise HTTPException(status_code=409, detail="request_id does not match the current pending permission request")
-    coordinator = get_task_coordinator()
-    if not pending_request_id:
-        existing = await coordinator.read_permission_decision(task_id, request_id)
-        if not existing:
-            raise HTTPException(status_code=409, detail="task has no pending permission request")
-    effective = await coordinator.submit_permission_decision(task_id, request_id, decision)
-    if pending_request_id:
-        store.append_permission_decision_record(
+    current = store.get_current_permission_interaction(task_id=task_id, request_id=request_id)
+    if current and str(current.get("status") or "") == "resolved":
+        effective = str(current.get("decision") or decision)
+    else:
+        append_result = store.append_permission_decision_if_waiting(
             task_id=task_id,
             request_id=request_id,
-            decision=effective,
+            decision=decision,
             note=str(payload.note or ""),
         )
-    # Return the canonical persisted form (allowed/denied) so the immediate
-    # response matches the streamed/reloaded SDK record.
+        if append_result not in {"appended", "already_resolved"}:
+            detail = (
+                "task is not awaiting this permission decision"
+                if append_result in {"not_found", "status_mismatch"}
+                else "failed to record permission decision"
+            )
+            raise HTTPException(status_code=409, detail=detail)
+        resolved = store.get_current_permission_interaction(task_id=task_id, request_id=request_id)
+        effective = str((resolved or {}).get("decision") or decision)
+
     return PermissionDecisionResponse.model_validate(
         {"task_id": task_id, "request_id": request_id, "decision": normalize_permission_decision(effective)}
     )
@@ -715,26 +715,23 @@ async def api_submit_question_answer(task_id: str, payload: QuestionAnswerReques
     request_id = str(payload.request_id or "").strip()
     if not request_id:
         raise HTTPException(status_code=400, detail="request_id is required")
-    if str(task.get("task_status") or "") != "waiting_input":
-        raise HTTPException(status_code=409, detail="task is not awaiting a user answer")
-    pending_request_id = store.get_pending_question_request_id(task_id)
-    if pending_request_id and pending_request_id != request_id:
-        raise HTTPException(status_code=409, detail="request_id does not match the current pending question")
-    coordinator = get_task_coordinator()
-    if not pending_request_id:
-        existing = await coordinator.read_question_answer(task_id, request_id)
-        if not existing:
-            raise HTTPException(status_code=409, detail="task has no pending question")
     answers = [a for a in (payload.answers or []) if isinstance(a, dict)]
-    accepted = await coordinator.submit_question_answer(task_id, request_id, answers)
-    if pending_request_id:
-        store.append_question_answer_record(
+    current = store.get_current_question_interaction(task_id=task_id, request_id=request_id)
+    if not current or str(current.get("status") or "") != "resolved":
+        append_result = store.append_question_answer_if_waiting(
             task_id=task_id,
             request_id=request_id,
             answers=answers,
         )
+        if append_result not in {"appended", "already_resolved"}:
+            detail = (
+                "task is not awaiting this user answer"
+                if append_result in {"not_found", "status_mismatch"}
+                else "failed to record user answer"
+            )
+            raise HTTPException(status_code=409, detail=detail)
     return QuestionAnswerResponse.model_validate(
-        {"task_id": task_id, "request_id": request_id, "accepted": bool(accepted)}
+        {"task_id": task_id, "request_id": request_id, "accepted": True}
     )
 
 

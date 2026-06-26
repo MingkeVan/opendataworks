@@ -101,3 +101,94 @@ def test_task_coordinator_persists_only_emitted_sdk_records():
             "data": {"type": "message_start"},
         }
     ]
+
+
+def test_task_stop_reason_distinguishes_lease_loss_from_user_cancel():
+    class FakeStore:
+        def __init__(self):
+            self.cancel_requested = False
+
+        def is_task_cancel_requested(self, task_id):
+            return self.cancel_requested
+
+    store = FakeStore()
+    coordinator = TaskCoordinator(store=store)
+
+    async def run():
+        lease_lost = asyncio.Event()
+        none_reason = await coordinator._task_stop_reason("task-1", lease_lost)
+        store.cancel_requested = True
+        user_reason = await coordinator._task_stop_reason("task-1", lease_lost)
+        lease_lost.set()
+        runner_reason = await coordinator._task_stop_reason("task-1", lease_lost)
+        return none_reason, user_reason, runner_reason
+
+    assert anyio.run(run) == (None, "user_cancel", "runner_stop")
+
+
+def test_recover_parked_tasks_leaves_unresolved_parked_task_untouched():
+    class FakeStore:
+        def __init__(self):
+            self.finished = []
+            self.messages = []
+
+        def list_parked_tasks(self, *, limit=20):
+            return [{"task_id": "task-1", "topic_id": "topic-1", "task_status": "waiting_permission"}]
+
+        def is_task_cancel_requested(self, task_id):
+            return False
+
+        def has_resolved_waiting_interaction(self, task_id):
+            return False
+
+        def update_assistant_message(self, **kwargs):
+            self.messages.append(kwargs)
+
+        def finish_task(self, **kwargs):
+            self.finished.append(kwargs)
+
+    coordinator = TaskCoordinator(store=FakeStore())
+
+    anyio.run(lambda: coordinator._recover_parked_tasks(batch_size=10))
+
+    assert coordinator.store.messages == []
+    assert coordinator.store.finished == []
+
+
+def test_recover_parked_tasks_suspends_resolved_orphan():
+    class FakeStore:
+        def __init__(self):
+            self.finished = []
+            self.messages = []
+
+        def list_parked_tasks(self, *, limit=20):
+            return [{"task_id": "task-1", "topic_id": "topic-1", "task_status": "waiting_input"}]
+
+        def is_task_cancel_requested(self, task_id):
+            return False
+
+        def has_resolved_waiting_interaction(self, task_id):
+            return True
+
+        def update_assistant_message(self, **kwargs):
+            self.messages.append(kwargs)
+
+        def finish_task(self, **kwargs):
+            self.finished.append(kwargs)
+
+    coordinator = TaskCoordinator(store=FakeStore())
+
+    anyio.run(lambda: coordinator._recover_parked_tasks(batch_size=10))
+
+    assert coordinator.store.messages[0]["status"] == "suspended"
+    assert coordinator.store.messages[0]["error"]["code"] == "run_lost"
+    assert coordinator.store.finished == [
+        {
+            "task_id": "task-1",
+            "task_status": "suspended",
+            "error": {
+                "code": "run_lost",
+                "message": "确认/输入已提交，但原运行器已释放，请重新发送请求继续。",
+            },
+        }
+    ]
