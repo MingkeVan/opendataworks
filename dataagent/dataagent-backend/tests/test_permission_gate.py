@@ -51,6 +51,22 @@ def test_legacy_mode_normalizes_to_default() -> None:
     assert pg.requires_confirmation(CREATE_TASK, "junk") is True
 
 
+def test_is_exit_plan_mode() -> None:
+    assert pg.is_exit_plan_mode("ExitPlanMode") is True
+    # bare-name reduction also matches an MCP-qualified form, defensively.
+    assert pg.is_exit_plan_mode("mcp__x__ExitPlanMode") is True
+    assert pg.is_exit_plan_mode("portal_create_task") is False
+    assert pg.is_exit_plan_mode(READ) is False
+
+
+def test_post_plan_mode_is_accept_edits() -> None:
+    # Approving a plan switches the run to acceptEdits: drafts auto-run, high-risk
+    # still confirms.
+    assert pg.post_plan_mode() == "acceptEdits"
+    assert pg.requires_confirmation(CREATE_TASK, pg.post_plan_mode()) is False
+    assert pg.requires_confirmation(PUBLISH, pg.post_plan_mode()) is True
+
+
 def test_strip_card_annotations_drops_only_annotation_keys() -> None:
     raw = {"workflow_id": 7, "operation": "deploy", "preview_token": "tok", "title": "t", "summary": "s"}
     assert pg.strip_card_annotations(raw) == {

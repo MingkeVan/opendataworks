@@ -41,6 +41,15 @@ DRAFT_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
 
 WRITE_TOOL_NAMES: frozenset[str] = HIGH_RISK_TOOL_NAMES | DRAFT_WRITE_TOOL_NAMES
 
+# The built-in plan tool the model calls to present its plan and request approval
+# to leave plan mode. It is not MCP-qualified.
+EXIT_PLAN_MODE_TOOL_NAME: str = "ExitPlanMode"
+
+# Mode the session switches to once the user approves a plan: drafts auto-execute,
+# high-risk (publish/online) still confirm. Keeps the approved plan flowing without
+# re-confirming every draft write, while preserving the high-risk guard.
+POST_PLAN_MODE: str = "acceptEdits"
+
 # Confirmation-card annotation keys the skill attaches to a write tool call so the
 # generic gate can render a meaningful card (title/diff summary). They are gate
 # metadata, not part of any downstream tool schema — the portal MCP write tools
@@ -75,6 +84,16 @@ def _bare_tool_name(tool_name: str) -> str:
         if parts:
             return parts[-1]
     return name
+
+
+def is_exit_plan_mode(tool_name: str) -> bool:
+    """Whether ``tool_name`` is the built-in plan-presentation/approval tool."""
+    return _bare_tool_name(tool_name) == EXIT_PLAN_MODE_TOOL_NAME
+
+
+def post_plan_mode() -> str:
+    """Permission mode a session adopts after the user approves a plan."""
+    return POST_PLAN_MODE
 
 
 def is_write_tool(tool_name: str) -> bool:

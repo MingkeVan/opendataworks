@@ -2,18 +2,18 @@
   <div class="v2-perm-card" :class="`risk-${block.risk_level || 'high'}`">
     <div class="v2-perm-head">
       <span class="v2-perm-badge">{{ riskLabel }}</span>
-      <span class="v2-perm-title">{{ block.title || ('请确认操作：' + bareTool) }}</span>
+      <span class="v2-perm-title">{{ block.title || (isPlan ? '请确认执行计划' : ('请确认操作：' + bareTool)) }}</span>
     </div>
-    <div v-if="block.summary" class="v2-perm-summary">{{ block.summary }}</div>
-    <div class="v2-perm-tool">工具：<code>{{ bareTool }}</code></div>
-    <details v-if="hasPreview" class="v2-perm-preview">
+    <div v-if="block.summary" class="v2-perm-summary" :class="{ 'is-plan': isPlan }">{{ block.summary }}</div>
+    <div v-if="!isPlan" class="v2-perm-tool">工具：<code>{{ bareTool }}</code></div>
+    <details v-if="!isPlan && hasPreview" class="v2-perm-preview">
       <summary>参数详情</summary>
       <pre>{{ prettyPreview }}</pre>
     </details>
 
     <div v-if="isPending" class="v2-perm-actions">
-      <button type="button" class="v2-perm-btn deny" :disabled="disabled || submitting" @click="decide('deny')">拒绝</button>
-      <button type="button" class="v2-perm-btn allow" :disabled="disabled || submitting" @click="decide('allow')">允许</button>
+      <button type="button" class="v2-perm-btn deny" :disabled="disabled || submitting" @click="decide('deny')">{{ isPlan ? '继续完善' : '拒绝' }}</button>
+      <button type="button" class="v2-perm-btn allow" :disabled="disabled || submitting" @click="decide('allow')">{{ isPlan ? '批准并执行' : '允许' }}</button>
     </div>
     <div v-else class="v2-perm-result" :class="block.decision">{{ resultLabel }}</div>
   </div>
@@ -39,7 +39,12 @@ const bareTool = computed(() => {
   const name = String(props.block.tool_name || '')
   return name.startsWith('mcp__') ? name.split('__').pop() : name
 })
-const riskLabel = computed(() => (props.block.risk_level === 'critical' ? '高危操作' : '需要确认'))
+const isPlan = computed(() => props.block.risk_level === 'plan')
+const riskLabel = computed(() => {
+  if (props.block.risk_level === 'plan') return '执行计划'
+  if (props.block.risk_level === 'critical') return '高危操作'
+  return '需要确认'
+})
 const hasPreview = computed(() => props.block.payload_preview != null && typeof props.block.payload_preview === 'object')
 const prettyPreview = computed(() => {
   try {
@@ -49,11 +54,12 @@ const prettyPreview = computed(() => {
   }
 })
 const resultLabel = computed(() => {
+  const plan = props.block.risk_level === 'plan'
   switch (props.block.decision) {
     case 'allow':
-      return '✓ 已允许执行'
+      return plan ? '✓ 计划已批准，继续执行' : '✓ 已允许执行'
     case 'deny':
-      return '✕ 已拒绝'
+      return plan ? '✕ 计划未批准' : '✕ 已拒绝'
     case 'timeout':
       return '⏱ 等待确认超时，已自动拒绝'
     default:
@@ -81,6 +87,10 @@ function decide(decision) {
   border-color: #e88;
   background: #fff5f5;
 }
+.v2-perm-card.risk-plan {
+  border-color: #91b8f0;
+  background: #f5f9ff;
+}
 .v2-perm-head {
   display: flex;
   align-items: center;
@@ -96,8 +106,19 @@ function decide(decision) {
   padding: 1px 8px;
 }
 .risk-critical .v2-perm-badge { background: #e05656; }
+.risk-plan .v2-perm-badge { background: #3b82f6; }
 .v2-perm-title { font-weight: 600; font-size: 14px; }
 .v2-perm-summary { font-size: 13px; color: #555; margin: 4px 0; white-space: pre-wrap; }
+.v2-perm-summary.is-plan {
+  max-height: 320px;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #e3ecfb;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 6px 0;
+  line-height: 1.5;
+}
 .v2-perm-tool { font-size: 12px; color: #777; margin: 4px 0; }
 .v2-perm-tool code { background: #eef1f6; padding: 1px 5px; border-radius: 4px; }
 .v2-perm-preview { margin: 6px 0; }

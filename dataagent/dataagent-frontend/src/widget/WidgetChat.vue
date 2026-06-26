@@ -274,8 +274,8 @@
                 title="会话权限模式"
                 @change="changePermissionMode($event.target.value)"
               >
-                <option v-for="opt in PERMISSION_MODE_OPTIONS" :key="opt.value" :value="opt.value">
-                  {{ opt.label }}
+                <option v-for="opt in PERMISSION_MODE_OPTIONS" :key="opt.value" :value="opt.value" :title="opt.desc || ''">
+                  {{ opt.desc ? `${opt.label} · ${opt.desc}` : opt.label }}
                 </option>
               </select>
             </div>
@@ -354,10 +354,10 @@ const agentName = ref('智能数据助手')
 const suggestions = computed(() => agentPresetQuestions.value.length ? agentPresetQuestions.value : DEFAULT_SUGGESTIONS)
 const permissionMode = ref('default')
 const PERMISSION_MODE_OPTIONS = [
-  { value: 'default', label: 'Default' },
-  { value: 'acceptEdits', label: 'Accept edits' },
-  { value: 'plan', label: 'Plan mode' },
-  { value: 'bypassPermissions', label: 'Bypass permissions' },
+  { value: 'default', label: 'Default', desc: '每次写操作前都需确认' },
+  { value: 'acceptEdits', label: 'Accept edits', desc: '草稿写自动执行，发布/上线仍确认' },
+  { value: 'plan', label: 'Plan mode', desc: '先只读出计划，批准后再执行' },
+  { value: 'bypassPermissions', label: 'Bypass permissions', desc: '全部自动执行，不再确认' },
 ]
 
 // widget-only UI state

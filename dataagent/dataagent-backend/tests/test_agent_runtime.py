@@ -304,6 +304,26 @@ def test_build_allowed_tools_plan_mode_strips_write_tools():
     assert "mcp__portal__portal_workflow_schedule_online" not in allowed
 
 
+def test_resolve_sdk_permission_mode_identity_non_root(monkeypatch):
+    # The SDK mode mirrors the logical mode 1:1 when not running as root, so the
+    # in-run can_use_tool gate fires for plan/default/acceptEdits.
+    monkeypatch.setattr(agent_runtime, "_is_running_as_root", lambda: False)
+    for mode in ("default", "acceptEdits", "plan", "bypassPermissions"):
+        assert agent_runtime._resolve_sdk_permission_mode(mode) == mode
+    # Unknown / legacy values normalize to default.
+    assert agent_runtime._resolve_sdk_permission_mode("inherit") == "default"
+
+
+def test_resolve_sdk_permission_mode_root_degrades_only_bypass(monkeypatch):
+    # The sandbox runner runs as uid 0 (it needs the docker socket); Claude Code
+    # rejects bypassPermissions under root, so only that mode degrades to default.
+    monkeypatch.setattr(agent_runtime, "_is_running_as_root", lambda: True)
+    assert agent_runtime._resolve_sdk_permission_mode("bypassPermissions") == "default"
+    assert agent_runtime._resolve_sdk_permission_mode("plan") == "plan"
+    assert agent_runtime._resolve_sdk_permission_mode("default") == "default"
+    assert agent_runtime._resolve_sdk_permission_mode("acceptEdits") == "acceptEdits"
+
+
 def test_workspace_boundary_denies_parent_directory_file_lookup(tmp_path: Path):
     workspace = tmp_path / "runtime" / "workspaces" / "agent_default"
     workspace.mkdir(parents=True)

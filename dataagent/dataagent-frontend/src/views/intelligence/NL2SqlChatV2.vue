@@ -408,7 +408,12 @@
                       :key="opt.value"
                       :command="opt.value"
                       :class="{ 'is-active': opt.value === permissionMode }"
-                    >{{ opt.label }}</el-dropdown-item>
+                    >
+                      <div class="v2-perm-opt">
+                        <span class="v2-perm-opt-label">{{ opt.label }}</span>
+                        <span v-if="opt.desc" class="v2-perm-opt-desc">{{ opt.desc }}</span>
+                      </div>
+                    </el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -623,10 +628,10 @@ const agentSelectValue = ref('')
 // Session permission mode (latest selection). Default per design: 'default'.
 const permissionMode = ref('default')
 const PERMISSION_MODE_OPTIONS = [
-  { value: 'default', label: 'Default' },
-  { value: 'acceptEdits', label: 'Accept edits' },
-  { value: 'plan', label: 'Plan mode' },
-  { value: 'bypassPermissions', label: 'Bypass permissions' },
+  { value: 'default', label: 'Default', desc: '每次写操作前都需确认' },
+  { value: 'acceptEdits', label: 'Accept edits', desc: '草稿写自动执行，发布/上线仍确认' },
+  { value: 'plan', label: 'Plan mode', desc: '先只读出计划，批准后再执行' },
+  { value: 'bypassPermissions', label: 'Bypass permissions', desc: '全部自动执行，不再确认' },
 ]
 const searchKeyword = ref('')
 const autoScroll = ref(true)
@@ -2497,6 +2502,9 @@ onBeforeUnmount(() => {
 .v2-perm-pill-dot.plan { background: #909399; }
 .v2-perm-pill-dot.acceptEdits { background: #e6a23c; }
 .v2-perm-pill-dot.default { background: #409eff; }
+.v2-perm-opt { display: flex; flex-direction: column; line-height: 1.3; padding: 2px 0; }
+.v2-perm-opt-label { font-size: 13px; }
+.v2-perm-opt-desc { font-size: 11px; color: #909399; }
 
 .v2-composer-hint {
   color: #9aa5b1;
