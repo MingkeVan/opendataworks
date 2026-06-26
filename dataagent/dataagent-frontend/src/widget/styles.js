@@ -1130,10 +1130,6 @@ export const WIDGET_STYLES = `
   cursor: not-allowed;
 }
 
-.query-workbench.is-floating .query-composer-toolbar {
-  display: none;
-}
-
 .query-send-btn {
   width: 30px;
   height: 30px;
