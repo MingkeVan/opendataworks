@@ -11,7 +11,7 @@ from core.task_control import RunnerStoppedError, TaskCancelledError
 def test_wait_for_decision_returns_persisted_decision(monkeypatch):
     class Store:
         def get_resolved_permission_decision(self, *, task_id: str, request_id: str):
-            return "allowed"
+            return "allow"
 
     monkeypatch.setattr(permission_wait, "get_topic_task_store", lambda: Store())
 

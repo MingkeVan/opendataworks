@@ -21,7 +21,7 @@ Implement v1 of persistent permission/input waiting for DataAgent:
    - Update `permission_wait.wait_for_decision` to poll MySQL with no timeout.
    - Update `ask_user_question.wait_for_answer` similarly.
    - Add `TaskCancelledError` and `RunnerStoppedError` handling.
-   - Map canonical permission decisions to callback verbs.
+   - Keep persisted permission decisions aligned with callback verbs.
 
 3. Make endpoint writes authoritative and idempotent.
    - Remove confirmation endpoint calls to Redis submit/read helpers.
@@ -47,7 +47,7 @@ Implement v1 of persistent permission/input waiting for DataAgent:
    - Parent watch cancel branches on reason plus DB status.
 
 7. Tests.
-   - Unit tests for no-deadline MySQL polling and decision mapping.
+   - Unit tests for no-deadline MySQL polling and decision handling.
    - Route tests for resolved idempotency, pending writes, and terminal/cancel
      rejection.
    - Coordinator tests for parked finalization guard and `run_lost`.

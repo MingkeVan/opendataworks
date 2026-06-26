@@ -51,15 +51,14 @@ task that resumes the persisted SDK session.
 The wait functions no longer have deadlines. They poll MySQL for the resolved
 decision/answer and retry transient MySQL errors instead of failing closed.
 
-Permission records persist canonical values (`allowed`/`denied`), while SDK
-callbacks need callback verbs (`allow`/`deny`). The wait path maps
-`allowed -> allow` and `denied -> deny`.
+Permission records persist the same canonical verbs used by the SDK callback:
+`allow` / `deny` / `timeout`. There is no `allowed` / `denied` translation layer.
 
 ### MySQL as Authority
 
 The API endpoint is the only writer of durable decision/answer records. The SDK
 callback only consumes those records, moves the task back to `running`, and
-returns the corresponding allow/deny or updated input to the SDK.
+returns the corresponding `allow` / `deny` or updated input to the SDK.
 
 Redis `submit_*`/`read_*` helpers are removed from the confirmation main path.
 `task_permission_wait_seconds` is no longer a confirmation wait timeout.

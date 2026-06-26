@@ -65,8 +65,8 @@ async def _read_cancel_reason(cancel_reason: Any) -> str | None:
 
 def _to_callback_decision(decision: Any) -> str | None:
     value = str(decision or "").strip().lower()
-    if value in {"allow", "allowed"}:
+    if value == "allow":
         return "allow"
-    if value in {"deny", "denied", "timeout"}:
+    if value in {"deny", "timeout"}:
         return "deny"
     return None

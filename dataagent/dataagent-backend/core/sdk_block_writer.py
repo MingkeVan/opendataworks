@@ -401,7 +401,7 @@ class SdkBlockWriter:
     ) -> None:
         """Record the user's decision for a prior permission request.
 
-        ``decision`` is one of ``allowed`` / ``denied`` / ``timeout``; it merges
+        ``decision`` is one of ``allow`` / ``deny`` / ``timeout``; it merges
         onto the matching ``permission_request`` block during projection.
         """
         self._store.append_sdk_record(

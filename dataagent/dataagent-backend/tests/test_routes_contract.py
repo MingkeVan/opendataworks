@@ -168,7 +168,6 @@ class _FakeStore:
         pending = self.get_pending_permission_request(task_id)
         if not pending or pending.get("request_id") != request_id:
             return False
-        normalized = {"allow": "allowed", "deny": "denied"}.get(decision, decision)
         self.append_sdk_record(
             task_id=task_id,
             topic_id=pending.get("topic_id") or "",
@@ -177,7 +176,7 @@ class _FakeStore:
             event_type=None,
             data={
                 "request_id": request_id,
-                "decision": normalized,
+                "decision": decision,
                 "note": note,
                 "decided_at": decided_at or _now(),
             },
@@ -198,7 +197,6 @@ class _FakeStore:
             return "not_found"
         if interaction.get("status") == "resolved":
             return "already_resolved"
-        normalized = {"allow": "allowed", "deny": "denied"}.get(decision, decision)
         self.append_sdk_record(
             task_id=task_id,
             topic_id=interaction.get("topic_id") or "",
@@ -207,7 +205,7 @@ class _FakeStore:
             event_type=None,
             data={
                 "request_id": request_id,
-                "decision": normalized,
+                "decision": decision,
                 "note": note,
                 "decided_at": decided_at or _now(),
             },
@@ -976,18 +974,17 @@ def test_permission_decision_endpoint(monkeypatch):
         # Valid allow.
         ok = client.post(base, json={"request_id": "req-1", "decision": "allow"})
         assert ok.status_code == 200
-        # Response uses the canonical persisted form, matching the SDK record below.
-        assert ok.json() == {"task_id": task_id, "request_id": "req-1", "decision": "allowed"}
+        assert ok.json() == {"task_id": task_id, "request_id": "req-1", "decision": "allow"}
         decisions = [
             rec for rec in store.sdk_records[task_id]
             if rec["record_type"] == "permission_decision"
         ]
         assert len(decisions) == 1
-        assert decisions[0]["data"]["decision"] == "allowed"
+        assert decisions[0]["data"]["decision"] == "allow"
 
         # Idempotent: a later deny for the same request_id returns the first decision.
         again = client.post(base, json={"request_id": "req-1", "decision": "deny"})
-        assert again.json()["decision"] == "allowed"
+        assert again.json()["decision"] == "allow"
         decisions = [
             rec for rec in store.sdk_records[task_id]
             if rec["record_type"] == "permission_decision"
