@@ -260,18 +260,20 @@ const buildAxisOption = (spec) => {
   const isCombo = spec.chart_type === 'combo'
   const isArea = spec.chart_type === 'area'
   const horizontal = spec.chart_type === 'bar' && spec.orientation === 'horizontal'
-  const isBarLike = spec.chart_type === 'bar' || isCombo
+  // Only a plain categorical bar force-shows every label (interval 0) and rotates
+  // when crowded — that is the case that previously dropped labels in the narrow
+  // widget. combo is usually a time-series dual-axis trend (e.g. 30 days / monthly),
+  // so it keeps ECharts auto thinning like line/area; forcing interval:0 there
+  // would cram every x label and overlap in a 360px container.
+  const isCategoricalBar = spec.chart_type === 'bar'
   const categoryAxis = {
     type: 'category',
     data: spec.dataset.map((row) => row[spec.x_field]),
     axisLabel: {
       color: '#607185',
       fontSize: 11,
-      // Bar/combo are categorical: show every label (interval 0) and rotate once
-      // they get crowded so none are silently dropped in the narrow widget panel.
-      // Time-series line/area keep auto thinning so dense x axes stay readable.
-      interval: isBarLike ? 0 : 'auto',
-      rotate: isBarLike && !horizontal && spec.dataset.length > 6 ? 30 : 0
+      interval: isCategoricalBar ? 0 : 'auto',
+      rotate: isCategoricalBar && !horizontal && spec.dataset.length > 6 ? 30 : 0
     },
     axisLine: { lineStyle: { color: '#d7e4ef' } }
   }

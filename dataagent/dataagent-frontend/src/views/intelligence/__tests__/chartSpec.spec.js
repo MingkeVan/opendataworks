@@ -139,6 +139,30 @@ describe('chartSpec', () => {
     expect(renderModel.option.yAxis.scale).toBe(true)
   })
 
+  it('keeps a dense time-series combo on auto label thinning instead of forcing every x label', () => {
+    const renderModel = buildChartRenderModel({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'combo',
+      title: '近30天金额与增速',
+      x_field: 'stat_day',
+      series: [
+        { name: '金额', field: 'amount', type: 'bar', axis: 'left' },
+        { name: '增速', field: 'growth_rate', type: 'line', axis: 'right' }
+      ],
+      dataset: Array.from({ length: 30 }, (_, i) => ({
+        stat_day: `2026-03-${i + 1}`, amount: 1000 + i * 20, growth_rate: i / 100
+      })),
+      error: null
+    })
+
+    // combo is typically a time-series dual-axis trend: forcing interval:0 would
+    // cram all 30 date labels in the narrow widget, so it keeps ECharts auto
+    // thinning (and no forced rotation) like line/area.
+    expect(renderModel.option.xAxis.axisLabel.interval).toBe('auto')
+    expect(renderModel.option.xAxis.axisLabel.rotate).toBe(0)
+  })
+
   it('builds table render models only when columns are explicit', () => {
     const renderModel = buildChartRenderModel({
       kind: 'chart_spec',
