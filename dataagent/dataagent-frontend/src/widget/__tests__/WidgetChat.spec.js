@@ -162,7 +162,6 @@ describe('WidgetChat history conversations', () => {
     expect(wrapper.find('.query-workbench').exists()).toBe(true)
     expect(wrapper.find('.query-sidebar').exists()).toBe(true)
     expect(wrapper.find('.query-main').exists()).toBe(true)
-    expect(wrapper.find('.query-model-selector').text()).toContain('Anthropic Compatible')
     expect(wrapper.find('.query-model-selector').text()).toContain('claude-opus-4-6')
     expect(wrapper.text()).toContain('最近 30 天工作流发布趋势')
     expect(wrapper.text()).toContain('smoke-ok 测试')

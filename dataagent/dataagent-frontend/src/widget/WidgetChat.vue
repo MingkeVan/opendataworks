@@ -280,11 +280,6 @@
               </select>
             </div>
             <div class="query-model-selector">
-              <select v-model="selectedProvider" class="query-model-select" :disabled="!providers.length || isBusy" title="切换提供商">
-                <option v-for="provider in providers" :key="provider.provider_id" :value="provider.provider_id">
-                  {{ provider.display_name || provider.provider_id }}
-                </option>
-              </select>
               <select v-model="selectedModel" class="query-model-select" :disabled="!availableModels.length || isBusy" title="切换模型">
                 <option v-for="modelName in availableModels" :key="modelName" :value="modelName">{{ modelName }}</option>
               </select>
