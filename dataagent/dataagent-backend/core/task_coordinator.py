@@ -478,7 +478,11 @@ class TaskCoordinator:
             error: dict[str, Any] | None = None
             if self.store.is_task_cancel_requested(task_id):
                 error = {"code": "task_cancelled", "message": "任务已取消"}
-            elif self.store.has_resolved_waiting_interaction(task_id):
+            elif (
+                self.store.get_pending_permission_request(task_id) is None
+                and self.store.get_pending_question_request(task_id) is None
+                and self.store.has_resolved_waiting_interaction(task_id)
+            ):
                 error = {
                     "code": "run_lost",
                     "message": "确认/输入已提交，但原运行器已释放，请重新发送请求继续。",

@@ -653,10 +653,6 @@ def _is_empty_completion_result(result: TaskExecutionResult) -> bool:
     )
 
 
-def _empty_completion_recovery_timeout(timeout_seconds: int) -> int:
-    return max(10, min(120, max(10, int(timeout_seconds or 0)) // 2))
-
-
 def _build_empty_completion_recovery_prompt(question: str) -> str:
     original_question = _clip_text(str(question or "").strip(), 2000)
     if not original_question:
@@ -976,8 +972,6 @@ async def _execute_task_stream_local(
     cli_path = resolve_claude_cli_path(cfg)
     if cli_path:
         options_kwargs["cli_path"] = cli_path
-    legacy_timeout_seconds = max(10, int(params.timeout_seconds or cfg.agent_timeout_seconds))
-
     def _make_options(resume_session_id: str | None = None):
         current_options = dict(options_kwargs)
         resume_value = str(resume_session_id or "").strip()
@@ -1160,14 +1154,12 @@ async def _execute_task_stream_local(
     )
     if _is_empty_completion_result(result):
         recovery_session_id = str(result.session_id or accumulator.session_id or params.resume_session_id or "").strip()
-        recovery_timeout = _empty_completion_recovery_timeout(legacy_timeout_seconds)
         logger.warning(
-            "task.empty_completion.recover_start task_id=%s topic_id=%s provider=%s model=%s timeout=%s session_id_set=%s",
+            "task.empty_completion.recover_start task_id=%s topic_id=%s provider=%s model=%s session_id_set=%s",
             params.task_id,
             params.topic_id,
             provider_id,
             model,
-            recovery_timeout,
             bool(recovery_session_id),
         )
         result = await _run_sdk_turn(

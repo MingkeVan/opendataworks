@@ -141,6 +141,12 @@ def test_recover_parked_tasks_leaves_unresolved_parked_task_untouched():
         def has_resolved_waiting_interaction(self, task_id):
             return False
 
+        def get_pending_permission_request(self, task_id):
+            return {"request_id": "req-1"}
+
+        def get_pending_question_request(self, task_id):
+            return None
+
         def update_assistant_message(self, **kwargs):
             self.messages.append(kwargs)
 
@@ -170,6 +176,12 @@ def test_recover_parked_tasks_suspends_resolved_orphan():
         def has_resolved_waiting_interaction(self, task_id):
             return True
 
+        def get_pending_permission_request(self, task_id):
+            return None
+
+        def get_pending_question_request(self, task_id):
+            return None
+
         def update_assistant_message(self, **kwargs):
             self.messages.append(kwargs)
 
@@ -192,3 +204,40 @@ def test_recover_parked_tasks_suspends_resolved_orphan():
             },
         }
     ]
+
+
+def test_recover_parked_tasks_keeps_later_unresolved_request_parked():
+    class FakeStore:
+        def __init__(self):
+            self.finished = []
+            self.messages = []
+
+        def list_parked_tasks(self, *, limit=20):
+            return [{"task_id": "task-1", "topic_id": "topic-1", "task_status": "waiting_permission"}]
+
+        def is_task_cancel_requested(self, task_id):
+            return False
+
+        def has_resolved_waiting_interaction(self, task_id):
+            # A prior permission in the same run was already answered, but the
+            # current request is still pending and must remain visible.
+            return True
+
+        def get_pending_permission_request(self, task_id):
+            return {"request_id": "req-2"}
+
+        def get_pending_question_request(self, task_id):
+            return None
+
+        def update_assistant_message(self, **kwargs):
+            self.messages.append(kwargs)
+
+        def finish_task(self, **kwargs):
+            self.finished.append(kwargs)
+
+    coordinator = TaskCoordinator(store=FakeStore())
+
+    anyio.run(lambda: coordinator._recover_parked_tasks(batch_size=10))
+
+    assert coordinator.store.messages == []
+    assert coordinator.store.finished == []
