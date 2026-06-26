@@ -858,7 +858,7 @@ function routeMessageId() {
 }
 
 function replaceRouteTopic(topicId, messageId = '') {
-  const query = { ...route.query, tab: 'chat-v2' }
+  const query = { ...route.query }
   const normalizedTopicId = normalizeQueryValue(topicId)
   const normalizedMessageId = normalizeQueryValue(messageId)
 
@@ -875,7 +875,7 @@ function replaceRouteTopic(topicId, messageId = '') {
   }
 
   const navigation = router.replace({
-    path: route.path || '/intelligent-query',
+    path: route.path || '/intelligent-query/chat',
     query,
   })
   if (navigation?.catch) {

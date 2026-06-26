@@ -37,7 +37,10 @@ export default defineConfig(() => {
   const isTest = process.env.VITEST === 'true'
 
   return {
-    base: './',
+    // Absolute base so hashed asset URLs resolve from the site root on any
+    // nested route (e.g. /intelligent-query/skills/:folder); a relative base
+    // breaks asset loading when such a route is refreshed directly.
+    base: '/',
     plugins: [
       vue(),
       {

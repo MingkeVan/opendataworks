@@ -1,32 +1,27 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const routerReplace = vi.hoisted(() => vi.fn())
+const routerPush = vi.hoisted(() => vi.fn())
 const routeState = vi.hoisted(() => ({
-  path: '/intelligent-query',
-  name: 'IntelligentQuery',
+  path: '/intelligent-query/chat',
+  name: 'IntelligentQueryChat',
   query: {},
-  params: {}
+  params: {},
+  meta: { tab: 'chat-v2' }
 }))
 
 vi.mock('vue-router', async (importOriginal) => ({
   ...(await importOriginal()),
   useRoute: () => routeState,
   useRouter: () => ({
-    replace: routerReplace
+    push: routerPush
   })
 }))
 
 import IntelligentQueryView from '../IntelligentQueryView.vue'
 
 const stubs = {
-  NL2SqlChatV2: { template: '<div data-test="nl2sql-chat-v2">Chat V2</div>' },
-  AgentStudio: { template: '<div data-test="agent-studio">智能体内容</div>' },
-  AgentDetailView: { template: '<div data-test="agent-detail">智能体详情</div>' },
-  SkillStudio: { template: '<div data-test="skill-studio">Skills 内容</div>' },
-  DataAgentConfig: { template: '<div data-test="dataagent-config">模型管理内容</div>' },
-  WidgetAccessConfig: { template: '<div data-test="widget-access">Widget 接入内容</div>' },
-  SkillDetailView: { template: '<div data-test="skill-detail">Skill 详情</div>' },
+  'router-view': { template: '<div data-test="router-view">routed content</div>' },
   'el-menu': {
     props: ['defaultActive'],
     emits: ['select'],
@@ -40,10 +35,11 @@ const stubs = {
 }
 
 const mountView = (route = {}) => {
-  routeState.path = route.path || '/intelligent-query'
-  routeState.name = route.name || 'IntelligentQuery'
+  routeState.path = route.path || '/intelligent-query/chat'
+  routeState.name = route.name || 'IntelligentQueryChat'
   routeState.query = route.query || {}
   routeState.params = route.params || {}
+  routeState.meta = route.meta || { tab: 'chat-v2' }
   return mount(IntelligentQueryView, {
     global: { stubs }
   })
@@ -51,93 +47,78 @@ const mountView = (route = {}) => {
 
 describe('IntelligentQueryView', () => {
   beforeEach(() => {
-    routerReplace.mockReset()
+    routerPush.mockReset()
   })
 
-  it('renders chat v2 by default', () => {
+  it('renders the routed child via router-view and highlights chat by default', () => {
     const wrapper = mountView()
 
-    expect(wrapper.find('[data-test="nl2sql-chat-v2"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="nl2sql-chat"]').exists()).toBe(false)
-    expect(wrapper.find('[data-test="skill-studio"]').exists()).toBe(false)
-    expect(wrapper.find('[data-test="agent-studio"]').exists()).toBe(false)
-    expect(wrapper.find('[data-test="dataagent-config"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="router-view"]').exists()).toBe(true)
     expect(wrapper.find('.el-menu-stub').attributes('data-active')).toBe('chat-v2')
     expect(wrapper.text()).toContain('Chat')
     expect(wrapper.text()).not.toContain('智能问数')
   })
 
-  it('treats the legacy chat tab as chat v2', () => {
-    const wrapper = mountView({ query: { tab: 'chat' } })
+  it('highlights the menu entry from the matched route meta', () => {
+    const wrapper = mountView({
+      path: '/intelligent-query/skills',
+      name: 'IntelligentQuerySkills',
+      meta: { tab: 'skills' }
+    })
 
-    expect(wrapper.find('[data-test="nl2sql-chat-v2"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="nl2sql-chat"]').exists()).toBe(false)
+    expect(wrapper.find('.el-menu-stub').attributes('data-active')).toBe('skills')
+  })
+
+  it('falls back to chat when the route meta has no tab', () => {
+    const wrapper = mountView({
+      path: '/intelligent-query/chat',
+      name: 'IntelligentQueryChat',
+      meta: {}
+    })
+
     expect(wrapper.find('.el-menu-stub').attributes('data-active')).toBe('chat-v2')
   })
 
-  it('renders Skills from the tab query and updates the query from menu selection', async () => {
-    const wrapper = mountView({ query: { tab: 'skills' } })
-
-    expect(wrapper.find('[data-test="skill-studio"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="nl2sql-chat-v2"]').exists()).toBe(false)
-    expect(wrapper.find('[data-test="nl2sql-chat"]').exists()).toBe(false)
-    expect(wrapper.find('.el-menu-stub').attributes('data-active')).toBe('skills')
+  it('navigates to the real route when a menu entry is selected', async () => {
+    const wrapper = mountView()
 
     await wrapper.vm.handleMenuSelect('models')
-    expect(routerReplace).toHaveBeenCalledWith({
-      path: '/intelligent-query',
-      query: { tab: 'models' }
+    expect(routerPush).toHaveBeenCalledWith('/intelligent-query/models')
+
+    await wrapper.vm.handleMenuSelect('skills')
+    expect(routerPush).toHaveBeenCalledWith('/intelligent-query/skills')
+  })
+
+  it('does not navigate when selecting the already active route', async () => {
+    const wrapper = mountView({
+      path: '/intelligent-query/models',
+      name: 'IntelligentQueryModels',
+      meta: { tab: 'models' }
     })
+
+    await wrapper.vm.handleMenuSelect('models')
+    expect(routerPush).not.toHaveBeenCalled()
   })
 
-  it('renders model management from the tab query', () => {
-    const wrapper = mountView({ query: { tab: 'models' } })
-
-    expect(wrapper.find('[data-test="dataagent-config"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="nl2sql-chat-v2"]').exists()).toBe(false)
-    expect(wrapper.find('[data-test="nl2sql-chat"]').exists()).toBe(false)
-    expect(wrapper.find('.el-menu-stub').attributes('data-active')).toBe('models')
-  })
-
-  it('renders widget access config from the tab query', () => {
-    const wrapper = mountView({ query: { tab: 'widget' } })
-
-    expect(wrapper.find('[data-test="widget-access"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="nl2sql-chat-v2"]').exists()).toBe(false)
-    expect(wrapper.find('[data-test="nl2sql-chat"]').exists()).toBe(false)
-    expect(wrapper.find('.el-menu-stub').attributes('data-active')).toBe('widget')
-  })
-
-  it('renders agent studio from the tab query', () => {
-    const wrapper = mountView({ query: { tab: 'agents' } })
-
-    expect(wrapper.find('[data-test="agent-studio"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="nl2sql-chat-v2"]').exists()).toBe(false)
-    expect(wrapper.find('[data-test="nl2sql-chat"]').exists()).toBe(false)
-    expect(wrapper.find('.el-menu-stub').attributes('data-active')).toBe('agents')
-  })
-
-  it('keeps Skills selected when rendering the skill detail route', () => {
+  it('keeps Skills highlighted on the skill detail route', () => {
     const wrapper = mountView({
       path: '/intelligent-query/skills/marketing-insights',
       name: 'IntelligentQuerySkillDetail',
-      params: { folder: 'marketing-insights' }
+      params: { folder: 'marketing-insights' },
+      meta: { tab: 'skills' }
     })
 
-    expect(wrapper.find('[data-test="skill-detail"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="skill-studio"]').exists()).toBe(false)
     expect(wrapper.find('.el-menu-stub').attributes('data-active')).toBe('skills')
   })
 
-  it('keeps agents selected when rendering the agent detail route', () => {
+  it('keeps 智能体 highlighted on the agent detail route', () => {
     const wrapper = mountView({
       path: '/intelligent-query/agents/agent_1',
       name: 'IntelligentQueryAgentDetail',
-      params: { agentId: 'agent_1' }
+      params: { agentId: 'agent_1' },
+      meta: { tab: 'agents' }
     })
 
-    expect(wrapper.find('[data-test="agent-detail"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="agent-studio"]').exists()).toBe(false)
     expect(wrapper.find('.el-menu-stub').attributes('data-active')).toBe('agents')
   })
 })

@@ -281,9 +281,6 @@ describe('SkillDetailView', () => {
     )
     expect(apiMocks.uninstallSkill).toHaveBeenCalledWith('marketing-insights')
     expect(messageMocks.success).toHaveBeenCalledWith('Skill「marketing-insights」已卸载')
-    expect(routerPush).toHaveBeenCalledWith({
-      path: '/intelligent-query',
-      query: { tab: 'skills' }
-    })
+    expect(routerPush).toHaveBeenCalledWith({ name: 'IntelligentQuerySkills' })
   })
 })
