@@ -219,7 +219,10 @@ const buildPieOption = (spec) => {
         radius: hasTitle ? (spec.donut ? ['40%', '62%'] : '60%') : (spec.donut ? ['44%', '70%'] : '68%'),
         center: hasTitle ? ['50%', '55%'] : ['50%', '52%'],
         avoidLabelOverlap: true,
-        label: { color: '#425466' },
+        // alignTo:'edge' pins outside labels to the container edge so a wide
+        // slice's label can't overflow and get truncated in the narrow widget
+        // panel; names stay on the chart (unlike inside-percentage labels).
+        label: { color: '#425466', alignTo: 'edge', edgeDistance: 6, minMargin: 4 },
         labelLine: { length: 12, length2: 8 },
         itemStyle: { borderColor: '#ffffff', borderWidth: 2 },
         data: spec.dataset.map((row) => ({
@@ -242,10 +245,12 @@ const buildTitleOption = (spec) => (spec.title
     }
   : undefined)
 
-const valueAxisOption = (name) => ({
+// Bar-family axes must start at 0 so bar length encodes value honestly;
+// line/scatter pass scale:true to zoom into the data range.
+const valueAxisOption = (name, scale = true) => ({
   type: 'value',
   name: name || '',
-  scale: true,
+  scale,
   axisLabel: { color: '#607185', fontSize: 11 },
   splitLine: { lineStyle: { color: '#eef3f8' } }
 })
@@ -270,9 +275,12 @@ const buildAxisOption = (spec) => {
     },
     axisLine: { lineStyle: { color: '#d7e4ef' } }
   }
-  const valueAxis = valueAxisOption(spec.unit)
+  // Bar/area/combo encode value by length, so their value axis starts at 0;
+  // line keeps scale:true to zoom into the trend range.
+  const startAtZero = spec.chart_type === 'bar' || isArea || isCombo
+  const valueAxis = valueAxisOption(spec.unit, !startAtZero)
   const yAxis = isCombo
-    ? [valueAxisOption(spec.series[0] ? spec.series[0].name : spec.unit), valueAxisOption('')]
+    ? [valueAxisOption(spec.series[0] ? spec.series[0].name : spec.unit, false), valueAxisOption('', false)]
     : (horizontal ? categoryAxis : valueAxis)
 
   return {

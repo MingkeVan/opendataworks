@@ -84,6 +84,9 @@ describe('chartSpec', () => {
     expect(parseFloat(series.center[1])).toBeGreaterThan(52)
     expect(parseFloat(series.radius)).toBeLessThan(68)
     expect(series.labelLine.length).toBeLessThan(15)
+    // alignTo:'edge' keeps a wide slice's outside label from overflowing/being
+    // truncated at the narrow panel edge.
+    expect(series.label.alignTo).toBe('edge')
   })
 
   it('shows every bar category label (rotated when crowded) instead of dropping them', () => {
@@ -113,6 +116,8 @@ describe('chartSpec', () => {
     expect(axisLabel.interval).toBe(0)
     expect(axisLabel.rotate).toBeGreaterThan(0)
     expect(axisLabel.fontSize).toBeLessThanOrEqual(11)
+    // Bars encode value by length, so the value axis must start at 0.
+    expect(renderModel.option.yAxis.scale).toBe(false)
   })
 
   it('keeps line/area x axes on auto label thinning so dense time series stay readable', () => {
@@ -130,6 +135,8 @@ describe('chartSpec', () => {
     // Forcing interval:0 here would cram 30 date labels; line charts keep auto.
     expect(renderModel.option.xAxis.axisLabel.interval).toBe('auto')
     expect(renderModel.option.xAxis.axisLabel.rotate).toBe(0)
+    // Lines keep scale:true to zoom into the trend range (unlike bars).
+    expect(renderModel.option.yAxis.scale).toBe(true)
   })
 
   it('builds table render models only when columns are explicit', () => {
