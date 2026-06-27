@@ -163,6 +163,67 @@ def test_can_use_tool_denies_after_persisted_denial(monkeypatch):
     assert writer.decisions == []
 
 
+def test_can_use_tool_exit_plan_mode_approved_switches_mode(monkeypatch):
+    # Under plan mode, ExitPlanMode pauses the run for approval. On allow it records
+    # a plan card, returns a setMode permission update (or dict fallback), and flips
+    # the in-run effective mode so subsequent draft writes auto-allow.
+    cb, writer, store = _build_gate(monkeypatch, "allow", mode="plan")
+    result = asyncio.run(cb("ExitPlanMode", {"plan": "1. 建表\n2. 发布"}))
+    assert _permission_behavior(result) == "allow"
+    assert len(writer.requests) == 1
+    req = writer.requests[0]
+    assert req["risk_level"] == "plan"
+    assert req["tool_name"] == "ExitPlanMode"
+    assert req["summary"] == "1. 建表\n2. 发布"
+    assert store.statuses == ["waiting_permission", "running"]
+
+    # After approval the same callback gates a draft write per acceptEdits: auto-allow
+    # without a new confirmation request, instead of plan-denying it.
+    result2 = asyncio.run(cb("mcp__portal__portal_create_task", {"task": {"name": "t"}}))
+    assert _permission_behavior(result2) == "allow"
+    assert len(writer.requests) == 1  # no extra confirmation recorded
+
+
+def test_can_use_tool_exit_plan_mode_denied(monkeypatch):
+    cb, writer, store = _build_gate(monkeypatch, "deny", mode="plan")
+    result = asyncio.run(cb("ExitPlanMode", {"plan": "草案"}))
+    assert _permission_behavior(result) == "deny"
+    assert writer.requests[0]["risk_level"] == "plan"
+    assert store.statuses == ["waiting_permission", "running"]
+
+    # Still in plan mode: a write tool is plan-denied outright (no confirmation).
+    result2 = asyncio.run(cb("mcp__portal__portal_create_task", {}))
+    assert _permission_behavior(result2) == "deny"
+    assert len(writer.requests) == 1
+
+
+def test_can_use_tool_plan_mode_denies_write_before_approval(monkeypatch):
+    cb, writer, store = _build_gate(monkeypatch, "allow", mode="plan")
+    result = asyncio.run(cb("mcp__portal__portal_create_task", {"summary": "建表"}))
+    assert _permission_behavior(result) == "deny"
+    assert writer.requests == []
+    assert store.statuses == []
+
+
+def test_can_use_tool_plan_mode_denies_builtin_file_writes(monkeypatch):
+    # Built-in Write/Edit/MultiEdit/NotebookEdit must be denied under plan, not
+    # auto-allowed via requires_confirmation==False.
+    cb, writer, store = _build_gate(monkeypatch, "allow", mode="plan")
+    for tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+        result = asyncio.run(cb(tool, {"file_path": "/ws/x", "content": "y"}))
+        assert _permission_behavior(result) == "deny", tool
+    assert writer.requests == []
+    assert store.statuses == []
+
+
+def test_can_use_tool_builtin_write_auto_allows_after_plan_approval(monkeypatch):
+    # After plan approval the run is acceptEdits, where built-in file edits auto-run.
+    cb, writer, store = _build_gate(monkeypatch, "allow", mode="plan")
+    asyncio.run(cb("ExitPlanMode", {"plan": "步骤"}))
+    result = asyncio.run(cb("Write", {"file_path": "/ws/x", "content": "y"}))
+    assert _permission_behavior(result) == "allow"
+
+
 def _build_ask_gate(monkeypatch, answers, *, mode="default"):
     writer = _RecordingWriter()
     store = _RecordingStore()

@@ -22,9 +22,11 @@ from core.ask_user_question import (
     wait_for_answer,
 )
 from core.permission_gate import (
+    is_exit_plan_mode,
     is_high_risk_tool,
     is_write_tool,
     plan_denies_tool,
+    post_plan_mode,
     requires_confirmation,
     strip_card_annotations,
 )
@@ -495,9 +497,30 @@ def _permission_result_types():
         return None, None
 
 
-def _allow_result(tool_input: dict[str, Any]):
+def _set_mode_permission_update(mode: str):
+    """Build a session-scoped ``setMode`` PermissionUpdate, or None if the SDK
+    type is unavailable. Returned to the SDK so approving ExitPlanMode switches
+    the run out of plan mode in place."""
+    try:
+        from claude_agent_sdk import PermissionUpdate
+
+        return PermissionUpdate(type="setMode", mode=mode, destination="session")
+    except Exception:
+        # 旧 SDK 可能没有 PermissionUpdate；裸 allow ExitPlanMode 也能退出 plan，
+        # effective_mode 翻转仍保证后续写工具按 post-plan 模式 gating。
+        logger.debug("PermissionUpdate unavailable; approving ExitPlanMode without setMode", exc_info=True)
+        return None
+
+
+def _allow_result(tool_input: dict[str, Any], updated_permissions: list | None = None):
     Allow, _ = _permission_result_types()
     if Allow is not None:
+        if updated_permissions:
+            try:
+                return Allow(updated_input=tool_input, updated_permissions=updated_permissions)
+            except Exception:
+                # updated_permissions 不被支持时退回普通 allow，不阻断放行
+                logger.debug("PermissionResultAllow(updated_permissions=...) failed, retrying without it", exc_info=True)
         try:
             return Allow(updated_input=tool_input)
         except Exception:
@@ -507,7 +530,15 @@ def _allow_result(tool_input: dict[str, Any]):
                 return Allow()
             except Exception:
                 logger.warning("PermissionResultAllow construction failed, using dict allow fallback", exc_info=True)
-    return {"behavior": "allow", "updatedInput": tool_input}
+    result = {"behavior": "allow", "updatedInput": tool_input}
+    if updated_permissions:
+        try:
+            result["updatedPermissions"] = [
+                p.to_dict() if hasattr(p, "to_dict") else p for p in updated_permissions
+            ]
+        except Exception:
+            logger.debug("updated_permissions to_dict fallback failed", exc_info=True)
+    return result
 
 
 def _deny_result(message: str):
@@ -579,7 +610,38 @@ def _build_can_use_tool_callback(
     the run: a permission_request block is recorded, the task moves to
     waiting_permission, and the run waits for the user's persisted decision before
     resuming. Plan-denied tools are rejected outright.
+
+    Under ``plan`` mode the model presents its plan via ``ExitPlanMode``; that call
+    pauses the run for approval just like a write confirmation. On approval the run
+    switches to :func:`post_plan_mode` (via an SDK setMode permission update) and
+    continues in place, so subsequent write tools are gated by the post-plan policy
+    instead of being plan-denied. ``effective_mode`` carries that switch.
     """
+
+    # Mutable so plan approval can switch the in-run policy from plan -> post-plan.
+    state = {"mode": permission_mode}
+
+    async def _wait_decision(*, request_id: str, tool_name: str, risk_level: str, title: str, summary: str, payload_preview: dict[str, Any]) -> str:
+        """Record a permission/plan request, park the task, and return the decision."""
+        try:
+            sdk_writer.append_permission_request(
+                request_id=request_id,
+                tool_name=tool_name,
+                risk_level=risk_level,
+                title=title,
+                summary=summary,
+                payload_preview=payload_preview,
+            )
+            store.set_task_status(task_id, "waiting_permission")
+        except Exception:
+            logger.exception("can_use_tool: failed to record permission request task_id=%s", task_id)
+            return "deny"
+        decision = await wait_for_decision(task_id, request_id, cancel_reason=cancel_reason)
+        try:
+            store.set_task_status(task_id, "running")
+        except Exception:
+            logger.exception("can_use_tool: failed to restore running status task_id=%s", task_id)
+        return decision
 
     async def can_use_tool(tool_name: str, tool_input: dict[str, Any] | None = None, context: Any = None):
         tool_input = dict(tool_input or {})
@@ -592,45 +654,50 @@ def _build_can_use_tool_callback(
                 task_id=task_id,
                 cancel_reason=cancel_reason,
             )
+
+        # Plan presentation: pause for the user to approve the plan, then leave plan
+        # mode in place. The plan text is read from the tool input and persisted as
+        # a plan card (risk_level="plan"); no plan file is involved.
+        if is_exit_plan_mode(tool_name):
+            plan_text = str(tool_input.get("plan") or tool_input.get("summary") or "").strip()
+            decision = await _wait_decision(
+                request_id=uuid.uuid4().hex,
+                tool_name=tool_name,
+                risk_level="plan",
+                title="请确认执行计划",
+                summary=plan_text,
+                payload_preview={"plan": plan_text},
+            )
+            if decision == "allow":
+                post_mode = post_plan_mode()
+                state["mode"] = post_mode
+                update = _set_mode_permission_update(post_mode)
+                return _allow_result(tool_input, updated_permissions=[update] if update else None)
+            return _deny_result("用户未批准该计划，请继续完善后再申请执行。")
+
+        effective_mode = state["mode"]
         # For write tools the skill may attach card-annotation keys (title/summary)
         # that no downstream tool schema accepts; the card reads them from the raw
         # input, but the forwarded input must drop them or the MCP call is rejected
         # after approval.
         forwarded_input = strip_card_annotations(tool_input) if is_write_tool(tool_name) else tool_input
-        if permission_mode == "plan" and plan_denies_tool(tool_name):
+        if effective_mode == "plan" and plan_denies_tool(tool_name):
             return _deny_result("当前为规划(plan)模式，不允许执行写操作。")
-        if not requires_confirmation(tool_name, permission_mode):
+        if not requires_confirmation(tool_name, effective_mode):
             return _allow_result(forwarded_input)
 
-        request_id = uuid.uuid4().hex
         bare = tool_name.split("__")[-1] if tool_name.startswith("mcp__") else tool_name
         summary = str(tool_input.get("summary") or "").strip()
         title = str(tool_input.get("title") or "").strip() or f"请确认操作:{bare}"
         risk_level = "critical" if is_high_risk_tool(tool_name) else "high"
-        try:
-            sdk_writer.append_permission_request(
-                request_id=request_id,
-                tool_name=tool_name,
-                risk_level=risk_level,
-                title=title,
-                summary=summary,
-                payload_preview=tool_input,
-            )
-            store.set_task_status(task_id, "waiting_permission")
-        except Exception:
-            logger.exception("can_use_tool: failed to record permission request task_id=%s", task_id)
-            return _deny_result("无法发起确认请求。")
-
-        decision = await wait_for_decision(
-            task_id,
-            request_id,
-            cancel_reason=cancel_reason,
+        decision = await _wait_decision(
+            request_id=uuid.uuid4().hex,
+            tool_name=tool_name,
+            risk_level=risk_level,
+            title=title,
+            summary=summary,
+            payload_preview=tool_input,
         )
-        try:
-            store.set_task_status(task_id, "running")
-        except Exception:
-            logger.exception("can_use_tool: failed to restore running status task_id=%s", task_id)
-
         if decision == "allow":
             return _allow_result(forwarded_input)
         return _deny_result("用户拒绝了该操作。")
@@ -922,20 +989,17 @@ async def _execute_task_stream_local(
     if ask_user_enabled and ASK_USER_QUESTION_TOOL_NAME not in allowed_tools:
         allowed_tools = [*allowed_tools, ASK_USER_QUESTION_TOOL_NAME]
 
-    # Gating fires when there are guardable write tools (portal MCP) and the
-    # session mode asks for confirmation; only then does the SDK run in "default"
-    # mode. The SDK permission mode is otherwise preserved as-is.
-    needs_gating = bool(mcp_servers) and logical_permission_mode in {"default", "acceptEdits"}
-    if needs_gating:
-        permission_mode = "default"
-    else:
-        permission_mode = _resolve_sdk_permission_mode(requested_permission_mode)
-    # The callback is installed for gating and/or AskUserQuestion. The built-in
-    # AskUserQuestion always resolves through can_use_tool (it requires user
-    # interaction), so installing the callback is sufficient regardless of mode;
-    # non-write tools are auto-allowed, keeping allowed_tools the capability boundary.
+    # The SDK permission mode mirrors the logical session mode 1:1 (only the root
+    # bypass fallback deviates), so the in-run can_use_tool gate fires reliably for
+    # plan/default/acceptEdits.
+    permission_mode = _resolve_sdk_permission_mode(logical_permission_mode)
+    # Install the callback whenever it has work to do: guardable write tools to
+    # confirm, AskUserQuestion to resolve, or plan mode (to gate ExitPlanMode and
+    # plan-deny writes). Non-write tools auto-allow inside it; allowed_tools remains
+    # the auto-allow fast-path.
+    needs_gating = bool(mcp_servers) and logical_permission_mode in {"default", "acceptEdits", "plan"}
     can_use_tool = None
-    if needs_gating or ask_user_enabled:
+    if needs_gating or ask_user_enabled or logical_permission_mode == "plan":
         can_use_tool = _build_can_use_tool_callback(
             sdk_writer=sdk_writer,
             store=get_topic_task_store(),

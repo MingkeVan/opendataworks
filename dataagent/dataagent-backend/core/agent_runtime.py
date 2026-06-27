@@ -491,15 +491,17 @@ def _is_running_as_root() -> bool:
 
 
 def _resolve_sdk_permission_mode(permission_mode: str | None = None) -> str:
-    # Per-mode enforcement is handled by the mounted allowed_tools set. MCP write
-    # tools requiring confirmation are withheld because SDK can_use_tool is not a
-    # reliable gate for those calls.
-    normalize_permission_mode(permission_mode)
-    if _is_running_as_root():
-        # Claude Code rejects bypassPermissions under root/sudo. Fall back to the
-        # standard mode and rely on allowed_tools for the read-only + script path.
+    # The SDK permission mode mirrors the logical session mode 1:1 so that the
+    # in-run gate (can_use_tool) actually fires for plan/default/acceptEdits.
+    # The only deviation is the root fallback below.
+    mode = normalize_permission_mode(permission_mode)
+    if mode == "bypassPermissions" and _is_running_as_root():
+        # Claude Code rejects bypassPermissions under root/sudo, and the sandbox
+        # runner runs as uid 0 by default (it needs the mounted docker socket to
+        # spawn per-session containers). Degrade only this one mode to the
+        # standard gated mode; plan/default/acceptEdits are unaffected.
         return "default"
-    return "bypassPermissions"
+    return mode
 
 
 def _build_portal_mcp_servers(
@@ -551,10 +553,12 @@ def _build_allowed_tools(
         tool_names = list(PORTAL_MCP_TOOL_NAMES) + sorted(WRITE_TOOL_NAMES)
         for tool_name in tool_names:
             qualified = f"mcp__{PORTAL_MCP_SERVER_NAME}__{tool_name}"
-            # SDK can_use_tool is not a reliable gate for MCP write tools, so the
-            # mounted tool set remains the hard capability boundary. Tools that
-            # would require confirmation in the current mode are withheld rather
-            # than exposed and then approved later.
+            # allowed_tools is the auto-allow fast-path. Tools that would need
+            # confirmation (or are plan-denied) in the current mode are left out so
+            # they route through can_use_tool instead of auto-running. Now that the
+            # SDK permission mode mirrors the logical mode, that callback fires
+            # reliably for plan/default/acceptEdits; under bypassPermissions nothing
+            # requires confirmation, so all write tools stay auto-allowed.
             if (mode == "plan" and plan_denies_tool(qualified)) or requires_confirmation(qualified, mode):
                 continue
             allowed.append(qualified)
