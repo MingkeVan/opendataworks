@@ -205,6 +205,25 @@ def test_can_use_tool_plan_mode_denies_write_before_approval(monkeypatch):
     assert store.statuses == []
 
 
+def test_can_use_tool_plan_mode_denies_builtin_file_writes(monkeypatch):
+    # Built-in Write/Edit/MultiEdit/NotebookEdit must be denied under plan, not
+    # auto-allowed via requires_confirmation==False.
+    cb, writer, store = _build_gate(monkeypatch, "allow", mode="plan")
+    for tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+        result = asyncio.run(cb(tool, {"file_path": "/ws/x", "content": "y"}))
+        assert _permission_behavior(result) == "deny", tool
+    assert writer.requests == []
+    assert store.statuses == []
+
+
+def test_can_use_tool_builtin_write_auto_allows_after_plan_approval(monkeypatch):
+    # After plan approval the run is acceptEdits, where built-in file edits auto-run.
+    cb, writer, store = _build_gate(monkeypatch, "allow", mode="plan")
+    asyncio.run(cb("ExitPlanMode", {"plan": "步骤"}))
+    result = asyncio.run(cb("Write", {"file_path": "/ws/x", "content": "y"}))
+    assert _permission_behavior(result) == "allow"
+
+
 def _build_ask_gate(monkeypatch, answers, *, mode="default"):
     writer = _RecordingWriter()
     store = _RecordingStore()

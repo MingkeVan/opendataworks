@@ -79,6 +79,16 @@ DataAgent 的会话权限模式(`default` / `acceptEdits` / `plan` / `bypassPerm
 `post_plan_mode` 选 `acceptEdits` 而非 `default`:用户已批准整份计划,不应再对每个草稿写
 逐条确认;高危发布/上线仍保留确认。该取舍集中在 `core/permission_gate.POST_PLAN_MODE`。
 
+### plan-deny 覆盖范围(防御纵深)
+
+`plan_denies_tool` 覆盖两类:portal MCP 写工具,以及内置文件写工具
+`PLAN_DENIED_BUILTIN_TOOLS = {Write, Edit, MultiEdit, NotebookEdit}`。后者虽不在
+`allowed_tools` 自动放行集中,但模型仍可能调用;若仅靠 `requires_confirmation(...,"plan")`
+会得到 `False` 而被直接放行,违背"只读出计划"承诺,故在 plan 模式显式 deny;批准后切到
+`acceptEdits` 时这些工具自动放行。`Bash` 不纳入 plan-deny:它在 `allowed_tools` 中由 SDK
+上游自动放行(回调无法拦截),是只读研究的必经路径(skill 脚本、只读 SQL),且被工作区
+边界 hook 限定在临时 per-topic 工作区,平台级写入只走 MCP(已 plan-deny)。
+
 ### root 兜底(保留,非投机分支)
 
 `_resolve_sdk_permission_mode` 改为恒等映射,**仅** `bypassPermissions` 在 root 下降级

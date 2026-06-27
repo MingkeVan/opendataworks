@@ -45,6 +45,15 @@ def test_plan_denies_writes_and_never_confirms() -> None:
     assert pg.plan_denies_tool(READ) is False
 
 
+def test_plan_denies_builtin_file_write_tools() -> None:
+    # Built-in file-mutation tools must be plan-denied, not silently allowed.
+    for tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+        assert pg.plan_denies_tool(tool) is True
+    # Read-only research tools and Bash stay allowed under plan.
+    for tool in ("Read", "LS", "Glob", "Grep", "Bash", "Skill"):
+        assert pg.plan_denies_tool(tool) is False
+
+
 def test_legacy_mode_normalizes_to_default() -> None:
     # legacy 'inherit' / unknown -> default policy
     assert pg.requires_confirmation(CREATE_TASK, "inherit") is True

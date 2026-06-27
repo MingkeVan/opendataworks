@@ -41,6 +41,13 @@ DRAFT_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
 
 WRITE_TOOL_NAMES: frozenset[str] = HIGH_RISK_TOOL_NAMES | DRAFT_WRITE_TOOL_NAMES
 
+# Built-in (non-MCP) Claude Code tools that mutate files. Denied under plan so the
+# read-only-until-approved promise holds even though they are never auto-allowed;
+# after plan approval the run switches to acceptEdits, where they auto-allow.
+PLAN_DENIED_BUILTIN_TOOLS: frozenset[str] = frozenset(
+    {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+)
+
 # The built-in plan tool the model calls to present its plan and request approval
 # to leave plan mode. It is not MCP-qualified.
 EXIT_PLAN_MODE_TOOL_NAME: str = "ExitPlanMode"
@@ -105,9 +112,19 @@ def is_high_risk_tool(tool_name: str) -> bool:
 
 
 def plan_denies_tool(tool_name: str) -> bool:
-    """Under ``plan`` no write tool may run (defense in depth alongside the
-    runtime not mounting them)."""
-    return is_write_tool(tool_name)
+    """Whether ``tool_name`` must be denied under ``plan`` mode.
+
+    Covers portal MCP write tools and the built-in file-mutation tools
+    (``PLAN_DENIED_BUILTIN_TOOLS``). Defense in depth: these are not in the
+    auto-allow set, but if the model invokes one it must not run before the plan is
+    approved; after approval the run switches to acceptEdits where they auto-allow.
+
+    ``Bash`` is deliberately not denied: it is the read-only research vector (skill
+    scripts, read-only SQL), is confined to the ephemeral per-topic workspace by the
+    runtime boundary hook, and cannot mutate platform state (which is MCP-only and
+    already covered above)."""
+    bare = _bare_tool_name(tool_name)
+    return bare in WRITE_TOOL_NAMES or bare in PLAN_DENIED_BUILTIN_TOOLS
 
 
 def requires_confirmation(tool_name: str, permission_mode: str | None) -> bool:
