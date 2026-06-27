@@ -11,14 +11,14 @@ const LEGACY_TAB_TO_SEGMENT = {
   widget: 'widget'
 }
 
-const redirectLegacyTab = (to) => {
+export const redirectLegacyTab = (to) => {
   const tab = String(to.query.tab || '')
   const segment = LEGACY_TAB_TO_SEGMENT[tab] || 'chat'
   const { tab: _omitTab, ...query } = to.query
   return { path: `/intelligent-query/${segment}`, query, hash: to.hash }
 }
 
-const routes = [
+export const routes = [
   {
     path: '/',
     redirect: '/intelligent-query/chat'
@@ -78,12 +78,16 @@ const routes = [
   },
   {
     path: '/nl2sql',
-    redirect: (to) => ({ path: '/intelligent-query/chat', query: to.query, hash: to.hash })
+    // Reuse the legacy tab mapping so /nl2sql?tab=skills lands on the matching
+    // section (and drops the now-unused tab param) instead of always Chat.
+    redirect: redirectLegacyTab
   }
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  // Keep the router base in sync with the Vite base so the app works under the
+  // production `/dataagent/` prefix as well as any overridden mount point.
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes
 })
 
