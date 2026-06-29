@@ -68,6 +68,8 @@ No shared portal-side widget loader module is introduced. The two host component
 
 The root deployment gains a `dataagent-frontend` service. The main portal Nginx proxies `/dataagent/` to that service, so the default widget URL remains same-origin for production and offline deployments.
 
+> 更新（2026-06-29）：部署契约已收窄。主门户 Nginx 仅反代 `/dataagent/widget/`（widget bundle 保持同源），DataAgent 完整前端改为经 `dataagent-frontend`（:8901）根路径直接访问，不再整站代理 `/dataagent/`。配套地，`dataagent-frontend` 的 Vite `base` 默认为 `/`（可经 `DATAAGENT_BASE_PATH` 覆盖），以支持根路径下的深链刷新。
+
 DataAgent frontend Nginx proxies existing DataAgent API routes to `dataagent-backend` and preserves streaming proxy settings for `/api/v1/nl2sql/`.
 
 ## Tradeoffs
