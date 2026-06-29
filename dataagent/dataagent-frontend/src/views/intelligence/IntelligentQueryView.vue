@@ -38,13 +38,7 @@
     </aside>
 
     <main class="intelligent-query-content" :class="{ 'is-chat': activeMenu === 'chat-v2' }">
-      <SkillDetailView v-if="isSkillDetailRoute" />
-      <AgentDetailView v-else-if="isAgentDetailRoute" />
-      <AgentStudio v-else-if="activeTab === 'agents'" />
-      <SkillStudio v-else-if="activeTab === 'skills'" />
-      <DataAgentConfig v-else-if="activeTab === 'models'" />
-      <WidgetAccessConfig v-else-if="activeTab === 'widget'" />
-      <NL2SqlChatV2 v-else />
+      <router-view />
     </main>
   </div>
 </template>
@@ -53,52 +47,34 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Collection, Cpu, MagicStick, Monitor, User } from '@element-plus/icons-vue'
-import NL2SqlChatV2 from './NL2SqlChatV2.vue'
-import AgentStudio from './AgentStudio.vue'
-import AgentDetailView from './AgentDetailView.vue'
-import SkillStudio from '../settings/SkillStudio.vue'
-import DataAgentConfig from '../settings/DataAgentConfig.vue'
-import WidgetAccessConfig from '../settings/WidgetAccessConfig.vue'
-import SkillDetailView from '../settings/SkillDetailView.vue'
 
 const route = useRoute()
 const router = useRouter()
-const validTabs = new Set(['chat-v2', 'skills', 'agents', 'models', 'widget'])
+
+// Each menu entry maps to a real child route under /intelligent-query.
+const MENU_TO_PATH = {
+  'chat-v2': '/intelligent-query/chat',
+  skills: '/intelligent-query/skills',
+  agents: '/intelligent-query/agents',
+  models: '/intelligent-query/models',
+  widget: '/intelligent-query/widget'
+}
 
 const brandLogo = `${import.meta.env.BASE_URL}opendataworks-icon.svg`
 
-const isSkillDetailRoute = computed(() => (
-  route.name === 'IntelligentQuerySkillDetail' || route.path.startsWith('/intelligent-query/skills/')
-))
-
-const isAgentDetailRoute = computed(() => (
-  route.name === 'IntelligentQueryAgentDetail' || route.path.startsWith('/intelligent-query/agents/')
-))
-
-const activeTab = computed(() => {
-  if (isSkillDetailRoute.value) {
-    return 'skills'
-  }
-  if (isAgentDetailRoute.value) {
-    return 'agents'
-  }
-  const tab = String(route.query.tab || 'chat-v2')
-  return validTabs.has(tab) ? tab : 'chat-v2'
+// The active menu follows the matched route's meta.tab, so it stays correct on
+// direct navigation and on refresh of detail routes (e.g. skill/agent detail).
+const activeMenu = computed(() => {
+  const tab = String(route.meta?.tab || '')
+  return MENU_TO_PATH[tab] ? tab : 'chat-v2'
 })
 
-const activeMenu = computed(() => activeTab.value)
-
 const handleMenuSelect = (index) => {
-  const tab = validTabs.has(index) ? index : 'chat-v2'
-  if (tab === activeTab.value && !isSkillDetailRoute.value) {
+  const path = MENU_TO_PATH[index] || MENU_TO_PATH['chat-v2']
+  if (route.path === path) {
     return
   }
-
-  router.replace({
-    path: '/intelligent-query',
-    query: tab === 'chat-v2' ? {} : { tab }
-  })
-
+  router.push(path)
 }
 </script>
 

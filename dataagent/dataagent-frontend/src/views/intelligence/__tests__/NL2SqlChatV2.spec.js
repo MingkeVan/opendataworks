@@ -24,8 +24,8 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 const routeState = vi.hoisted(() => ({
-  path: '/intelligent-query',
-  name: 'IntelligentQuery',
+  path: '/intelligent-query/chat',
+  name: 'IntelligentQueryChat',
   query: {},
   params: {}
 }))
@@ -216,8 +216,8 @@ describe('NL2SqlChatV2 URL location', () => {
       topic_id: '', page: 1, page_size: 500, order: 'asc', total: 0, items: []
     })
 
-    routeState.path = '/intelligent-query'
-    routeState.name = 'IntelligentQuery'
+    routeState.path = '/intelligent-query/chat'
+    routeState.name = 'IntelligentQueryChat'
     routeState.query = {}
     routeState.params = {}
 
@@ -266,7 +266,6 @@ describe('NL2SqlChatV2 URL location', () => {
       value: scrollIntoView
     })
     routeState.query = {
-      tab: 'chat-v2',
       topic_id: 'topic-2',
       message_id: 'a2'
     }
@@ -318,7 +317,6 @@ describe('NL2SqlChatV2 URL location', () => {
 
   it('surfaces the error card when reloading a failed (status=error) assistant message', async () => {
     routeState.query = {
-      tab: 'chat-v2',
       topic_id: 'topic-3'
     }
 
@@ -335,7 +333,6 @@ describe('NL2SqlChatV2 URL location', () => {
 
   it('retries the failed question from the error card and continues the conversation', async () => {
     routeState.query = {
-      tab: 'chat-v2',
       topic_id: 'topic-3'
     }
     apiMocks.taskApi.deliverMessage.mockResolvedValue({ task_id: 'task-retry' })
@@ -407,7 +404,6 @@ describe('NL2SqlChatV2 URL location', () => {
       ]
     }))
     routeState.query = {
-      tab: 'chat-v2',
       topic_id: 'topic-1'
     }
 
@@ -425,7 +421,6 @@ describe('NL2SqlChatV2 URL location', () => {
 
   it('writes the selected topic to the URL and clears the previous message target', async () => {
     routeState.query = {
-      tab: 'chat-v2',
       topic_id: 'topic-1',
       message_id: 'a1'
     }
@@ -442,9 +437,8 @@ describe('NL2SqlChatV2 URL location', () => {
       order: 'asc'
     })
     expect(routerReplace).toHaveBeenLastCalledWith({
-      path: '/intelligent-query',
+      path: '/intelligent-query/chat',
       query: {
-        tab: 'chat-v2',
         topic_id: 'topic-2'
       }
     })
@@ -452,7 +446,6 @@ describe('NL2SqlChatV2 URL location', () => {
 
   it('clears the active conversation and removes stale topic query when switching assistants', async () => {
     routeState.query = {
-      tab: 'chat-v2',
       agent_id: 'agent_default',
       topic_id: 'topic-1',
       message_id: 'a1'
@@ -483,9 +476,8 @@ describe('NL2SqlChatV2 URL location', () => {
     expect(wrapper.text()).not.toContain('first answer')
     expect(wrapper.find('.v2-session-item.active').exists()).toBe(false)
     expect(routerReplace).toHaveBeenLastCalledWith({
-      path: '/intelligent-query',
+      path: '/intelligent-query/chat',
       query: {
-        tab: 'chat-v2',
         agent_id: 'agent_sales'
       }
     })
@@ -613,7 +605,7 @@ describe('NL2SqlChatV2 URL location', () => {
       opts.onRecord({ record_type: 'stream', data: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'resumed stream' } } })
       return new Promise((resolve) => { resolveStream = resolve })
     })
-    routeState.query = { tab: 'chat-v2', topic_id: 'topic-run' }
+    routeState.query = { topic_id: 'topic-run' }
 
     const wrapper = mountChat()
     await flushPromises()
@@ -655,7 +647,7 @@ describe('NL2SqlChatV2 URL location', () => {
     }))
     // Resume re-attaches but the backend has produced nothing yet (still waiting).
     apiMocks.taskApi.streamSdkEvents.mockImplementation(() => new Promise((resolve) => { resolveStream = resolve }))
-    routeState.query = { tab: 'chat-v2', topic_id: 'topic-run' }
+    routeState.query = { topic_id: 'topic-run' }
 
     const wrapper = mountChat()
     await flushPromises()
@@ -696,7 +688,7 @@ describe('NL2SqlChatV2 URL location', () => {
       opts.onRecord({ record_type: 'stream', data: { type: 'content_block_stop', index: 0 } })
       return new Promise((resolve) => { resolveStream = resolve })
     })
-    routeState.query = { tab: 'chat-v2', topic_id: 'topic-run' }
+    routeState.query = { topic_id: 'topic-run' }
 
     const wrapper = mountChat()
     await flushPromises()
@@ -718,7 +710,7 @@ describe('NL2SqlChatV2 URL location', () => {
   })
 
   it('forwards the selected assistant to the widget topic query', async () => {
-    routeState.query = { tab: 'chat-v2', agent_id: 'agent_sales' }
+    routeState.query = { agent_id: 'agent_sales' }
     const wrapper = mountChat()
 
     await flushPromises()

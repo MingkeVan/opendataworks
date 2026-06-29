@@ -299,10 +299,7 @@ const notifyError = (error, fallbackMessage) => {
 }
 
 const goBack = () => {
-  router.push({
-    path: '/intelligent-query',
-    query: { tab: 'skills' }
-  })
+  router.push({ name: 'IntelligentQuerySkills' })
 }
 
 const loadDocument = async (documentId) => {

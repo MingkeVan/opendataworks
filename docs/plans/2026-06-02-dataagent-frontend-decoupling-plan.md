@@ -19,6 +19,7 @@ Split the intelligent-query frontend into `dataagent/dataagent-frontend` and mak
    - add `opendataworks-dataagent-frontend` image configuration
    - add `dataagent-frontend` service to dev and prod Compose
    - proxy `/dataagent/` from main frontend Nginx to `dataagent-frontend`
+     （更新 2026-06-29：已收窄为仅代理 `/dataagent/widget/`；DataAgent 完整前端经 `dataagent-frontend` / :8901 根路径直接访问，Vite `base` 默认 `/`）
    - update build scripts, offline packaging, image loading, `.env.example`, and deployment docs
 7. Verify:
    - DataAgent frontend tests and builds

@@ -36,8 +36,16 @@ const manualChunks = (id) => {
 export default defineConfig(() => {
   const isTest = process.env.VITEST === 'true'
 
+  // Absolute base so hashed asset URLs resolve from the server root on any
+  // nested route (e.g. /intelligent-query/skills/:folder) even when refreshed
+  // directly. The app is served standalone at the container root (published on
+  // :8901), so '/' is the default; override via DATAAGENT_BASE_PATH (e.g.
+  // '/dataagent/') when mounting under a path prefix. A relative base ('./')
+  // instead breaks asset loading on deep-route refresh.
+  const base = process.env.DATAAGENT_BASE_PATH || '/'
+
   return {
-    base: './',
+    base,
     plugins: [
       vue(),
       {

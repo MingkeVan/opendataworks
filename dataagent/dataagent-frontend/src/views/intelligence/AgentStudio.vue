@@ -107,7 +107,7 @@ const handleDetail = (agent) => {
 
 const handleChat = (agent) => {
   router.push({
-    path: '/intelligent-query',
+    path: '/intelligent-query/chat',
     query: { agent_id: agent.agent_id }
   })
 }

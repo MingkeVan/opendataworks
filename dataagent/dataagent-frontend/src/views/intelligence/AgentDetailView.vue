@@ -335,11 +335,11 @@ const handleSave = async () => {
 }
 
 const goBack = () => {
-  router.push({ path: '/intelligent-query', query: { tab: 'agents' } })
+  router.push({ name: 'IntelligentQueryAgents' })
 }
 
 const openChat = () => {
-  router.push({ path: '/intelligent-query', query: { agent_id: form.agent_id } })
+  router.push({ path: '/intelligent-query/chat', query: { agent_id: form.agent_id } })
 }
 
 onMounted(loadDetail)

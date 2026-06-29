@@ -81,10 +81,13 @@ export default defineConfig(() => {
     server: {
       port: 3000,
       proxy: {
-        '/dataagent': {
+        // Only the DataAgent widget bundle is served through the portal origin
+        // (matching production nginx). The full DataAgent app is accessed
+        // directly at the dataagent-frontend dev server (:3001), not proxied.
+        '/dataagent/widget': {
           target: 'http://localhost:3001',
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/dataagent/, '') || '/'
+          rewrite: (path) => path.replace(/^\/dataagent/, '')
         },
         '/api/v1/dataagent': {
           target: 'http://localhost:8900',
