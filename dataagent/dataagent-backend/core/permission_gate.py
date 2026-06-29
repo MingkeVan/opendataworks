@@ -120,9 +120,13 @@ def plan_denies_tool(tool_name: str) -> bool:
     approved; after approval the run switches to acceptEdits where they auto-allow.
 
     ``Bash`` is deliberately not denied: it is the read-only research vector (skill
-    scripts, read-only SQL), is confined to the ephemeral per-topic workspace by the
-    runtime boundary hook, and cannot mutate platform state (which is MCP-only and
-    already covered above)."""
+    scripts, read-only SQL) and is auto-allowed upstream via ``allowed_tools`` (the
+    callback never sees it), and its filesystem writes are confined to the ephemeral
+    per-topic workspace by the runtime boundary hook. This is an accepted trust
+    boundary, not a hard guarantee: the sandbox forwards DB/portal credentials
+    (``MYSQL_`` / ``DATAAGENT_PORTAL_`` / ``ODW_`` env) into the child, so Bash could
+    in principle reach platform state outside the gated MCP path. Plan mode relies on
+    the model honoring read-only research here rather than on Bash being incapable."""
     bare = _bare_tool_name(tool_name)
     return bare in WRITE_TOOL_NAMES or bare in PLAN_DENIED_BUILTIN_TOOLS
 

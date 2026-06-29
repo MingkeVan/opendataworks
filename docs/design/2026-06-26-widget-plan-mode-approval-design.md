@@ -86,8 +86,11 @@ DataAgent 的会话权限模式(`default` / `acceptEdits` / `plan` / `bypassPerm
 `allowed_tools` 自动放行集中,但模型仍可能调用;若仅靠 `requires_confirmation(...,"plan")`
 会得到 `False` 而被直接放行,违背"只读出计划"承诺,故在 plan 模式显式 deny;批准后切到
 `acceptEdits` 时这些工具自动放行。`Bash` 不纳入 plan-deny:它在 `allowed_tools` 中由 SDK
-上游自动放行(回调无法拦截),是只读研究的必经路径(skill 脚本、只读 SQL),且被工作区
-边界 hook 限定在临时 per-topic 工作区,平台级写入只走 MCP(已 plan-deny)。
+上游自动放行(回调无法拦截),是只读研究的必经路径(skill 脚本、只读 SQL),文件写入被
+工作区边界 hook 限定在临时 per-topic 工作区。这是一条**可接受的信任边界,而非硬保证**:
+sandbox 会把 DB/portal 凭证(`MYSQL_` / `DATAAGENT_PORTAL_` / `ODW_` 等 env,见
+`sandbox_runner_main.py:_FORWARDED_ENV_PREFIXES`)转发进子进程,Bash 理论上可绕过受控的
+MCP 路径直达平台状态;plan 阶段依赖模型遵守只读研究,而非 Bash 本身不可写。
 
 ### root 兜底(保留,非投机分支)
 
