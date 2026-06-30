@@ -274,7 +274,7 @@
                 title="Session permission mode"
                 @change="changePermissionMode($event.target.value)"
               >
-                <option v-for="opt in PERMISSION_MODE_OPTIONS" :key="opt.value" :value="opt.value" :title="opt.desc || ''">
+                <option v-for="opt in PERMISSION_MODE_OPTIONS" :key="opt.value" :value="opt.value">
                   {{ opt.label }}
                 </option>
               </select>
@@ -354,10 +354,10 @@ const agentName = ref('智能数据助手')
 const suggestions = computed(() => agentPresetQuestions.value.length ? agentPresetQuestions.value : DEFAULT_SUGGESTIONS)
 const permissionMode = ref('default')
 const PERMISSION_MODE_OPTIONS = [
-  { value: 'default', label: 'Default', desc: 'Confirm before every write action' },
-  { value: 'acceptEdits', label: 'Accept edits', desc: 'Auto-run draft writes, still confirm publish' },
-  { value: 'plan', label: 'Plan mode', desc: 'Read-only plan first, run after approval' },
-  { value: 'bypassPermissions', label: 'Bypass permissions', desc: 'Auto-run everything, no confirmation' },
+  { value: 'default', label: 'Default' },
+  { value: 'acceptEdits', label: 'Accept edits' },
+  { value: 'plan', label: 'Plan mode' },
+  { value: 'bypassPermissions', label: 'Bypass permissions' },
 ]
 
 // widget-only UI state
