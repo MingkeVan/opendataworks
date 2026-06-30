@@ -271,16 +271,16 @@
                 :value="permissionMode"
                 class="query-model-select query-permission-select"
                 :disabled="isBusy"
-                title="会话权限模式"
+                title="Session permission mode"
                 @change="changePermissionMode($event.target.value)"
               >
                 <option v-for="opt in PERMISSION_MODE_OPTIONS" :key="opt.value" :value="opt.value" :title="opt.desc || ''">
-                  {{ opt.desc ? `${opt.label} · ${opt.desc}` : opt.label }}
+                  {{ opt.label }}
                 </option>
               </select>
             </div>
             <div class="query-model-selector">
-              <select v-model="selectedModel" class="query-model-select" :disabled="!availableModels.length || isBusy" title="切换模型">
+              <select v-model="selectedModel" class="query-model-select" :disabled="!availableModels.length || isBusy" title="Switch model">
                 <option v-for="modelName in availableModels" :key="modelName" :value="modelName">{{ modelName }}</option>
               </select>
             </div>
@@ -354,10 +354,10 @@ const agentName = ref('智能数据助手')
 const suggestions = computed(() => agentPresetQuestions.value.length ? agentPresetQuestions.value : DEFAULT_SUGGESTIONS)
 const permissionMode = ref('default')
 const PERMISSION_MODE_OPTIONS = [
-  { value: 'default', label: 'Default', desc: '每次写操作前都需确认' },
-  { value: 'acceptEdits', label: 'Accept edits', desc: '草稿写自动执行，发布/上线仍确认' },
-  { value: 'plan', label: 'Plan mode', desc: '先只读出计划，批准后再执行' },
-  { value: 'bypassPermissions', label: 'Bypass permissions', desc: '全部自动执行，不再确认' },
+  { value: 'default', label: 'Default', desc: 'Confirm before every write action' },
+  { value: 'acceptEdits', label: 'Accept edits', desc: 'Auto-run draft writes, still confirm publish' },
+  { value: 'plan', label: 'Plan mode', desc: 'Read-only plan first, run after approval' },
+  { value: 'bypassPermissions', label: 'Bypass permissions', desc: 'Auto-run everything, no confirmation' },
 ]
 
 // widget-only UI state

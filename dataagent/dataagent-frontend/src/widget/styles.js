@@ -1103,26 +1103,53 @@ export const WIDGET_STYLES = `
 }
 
 .query-model-select {
-  height: 24px;
-  padding: 0 6px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: #8a96a6;
+  height: 26px;
+  padding: 0 26px 0 11px;
+  border: 1px solid #e3e7ee;
+  border-radius: 13px;
+  background-color: #f6f7f9;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238a96a6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 10px 10px;
+  color: #5a6573;
   font: inherit;
   font-size: 11px;
+  font-weight: 500;
+  line-height: 24px;
   outline: none;
-  max-width: 120px;
+  max-width: 150px;
   cursor: pointer;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  text-overflow: ellipsis;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .query-permission-select {
-  max-width: 92px;
+  max-width: 150px;
+  color: #4f76d6;
+  background-color: #eef3fd;
+  border-color: #d8e3fb;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%234f76d6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
 }
 
 .query-model-select:hover {
-  background: #eef1f5;
-  color: #4a5568;
+  background-color: #eef1f5;
+  border-color: #d3d9e2;
+  color: #3a4456;
+}
+
+.query-permission-select:hover {
+  background-color: #e3ecfc;
+  border-color: #c4d6f9;
+  color: #3d63c4;
+}
+
+.query-model-select:focus-visible {
+  border-color: #b9c6e8;
+  box-shadow: 0 0 0 2px rgba(79, 118, 214, 0.15);
 }
 
 .query-model-select:disabled {
