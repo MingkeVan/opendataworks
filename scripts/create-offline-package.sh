@@ -236,6 +236,8 @@ rewrite_offline_env_file() {
         -e "s|^OPENDATAWORKS_PORTAL_MCP_IMAGE=.*|OPENDATAWORKS_PORTAL_MCP_IMAGE=opendataworks-portal-mcp:${PARSER_TAG}|" \
         -e "s|^DATAAGENT_LLM_JSON_FILE=.*|DATAAGENT_LLM_JSON_FILE=./dataagent-runtime/settings.json|" \
         -e "s|^DATAAGENT_SKILLS_DIR=.*|DATAAGENT_SKILLS_DIR=./dataagent-runtime/skills|" \
+        -e "s|^# *DATAAGENT_SANDBOX_MODE=.*|DATAAGENT_SANDBOX_MODE=container|" \
+        -e "s|^DATAAGENT_SANDBOX_MODE=.*|DATAAGENT_SANDBOX_MODE=container|" \
         "$env_file" > "${env_file}.tmp" && mv "${env_file}.tmp" "$env_file"
 
     grep -q '^OPENDATAWORKS_BACKEND_IMAGE=' "$env_file" 2>/dev/null || \
@@ -258,6 +260,10 @@ rewrite_offline_env_file() {
         echo "DATAAGENT_LLM_JSON_FILE=./dataagent-runtime/settings.json" >> "$env_file"
     grep -q '^DATAAGENT_SKILLS_DIR=' "$env_file" 2>/dev/null || \
         echo "DATAAGENT_SKILLS_DIR=./dataagent-runtime/skills" >> "$env_file"
+    # 离线包默认开启 sandbox 容器模式（每个 task 由 sandbox runner 启动独立 child 容器执行），
+    # 源码部署仍以 .env.example 中的空值（关闭）为默认，二者不混淆。
+    grep -q '^DATAAGENT_SANDBOX_MODE=' "$env_file" 2>/dev/null || \
+        echo "DATAAGENT_SANDBOX_MODE=container" >> "$env_file"
 }
 
 rewrite_offline_env_file "$PACKAGED_DEPLOY_DIR/.env"
