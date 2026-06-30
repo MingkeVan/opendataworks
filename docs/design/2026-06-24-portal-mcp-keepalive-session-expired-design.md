@@ -29,7 +29,9 @@ MCP server "portal" session expired
 - 无状态模式下每个请求新建一次性 transport（`mcp_session_id=None`），不跟踪、不校验、不淘汰 session，因此**不会**返回 `404 Session not found`。
 - 即便返回 `404`，Python SDK 用的是 `INVALID_REQUEST = -32600`，并非 CLI 路径 M 所需的 `-32001`。
 
-结论：路径 M 不成立；真正触发的是**路径 P（`-32000 Connection closed`）**，即 CLI↔portal-mcp 的连接在工具调用在途/会话存续期间被断开。
+结论（当时）：路径 M 不成立；真正触发的是**路径 P（`-32000 Connection closed`）**，即 CLI↔portal-mcp 的连接在工具调用在途/会话存续期间被断开。
+
+> 校正见文末「更新（2026-06-30）」：keepalive 仅解决路径 P 的「uvicorn 空闲关闭」这一**子情况**；server 重启/OOM、MCP SDK 的 session eviction、以及 Claude CLI 客户端不按规范重连，都会以同一报错复现，且 keepalive 对它们无效。
 
 ### 被验证的服务端缺陷：uvicorn 空闲 keep-alive = 5s
 
@@ -95,3 +97,40 @@ CMD ["uvicorn", "portal_mcp.app:app", "--host", "0.0.0.0", "--port", "8801"]
 - 取值过小仍可能在深会话中复发；过大仅延长失活连接回收时间，对单客户端内部服务影响可忽略。
 - 若上线后仍偶发 `session expired`，下一步排查方向：portal-mcp 进程因 OOM/崩溃触发 `restart: always` 重启导致主通道断开，或标准 GET SSE 通道在重连churn中被撕裂；可结合 portal-mcp 重启计数与 CLI MCP 调试日志定位。
 - 回退：将 Dockerfile `CMD` 恢复为 `["uvicorn", "portal_mcp.app:app", "--host", "0.0.0.0", "--port", "8801"]`，移除 compose 和 `.env.example` 中的 `PORTAL_MCP_KEEPALIVE_TIMEOUT_SECONDS` 即可。
+
+## 更新（2026-06-30）：根因校正与范围收窄
+
+### 现场新事实
+
+keepalive=600 已确认在运行容器生效，但在**很小的旧 topic、追问间隔远小于 10 分钟**时仍复发。这与「空闲连接被回收」时序不符，说明本次复发不属于 uvicorn idle close 子情况。
+
+### 校正后的根因（已查证）
+
+`MCP server "portal" session expired` 是 **MCP Streamable HTTP 的已知通用问题**：服务端 session 因①空闲过期、②server 重启/OOM、或③MCP SDK 的 session TTL/eviction 失效后，**Claude Code 的 MCP 客户端不按规范重新握手重连**，直接抛该错。
+
+- MCP 规范（Streamable HTTP transport）要求：客户端收到带 `Mcp-Session-Id` 请求的 404/session 失效时，**MUST** 丢弃旧 session、用不带 session id 的新 `InitializeRequest` 重新握手并重试。
+- 但客户端普遍未实现：官方 `anthropics/claude-code#27142`；同类 `openai/codex#13969`、`danny-avila/LibreChat#11868`；server 端 session TTL 过短见 `Doist/todoist-ai#304`。
+- httpx 社区对同类「连接池僵尸连接」的标准结论（`encode/httpx#2056`）：**重试** 或 **不用连接池/每次新连接**；server 端单纯调大 keepalive 不能根治。
+
+keepalive 仅覆盖①。②③与「客户端不重连」均在 keepalive 之外。
+
+### 范围决策（本次收窄）
+
+真正的「丢弃失效 session→新握手→重试」属于 Claude CLI **客户端行为，不在本仓库可控边界**。若在 dataagent-backend 做「外层重跑整个 turn」兜底，会从 MCP 连接问题扩散到 stream 持久化、前端渲染、权限/副作用判断（需要 deferred terminal、半截工具块清理、写工具门控、fresh accumulator 等一连串补偿逻辑），风险与本问题不成比例。
+
+因此**本次不在 dataagent-backend 做外层 turn retry**，只做低风险主线：
+
+1. **portal-mcp 无状态 + 依赖版本钉死**：`app.py` 已 `stateless_http=True`（无状态 = 不发 `Mcp-Session-Id` = 没有服务端 session 可过期，从源头消除 ②③ 与 404/session-invalid 路径）；将 `requirements.txt` 的 `mcp[cli]`/`uvicorn[standard]` 从 `>=` 钉到具体版本（本地验证 `mcp==1.28.1`、`uvicorn==0.49.0`，非从目标镜像实测），消除镜像重建导致的 session 语义漂移。仅 pin 顶层包，transitive 仍可能变动，非完全可复现构建。
+2. **keepalive 保留**：继续处理 uvicorn idle close（①），默认 600 不变。
+3. **运维/认知文档更正**：`latest` 浮动 tag 升级需显式 `docker compose pull`；keepalive 适用边界；OOM churn 排查；compose `healthcheck` 已存在但只标记健康、`restart: always` 不因「仅 unhealthy」重启，真要自动重启需外部 watchdog（本次不做）。
+
+外层重跑/客户端层重连作为**后续设计项**：若无状态化后仍复发，再单独立项设计。
+
+### 测试与验证
+
+- `pytest dataagent/portal-mcp/tests -q`：新增断言 `build_mcp_server(...).settings.stateless_http is True`，以及成功 `initialize`（200）响应**不含** `mcp-session-id` 头（无状态生效证据）。
+- DataAgent 后端本次无代码改动，仅 docs/static 检查。
+
+### 参考
+
+`anthropics/claude-code#27142`、`openai/codex#13969`、`danny-avila/LibreChat#11868`、`Doist/todoist-ai#304`、`encode/httpx#2056`、modelcontextprotocol.io — Transports。

@@ -13,7 +13,7 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
-from portal_mcp.app import create_app
+from portal_mcp.app import build_mcp_server, create_app
 from portal_mcp.backend_client import BackendApiError
 from portal_mcp.config import Settings
 from portal_mcp.service import PortalToolService
@@ -93,6 +93,15 @@ def test_mcp_path_accepts_valid_frontdoor_token():
     assert response.status_code != 401
 
 
+def test_build_mcp_server_is_stateless():
+    # Stateless mode is what keeps the server from tracking/expiring per-client
+    # sessions: with no server-side session there is no `Mcp-Session-Id` to go
+    # stale, so the `MCP server "portal" session expired` 404/session-invalid path
+    # cannot occur. Assert the flag on the real server object, not via an abstraction.
+    mcp = build_mcp_server(PortalToolService(FakeBackendClient()))
+    assert mcp.settings.stateless_http is True
+
+
 def test_mcp_path_accepts_docker_hostname():
     # Regression: FastMCP 1.x DNS-rebinding protection defaults to
     # localhost-only and returns 421 for Host: portal-mcp:8801.
@@ -101,7 +110,14 @@ def test_mcp_path_accepts_docker_hostname():
     with TestClient(app, base_url="http://portal-mcp:8801") as client:
         response = client.post(
             "/mcp/",
-            headers={"X-Portal-MCP-Token": "portal-token", "Content-Type": "application/json"},
+            headers={
+                "X-Portal-MCP-Token": "portal-token",
+                "Content-Type": "application/json",
+                # Streamable HTTP requires the client to accept both; sending it
+                # makes initialize return 200 so the no-session-id assertion below
+                # is meaningful (a stateful server would emit Mcp-Session-Id here).
+                "Accept": "application/json, text/event-stream",
+            },
             json={
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -116,6 +132,10 @@ def test_mcp_path_accepts_docker_hostname():
 
     assert response.status_code != 421, "MCP server must not reject Docker service hostname"
     assert response.status_code != 401
+    # Stateless server must not hand out a session id on a successful initialize;
+    # if it did, the client could later send a stale id and hit session-expired.
+    assert response.status_code == 200
+    assert "mcp-session-id" not in response.headers
 
 
 @pytest.mark.anyio
