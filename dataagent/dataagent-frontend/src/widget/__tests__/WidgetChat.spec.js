@@ -94,6 +94,13 @@ const messagePage = (topicId, text) => ({
   ]
 })
 
+async function choosePermissionMode(wrapper, label) {
+  await wrapper.get('.query-permission-select').trigger('click')
+  const item = wrapper.findAll('.query-dropdown-item').find((el) => el.text() === label)
+  if (!item) throw new Error(`permission mode option not found: ${label}`)
+  await item.trigger('click')
+}
+
 function mountChat(options = {}) {
   const state = reactive({
     historyOpen: false,
@@ -407,7 +414,7 @@ describe('WidgetChat history conversations', () => {
     const { wrapper } = mountChat({ config: { displayMode: 'inline' } })
     await flushPromises()
 
-    await wrapper.get('.query-permission-select').setValue('plan')
+    await choosePermissionMode(wrapper, 'Plan mode')
     await wrapper.get('textarea').setValue('只做规划')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -425,7 +432,7 @@ describe('WidgetChat history conversations', () => {
 
     await wrapper.get('[data-testid="history-topic-topic-1"]').trigger('click')
     await flushPromises()
-    await wrapper.get('.query-permission-select').setValue('acceptEdits')
+    await choosePermissionMode(wrapper, 'Accept edits')
     await flushPromises()
 
     expect(apiMocks.topicApi.updateTopic).toHaveBeenCalledWith('topic-1', { permission_mode: 'acceptEdits' })
