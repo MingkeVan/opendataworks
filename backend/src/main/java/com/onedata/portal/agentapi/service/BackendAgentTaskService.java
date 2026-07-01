@@ -40,6 +40,19 @@ public class BackendAgentTaskService implements AgentTaskService {
     public Object updateTask(Long taskId, AgentTaskUpsertRequest request, String operator) {
         DataTask task = toTask(request);
         task.setId(taskId);
+        // DataTask.workflowId is a relation-management field, not a persisted
+        // column: DataTaskService.update() treats a null value as "detach the
+        // task from its workflow". The agent write contract only documents task
+        // fields (see opendataworks-data-dev skill), so agent payloads never
+        // include workflowId; without this, every agent-driven update silently
+        // dropped the task's workflow binding. Preserve the current binding
+        // unless the caller explicitly sets workflowId (including to null).
+        if (!request.getTask().containsKey("workflowId")) {
+            DataTask existing = dataTaskService.getById(taskId);
+            if (existing != null) {
+                task.setWorkflowId(existing.getWorkflowId());
+            }
+        }
         validateDataScope(task);
         applyAuditDefaults(task, operator, false);
         return dataTaskService.update(task, nullSafe(request.getInputTableIds()), nullSafe(request.getOutputTableIds()));
