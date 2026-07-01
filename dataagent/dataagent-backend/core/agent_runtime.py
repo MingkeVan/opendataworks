@@ -120,7 +120,7 @@ def _resolve_claude_project_data_dir(workspace: Path, runtime_env: dict[str, str
     by ``-``. This dir holds session ``.jsonl`` transcripts, ``subagents/`` logs,
     and offloaded (too-large) tool results. It is intentionally *not* added to the
     workspace allow-list: only the offloaded tool-result files under it are
-    readable (see ``_is_offloaded_tool_result_read``); transcripts and other
+    readable (see ``_is_offloaded_tool_result_path``); transcripts and other
     session state stay outside the boundary.
     """
     env = runtime_env or {}
@@ -136,17 +136,19 @@ def _resolve_claude_project_data_dir(workspace: Path, runtime_env: dict[str, str
     return (base / "projects" / encoded_cwd).resolve(strict=False)
 
 
-def _is_offloaded_tool_result_read(candidate: Path, tool_result_root: Path | None) -> bool:
+def _is_offloaded_tool_result_path(candidate: Path, tool_result_root: Path | None) -> bool:
     """True when ``candidate`` is exactly an offloaded tool-result file the CLI
-    asked the agent to ``Read``.
+    wrote a "Full output saved to" pointer for.
 
     The CLI offloads oversized tool results to
     ``<project_data_dir>/<session_id>/tool-results/<tool_use_id>.{txt,json}`` and
-    rewrites the inline result with a "Use Read to view" pointer. Only that exact
-    shape is allowed: a ``.txt``/``.json`` file whose parent dir is
-    ``tool-results`` directly under a single session segment. Session ``.jsonl``
-    transcripts, ``subagents/`` logs, meta files, and the project root itself stay
-    denied so the agent cannot browse cross-run session state.
+    rewrites the inline result with that file path. The CLI does not dictate which
+    tool the agent must use to view it, so both ``Read`` and a ``Bash`` command
+    that merely references the file get this allowance. Only that exact shape is
+    allowed: a ``.txt``/``.json`` file whose parent dir is ``tool-results``
+    directly under a single session segment. Session ``.jsonl`` transcripts,
+    ``subagents/`` logs, meta files, and the project root itself stay denied so
+    the agent cannot browse cross-run session state.
     """
     if tool_result_root is None:
         return False
@@ -214,6 +216,7 @@ def _validate_bash_workspace_boundary(
     command: str,
     allowed_roots: list[Path],
     runtime_env: dict[str, str] | None,
+    tool_result_root: Path | None = None,
 ) -> str | None:
     if _BASH_PARENT_SEGMENT_RE.search(command.replace("\\", "/")):
         return "Bash command uses a parent directory segment; stay inside the current agent workspace."
@@ -235,8 +238,11 @@ def _validate_bash_workspace_boundary(
         candidate = Path(normalized).expanduser().resolve(strict=False)
         if allowed_executable and candidate == allowed_executable:
             continue
-        if not _path_is_allowed(candidate, allowed_roots):
-            return f"Bash command references absolute path outside workspace: {normalized}"
+        if _path_is_allowed(candidate, allowed_roots):
+            continue
+        if _is_offloaded_tool_result_path(candidate, tool_result_root):
+            continue
+        return f"Bash command references absolute path outside workspace: {normalized}"
     return None
 
 
@@ -250,28 +256,30 @@ def _validate_workspace_tool_boundary(
     normalized_tool = str(tool_name or "").strip()
     input_payload = tool_input or {}
     workspace = Path(project_cwd).expanduser().resolve(strict=False)
+
+    # The only path outside the workspace the agent may touch is an offloaded
+    # tool-result file, via Read or a Bash command that merely references it.
+    # Resolve the per-project tool-result root so the surrounding session
+    # transcripts stay denied; other tools never get this exception.
+    tool_result_root = (
+        _resolve_claude_project_data_dir(workspace, runtime_env)
+        if normalized_tool in ("Read", "Bash")
+        else None
+    )
+
     if normalized_tool == "Bash":
         command = str(input_payload.get("command") or "").strip()
         if command:
-            return _validate_bash_workspace_boundary(command, allowed_roots, runtime_env)
+            return _validate_bash_workspace_boundary(command, allowed_roots, runtime_env, tool_result_root)
         return None
 
-    # The only path outside the workspace the agent may touch is an offloaded
-    # tool-result file, and only via Read. Resolve the per-project tool-result
-    # root for Read so the surrounding session transcripts stay denied; other
-    # tools never get this exception.
-    tool_result_root = (
-        _resolve_claude_project_data_dir(workspace, runtime_env)
-        if normalized_tool == "Read"
-        else None
-    )
     for key, value in _iter_tool_path_inputs(normalized_tool, input_payload):
         if _path_has_parent_segment(value):
             return f"{normalized_tool} {key} uses a parent directory segment; stay inside the current agent workspace."
         candidate = _resolve_workspace_candidate(value, workspace)
         if _path_is_allowed(candidate, allowed_roots):
             continue
-        if _is_offloaded_tool_result_read(candidate, tool_result_root):
+        if _is_offloaded_tool_result_path(candidate, tool_result_root):
             continue
         return f"{normalized_tool} {key} is outside workspace or enabled Skill roots: {value}"
     return None
