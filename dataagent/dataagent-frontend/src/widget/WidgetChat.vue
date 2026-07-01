@@ -267,22 +267,54 @@
           <!-- Toolbar row -->
           <div class="query-composer-toolbar">
             <div class="query-composer-toolbar-left">
-              <select
-                :value="permissionMode"
-                class="query-model-select query-permission-select"
-                :disabled="isBusy"
-                title="Session permission mode"
-                @change="changePermissionMode($event.target.value)"
-              >
-                <option v-for="opt in PERMISSION_MODE_OPTIONS" :key="opt.value" :value="opt.value">
-                  {{ opt.label }}
-                </option>
-              </select>
+              <div ref="permissionDropdownRef" class="query-dropdown" :class="{ 'is-open': permissionMenuOpen }">
+                <button
+                  type="button"
+                  class="query-dropdown-trigger query-permission-select"
+                  :disabled="isBusy"
+                  title="Session permission mode"
+                  @click="togglePermissionMenu"
+                >
+                  <span class="query-dropdown-trigger-label">{{ permissionModeLabel }}</span>
+                  <svg class="query-dropdown-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10"><polyline points="6 9 12 15 18 9" /></svg>
+                </button>
+                <div v-if="permissionMenuOpen" class="query-dropdown-menu">
+                  <button
+                    v-for="opt in PERMISSION_MODE_OPTIONS"
+                    :key="opt.value"
+                    type="button"
+                    class="query-dropdown-item"
+                    :class="{ 'is-active': opt.value === permissionMode }"
+                    @click="selectPermissionMode(opt.value)"
+                  >
+                    {{ opt.label }}
+                  </button>
+                </div>
+              </div>
             </div>
-            <div class="query-model-selector">
-              <select v-model="selectedModel" class="query-model-select" :disabled="!availableModels.length || isBusy" title="Switch model">
-                <option v-for="modelName in availableModels" :key="modelName" :value="modelName">{{ modelName }}</option>
-              </select>
+            <div ref="modelDropdownRef" class="query-model-selector query-dropdown" :class="{ 'is-open': modelMenuOpen }">
+              <button
+                type="button"
+                class="query-dropdown-trigger query-model-select"
+                :disabled="!availableModels.length || isBusy"
+                title="Switch model"
+                @click="toggleModelMenu"
+              >
+                <span class="query-dropdown-trigger-label">{{ selectedModel }}</span>
+                <svg class="query-dropdown-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10"><polyline points="6 9 12 15 18 9" /></svg>
+              </button>
+              <div v-if="modelMenuOpen" class="query-dropdown-menu query-dropdown-menu-right">
+                <button
+                  v-for="modelName in availableModels"
+                  :key="modelName"
+                  type="button"
+                  class="query-dropdown-item"
+                  :class="{ 'is-active': modelName === selectedModel }"
+                  @click="selectModelOption(modelName)"
+                >
+                  {{ modelName }}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -359,6 +391,45 @@ const PERMISSION_MODE_OPTIONS = [
   { value: 'plan', label: 'Plan mode' },
   { value: 'bypassPermissions', label: 'Bypass permissions' },
 ]
+const permissionModeLabel = computed(() => (
+  PERMISSION_MODE_OPTIONS.find((opt) => opt.value === permissionMode.value)?.label || 'Default'
+))
+
+// Composer toolbar dropdowns (permission mode + model). Plain buttons/menus
+// instead of native <select> so the closed/expanded look can be fully styled
+// (native select popups ignore most author styles across browsers).
+const permissionMenuOpen = ref(false)
+const modelMenuOpen = ref(false)
+const permissionDropdownRef = ref(null)
+const modelDropdownRef = ref(null)
+
+const togglePermissionMenu = () => {
+  if (isBusy.value) return
+  modelMenuOpen.value = false
+  permissionMenuOpen.value = !permissionMenuOpen.value
+}
+const toggleModelMenu = () => {
+  if (!availableModels.value.length || isBusy.value) return
+  permissionMenuOpen.value = false
+  modelMenuOpen.value = !modelMenuOpen.value
+}
+const selectPermissionMode = (value) => {
+  permissionMenuOpen.value = false
+  void changePermissionMode(value)
+}
+const selectModelOption = (modelName) => {
+  modelMenuOpen.value = false
+  selectedModel.value = modelName
+}
+const handleToolbarDropdownOutsideClick = (event) => {
+  const path = typeof event.composedPath === 'function' ? event.composedPath() : []
+  if (permissionMenuOpen.value && permissionDropdownRef.value && !path.includes(permissionDropdownRef.value)) {
+    permissionMenuOpen.value = false
+  }
+  if (modelMenuOpen.value && modelDropdownRef.value && !path.includes(modelDropdownRef.value)) {
+    modelMenuOpen.value = false
+  }
+}
 
 // widget-only UI state
 const inputSource = ref('typed')
@@ -889,6 +960,7 @@ watch(
 )
 
 onMounted(async () => {
+  document.addEventListener('click', handleToolbarDropdownOutsideClick, true)
   await loadConfig()
   if (agentId.value && agentId.value !== 'demo') {
     try {
@@ -905,6 +977,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('click', handleToolbarDropdownOutsideClick, true)
   stopTopicStatusRefresh()
   if (copyNoticeTimer) window.clearTimeout(copyNoticeTimer)
   abortController.value?.abort()
