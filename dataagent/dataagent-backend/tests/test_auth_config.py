@@ -221,16 +221,17 @@ def test_sanitize_redirect_accepts_app_paths():
 # ---------------------------------------------------------------------------
 
 def _write_base_config(tmp_path: Path) -> str:
+    # 与 deploy/docker/dataagent/dataagent_config.py 相同的加载模式：
+    # find_spec 判存在，存在则直接 import（内部错误原样抛出，fail-closed）。
     base = tmp_path / "dataagent_config.py"
     base.write_text(
         """
 AUTH_ENABLED = False
 SECRET_KEY = ""
 LOCAL_ADMINS = []
-try:
+import importlib.util as _importlib_util
+if _importlib_util.find_spec("dataagent_config_docker") is not None:
     from dataagent_config_docker import *  # noqa: F401,F403
-except ImportError:
-    pass
 """,
         encoding="utf-8",
     )
@@ -270,6 +271,34 @@ LOCAL_ADMINS = [{{"username": "admin", "password_bcrypt": {password_hash!r}}}]
 def test_broken_override_module_fails_startup(monkeypatch, tmp_path, _clean_override_module):
     (tmp_path / "dataagent_config_docker.py").write_text("this is not python !!!", encoding="utf-8")
     monkeypatch.setenv(auth.AUTH_CONFIG_ENV, _write_base_config(tmp_path))
+    with pytest.raises(AuthConfigError):
+        init_auth()
+
+
+def test_override_with_missing_nested_import_fails_startup(monkeypatch, tmp_path, _clean_override_module):
+    """P1 回归：覆盖文件存在但其内部 import 失败（如引用缺失的
+    custom_sso_user_mapper）必须让启动失败，绝不静默回落到认证关闭。"""
+    (tmp_path / "dataagent_config_docker.py").write_text(
+        "from missing_custom_module import something\nAUTH_ENABLED = True\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, _write_base_config(tmp_path))
+    with pytest.raises(AuthConfigError):
+        init_auth()
+
+
+def test_shipped_base_config_does_not_swallow_nested_import_error(monkeypatch, tmp_path, _clean_override_module):
+    """同一回归直接跑仓库自带的 deploy/docker/dataagent/dataagent_config.py。"""
+    import shutil
+
+    shipped = Path(__file__).resolve().parents[3] / "deploy" / "docker" / "dataagent" / "dataagent_config.py"
+    target = tmp_path / "dataagent_config.py"
+    shutil.copyfile(shipped, target)
+    (tmp_path / "dataagent_config_docker.py").write_text(
+        "from missing_custom_module import something\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, str(target))
     with pytest.raises(AuthConfigError):
         init_auth()
 
@@ -329,3 +358,37 @@ def test_userinfo_mapper_is_captured(monkeypatch, tmp_path):
     monkeypatch.setenv(auth.AUTH_CONFIG_ENV, path)
     settings = init_auth()
     assert callable(settings.oauth_userinfo_mapper)
+
+
+# ---------------------------------------------------------------------------
+# OAuth 启动期校验：callback 实际必需字段（P2 回归）
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("missing_field", ["userinfo_url", "redirect_uri"])
+def test_oauth_missing_callback_required_field_fails_startup(tmp_path, missing_field):
+    oauth = {
+        "provider_name": "SSO",
+        "client_id": "cid",
+        "client_secret": "secret",
+        "authorize_url": "https://sso.example.com/authorize",
+        "token_url": "https://sso.example.com/token",
+        "userinfo_url": "https://sso.example.com/userinfo",
+        "redirect_uri": "https://app.example.com/cb",
+    }
+    oauth[missing_field] = ""
+    path = write_config(
+        tmp_path,
+        f"AUTH_ENABLED = True\nSECRET_KEY = {VALID_SECRET!r}\nOAUTH = {oauth!r}\n",
+    )
+    with pytest.raises(AuthConfigError):
+        load_auth_settings(path)
+
+
+# ---------------------------------------------------------------------------
+# bcrypt 超长口令（bcrypt 5 对 >72 字节抛 ValueError）按认证失败处理（P2 回归）
+# ---------------------------------------------------------------------------
+
+def test_overlong_password_is_rejected_not_crash(monkeypatch, tmp_path):
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, enable_local_admin_auth(tmp_path))
+    init_auth()
+    assert verify_local_admin("admin", "x" * 200) is None

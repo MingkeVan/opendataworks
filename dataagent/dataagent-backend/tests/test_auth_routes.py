@@ -147,6 +147,12 @@ def test_oauth_authorize_redirects_with_state(monkeypatch, tmp_path):
     assert payload is not None
     assert payload["redirect"] == "/intelligent-query/chat"
 
+    # authorize 必须把 state nonce 同步种进发起浏览器的 HttpOnly Cookie（CSRF 绑定）。
+    set_cookie = response.headers.get("set-cookie", "")
+    assert f"{auth.OAUTH_STATE_COOKIE}=" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert client.cookies.get(auth.OAUTH_STATE_COOKIE) == payload["nonce"]
+
 
 class _FakeResponse:
     def __init__(self, payload):
@@ -179,9 +185,15 @@ class _FakeAsyncClient:
         return _FakeResponse(self._userinfo)
 
 
-def _oauth_callback(client, monkeypatch, *, userinfo, redirect=""):
+def _oauth_callback(client, monkeypatch, *, userinfo, redirect="", bind_nonce=True, cookie_nonce=None):
     monkeypatch.setattr(auth_routes.httpx, "AsyncClient", _FakeAsyncClient(userinfo=userinfo))
-    state = auth.issue_oauth_state(redirect)
+    nonce = auth.generate_oauth_nonce()
+    state = auth.issue_oauth_state(redirect, nonce=nonce)
+    # 正常流程：authorize 会把 nonce 种进发起浏览器的 HttpOnly Cookie。
+    if bind_nonce:
+        client.cookies.set(auth.OAUTH_STATE_COOKIE, cookie_nonce if cookie_nonce is not None else nonce)
+    else:
+        client.cookies.delete(auth.OAUTH_STATE_COOKIE) if auth.OAUTH_STATE_COOKIE in client.cookies else None
     return client.get(
         f"/api/v1/nl2sql/auth/oauth/callback?code=abc&state={state}",
         follow_redirects=False,
@@ -340,3 +352,54 @@ def test_mapper_failure_fails_the_login_not_the_service(monkeypatch, tmp_path):
     assert response.headers["location"] == "/login?error=oauth_mapper_failed"
     # 服务仍健康。
     assert client.get("/api/v1/nl2sql/auth/config").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# OAuth 登录 CSRF：state 必须绑定发起登录的浏览器（P1 回归）
+# ---------------------------------------------------------------------------
+
+def test_oauth_callback_rejects_state_without_browser_nonce(monkeypatch, tmp_path):
+    """攻击者拿自己的合法 state/code 构造 callback URL 让受害者打开：
+    受害者浏览器没有对应 nonce Cookie，必须拒绝。"""
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    client = TestClient(app)
+
+    response = _oauth_callback(client, monkeypatch, userinfo={"sub": "42"}, bind_nonce=False)
+    assert response.status_code == 400
+    # 未写入任何会话。
+    assert client.get("/api/v1/nl2sql/auth/me").status_code == 401
+
+
+def test_oauth_callback_rejects_mismatched_browser_nonce(monkeypatch, tmp_path):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    client = TestClient(app)
+
+    response = _oauth_callback(
+        client, monkeypatch, userinfo={"sub": "42"}, cookie_nonce="another-browser-nonce"
+    )
+    assert response.status_code == 400
+    assert client.get("/api/v1/nl2sql/auth/me").status_code == 401
+
+
+def test_oauth_callback_clears_nonce_cookie_on_success(monkeypatch, tmp_path):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    client = TestClient(app)
+
+    response = _oauth_callback(client, monkeypatch, userinfo={"sub": "42"})
+    assert response.status_code == 302
+    set_cookies = response.headers.get_list("set-cookie")
+    assert any(f'{auth.OAUTH_STATE_COOKIE}=""' in c or f"{auth.OAUTH_STATE_COOKIE}=;" in c for c in set_cookies)
+
+
+# ---------------------------------------------------------------------------
+# bcrypt 超长口令 → 401 而非 500（P2 回归）
+# ---------------------------------------------------------------------------
+
+def test_login_with_overlong_password_returns_401(monkeypatch, tmp_path):
+    enable_auth(monkeypatch, tmp_path)
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/nl2sql/auth/login",
+        json={"username": "admin", "password": "x" * 200},
+    )
+    assert response.status_code == 401

@@ -162,6 +162,12 @@ def _parse_oauth(raw: Any) -> OAuthSettings:
     oauth = OAuthSettings(**{k: str(v) for k, v in values.items()})
     if any(raw.get(k) for k in ("client_id", "authorize_url", "token_url")) and not oauth.configured:
         raise AuthConfigError("OAUTH 配置不完整：client_id / authorize_url / token_url 必须同时提供")
+    if oauth.configured:
+        # callback 实际必用的字段也纳入启动期校验，避免"能启动、登录页有 OAuth
+        # 按钮、回调必失败"的上线即不可用状态。
+        missing = [name for name in ("userinfo_url", "redirect_uri") if not getattr(oauth, name)]
+        if missing:
+            raise AuthConfigError(f"OAUTH 配置不完整：缺少回调必需字段 {missing}")
     return oauth
 
 
@@ -327,7 +333,12 @@ def verify_local_admin(username: str, password: str) -> AuthIdentity | None:
     for admin in cfg.local_admins:
         if admin["username"] != username:
             continue
-        if bcrypt.checkpw(password.encode("utf-8"), admin["password_bcrypt"].encode("utf-8")):
+        try:
+            matched = bcrypt.checkpw(password.encode("utf-8"), admin["password_bcrypt"].encode("utf-8"))
+        except ValueError:
+            # bcrypt 5 对超过 72 字节的口令抛 ValueError；按认证失败处理而非 500。
+            matched = False
+        if matched:
             return AuthIdentity(
                 user_id=f"{LOCAL_PROVIDER}:{username}",
                 username=username,
@@ -374,21 +385,41 @@ def require_admin(request: Request) -> AuthIdentity | None:
 
 
 # ---------------------------------------------------------------------------
-# OAuth state（HMAC 自校验，免服务端存储）
+# OAuth state（HMAC 自校验 + 浏览器绑定）
+#
+# 仅 HMAC 自校验不够：攻击者可以用自己的合法 state/code 构造 callback URL 让
+# 受害者打开（登录 CSRF，受害者会被写入攻击者账号的会话）。因此 authorize 时
+# 把 state 里的 nonce 同时种进发起登录的浏览器的 HttpOnly 临时 Cookie，
+# callback 必须两者一致才接受。
 # ---------------------------------------------------------------------------
+
+OAUTH_STATE_COOKIE = "da_oauth_nonce"
+OAUTH_STATE_COOKIE_MAX_AGE = _STATE_TTL_SECONDS
+
+
+def generate_oauth_nonce() -> str:
+    return secrets.token_urlsafe(16)
+
 
 def _state_signature(payload: str) -> str:
     cfg = get_auth_settings()
     return hmac.new(cfg.secret_key.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def issue_oauth_state(redirect_path: str = "") -> str:
+def issue_oauth_state(redirect_path: str = "", nonce: str | None = None) -> str:
     payload = json.dumps(
-        {"nonce": secrets.token_urlsafe(16), "ts": int(time.time()), "redirect": redirect_path},
+        {"nonce": nonce or generate_oauth_nonce(), "ts": int(time.time()), "redirect": redirect_path},
         separators=(",", ":"),
     )
     encoded = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
     return f"{encoded}.{_state_signature(encoded)}"
+
+
+def verify_oauth_state_binding(payload: dict[str, Any] | None, cookie_nonce: str | None) -> bool:
+    """callback 侧校验 state 与发起登录的浏览器绑定（nonce Cookie 一致）。"""
+    state_nonce = str((payload or {}).get("nonce") or "")
+    cookie_value = str(cookie_nonce or "")
+    return bool(state_nonce) and bool(cookie_value) and hmac.compare_digest(state_nonce, cookie_value)
 
 
 def verify_oauth_state(state: str) -> dict[str, Any] | None:

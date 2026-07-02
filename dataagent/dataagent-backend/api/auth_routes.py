@@ -15,7 +15,10 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from core.auth import (
+    OAUTH_STATE_COOKIE,
+    OAUTH_STATE_COOKIE_MAX_AGE,
     AuthIdentity,
+    generate_oauth_nonce,
     get_auth_settings,
     issue_oauth_state,
     issue_session_token,
@@ -24,6 +27,7 @@ from core.auth import (
     sanitize_redirect_path,
     verify_local_admin,
     verify_oauth_state,
+    verify_oauth_state_binding,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,14 +124,27 @@ async def oauth_authorize(request: Request):
     if not cfg.oauth_login_enabled:
         raise HTTPException(status_code=400, detail="OAuth login is not configured")
     redirect_path = sanitize_redirect_path(request.query_params.get("redirect"), fallback="")
+    # nonce 同时写进 state 与发起浏览器的 HttpOnly 临时 Cookie，callback 比对，
+    # 防止攻击者用自己的 callback URL 给受害者写入攻击者会话（登录 CSRF）。
+    nonce = generate_oauth_nonce()
     params = {
         "response_type": "code",
         "client_id": cfg.oauth.client_id,
         "redirect_uri": cfg.oauth.redirect_uri,
         "scope": cfg.oauth.scopes,
-        "state": issue_oauth_state(redirect_path),
+        "state": issue_oauth_state(redirect_path, nonce=nonce),
     }
-    return RedirectResponse(url=f"{cfg.oauth.authorize_url}?{urlencode(params)}", status_code=302)
+    response = RedirectResponse(url=f"{cfg.oauth.authorize_url}?{urlencode(params)}", status_code=302)
+    response.set_cookie(
+        key=OAUTH_STATE_COOKIE,
+        value=nonce,
+        max_age=OAUTH_STATE_COOKIE_MAX_AGE,
+        path="/",
+        httponly=True,
+        secure=cfg.cookie_secure,
+        samesite=cfg.cookie_samesite,
+    )
+    return response
 
 
 async def _exchange_code_for_userinfo(code: str) -> dict:
@@ -175,6 +192,9 @@ async def oauth_callback(request: Request):
     state_payload = verify_oauth_state(request.query_params.get("state") or "")
     if state_payload is None:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    # state 必须绑定发起登录的浏览器（authorize 时种下的 nonce Cookie）。
+    if not verify_oauth_state_binding(state_payload, request.cookies.get(OAUTH_STATE_COOKIE)):
+        raise HTTPException(status_code=400, detail="OAuth state is not bound to this browser")
     code = str(request.query_params.get("code") or "")
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
@@ -227,4 +247,6 @@ async def oauth_callback(request: Request):
     )
     response = RedirectResponse(url=redirect_path, status_code=302)
     _set_session_cookie(response, issue_session_token(identity))
+    # nonce 为一次性：登录完成即清除。
+    response.delete_cookie(key=OAUTH_STATE_COOKIE, path="/")
     return response

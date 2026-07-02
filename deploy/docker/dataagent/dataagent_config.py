@@ -52,10 +52,15 @@ DATAAGENT_SETTINGS = {}
 
 # ---------------------------------------------------------------------------
 # 加载同目录下的用户扩展（Superset superset_config_docker.py 同款机制）。
-# 文件不存在则按上面的默认值运行（认证关闭）；文件存在但有错误会让启动失败
-# （fail-closed，符合预期）。
+# 先用 find_spec 判断覆盖文件是否存在：不存在 → 按上面的默认值运行（认证关闭）；
+# 存在 → 直接 import，任何错误（语法错误、覆盖文件内部的 import 失败，如
+# `from custom_sso_user_mapper import ...` 但文件缺失）都原样抛出，让启动失败
+# （fail-closed）。不能用 try/except ImportError 包住 import：那会把覆盖文件
+# 内部的导入失败也吞掉，静默回落到认证关闭。
 # ---------------------------------------------------------------------------
-try:
+import importlib.util as _importlib_util
+
+if _importlib_util.find_spec("dataagent_config_docker") is not None:
     import dataagent_config_docker
     from dataagent_config_docker import *  # noqa: F401,F403
 
@@ -63,5 +68,5 @@ try:
         "Loaded your DataAgent configuration override at [%s]",
         dataagent_config_docker.__file__,
     )
-except ImportError:
+else:
     logger.info("Using default DataAgent config (no dataagent_config_docker.py found)")
