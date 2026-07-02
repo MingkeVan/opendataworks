@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
 
 const apiMocks = vi.hoisted(() => ({
   topicApi: {
@@ -39,7 +40,8 @@ const dataagentApiMock = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api/nl2sql', () => ({
-  createNl2SqlApiClient: () => apiMocks
+  createNl2SqlApiClient: () => apiMocks,
+  DATAAGENT_CLIENT_HEADERS: Object.freeze({ 'X-ODW-Client': 'dataagent' })
 }))
 
 vi.mock('@/api/dataagent', () => ({
@@ -135,6 +137,7 @@ const scrollbarSetScrollTop = vi.fn()
 
 const mountChat = () => mount(NL2SqlChatV2, {
   global: {
+    plugins: [createPinia()],
     stubs: {
       ElScrollbar: {
         name: 'ElScrollbar',

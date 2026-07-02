@@ -2549,6 +2549,20 @@ export const demoAdapter = async (config) => {
     return createResponse(config, { status: 'ok', mode: 'demo' })
   }
 
+  // 演示模式不启用认证：SPA 路由守卫与登录页保持关闭。
+  if (method === 'get' && pathname === '/v1/nl2sql/auth/config') {
+    return createResponse(config, {
+      enabled: false,
+      provider_name: '',
+      local_login_enabled: false,
+      oauth_login_enabled: false
+    })
+  }
+
+  if (method === 'get' && pathname === '/v1/nl2sql-admin/topics') {
+    return createResponse(config, handleDemoWidgetTopics(params))
+  }
+
   if (method === 'get' && pathname === '/v1/nl2sql-admin/settings') {
     return createResponse(config, clone(demoProviderSettings))
   }

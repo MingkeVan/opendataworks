@@ -18,23 +18,41 @@
           <el-icon><MagicStick /></el-icon>
           <span>Chat</span>
         </el-menu-item>
-        <el-menu-item index="skills">
-          <el-icon><Collection /></el-icon>
-          <span>Skills</span>
-        </el-menu-item>
-        <el-menu-item index="agents">
-          <el-icon><User /></el-icon>
-          <span>智能体</span>
-        </el-menu-item>
-        <el-menu-item index="models">
-          <el-icon><Cpu /></el-icon>
-          <span>模型管理</span>
-        </el-menu-item>
-        <el-menu-item index="widget">
-          <el-icon><Monitor /></el-icon>
-          <span>Widget 接入</span>
-        </el-menu-item>
+        <template v-if="authStore.isAdmin">
+          <el-menu-item index="skills">
+            <el-icon><Collection /></el-icon>
+            <span>Skills</span>
+          </el-menu-item>
+          <el-menu-item index="agents">
+            <el-icon><User /></el-icon>
+            <span>智能体</span>
+          </el-menu-item>
+          <el-menu-item index="models">
+            <el-icon><Cpu /></el-icon>
+            <span>模型管理</span>
+          </el-menu-item>
+          <el-menu-item index="widget">
+            <el-icon><Monitor /></el-icon>
+            <span>Widget 接入</span>
+          </el-menu-item>
+        </template>
       </el-menu>
+      <div v-if="authStore.enabled && authStore.currentUser" class="intelligent-query-user">
+        <el-dropdown trigger="click" @command="handleUserCommand">
+          <span class="intelligent-query-user__trigger">
+            <el-icon><User /></el-icon>
+            <span class="intelligent-query-user__name">{{ authStore.currentUser.username }}</span>
+          </span>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item disabled>
+                {{ authStore.currentUser.role === 'admin' ? '管理员' : '普通用户' }}
+              </el-dropdown-item>
+              <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </div>
     </aside>
 
     <main class="intelligent-query-content" :class="{ 'is-chat': activeMenu === 'chat-v2' }">
@@ -47,9 +65,17 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Collection, Cpu, MagicStick, Monitor, User } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
+
+const handleUserCommand = async (command) => {
+  if (command !== 'logout') return
+  await authStore.logout()
+  router.push('/login')
+}
 
 // Each menu entry maps to a real child route under /intelligent-query.
 const MENU_TO_PATH = {
@@ -132,6 +158,28 @@ const handleMenuSelect = (index) => {
 .intelligent-query-menu :deep(.el-menu-item) {
   height: 44px;
   line-height: 44px;
+}
+
+.intelligent-query-user {
+  flex: 0 0 auto;
+  padding: 12px 16px;
+  border-top: 1px solid #eef2f8;
+}
+
+.intelligent-query-user__trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: #1f2d3d;
+  font-size: 14px;
+}
+
+.intelligent-query-user__name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .intelligent-query-content {

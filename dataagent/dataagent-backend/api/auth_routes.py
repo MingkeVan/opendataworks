@@ -1,0 +1,210 @@
+"""认证路由：本地管理员密码登录 + OAuth2 授权码登录。
+
+前缀复用已被两层 nginx 代理的 ``/api/v1/nl2sql``，无需改代理配置。
+auth 关闭（env 未设置或显式 AUTH_ENABLED=False）时各端点安全降级：
+``/config`` 返回 ``enabled=false``，其余登录端点返回 404。
+"""
+from __future__ import annotations
+
+import logging
+from urllib.parse import urlencode
+
+import httpx
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse, RedirectResponse, Response
+from pydantic import BaseModel
+
+from core.auth import (
+    AuthIdentity,
+    get_auth_settings,
+    issue_oauth_state,
+    issue_session_token,
+    require_identity,
+    resolve_oauth_role,
+    sanitize_redirect_path,
+    verify_local_admin,
+    verify_oauth_state,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/v1/nl2sql/auth", tags=["auth"])
+
+_OAUTH_HTTP_TIMEOUT_SECONDS = 15.0
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+def _require_enabled() -> None:
+    if not get_auth_settings().enabled:
+        raise HTTPException(status_code=404, detail="Authentication is not enabled")
+
+
+def _identity_payload(identity: AuthIdentity) -> dict:
+    return {
+        "user_id": identity.user_id,
+        "username": identity.username,
+        "role": identity.role,
+        "provider": identity.provider,
+    }
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    cfg = get_auth_settings()
+    response.set_cookie(
+        key=cfg.cookie_name,
+        value=token,
+        max_age=cfg.session_ttl_seconds,
+        path="/",
+        # HttpOnly 硬编码：前端无需读取会话令牌，不可配置放宽。
+        httponly=True,
+        secure=cfg.cookie_secure,
+        samesite=cfg.cookie_samesite,
+    )
+
+
+def _clear_session_cookie(response: Response) -> None:
+    cfg = get_auth_settings()
+    response.delete_cookie(key=cfg.cookie_name, path="/")
+
+
+@router.get("/config")
+async def auth_config():
+    cfg = get_auth_settings()
+    if not cfg.enabled:
+        return {"enabled": False, "provider_name": "", "local_login_enabled": False, "oauth_login_enabled": False}
+    return {
+        "enabled": True,
+        "provider_name": cfg.oauth.provider_name if cfg.oauth_login_enabled else "",
+        "local_login_enabled": cfg.local_login_enabled,
+        "oauth_login_enabled": cfg.oauth_login_enabled,
+    }
+
+
+@router.post("/login")
+async def login(payload: LoginRequest):
+    _require_enabled()
+    cfg = get_auth_settings()
+    if not cfg.local_login_enabled:
+        raise HTTPException(status_code=400, detail="Local login is not configured")
+    identity = verify_local_admin(payload.username, payload.password)
+    if identity is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    response = JSONResponse({"code": 200, "data": _identity_payload(identity)})
+    _set_session_cookie(response, issue_session_token(identity))
+    return response
+
+
+@router.get("/me")
+async def me(request: Request):
+    _require_enabled()
+    identity = require_identity(request)
+    return {"code": 200, "data": _identity_payload(identity)}
+
+
+@router.post("/logout")
+async def logout():
+    _require_enabled()
+    response = JSONResponse({"code": 200, "data": {"ok": True}})
+    _clear_session_cookie(response)
+    return response
+
+
+@router.get("/oauth/authorize")
+async def oauth_authorize(request: Request):
+    _require_enabled()
+    cfg = get_auth_settings()
+    if not cfg.oauth_login_enabled:
+        raise HTTPException(status_code=400, detail="OAuth login is not configured")
+    redirect_path = sanitize_redirect_path(request.query_params.get("redirect"), fallback="")
+    params = {
+        "response_type": "code",
+        "client_id": cfg.oauth.client_id,
+        "redirect_uri": cfg.oauth.redirect_uri,
+        "scope": cfg.oauth.scopes,
+        "state": issue_oauth_state(redirect_path),
+    }
+    return RedirectResponse(url=f"{cfg.oauth.authorize_url}?{urlencode(params)}", status_code=302)
+
+
+async def _exchange_code_for_userinfo(code: str) -> dict:
+    cfg = get_auth_settings()
+    async with httpx.AsyncClient(timeout=_OAUTH_HTTP_TIMEOUT_SECONDS) as client:
+        token_response = await client.post(
+            cfg.oauth.token_url,
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": cfg.oauth.client_id,
+                "client_secret": cfg.oauth.client_secret,
+                "redirect_uri": cfg.oauth.redirect_uri,
+            },
+            headers={"Accept": "application/json"},
+        )
+        token_response.raise_for_status()
+        token_payload = token_response.json()
+        access_token = str(token_payload.get("access_token") or "")
+        if not access_token:
+            raise HTTPException(status_code=502, detail="OAuth token endpoint returned no access_token")
+
+        userinfo_response = await client.get(
+            cfg.oauth.userinfo_url,
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+        )
+        userinfo_response.raise_for_status()
+        userinfo = userinfo_response.json()
+        if not isinstance(userinfo, dict):
+            raise HTTPException(status_code=502, detail="OAuth userinfo endpoint returned unexpected payload")
+        return userinfo
+
+
+@router.get("/oauth/callback")
+async def oauth_callback(request: Request):
+    _require_enabled()
+    cfg = get_auth_settings()
+    if not cfg.oauth_login_enabled:
+        raise HTTPException(status_code=400, detail="OAuth login is not configured")
+
+    error = request.query_params.get("error")
+    if error:
+        return RedirectResponse(url=f"/login?error={error}", status_code=302)
+
+    state_payload = verify_oauth_state(request.query_params.get("state") or "")
+    if state_payload is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    code = str(request.query_params.get("code") or "")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    try:
+        userinfo = await _exchange_code_for_userinfo(code)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("OAuth code exchange failed: %s", e)
+        return RedirectResponse(url="/login?error=oauth_exchange_failed", status_code=302)
+
+    oauth_user_id = str(userinfo.get(cfg.oauth.user_id_field) or "").strip()
+    if not oauth_user_id:
+        logger.error("OAuth userinfo missing %r field: keys=%s", cfg.oauth.user_id_field, sorted(userinfo))
+        return RedirectResponse(url="/login?error=oauth_missing_user_id", status_code=302)
+    username = str(userinfo.get(cfg.oauth.username_field) or oauth_user_id).strip()
+
+    provider = cfg.oauth.provider_name
+    identity = AuthIdentity(
+        user_id=f"{provider}:{oauth_user_id}",
+        username=username,
+        role=resolve_oauth_role(provider, oauth_user_id),
+        provider=provider,
+    )
+
+    redirect_path = sanitize_redirect_path(
+        state_payload.get("redirect"),
+        fallback=sanitize_redirect_path(cfg.oauth.post_login_redirect, fallback="/"),
+    )
+    response = RedirectResponse(url=redirect_path, status_code=302)
+    _set_session_cookie(response, issue_session_token(identity))
+    return response

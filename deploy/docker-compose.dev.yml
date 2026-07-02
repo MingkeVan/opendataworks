@@ -168,6 +168,10 @@ services:
       DATAAGENT_SANDBOX_IMAGE: ${OPENDATAWORKS_DATAAGENT_RUNNER_IMAGE:-mikefan2019/opendataworks-dataagent-runner:latest}
       DATAAGENT_SANDBOX_BACKEND: ${DATAAGENT_SANDBOX_BACKEND:-docker}
       DATAAGENT_SANDBOX_NETWORK: container:opendataworks-dataagent-sandbox-runner
+      # DataAgent 认证（可选，fail-closed）：取消下面 env 与 volumes 中配置文件挂载的注释后启用。
+      # 未设置该 env = 认证关闭（回滚手段）；已设置但文件缺失/非法 = 启动失败，不会静默裸奔。
+      # 示例配置见 deploy/dataagent-auth-config.example.py。
+      # DATAAGENT_AUTH_CONFIG: /app/auth_config.py
     ports:
       - "8900:8900"
     depends_on:
@@ -188,6 +192,8 @@ services:
     volumes:
       - ${DATAAGENT_HOST_ROOT:-/dataagent_runtime}:/dataagent_runtime
       - ${DATAAGENT_SKILLS_DIR:-../dataagent/.claude/skills}:/app/.claude/skills
+      # DataAgent 认证外置配置（与上方 DATAAGENT_AUTH_CONFIG env 一同取消注释）：
+      # - ${DATAAGENT_AUTH_CONFIG_FILE:-./dataagent-auth-config.py}:/app/auth_config.py:ro
 
   # DataAgent 沙箱 Runner（内部服务）
   dataagent-sandbox-runner:

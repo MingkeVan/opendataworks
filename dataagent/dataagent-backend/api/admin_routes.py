@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
+from core.auth import require_admin
 from core.agent_profile_service import (
     agent_capabilities,
     create_agent_profile,
@@ -60,8 +61,13 @@ from models.schemas import (
 )
 
 router = APIRouter()
-settings_router = APIRouter(prefix="/api/v1/nl2sql-admin")
-skills_router = APIRouter(prefix="/api/v1/dataagent")
+# 管理面（settings / 会话审计 / agent 与 skill 管理）在 auth 启用时要求 admin 会话；
+# auth 关闭（env 未设置或显式 AUTH_ENABLED=False）时 require_admin no-op 放行，
+# 与无认证时代行为一致。router 级依赖，新增端点自动受保护。
+settings_router = APIRouter(prefix="/api/v1/nl2sql-admin", dependencies=[Depends(require_admin)])
+skills_router = APIRouter(prefix="/api/v1/dataagent", dependencies=[Depends(require_admin)])
+# 聊天页与 widget 依赖的三个只读 agents 端点必须保持公开（匿名嵌入场景）。
+agents_public_router = APIRouter(prefix="/api/v1/dataagent")
 
 
 def _provider_catalog() -> list[ProviderConfig]:
@@ -118,6 +124,44 @@ async def create_model_detection(request: ModelDetectionRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ModelDetectionResponse.model_validate(result)
+
+
+@settings_router.get("/topics", response_model=AdminWidgetTopicPage)
+async def admin_list_all_topics(
+    source: str = Query(default="", pattern="^(|portal|widget)$"),
+    website_id: str | None = Query(default=None),
+    external_user_id: str | None = Query(default=None),
+    visitor_id: str | None = Query(default=None),
+    auth_user_id: str | None = Query(default=None),
+    agent_id: str | None = Query(default=None),
+    keyword: str | None = Query(default=None),
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+):
+    """Read-only admin listing across ALL conversation sources (portal
+    anonymous pool, authenticated users, widget). `source=''` means no
+    source filter. Backs the admin "all sessions" view."""
+    payload = get_topic_task_store().admin_list_topics(
+        source=source,
+        website_id=website_id,
+        external_user_id=external_user_id,
+        visitor_id=visitor_id,
+        auth_user_id=auth_user_id,
+        agent_id=agent_id,
+        keyword=keyword,
+        start=start,
+        end=end,
+        page=page,
+        page_size=page_size,
+    )
+    return AdminWidgetTopicPage(
+        items=[AdminWidgetTopicSummary.model_validate(item) for item in payload.get("items") or []],
+        total=int(payload.get("total") or 0),
+        page=int(payload.get("page") or page),
+        page_size=int(payload.get("page_size") or page_size),
+    )
 
 
 @settings_router.get("/widget-topics", response_model=AdminWidgetTopicPage)
@@ -207,7 +251,7 @@ async def get_data_scope_options():
     return [AgentDataScopeOption.model_validate(item) for item in list_data_scope_options()]
 
 
-@skills_router.get("/agents", response_model=list[AgentProfile])
+@agents_public_router.get("/agents", response_model=list[AgentProfile])
 async def get_agents():
     return [AgentProfile.model_validate(item) for item in list_agent_profiles()]
 
@@ -224,7 +268,7 @@ async def create_agent(request: AgentProfileCreateRequest):
     return AgentProfile.model_validate(profile)
 
 
-@skills_router.get("/agents/{agent_id}", response_model=AgentProfile)
+@agents_public_router.get("/agents/{agent_id}", response_model=AgentProfile)
 async def get_agent(agent_id: str):
     profile = get_agent_profile(agent_id)
     if not profile:
@@ -232,7 +276,7 @@ async def get_agent(agent_id: str):
     return AgentProfile.model_validate(profile)
 
 
-@skills_router.get("/agents/{agent_id}/slash-commands", response_model=AgentSlashCommandsResponse)
+@agents_public_router.get("/agents/{agent_id}/slash-commands", response_model=AgentSlashCommandsResponse)
 async def get_agent_slash_commands_endpoint(agent_id: str):
     # Prefer the authoritative list captured from a real run's system/init message.
     cached = get_agent_slash_commands(agent_id)
@@ -364,5 +408,8 @@ async def rollback_skill_document(document_id: int, version_id: int):
     return SkillDocumentDetail.model_validate(document)
 
 
+# include 顺序即路由匹配顺序：admin 的静态路径 /agents/capabilities 必须先于
+# 公开的动态路径 /agents/{agent_id} 注册，否则 capabilities 会被当作 agent_id。
 router.include_router(settings_router)
 router.include_router(skills_router)
+router.include_router(agents_public_router)

@@ -251,6 +251,25 @@ DataX 同步任务以 DolphinScheduler 的 `DATAX` 任务节点执行（见 `doc
 
 列映射（`column_mapping`）支持三种形式：留空（全列同步）、列清单（逗号分隔或 JSON 数组 / 源到目标的 JSON 对象映射）、完整 DataX 作业 JSON（含 `job` 键，按自定义模式 `customConfig=1` 下发）。
 
+## DataAgent Authentication (Optional)
+
+DataAgent（智能问数）支持可选的 OAuth2 + 本地管理员登录，配置放在**宿主机外置 Python 文件**中（Superset `superset_config.py` 模式），容器启动时加载。默认不启用，行为与历史版本完全一致。
+
+启用步骤：
+
+1. 拷贝 `deploy/dataagent-auth-config.example.py` 为宿主机文件（如 `deploy/dataagent-auth-config.py`），按注释填写 `SECRET_KEY`（`secrets.token_urlsafe(32)` 生成）、`LOCAL_ADMINS`（bcrypt 哈希）、`OAUTH`、`ADMIN_USERS`（`provider:sub` 稳定标识）。
+2. 取消 compose 中 `dataagent-backend` 服务的两处注释：`DATAAGENT_AUTH_CONFIG` env 与 `/app/auth_config.py:ro` 卷挂载（可经 `.env` 的 `DATAAGENT_AUTH_CONFIG_FILE` 指定宿主机路径）。
+3. 重启 `dataagent-backend`。可先以 `AUTH_ENABLED = False` 挂载验证文件可读，再置 `True` 启用。
+
+语义与回滚（fail-closed）：
+
+- 容器内 `DATAAGENT_AUTH_CONFIG` **未设置** = 认证关闭，行为与无认证版本完全一致——这也是唯一的回滚手段（重新注释掉 env 后重启）。
+- env **已设置**但文件缺失 / 不可读 / 配置非法 / 启用却缺合法 `SECRET_KEY` = 服务启动失败，不会静默降级为无认证。
+- 回滚后果：曾经登录用户名下的会话会重新出现在共享匿名池（恢复完整旧语义，不保留半套隔离）。
+- widget 外嵌会话（`X-ODW-Client: widget`）与主门户嵌入页的匿名会话完全不受认证影响。
+
+详见 `docs/design/2026-07-01-dataagent-auth-design.md` 与 `docs/handbook/`。
+
 ## Common Operations
 
 ### Stop Services

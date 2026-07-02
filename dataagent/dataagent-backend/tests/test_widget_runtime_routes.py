@@ -422,3 +422,120 @@ def test_runtime_config_returns_safe_enabled_provider_subset(monkeypatch):
     assert "auth_token_set" not in payload["providers"][0]
     assert "base_url" not in payload["providers"][0]
     assert "mysql_host" not in payload
+
+
+# ---------------------------------------------------------------------------
+# 三分支客户端语义（docs/design/2026-07-01-dataagent-auth-design.md 3.2）
+# ---------------------------------------------------------------------------
+
+VALID_SECRET = "unit-test-secret-key-0123456789abcdef-0123456789"
+
+
+def _enable_auth(monkeypatch, tmp_path):
+    import bcrypt
+    import core.auth as auth
+
+    password_hash = bcrypt.hashpw(b"admin-pass", bcrypt.gensalt(rounds=4)).decode()
+    config_file = tmp_path / "auth_config.py"
+    config_file.write_text(
+        f"""
+AUTH_ENABLED = True
+SECRET_KEY = {VALID_SECRET!r}
+LOCAL_ADMINS = [{{"username": "admin", "password_bcrypt": {password_hash!r}}}]
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, str(config_file))
+    auth.reset_auth_for_tests()
+    auth.init_auth()
+    return auth
+
+
+def _session_cookie(auth, *, user_id="SSO:42", username="alice", role="user"):
+    identity = auth.AuthIdentity(user_id=user_id, username=username, role=role, provider="SSO")
+    return {"da_session": auth.issue_session_token(identity)}
+
+
+def test_unmarked_client_with_session_cookie_stays_anonymous_portal(monkeypatch, tmp_path):
+    """门户嵌入语义回归：无标记客户端即使带着 da_session Cookie（同主机名下
+    登录过 DataAgent 站点），也永不消费 cookie，仍是匿名 portal 池。"""
+    auth = _enable_auth(monkeypatch, tmp_path)
+    try:
+        store = install_fake_store(monkeypatch)
+        client = TestClient(app)
+
+        response = client.get("/api/v1/nl2sql/topics", cookies=_session_cookie(auth))
+        assert response.status_code == 200
+        context = store.calls[-1][1]
+        assert context["source"] == "portal"
+        assert "auth_user_id" not in context
+    finally:
+        auth.reset_auth_for_tests()
+
+
+def test_widget_client_with_stray_session_cookie_keeps_widget_context(monkeypatch, tmp_path):
+    auth = _enable_auth(monkeypatch, tmp_path)
+    try:
+        install_widget_settings(monkeypatch)
+        store = install_fake_store(monkeypatch)
+        client = TestClient(app)
+
+        response = client.get(
+            "/api/v1/nl2sql/topics",
+            headers=widget_headers("user-123"),
+            cookies=_session_cookie(auth),
+        )
+        assert response.status_code == 200
+        context = store.calls[-1][1]
+        assert context["source"] == "widget"
+        assert context["external_user_id"] == "user-123"
+        assert "auth_user_id" not in context
+    finally:
+        auth.reset_auth_for_tests()
+
+
+def test_dataagent_client_resolves_identity_from_cookie(monkeypatch, tmp_path):
+    auth = _enable_auth(monkeypatch, tmp_path)
+    try:
+        store = install_fake_store(monkeypatch)
+        client = TestClient(app)
+
+        response = client.get(
+            "/api/v1/nl2sql/topics",
+            headers={"X-ODW-Client": "dataagent"},
+            cookies=_session_cookie(auth, user_id="SSO:42", username="alice"),
+        )
+        assert response.status_code == 200
+        context = store.calls[-1][1]
+        assert context["source"] == "portal"
+        assert context["auth_user_id"] == "SSO:42"
+        assert context["auth_username"] == "alice"
+        assert context["auth_role"] == "user"
+    finally:
+        auth.reset_auth_for_tests()
+
+
+def test_dataagent_client_without_session_gets_401(monkeypatch, tmp_path):
+    auth = _enable_auth(monkeypatch, tmp_path)
+    try:
+        install_fake_store(monkeypatch)
+        client = TestClient(app)
+
+        response = client.get("/api/v1/nl2sql/topics", headers={"X-ODW-Client": "dataagent"})
+        assert response.status_code == 401
+    finally:
+        auth.reset_auth_for_tests()
+
+
+def test_dataagent_client_is_plain_portal_when_auth_disabled(monkeypatch):
+    """auth 关闭（env 未设置）：dataagent 标记与旧行为一致，匿名 portal。"""
+    import core.auth as auth
+
+    auth.reset_auth_for_tests()
+    store = install_fake_store(monkeypatch)
+    client = TestClient(app)
+
+    response = client.get("/api/v1/nl2sql/topics", headers={"X-ODW-Client": "dataagent"})
+    assert response.status_code == 200
+    context = store.calls[-1][1]
+    assert context == {"source": "portal", "website_id": "", "external_user_id": "", "visitor_id": ""}

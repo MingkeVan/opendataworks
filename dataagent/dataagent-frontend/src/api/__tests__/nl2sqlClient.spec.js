@@ -166,3 +166,61 @@ describe('createNl2SqlApiClient', () => {
     })
   })
 })
+
+describe('auth wiring', () => {
+  beforeEach(() => {
+    clients.length = 0
+    axiosCreate.mockClear()
+  })
+
+  it('never injects the dataagent marker by default (widget/embed regression)', async () => {
+    const { createNl2SqlApiClient: create } = await import('../nl2sql')
+    create()
+    for (const client of clients) {
+      expect(client.config.headers['X-ODW-Client']).toBeUndefined()
+    }
+  })
+
+  it('exposes the SPA marker constant separately from the factory default', async () => {
+    const { DATAAGENT_CLIENT_HEADERS } = await import('../nl2sql')
+    expect(DATAAGENT_CLIENT_HEADERS).toEqual({ 'X-ODW-Client': 'dataagent' })
+  })
+
+  it('invokes onUnauthorized only for 401 responses', async () => {
+    const { createNl2SqlApiClient: create } = await import('../nl2sql')
+    const onUnauthorized = vi.fn()
+    create({ onUnauthorized })
+
+    // 每个 axios client 的 response 拦截器第二个参数是错误处理器。
+    const rejectHandler = clients[0].interceptors.response.use.mock.calls[0][1]
+
+    await expect(rejectHandler({ response: { status: 401 }, message: 'x' })).rejects.toBeTruthy()
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+
+    await expect(rejectHandler({ response: { status: 500 }, message: 'x' })).rejects.toBeTruthy()
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+  })
+
+  it('exposes the auth api on the runtime prefix', async () => {
+    const { createNl2SqlApiClient: create } = await import('../nl2sql')
+    const client = create({ baseURL: 'https://odw.example.com' })
+
+    client.authApi.getAuthConfig()
+    expect(clients[0].get).toHaveBeenCalledWith('/auth/config')
+
+    client.authApi.login('admin', 'pw')
+    expect(clients[0].post).toHaveBeenCalledWith('/auth/login', { username: 'admin', password: 'pw' })
+
+    expect(client.authApi.oauthAuthorizeUrl('/intelligent-query/chat')).toBe(
+      'https://odw.example.com/api/v1/nl2sql/auth/oauth/authorize?redirect=%2Fintelligent-query%2Fchat'
+    )
+  })
+
+  it('forwards admin all-topics listing to the admin client', async () => {
+    const { createNl2SqlApiClient: create } = await import('../nl2sql')
+    const client = create()
+
+    client.adminApi.listAdminTopics({ source: '' })
+    expect(clients[1].get).toHaveBeenCalledWith('/topics', { params: { source: '' } })
+  })
+})
