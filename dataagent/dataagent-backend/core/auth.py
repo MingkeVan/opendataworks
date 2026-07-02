@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import secrets
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -183,6 +184,13 @@ def load_auth_settings(config_path: str | None = None) -> AuthSettings:
 
     if not os.path.isfile(path) or not os.access(path, os.R_OK):
         raise AuthConfigError(f"{AUTH_CONFIG_ENV} 指向的配置文件不可读: {path}")
+
+    # 配置文件所在目录加入 sys.path（Superset PYTHONPATH=pythonpath_dev 同款）：
+    # 基础配置可以 `from <override> import *` 加载同目录的用户覆盖/扩展模块。
+    config_dir = os.path.dirname(os.path.abspath(path))
+    if config_dir not in sys.path:
+        sys.path.insert(0, config_dir)
+
     try:
         spec = importlib.util.spec_from_file_location("dataagent_auth_config", path)
         if spec is None or spec.loader is None:

@@ -253,19 +253,29 @@ DataX 同步任务以 DolphinScheduler 的 `DATAX` 任务节点执行（见 `doc
 
 ## DataAgent Authentication (Optional)
 
-DataAgent（智能问数）支持可选的 OAuth2 + 本地管理员登录，配置放在**宿主机外置 Python 文件**中（Superset `superset_config.py` 模式），容器启动时加载。默认不启用，行为与历史版本完全一致。
+DataAgent（智能问数）支持可选的 OAuth2 + 本地管理员登录。配置采用 **Superset `docker/pythonpath_dev` 同款模式**：`deploy/docker/dataagent/` 目录被 compose 整体挂载进 `dataagent-backend` 容器（`/app/docker/dataagent`，只读），并加入 `sys.path`。
+
+目录布局：
+
+| 文件 | 说明 |
+|---|---|
+| `docker/dataagent/dataagent_auth_config.py` | 仓库自带基础配置（默认 `AUTH_ENABLED=False`，**不要直接改**，升级会覆盖）；末尾自动加载同目录用户覆盖 |
+| `docker/dataagent/dataagent_auth_config_docker.py.example` | 用户覆盖示例；拷贝为 `dataagent_auth_config_docker.py` 后填写 |
+| `docker/dataagent/.gitignore` | 忽略一切用户文件，只保留自带文件与 `.example` |
+| `docker/nginx/frontend.conf`、`docker/nginx/dataagent-frontend.conf` | 两个前端 nginx 配置的宿主机副本；默认仍用镜像内构建版本，取消 compose 中对应服务 volumes 注释即可切换为宿主机管理 |
 
 启用步骤：
 
-1. 拷贝 `deploy/dataagent-auth-config.example.py` 为宿主机文件（如 `deploy/dataagent-auth-config.py`），按注释填写 `SECRET_KEY`（`secrets.token_urlsafe(32)` 生成）、`LOCAL_ADMINS`（bcrypt 哈希）、`OAUTH`、`ADMIN_USERS`（`provider:sub` 稳定标识）。
-2. 取消 compose 中 `dataagent-backend` 服务的两处注释：`DATAAGENT_AUTH_CONFIG` env 与 `/app/auth_config.py:ro` 卷挂载（可经 `.env` 的 `DATAAGENT_AUTH_CONFIG_FILE` 指定宿主机路径）。
-3. 重启 `dataagent-backend`。可先以 `AUTH_ENABLED = False` 挂载验证文件可读，再置 `True` 启用。
+1. `cd deploy/docker/dataagent && cp dataagent_auth_config_docker.py.example dataagent_auth_config_docker.py`
+2. 按注释填写 `SECRET_KEY`（`secrets.token_urlsafe(32)` 生成）、`LOCAL_ADMINS`（bcrypt 哈希）、`OAUTH`、`ADMIN_USERS`（`provider:sub` 稳定标识），置 `AUTH_ENABLED = True`。
+3. 重启 `dataagent-backend`。无需修改 compose。需要自定义扩展模块（如自研 SSO 适配）时，直接把 `.py` 放进同目录并在覆盖文件里 import（目录在 `sys.path` 上）。
 
 语义与回滚（fail-closed）：
 
-- 容器内 `DATAAGENT_AUTH_CONFIG` **未设置** = 认证关闭，行为与无认证版本完全一致——这也是唯一的回滚手段（重新注释掉 env 后重启）。
-- env **已设置**但文件缺失 / 不可读 / 配置非法 / 启用却缺合法 `SECRET_KEY` = 服务启动失败，不会静默降级为无认证。
-- 回滚后果：曾经登录用户名下的会话会重新出现在共享匿名池（恢复完整旧语义，不保留半套隔离）。
+- 覆盖文件不存在或 `AUTH_ENABLED=False`（默认） = 认证关闭，行为与无认证版本完全一致。
+- 容器内 `DATAAGENT_AUTH_CONFIG` env 被注释掉 = 彻底关闭认证机制（终极回滚手段）。
+- env 已设置但配置文件缺失 / 不可读 / 有语法错误 / 启用却缺合法 `SECRET_KEY` = 服务启动失败，不会静默降级为无认证。
+- 关闭后果：曾经登录用户名下的会话会重新出现在共享匿名池（恢复完整旧语义，不保留半套隔离）。
 - widget 外嵌会话（`X-ODW-Client: widget`）与主门户嵌入页的匿名会话完全不受认证影响。
 
 详见 `docs/design/2026-07-01-dataagent-auth-design.md` 与 `docs/handbook/`。

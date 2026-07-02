@@ -142,14 +142,16 @@ ALTER TABLE da_agent_topic
 - 文件下载/预览事件代理（3.6）。
 - widget bundle：不设标记、不设钩子、无 router → 完全不受影响。
 
-## 7. 部署
+## 7. 部署（Superset docker/pythonpath_dev 同款目录模式）
 
-- compose（prod/dev）中以注释形式提供：
-  - env `DATAAGENT_AUTH_CONFIG: /app/auth_config.py`
-  - 卷 `- ${DATAAGENT_AUTH_CONFIG_FILE:-./dataagent-auth-config.py}:/app/auth_config.py:ro`
-- 示例配置 `deploy/dataagent-auth-config.example.py`（默认关闭、SECRET_KEY/bcrypt 生成提示、通用 OIDC 样例、`provider:sub` 提名写法）。
-- 无需改 nginx（新端点在已代理前缀之下）。
-- 回滚 = 移除 env 重启；后果见 3.5。
+- `deploy/docker/dataagent/` 目录由 compose 整体挂载进 dataagent-backend（`/app/docker/dataagent:ro`），env 默认指定 `DATAAGENT_AUTH_CONFIG=/app/docker/dataagent/dataagent_auth_config.py`；加载器把该目录加入 `sys.path`。
+- 目录内容：
+  - `dataagent_auth_config.py`：仓库自带基础配置，默认 `AUTH_ENABLED=False`（挂载即"显式关闭"态，行为与现状一致）；文件末尾 `from dataagent_auth_config_docker import *` 加载同目录用户覆盖（不存在则跳过，Superset `superset_config_docker.py` 同款机制）。
+  - `dataagent_auth_config_docker.py.example`：用户覆盖示例（SECRET_KEY/bcrypt 生成提示、通用 OIDC 样例、`provider:sub` 提名写法）；用户拷贝为 `dataagent_auth_config_docker.py` 填写。
+  - `.gitignore`：忽略一切用户文件（覆盖配置、自定义扩展模块如自研 SSO 适配），只保留自带文件与 `.example`。
+- `deploy/docker/nginx/`：两个前端 nginx 配置的宿主机副本 + compose 中注释式挂载；默认仍用镜像内构建版本（单一主路径），需要宿主机管理时取消注释。
+- 无需改 nginx 路由（新端点在已代理前缀之下）。
+- 启用 = 拷贝 example 填写后重启（不改 compose）；彻底回滚 = 注释掉 env 重启；后果见 3.5。用户覆盖文件有语法错误时启动失败（fail-closed 覆盖到用户扩展层）。
 
 ## 8. 安全考量
 

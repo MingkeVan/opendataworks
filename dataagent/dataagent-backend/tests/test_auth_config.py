@@ -40,7 +40,12 @@ VALID_SECRET = "unit-test-secret-key-0123456789abcdef-0123456789"
 def _reset_auth(monkeypatch):
     monkeypatch.delenv(auth.AUTH_CONFIG_ENV, raising=False)
     auth.reset_auth_for_tests()
+    # 加载器会把配置目录插入 sys.path（运行时单目录无害）；测试间恢复快照，
+    # 防止上一个用例的 tmp 目录里的覆盖模块被后续用例 import 到。
+    saved_sys_path = list(sys.path)
     yield
+    sys.path[:] = saved_sys_path
+    sys.modules.pop("dataagent_auth_config_docker", None)
     auth.reset_auth_for_tests()
 
 
@@ -208,3 +213,69 @@ def test_sanitize_redirect_rejects_unsafe_values(raw):
 
 def test_sanitize_redirect_accepts_app_paths():
     assert sanitize_redirect_path("/intelligent-query/chat?x=1") == "/intelligent-query/chat?x=1"
+
+
+# ---------------------------------------------------------------------------
+# Superset docker/pythonpath_dev 同款目录模式：
+# 基础配置末尾加载同目录用户覆盖模块（配置目录在 sys.path 上）。
+# ---------------------------------------------------------------------------
+
+def _write_base_config(tmp_path: Path) -> str:
+    base = tmp_path / "dataagent_auth_config.py"
+    base.write_text(
+        """
+AUTH_ENABLED = False
+SECRET_KEY = ""
+LOCAL_ADMINS = []
+try:
+    from dataagent_auth_config_docker import *  # noqa: F401,F403
+except ImportError:
+    pass
+""",
+        encoding="utf-8",
+    )
+    return str(base)
+
+
+@pytest.fixture()
+def _clean_override_module():
+    yield
+    sys.modules.pop("dataagent_auth_config_docker", None)
+
+
+def test_base_config_without_override_is_disabled(monkeypatch, tmp_path, _clean_override_module):
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, _write_base_config(tmp_path))
+    settings = init_auth()
+    assert settings.enabled is False
+
+
+def test_docker_override_module_is_loaded_from_config_dir(monkeypatch, tmp_path, _clean_override_module):
+    import bcrypt
+
+    password_hash = bcrypt.hashpw(b"admin-pass", bcrypt.gensalt(rounds=4)).decode()
+    (tmp_path / "dataagent_auth_config_docker.py").write_text(
+        f"""
+AUTH_ENABLED = True
+SECRET_KEY = {VALID_SECRET!r}
+LOCAL_ADMINS = [{{"username": "admin", "password_bcrypt": {password_hash!r}}}]
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, _write_base_config(tmp_path))
+    settings = init_auth()
+    assert settings.enabled is True
+    assert settings.local_login_enabled is True
+
+
+def test_broken_override_module_fails_startup(monkeypatch, tmp_path, _clean_override_module):
+    (tmp_path / "dataagent_auth_config_docker.py").write_text("this is not python !!!", encoding="utf-8")
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, _write_base_config(tmp_path))
+    with pytest.raises(AuthConfigError):
+        init_auth()
+
+
+def test_shipped_deploy_base_config_is_disabled_by_default(monkeypatch, _clean_override_module):
+    shipped = Path(__file__).resolve().parents[3] / "deploy" / "docker" / "dataagent" / "dataagent_auth_config.py"
+    assert shipped.is_file(), shipped
+    settings = load_auth_settings(str(shipped))
+    assert settings.enabled is False

@@ -83,6 +83,10 @@ services:
         condition: service_healthy
       dataagent-frontend:
         condition: service_healthy
+    # nginx 配置默认使用镜像内构建版本；如需宿主机管理（Superset docker/nginx 同款），
+    # 取消下面挂载的注释并按需修改 ./docker/nginx/ 下的对应 conf。
+    # volumes:
+    #   - ./docker/nginx/frontend.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
       interval: 30s
@@ -99,6 +103,10 @@ services:
     depends_on:
       dataagent-backend:
         condition: service_healthy
+    # nginx 配置默认使用镜像内构建版本；如需宿主机管理（Superset docker/nginx 同款），
+    # 取消下面挂载的注释并按需修改 ./docker/nginx/ 下的对应 conf。
+    # volumes:
+    #   - ./docker/nginx/dataagent-frontend.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
       interval: 30s
@@ -168,10 +176,12 @@ services:
       DATAAGENT_SANDBOX_IMAGE: ${OPENDATAWORKS_DATAAGENT_RUNNER_IMAGE:-mikefan2019/opendataworks-dataagent-runner:latest}
       DATAAGENT_SANDBOX_BACKEND: ${DATAAGENT_SANDBOX_BACKEND:-docker}
       DATAAGENT_SANDBOX_NETWORK: container:opendataworks-dataagent-sandbox-runner
-      # DataAgent 认证（可选，fail-closed）：取消下面 env 与 volumes 中配置文件挂载的注释后启用。
-      # 未设置该 env = 认证关闭（回滚手段）；已设置但文件缺失/非法 = 启动失败，不会静默裸奔。
-      # 示例配置见 deploy/dataagent-auth-config.example.py。
-      # DATAAGENT_AUTH_CONFIG: /app/auth_config.py
+      # DataAgent 认证（fail-closed，Superset docker/pythonpath_dev 同款模式）：
+      # ./docker/dataagent 目录整体挂载进容器，仓库自带的基础配置默认 AUTH_ENABLED=False
+      # （行为与无认证版本一致）。启用 = 拷贝该目录下的 *_docker.py.example 为
+      # dataagent_auth_config_docker.py 并按注释填写，重启即生效，无需改 compose。
+      # 彻底回滚 = 注释掉下面这行 env；env 已设置但配置非法 = 启动失败，不会静默裸奔。
+      DATAAGENT_AUTH_CONFIG: /app/docker/dataagent/dataagent_auth_config.py
     ports:
       - "8900:8900"
     depends_on:
@@ -192,8 +202,8 @@ services:
     volumes:
       - ${DATAAGENT_HOST_ROOT:-/dataagent_runtime}:/dataagent_runtime
       - ${DATAAGENT_SKILLS_DIR:-../dataagent/.claude/skills}:/app/.claude/skills
-      # DataAgent 认证外置配置（与上方 DATAAGENT_AUTH_CONFIG env 一同取消注释）：
-      # - ${DATAAGENT_AUTH_CONFIG_FILE:-./dataagent-auth-config.py}:/app/auth_config.py:ro
+      # DataAgent 认证配置目录（基础配置 + 用户覆盖/扩展模块，见目录内注释）：
+      - ./docker/dataagent:/app/docker/dataagent:ro
 
   # DataAgent 沙箱 Runner（内部服务）
   dataagent-sandbox-runner:
