@@ -187,17 +187,37 @@ async def oauth_callback(request: Request):
         logger.exception("OAuth code exchange failed: %s", e)
         return RedirectResponse(url="/login?error=oauth_exchange_failed", status_code=302)
 
-    oauth_user_id = str(userinfo.get(cfg.oauth.user_id_field) or "").strip()
+    # 可选 userinfo 映射钩子（Superset custom_sso_security_manager 的
+    # oauth_user_info 对应物）：非标准 IdP 在外置配置里提供 OAUTH_USERINFO_MAPPER
+    # 自行解析 payload；未配置则按 user_id_field / username_field 平铺取值。
+    mapped_role = None
+    if cfg.oauth_userinfo_mapper is not None:
+        try:
+            mapped = cfg.oauth_userinfo_mapper(userinfo)
+        except Exception as e:
+            logger.exception("OAUTH_USERINFO_MAPPER failed: %s", e)
+            return RedirectResponse(url="/login?error=oauth_mapper_failed", status_code=302)
+        if not isinstance(mapped, dict):
+            logger.error("OAUTH_USERINFO_MAPPER must return a dict, got %r", type(mapped))
+            return RedirectResponse(url="/login?error=oauth_mapper_failed", status_code=302)
+        oauth_user_id = str(mapped.get("user_id") or "").strip()
+        username = str(mapped.get("username") or oauth_user_id).strip()
+        role_value = str(mapped.get("role") or "").strip().lower()
+        mapped_role = role_value if role_value in {"admin", "user"} else None
+    else:
+        oauth_user_id = str(userinfo.get(cfg.oauth.user_id_field) or "").strip()
+        username = str(userinfo.get(cfg.oauth.username_field) or oauth_user_id).strip()
+
     if not oauth_user_id:
-        logger.error("OAuth userinfo missing %r field: keys=%s", cfg.oauth.user_id_field, sorted(userinfo))
+        logger.error("OAuth userinfo missing user id: keys=%s", sorted(userinfo))
         return RedirectResponse(url="/login?error=oauth_missing_user_id", status_code=302)
-    username = str(userinfo.get(cfg.oauth.username_field) or oauth_user_id).strip()
 
     provider = cfg.oauth.provider_name
     identity = AuthIdentity(
         user_id=f"{provider}:{oauth_user_id}",
         username=username,
-        role=resolve_oauth_role(provider, oauth_user_id),
+        # 钩子显式返回 role 时优先生效；否则按 ADMIN_USERS（provider:sub）提名。
+        role=mapped_role or resolve_oauth_role(provider, oauth_user_id),
         provider=provider,
     )
 

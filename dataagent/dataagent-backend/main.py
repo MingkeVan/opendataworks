@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.admin_routes import router as admin_router
 from api.auth_routes import router as auth_router
 from api.routes import router
-from config import get_settings
+from config import get_settings, update_settings
 from core.auth import init_auth
 from core.agent_profile_service import bootstrap_default_agent_profile
 from core.skill_admin_service import bootstrap_admin_settings, reindex_documents_from_disk
@@ -68,6 +68,11 @@ async def startup():
         "enabled" if auth_settings.enabled else "disabled",
         auth_settings.config_path or "<unset>",
     )
+    # 外置配置里的 DATAAGENT_SETTINGS 覆盖运行时 Settings（config.py 字段），
+    # 在其余 bootstrap 之前应用，保证后续步骤读到最终值。
+    if auth_settings.runtime_settings:
+        update_settings(auth_settings.runtime_settings)
+        logger.info("Applied DATAAGENT_SETTINGS overrides: %s", sorted(auth_settings.runtime_settings))
 
     try:
         get_skill_admin_store().init_schema()

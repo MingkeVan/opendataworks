@@ -241,3 +241,102 @@ def test_oauth_callback_falls_back_to_safe_redirect(monkeypatch, tmp_path):
     response = _oauth_callback(client, monkeypatch, userinfo={"sub": "42"}, redirect="//evil.com")
     assert response.status_code == 302
     assert response.headers["location"] == "/intelligent-query/chat"
+
+
+# ---------------------------------------------------------------------------
+# OAUTH_USERINFO_MAPPER：非标准 IdP 的 userinfo 映射钩子
+# （Superset custom_sso_security_manager 的 oauth_user_info 对应物）
+# ---------------------------------------------------------------------------
+
+def enable_auth_with_mapper(monkeypatch, tmp_path, *, mapper_body: str) -> None:
+    import bcrypt
+
+    password_hash = bcrypt.hashpw(b"admin-pass", bcrypt.gensalt(rounds=4)).decode()
+    config_file = tmp_path / "auth_config.py"
+    config_file.write_text(
+        f"""
+AUTH_ENABLED = True
+SECRET_KEY = {VALID_SECRET!r}
+LOCAL_ADMINS = [{{"username": "admin", "password_bcrypt": {password_hash!r}}}]
+ADMIN_USERS = ["SSO:1024"]
+OAUTH = {{
+    "provider_name": "SSO",
+    "client_id": "cid",
+    "client_secret": "secret",
+    "authorize_url": "https://sso.example.com/authorize",
+    "token_url": "https://sso.example.com/token",
+    "userinfo_url": "https://sso.example.com/userinfo",
+    "redirect_uri": "https://app.example.com/cb",
+    "post_login_redirect": "/intelligent-query/chat",
+}}
+{mapper_body}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, str(config_file))
+    auth.init_auth()
+
+
+NESTED_MAPPER = """
+def _mapper(userinfo):
+    payload = userinfo.get("data") or {}
+    mapped = {"user_id": payload.get("uid"), "username": payload.get("nickname")}
+    if "dataagent-admin" in (payload.get("roles") or []):
+        mapped["role"] = "admin"
+    return mapped
+OAUTH_USERINFO_MAPPER = _mapper
+"""
+
+
+def test_mapper_takes_over_nonstandard_userinfo(monkeypatch, tmp_path):
+    enable_auth_with_mapper(monkeypatch, tmp_path, mapper_body=NESTED_MAPPER)
+    client = TestClient(app)
+
+    response = _oauth_callback(
+        client, monkeypatch,
+        userinfo={"code": 0, "data": {"uid": "7", "nickname": "小王", "roles": []}},
+    )
+    assert response.status_code == 302
+    data = client.get("/api/v1/nl2sql/auth/me").json()["data"]
+    assert data["user_id"] == "SSO:7"
+    assert data["username"] == "小王"
+    assert data["role"] == "user"
+
+
+def test_mapper_role_wins_over_admin_users(monkeypatch, tmp_path):
+    enable_auth_with_mapper(monkeypatch, tmp_path, mapper_body=NESTED_MAPPER)
+    client = TestClient(app)
+
+    response = _oauth_callback(
+        client, monkeypatch,
+        userinfo={"data": {"uid": "7", "nickname": "ops", "roles": ["dataagent-admin"]}},
+    )
+    assert response.status_code == 302
+    assert client.get("/api/v1/nl2sql/auth/me").json()["data"]["role"] == "admin"
+
+
+def test_mapper_without_role_falls_back_to_admin_users(monkeypatch, tmp_path):
+    enable_auth_with_mapper(monkeypatch, tmp_path, mapper_body=NESTED_MAPPER)
+    client = TestClient(app)
+
+    response = _oauth_callback(
+        client, monkeypatch,
+        userinfo={"data": {"uid": "1024", "nickname": "bob", "roles": []}},
+    )
+    assert response.status_code == 302
+    # 钩子未返回 role → 回落 ADMIN_USERS（SSO:1024）提名。
+    assert client.get("/api/v1/nl2sql/auth/me").json()["data"]["role"] == "admin"
+
+
+def test_mapper_failure_fails_the_login_not_the_service(monkeypatch, tmp_path):
+    enable_auth_with_mapper(
+        monkeypatch, tmp_path,
+        mapper_body="def _mapper(userinfo):\n    raise RuntimeError('boom')\nOAUTH_USERINFO_MAPPER = _mapper\n",
+    )
+    client = TestClient(app)
+
+    response = _oauth_callback(client, monkeypatch, userinfo={"sub": "42"})
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?error=oauth_mapper_failed"
+    # 服务仍健康。
+    assert client.get("/api/v1/nl2sql/auth/config").status_code == 200

@@ -9,14 +9,14 @@
 ### 后端（dataagent/dataagent-backend/）
 
 - [x] T1 `requirements.txt`：新增 `PyJWT>=2.8.0`、`bcrypt>=4.1.0`。
-- [x] T2 `core/auth.py`（新建）：fail-closed 外置配置加载（env `DATAAGENT_AUTH_CONFIG` + importlib）、`SECRET_KEY` 强度校验（非空/非占位/≥32 字节）、HS256 JWT 签发校验、`resolve_identity`（Cookie `da_session` → Bearer 兜底）、`verify_local_admin`（bcrypt）、`ADMIN_USERS`（provider:sub）提名、FastAPI 依赖 `require_admin`（关闭时 no-op）、OAuth state 辅助。
+- [x] T2 `core/auth.py`（新建）：fail-closed 外置配置加载（env `DATAAGENT_CONFIG` + importlib）、`SECRET_KEY` 强度校验（非空/非占位/≥32 字节）、HS256 JWT 签发校验、`resolve_identity`（Cookie `da_session` → Bearer 兜底）、`verify_local_admin`（bcrypt）、`ADMIN_USERS`（provider:sub）提名、FastAPI 依赖 `require_admin`（关闭时 no-op）、OAuth state 辅助。
 - [x] T3 `api/auth_routes.py`（新建，prefix `/api/v1/nl2sql/auth`）：`GET /config`、`POST /login`、`GET /oauth/authorize`、`GET /oauth/callback`（httpx）、`GET /me`、`POST /logout`；Cookie HttpOnly 硬编码。
 - [x] T4 `main.py`：startup 触发配置加载（fail-closed），注册 auth 路由，日志打印开关与路径。
 - [x] T5 `api/routes.py:_request_context`：三分支（widget 原样优先 / dataagent 标记消费 cookie，启用且无会话业务路由 401 / 其他永不读 cookie 匿名 portal）。
 - [x] T6 `core/topic_task_store.py`：`_normalize_context` 透传 auth 键；`_topic_context_predicate` 按设计 3.5 矩阵；`create_topic` 写 `auth_user_id/auth_username`；行归一化与 `admin_list_topics` 增加 auth 列/过滤。
 - [x] T7 迁移 `alembic/versions/20260701_000019_add_topic_auth_owner.py`（down_revision=`20260613_000018`，幂等 `_has_column`/`_has_index`）：`auth_user_id VARCHAR(255) NOT NULL DEFAULT ''`、`auth_username VARCHAR(255) NOT NULL DEFAULT ''`、`idx_da_agent_topic_auth_updated (source, auth_user_id, updated_at)`；schema 只由 Alembic 管理。
 - [x] T8 `api/admin_routes.py`：settings_router 挂 router 级 `dependencies=[Depends(require_admin)]`；`/api/v1/dataagent` 拆公开只读（3 个 agents GET）与 admin router（构造时显式 `dependencies=[Depends(require_admin)]`）；`/agents/capabilities` 先于 `/agents/{agent_id}` 注册；新增 `GET /api/v1/nl2sql-admin/topics`。
-- [x] T9 `deploy/docker/dataagent/`（Superset docker/pythonpath_dev 同款目录模式）：自带基础配置 `dataagent_auth_config.py`（默认关闭 + 末尾加载用户覆盖）、`dataagent_auth_config_docker.py.example`、目录 `.gitignore`；`core/auth.py` 加载器把配置目录加入 `sys.path` 以支持同目录用户扩展模块。
+- [x] T9 `deploy/docker/dataagent/`（Superset docker/pythonpath_dev 同款目录模式）：自带基础配置 `dataagent_config.py`（默认关闭 + 末尾加载用户覆盖，兼容承载非认证的 `DATAAGENT_SETTINGS` 运行时覆盖）、`dataagent_config_docker.py.example`、`custom_sso_user_mapper.py.example`（OAUTH_USERINFO_MAPPER 钩子示例）、目录 `.gitignore`；`core/auth.py` 加载器把配置目录加入 `sys.path` 以支持同目录用户扩展模块。
 - [x] T10 compose prod/dev + `.env.example` + `deploy/README.md`：`./docker/dataagent` 目录默认挂载 + env 默认指定基础配置（显式关闭态，行为不变）；`deploy/docker/nginx/` 前端 nginx 配置宿主机副本 + 注释式挂载；fail-closed 与回滚说明。
 
 ### 前端（dataagent/dataagent-frontend/）
@@ -46,7 +46,7 @@
 ## Rollout / Backout
 
 - Rollout：宿主机放置配置文件 → compose 取消注释 env + 卷 → 重启 dataagent-backend →（可选灰度）先 `AUTH_ENABLED=False` 验证挂载，再置 True。
-- Backout：移除 `DATAAGENT_AUTH_CONFIG` env（或整段注释回滚）重启；后果=用户名下 portal 会话重新进入共享匿名池（设计 3.5 已定语义）。
+- Backout：移除 `DATAAGENT_CONFIG` env（或整段注释回滚）重启；后果=用户名下 portal 会话重新进入共享匿名池（设计 3.5 已定语义）。
 
 ## 手工 Runbook（真实 IdP 对接，环境内无法自动验证）
 

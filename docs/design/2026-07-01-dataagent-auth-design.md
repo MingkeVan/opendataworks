@@ -25,7 +25,7 @@ DataAgent 后端（FastAPI :8900）目前完全无认证：
 ## 2. 目标
 
 1. DataAgent 自己实现 OAuth2 授权码登录（普通用户）+ 本地管理员密码登录。
-2. 所有认证配置放在外置 Python 配置脚本（Superset `superset_config.py` 模式），挂载于宿主机，`main.py` 启动时按 env `DATAAGENT_AUTH_CONFIG` 路径加载。
+2. 所有认证配置放在外置 Python 配置脚本（Superset `superset_config.py` 模式），挂载于宿主机，`main.py` 启动时按 env `DATAAGENT_CONFIG` 路径加载（基础配置名 `dataagent_config.py`，除认证外也承载 `DATAAGENT_SETTINGS` 运行时覆盖）。
 3. widget 会话（`X-ODW-Client: widget`）完全不受影响。
 4. 主门户嵌入页（匿名 portal 池）保持现状。
 5. 普通用户只能看自己的会话；管理员能看所有会话（portal 匿名池 + 用户会话 + widget）。
@@ -41,7 +41,7 @@ DataAgent 后端（FastAPI :8900）目前完全无认证：
 
 ### 3.1 Fail-closed 配置加载
 
-- `DATAAGENT_AUTH_CONFIG` **未设置** → auth 关闭，行为与现状完全一致（唯一合法"关闭"路径，也是回滚手段）。
+- `DATAAGENT_CONFIG` **未设置** → auth 关闭，行为与现状完全一致（唯一合法"关闭"路径，也是回滚手段）。
 - env **已设置**但文件不可读 / import 失败 / 配置非法 / `AUTH_ENABLED=True` 却缺 `SECRET_KEY` → **启动直接失败**（raise），绝不静默降级为无认证——防止生产挂载路径 typo / 权限错误把管理端点重新裸奔。
 - 合法文件里 `AUTH_ENABLED=False` → 显式关闭（允许，用于灰度前置挂载）。
 - `SECRET_KEY` 强度校验（HS256 弱密钥 = 会话可伪造）：非空、非示例占位值、长度 ≥ 32 字节，不满足即启动失败；示例配置用 `python -c "import secrets; print(secrets.token_urlsafe(32))"` 生成。
@@ -144,10 +144,11 @@ ALTER TABLE da_agent_topic
 
 ## 7. 部署（Superset docker/pythonpath_dev 同款目录模式）
 
-- `deploy/docker/dataagent/` 目录由 compose 整体挂载进 dataagent-backend（`/app/docker/dataagent:ro`），env 默认指定 `DATAAGENT_AUTH_CONFIG=/app/docker/dataagent/dataagent_auth_config.py`；加载器把该目录加入 `sys.path`。
+- `deploy/docker/dataagent/` 目录由 compose 整体挂载进 dataagent-backend（`/app/docker/dataagent:ro`），env 默认指定 `DATAAGENT_CONFIG=/app/docker/dataagent/dataagent_config.py`；加载器把该目录加入 `sys.path`。
 - 目录内容：
-  - `dataagent_auth_config.py`：仓库自带基础配置，默认 `AUTH_ENABLED=False`（挂载即"显式关闭"态，行为与现状一致）；文件末尾 `from dataagent_auth_config_docker import *` 加载同目录用户覆盖（不存在则跳过，Superset `superset_config_docker.py` 同款机制）。
-  - `dataagent_auth_config_docker.py.example`：用户覆盖示例（SECRET_KEY/bcrypt 生成提示、通用 OIDC 样例、`provider:sub` 提名写法）；用户拷贝为 `dataagent_auth_config_docker.py` 填写。
+  - `dataagent_config.py`：仓库自带基础配置，默认 `AUTH_ENABLED=False`（挂载即"显式关闭"态，行为与现状一致）；文件末尾 `from dataagent_config_docker import *` 加载同目录用户覆盖（不存在则跳过，Superset `superset_config_docker.py` 同款机制）。除认证外也可用 `DATAAGENT_SETTINGS = {"<config.py Settings 字段>": 值}` 覆盖运行时配置（启动期校验字段名，未知字段 fail-closed）。
+  - `dataagent_config_docker.py.example`：用户覆盖示例（SECRET_KEY/bcrypt 生成提示、通用 OIDC 样例、`provider:sub` 提名写法、`DATAAGENT_SETTINGS` 样例）；用户拷贝为 `dataagent_config_docker.py` 填写。
+  - `custom_sso_user_mapper.py.example`：`OAUTH_USERINFO_MAPPER` 钩子示例（Superset `custom_sso_security_manager.py` 的 `oauth_user_info` 对应物）——非标准 IdP（嵌套 payload / 组角色提权）时完全接管 userinfo 解析；钩子返回 `role` 优先于 `ADMIN_USERS`；钩子运行期异常只使该次登录失败，不影响服务。
   - `.gitignore`：忽略一切用户文件（覆盖配置、自定义扩展模块如自研 SSO 适配），只保留自带文件与 `.example`。
 - `deploy/docker/nginx/`：两个前端 nginx 配置的宿主机副本 + compose 中注释式挂载；默认仍用镜像内构建版本（单一主路径），需要宿主机管理时取消注释。
 - 无需改 nginx 路由（新端点在已代理前缀之下）。

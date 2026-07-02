@@ -1,12 +1,17 @@
-"""DataAgent 认证核心：外置 Python 配置加载、会话 JWT、身份解析与管理员门禁。
+"""DataAgent 外置配置加载 + 认证核心（会话 JWT、身份解析与管理员门禁）。
 
-配置来自 env ``DATAAGENT_AUTH_CONFIG`` 指向的宿主机挂载 Python 文件
-（Superset ``superset_config.py`` 模式）。语义为 fail-closed：
+配置来自 env ``DATAAGENT_CONFIG`` 指向的宿主机挂载 Python 文件
+（Superset ``superset_config.py`` 模式）。除认证（AUTH_* / OAUTH / LOCAL_ADMINS /
+ADMIN_USERS）外，也可通过 ``DATAAGENT_SETTINGS`` 字典覆盖运行时 Settings
+（config.py 中的字段，如超时/并发档位），main 启动时统一应用。
+
+语义为 fail-closed：
 
 - env 未设置 → 认证关闭，行为与无认证时代完全一致（唯一合法关闭路径，也是回滚手段）。
-- env 已设置但文件不可读 / import 失败 / 配置非法 / 启用却缺合法 SECRET_KEY
-  → 抛 ``AuthConfigError``，服务启动失败，绝不静默降级为无认证。
-- 合法文件里 ``AUTH_ENABLED = False`` → 显式关闭（灰度前置挂载用）。
+- env 已设置但文件不可读 / import 失败 / 配置非法 / 启用却缺合法 SECRET_KEY /
+  ``DATAAGENT_SETTINGS`` 含未知字段 → 抛 ``AuthConfigError``，服务启动失败，
+  绝不静默降级。
+- 合法文件里 ``AUTH_ENABLED = False`` → 认证显式关闭（默认挂载态）。
 
 设计文档：docs/design/2026-07-01-dataagent-auth-design.md
 """
@@ -30,7 +35,7 @@ from fastapi import HTTPException, Request
 
 logger = logging.getLogger(__name__)
 
-AUTH_CONFIG_ENV = "DATAAGENT_AUTH_CONFIG"
+AUTH_CONFIG_ENV = "DATAAGENT_CONFIG"
 
 # 与 deploy/dataagent-auth-config.example.py 中的占位值保持一致：
 # 用户直接拷贝示例而不改密钥时必须启动失败。
@@ -79,6 +84,14 @@ class AuthSettings:
     oauth: OAuthSettings = field(default_factory=OAuthSettings)
     local_admins: list[dict[str, str]] = field(default_factory=list)
     admin_users: list[str] = field(default_factory=list)
+    # 可选 userinfo → 身份 映射钩子（Superset custom_sso_security_manager 的
+    # oauth_user_info 对应物）：callable(userinfo: dict) -> dict，返回
+    # {"user_id": 必填, "username": 可选, "role": 可选 'admin'/'user'}。
+    # 用于非标准 IdP（嵌套 payload、自定义角色/组逻辑）。
+    oauth_userinfo_mapper: Any = None
+    # DATAAGENT_SETTINGS：非认证的运行时 Settings 覆盖（config.py 字段），
+    # main 启动时经 config.update_settings 应用。
+    runtime_settings: dict[str, Any] = field(default_factory=dict)
     config_path: str = ""
 
     @property
@@ -163,8 +176,23 @@ def _build_settings(module: Any, config_path: str) -> AuthSettings:
         oauth=_parse_oauth(getattr(module, "OAUTH", None)),
         local_admins=_parse_local_admins(getattr(module, "LOCAL_ADMINS", None)),
         admin_users=[str(x).strip() for x in (getattr(module, "ADMIN_USERS", None) or []) if str(x).strip()],
+        oauth_userinfo_mapper=getattr(module, "OAUTH_USERINFO_MAPPER", None),
         config_path=config_path,
     )
+    if settings.oauth_userinfo_mapper is not None and not callable(settings.oauth_userinfo_mapper):
+        raise AuthConfigError("OAUTH_USERINFO_MAPPER 必须是 callable(userinfo: dict) -> dict")
+
+    raw_runtime = getattr(module, "DATAAGENT_SETTINGS", None)
+    if raw_runtime is not None:
+        if not isinstance(raw_runtime, dict):
+            raise AuthConfigError("DATAAGENT_SETTINGS 必须是 dict（config.py Settings 字段 → 值）")
+        from config import Settings as RuntimeSettings
+
+        known_fields = set(RuntimeSettings.model_fields)
+        unknown = sorted(str(k) for k in raw_runtime if str(k) not in known_fields)
+        if unknown:
+            raise AuthConfigError(f"DATAAGENT_SETTINGS 含未知字段: {unknown}")
+        settings.runtime_settings = {str(k): v for k, v in raw_runtime.items()}
     if settings.cookie_samesite not in {"lax", "strict", "none"}:
         raise AuthConfigError(f"COOKIE_SAMESITE 非法: {settings.cookie_samesite!r}")
     if settings.session_ttl_seconds <= 0:
@@ -192,7 +220,7 @@ def load_auth_settings(config_path: str | None = None) -> AuthSettings:
         sys.path.insert(0, config_dir)
 
     try:
-        spec = importlib.util.spec_from_file_location("dataagent_auth_config", path)
+        spec = importlib.util.spec_from_file_location("dataagent_external_config", path)
         if spec is None or spec.loader is None:
             raise AuthConfigError(f"无法加载认证配置: {path}")
         module = importlib.util.module_from_spec(spec)

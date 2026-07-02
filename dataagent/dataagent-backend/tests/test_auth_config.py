@@ -45,7 +45,7 @@ def _reset_auth(monkeypatch):
     saved_sys_path = list(sys.path)
     yield
     sys.path[:] = saved_sys_path
-    sys.modules.pop("dataagent_auth_config_docker", None)
+    sys.modules.pop("dataagent_config_docker", None)
     auth.reset_auth_for_tests()
 
 
@@ -221,14 +221,14 @@ def test_sanitize_redirect_accepts_app_paths():
 # ---------------------------------------------------------------------------
 
 def _write_base_config(tmp_path: Path) -> str:
-    base = tmp_path / "dataagent_auth_config.py"
+    base = tmp_path / "dataagent_config.py"
     base.write_text(
         """
 AUTH_ENABLED = False
 SECRET_KEY = ""
 LOCAL_ADMINS = []
 try:
-    from dataagent_auth_config_docker import *  # noqa: F401,F403
+    from dataagent_config_docker import *  # noqa: F401,F403
 except ImportError:
     pass
 """,
@@ -240,7 +240,7 @@ except ImportError:
 @pytest.fixture()
 def _clean_override_module():
     yield
-    sys.modules.pop("dataagent_auth_config_docker", None)
+    sys.modules.pop("dataagent_config_docker", None)
 
 
 def test_base_config_without_override_is_disabled(monkeypatch, tmp_path, _clean_override_module):
@@ -253,7 +253,7 @@ def test_docker_override_module_is_loaded_from_config_dir(monkeypatch, tmp_path,
     import bcrypt
 
     password_hash = bcrypt.hashpw(b"admin-pass", bcrypt.gensalt(rounds=4)).decode()
-    (tmp_path / "dataagent_auth_config_docker.py").write_text(
+    (tmp_path / "dataagent_config_docker.py").write_text(
         f"""
 AUTH_ENABLED = True
 SECRET_KEY = {VALID_SECRET!r}
@@ -268,14 +268,64 @@ LOCAL_ADMINS = [{{"username": "admin", "password_bcrypt": {password_hash!r}}}]
 
 
 def test_broken_override_module_fails_startup(monkeypatch, tmp_path, _clean_override_module):
-    (tmp_path / "dataagent_auth_config_docker.py").write_text("this is not python !!!", encoding="utf-8")
+    (tmp_path / "dataagent_config_docker.py").write_text("this is not python !!!", encoding="utf-8")
     monkeypatch.setenv(auth.AUTH_CONFIG_ENV, _write_base_config(tmp_path))
     with pytest.raises(AuthConfigError):
         init_auth()
 
 
 def test_shipped_deploy_base_config_is_disabled_by_default(monkeypatch, _clean_override_module):
-    shipped = Path(__file__).resolve().parents[3] / "deploy" / "docker" / "dataagent" / "dataagent_auth_config.py"
+    shipped = Path(__file__).resolve().parents[3] / "deploy" / "docker" / "dataagent" / "dataagent_config.py"
     assert shipped.is_file(), shipped
     settings = load_auth_settings(str(shipped))
     assert settings.enabled is False
+
+
+# ---------------------------------------------------------------------------
+# DATAAGENT_SETTINGS：非认证的运行时 Settings 覆盖（config.py 字段）
+# ---------------------------------------------------------------------------
+
+def test_dataagent_settings_are_captured_and_validated(monkeypatch, tmp_path):
+    path = write_config(
+        tmp_path,
+        "AUTH_ENABLED = False\nDATAAGENT_SETTINGS = {\"agent_interactive_timeout_seconds\": 420}\n",
+    )
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, path)
+    settings = init_auth()
+    assert settings.runtime_settings == {"agent_interactive_timeout_seconds": 420}
+
+
+def test_dataagent_settings_unknown_field_fails_startup(monkeypatch, tmp_path):
+    path = write_config(tmp_path, "DATAAGENT_SETTINGS = {\"no_such_field\": 1}\n")
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, path)
+    with pytest.raises(AuthConfigError):
+        init_auth()
+
+
+def test_dataagent_settings_must_be_dict(monkeypatch, tmp_path):
+    path = write_config(tmp_path, "DATAAGENT_SETTINGS = [1, 2]\n")
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, path)
+    with pytest.raises(AuthConfigError):
+        init_auth()
+
+
+# ---------------------------------------------------------------------------
+# OAUTH_USERINFO_MAPPER 配置校验（回调行为见 test_auth_routes.py）
+# ---------------------------------------------------------------------------
+
+def test_userinfo_mapper_must_be_callable(monkeypatch, tmp_path):
+    path = write_config(tmp_path, "OAUTH_USERINFO_MAPPER = 'not-callable'\n")
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, path)
+    with pytest.raises(AuthConfigError):
+        init_auth()
+
+
+def test_userinfo_mapper_is_captured(monkeypatch, tmp_path):
+    path = write_config(
+        tmp_path,
+        "def _mapper(userinfo):\n    return {\"user_id\": userinfo.get(\"uid\")}\n"
+        "OAUTH_USERINFO_MAPPER = _mapper\n",
+    )
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, path)
+    settings = init_auth()
+    assert callable(settings.oauth_userinfo_mapper)

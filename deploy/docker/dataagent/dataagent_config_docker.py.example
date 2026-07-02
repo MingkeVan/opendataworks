@@ -1,13 +1,13 @@
-"""DataAgent 认证用户扩展示例（Superset superset_config_docker.py 同款机制）。
+"""DataAgent 外置配置用户覆盖示例（Superset superset_config_docker.py 同款机制）。
 
-拷贝本文件为同目录下的 `dataagent_auth_config_docker.py`（已被 .gitignore
-忽略，不会入库），按需修改后重启 dataagent-backend 即生效。本目录在容器内
-位于 `sys.path` 上，你也可以像 Superset 的 custom_sso_security_manager.py
-一样在同目录放自定义模块并在这里 import。
+拷贝本文件为同目录下的 `dataagent_config_docker.py`（已被 .gitignore 忽略，
+不会入库），按需修改后重启 dataagent-backend 即生效。本目录在容器内位于
+`sys.path` 上，你也可以像 Superset 的 custom_sso_security_manager.py 一样在
+同目录放自定义模块并在这里 import（示例见 custom_sso_user_mapper.py.example）。
 """
 
 # ---------------------------------------------------------------------------
-# 总开关。置 True 前先完成 SECRET_KEY 与至少一种登录方式（LOCAL_ADMINS / OAUTH）。
+# 认证总开关。置 True 前先完成 SECRET_KEY 与至少一种登录方式（LOCAL_ADMINS / OAUTH）。
 # ---------------------------------------------------------------------------
 AUTH_ENABLED = False
 
@@ -50,7 +50,7 @@ OAUTH = {
     # 必须与 IdP 侧注册的回调一致：
     #   https://<dataagent-host>/api/v1/nl2sql/auth/oauth/callback
     "redirect_uri": "",
-    # userinfo 响应里的用户唯一标识与显示名字段。
+    # userinfo 响应里的用户唯一标识与显示名字段（标准平铺 payload 时用）。
     "user_id_field": "sub",
     "username_field": "preferred_username",
     # 登录成功后的回跳路径（仅接受同源应用内路径）。
@@ -58,9 +58,28 @@ OAUTH = {
 }
 
 # ---------------------------------------------------------------------------
+# 非标准 IdP 的 userinfo 映射钩子（可选，Superset custom_sso_security_manager
+# 的 oauth_user_info 对应物）。配置后 user_id_field / username_field 不再生效，
+# 由钩子完全接管 payload 解析。示例：
+#
+#   from custom_sso_user_mapper import map_sso_userinfo
+#   OAUTH_USERINFO_MAPPER = map_sso_userinfo
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # OAuth 用户提名为管理员：条目为 "<provider_name>:<user_id_field值>"（稳定标识，
 # 即 provider:sub）。username 可变、不保证唯一，不参与提权。
+# 若 OAUTH_USERINFO_MAPPER 返回了 role 字段，则以钩子返回为准。
 # ---------------------------------------------------------------------------
 ADMIN_USERS = [
     # "SSO:1024",
 ]
+
+# ---------------------------------------------------------------------------
+# 其他运行时配置覆盖（可选）：键为 dataagent-backend/config.py 中 Settings 的
+# 字段名，启动时统一应用；含未知字段会启动失败（fail-closed）。
+# ---------------------------------------------------------------------------
+DATAAGENT_SETTINGS = {
+    # "agent_interactive_timeout_seconds": 420,
+    # "task_max_concurrency": 8,
+}
