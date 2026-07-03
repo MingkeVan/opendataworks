@@ -516,3 +516,130 @@ def test_admin_widget_topics_routes_contract(monkeypatch):
 
     missing = client.get("/api/v1/nl2sql-admin/widget-topics/unknown/messages")
     assert missing.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 认证启用后的管理端点门禁（auth 关闭时以上所有既有用例即回归：全部开放）。
+# ---------------------------------------------------------------------------
+
+VALID_SECRET = "unit-test-secret-key-0123456789abcdef-0123456789"
+
+
+def _enable_auth(monkeypatch, tmp_path):
+    import bcrypt
+    import core.auth as auth
+
+    password_hash = bcrypt.hashpw(b"admin-pass", bcrypt.gensalt(rounds=4)).decode()
+    config_file = tmp_path / "auth_config.py"
+    config_file.write_text(
+        f"""
+AUTH_ENABLED = True
+SECRET_KEY = {VALID_SECRET!r}
+LOCAL_ADMINS = [{{"username": "admin", "password_bcrypt": {password_hash!r}}}]
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, str(config_file))
+    auth.reset_auth_for_tests()
+    auth.init_auth()
+    return auth
+
+
+def _bearer(auth, *, role):
+    identity = auth.AuthIdentity(user_id=f"local:{role}", username=role, role=role, provider="local")
+    return {"Authorization": f"Bearer {auth.issue_session_token(identity)}"}
+
+
+def test_admin_routes_require_admin_when_auth_enabled(monkeypatch, tmp_path):
+    auth = _enable_auth(monkeypatch, tmp_path)
+    try:
+        store = _FakeWidgetStore()
+        monkeypatch.setattr(admin_routes, "get_topic_task_store", lambda: store)
+        client = TestClient(app)
+
+        # 未登录 → 401
+        assert client.get("/api/v1/nl2sql-admin/settings").status_code == 401
+        assert client.get("/api/v1/nl2sql-admin/widget-topics").status_code == 401
+        assert client.get("/api/v1/nl2sql-admin/topics").status_code == 401
+        assert client.get("/api/v1/dataagent/skills/documents").status_code == 401
+        assert client.post("/api/v1/dataagent/agents", json={"name": "x"}).status_code == 401
+
+        # 普通用户 → 403
+        user_headers = _bearer(auth, role="user")
+        assert client.get("/api/v1/nl2sql-admin/topics", headers=user_headers).status_code == 403
+
+        # admin → 放行
+        admin_headers = _bearer(auth, role="admin")
+        listing = client.get("/api/v1/nl2sql-admin/topics", headers=admin_headers)
+        assert listing.status_code == 200
+        assert store.list_calls[0]["source"] == ""
+    finally:
+        auth.reset_auth_for_tests()
+
+
+def test_agents_read_endpoints_stay_public_when_auth_enabled(monkeypatch, tmp_path):
+    auth = _enable_auth(monkeypatch, tmp_path)
+    try:
+        profile = {"agent_id": "agent_1", "name": "x", "skill_folders": []}
+        monkeypatch.setattr(admin_routes, "list_agent_profiles", lambda: [profile])
+        monkeypatch.setattr(admin_routes, "get_agent_profile", lambda agent_id: profile if agent_id == "agent_1" else None)
+        client = TestClient(app)
+
+        # widget / 匿名嵌入依赖的三个只读端点必须保持公开。
+        assert client.get("/api/v1/dataagent/agents").status_code == 200
+        assert client.get("/api/v1/dataagent/agents/agent_1").status_code == 200
+        assert client.get("/api/v1/dataagent/agents/agent_1/slash-commands").status_code == 200
+    finally:
+        auth.reset_auth_for_tests()
+
+
+def test_agents_capabilities_not_shadowed_by_public_dynamic_route(monkeypatch, tmp_path):
+    """路由遮蔽回归：/agents/capabilities（admin 静态路径）必须先于公开的
+    /agents/{agent_id} 匹配，否则 capabilities 会被当作 agent_id 返回 404/泄漏。"""
+    auth = _enable_auth(monkeypatch, tmp_path)
+    try:
+        monkeypatch.setattr(admin_routes, "list_documents", lambda: [])
+        monkeypatch.setattr(
+            admin_routes,
+            "agent_capabilities",
+            lambda documents: {"tools": [], "mcp_servers": [], "skills": [], "permission_modes": []},
+        )
+        # 公开动态路由若吞掉 capabilities，会走 get_agent_profile 而不是 401/200。
+        monkeypatch.setattr(admin_routes, "get_agent_profile", lambda agent_id: None)
+        client = TestClient(app)
+
+        # 未登录：capabilities 属于 admin router → 401（而不是被公开动态路由当作 agent_id 返回 404）。
+        assert client.get("/api/v1/dataagent/agents/capabilities").status_code == 401
+        # admin：正常返回 capabilities 契约。
+        response = client.get("/api/v1/dataagent/agents/capabilities", headers=_bearer(auth, role="admin"))
+        assert response.status_code == 200
+        assert "tools" in response.json()
+    finally:
+        auth.reset_auth_for_tests()
+
+
+def test_admin_all_topics_forwards_filters(monkeypatch, tmp_path):
+    auth = _enable_auth(monkeypatch, tmp_path)
+    try:
+        store = _FakeWidgetStore()
+        monkeypatch.setattr(admin_routes, "get_topic_task_store", lambda: store)
+        client = TestClient(app)
+
+        response = client.get(
+            "/api/v1/nl2sql-admin/topics",
+            params={"source": "portal", "auth_user_id": "SSO:42", "keyword": "趋势"},
+            headers=_bearer(auth, role="admin"),
+        )
+        assert response.status_code == 200
+        assert store.list_calls[0]["source"] == "portal"
+        assert store.list_calls[0]["auth_user_id"] == "SSO:42"
+        assert store.list_calls[0]["keyword"] == "趋势"
+
+        bad_source = client.get(
+            "/api/v1/nl2sql-admin/topics",
+            params={"source": "evil"},
+            headers=_bearer(auth, role="admin"),
+        )
+        assert bad_source.status_code == 422
+    finally:
+        auth.reset_auth_for_tests()

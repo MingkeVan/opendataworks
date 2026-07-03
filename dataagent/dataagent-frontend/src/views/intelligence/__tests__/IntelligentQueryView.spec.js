@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
 
 const routerPush = vi.hoisted(() => vi.fn())
 const routeState = vi.hoisted(() => ({
@@ -41,7 +42,7 @@ const mountView = (route = {}) => {
   routeState.params = route.params || {}
   routeState.meta = route.meta || { tab: 'chat-v2' }
   return mount(IntelligentQueryView, {
-    global: { stubs }
+    global: { stubs, plugins: [createPinia()] }
   })
 }
 

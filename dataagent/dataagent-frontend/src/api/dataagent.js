@@ -6,8 +6,17 @@ import { isDemoMode } from '@/demo/runtime'
 const dataagentRequest = axios.create({
   baseURL: '/api',
   timeout: 120000,
+  // 本模块只被独立 SPA 使用（src/widget 不引用），标记头让后端在 auth 启用时
+  // 消费会话 Cookie。不要把该头扩散到 widget 共用的 client 工厂里。
+  headers: { 'X-ODW-Client': 'dataagent' },
   ...(isDemoMode ? { adapter: demoAdapter } : {})
 })
+
+// 认证 401 处理（跳登录页）由 SPA 入口注入，避免 api 模块反向依赖 router/store。
+let unauthorizedHandler = null
+export function setDataagentUnauthorizedHandler(handler) {
+  unauthorizedHandler = typeof handler === 'function' ? handler : null
+}
 
 dataagentRequest.interceptors.response.use(
   (response) => {
@@ -18,6 +27,11 @@ dataagentRequest.interceptors.response.use(
     return payload
   },
   (error) => {
+    if (error?.response?.status === 401 && unauthorizedHandler) {
+      unauthorizedHandler(error)
+      error.__odwNotified = true
+      return Promise.reject(error)
+    }
     const message = error?.response?.data?.detail || error?.response?.data?.message || error.message || '请求失败'
     ElMessage.error(message)
     error.__odwNotified = true
@@ -106,6 +120,10 @@ export const dataagentApi = {
 
   listDataScopeOptions() {
     return dataagentRequest.get('/v1/dataagent/data-scope/options')
+  },
+
+  listAdminTopics(params = {}) {
+    return dataagentRequest.get('/v1/nl2sql-admin/topics', { params })
   },
 
   listWidgetTopics(params = {}) {

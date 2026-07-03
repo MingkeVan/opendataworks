@@ -11,6 +11,7 @@ from typing import Any
 import pymysql
 
 from config import get_settings
+from core.auth import is_auth_enabled
 from core.agent_profile_service import (
     DEFAULT_AGENT_ID,
     agent_summary_from_snapshot,
@@ -324,12 +325,21 @@ class TopicTaskStore:
     def _normalize_context(self, context: dict[str, Any] | None = None) -> dict[str, str]:
         source = str((context or {}).get("source") or "portal").strip().lower()
         if source != "widget":
-            return {
+            normalized = {
                 "source": "portal",
                 "website_id": "",
                 "external_user_id": "",
                 "visitor_id": "",
             }
+            # 认证键仅在 dataagent SPA 已登录时由 _request_context 附加；
+            # 缺失即匿名 portal（含门户嵌入页），与无认证时代同形。
+            auth_user_id = str((context or {}).get("auth_user_id") or "").strip()
+            if auth_user_id:
+                normalized["auth_user_id"] = auth_user_id
+                normalized["auth_username"] = str((context or {}).get("auth_username") or "").strip()
+                role = str((context or {}).get("auth_role") or "user").strip().lower()
+                normalized["auth_role"] = role if role in {"admin", "user"} else "user"
+            return normalized
 
         website_id = str((context or {}).get("website_id") or "").strip()
         external_user_id = str((context or {}).get("external_user_id") or "").strip()
@@ -348,7 +358,18 @@ class TopicTaskStore:
         normalized = self._normalize_context(context)
         prefix = f"{alias}." if alias else ""
         if normalized["source"] != "widget":
-            return f"COALESCE({prefix}source, 'portal') = %s", ["portal"]
+            # 谓词矩阵（docs/design/2026-07-01-dataagent-auth-design.md 3.5）。
+            # is_auth_enabled()==False（env 未设置或显式关闭）走旧谓词逐字一致，
+            # 无 owner 过滤——关闭即恢复"无认证共享池"的完整旧语义。
+            if not is_auth_enabled():
+                return f"COALESCE({prefix}source, 'portal') = %s", ["portal"]
+            if normalized.get("auth_role") == "admin":
+                return f"{prefix}source = %s", ["portal"]
+            auth_user_id = normalized.get("auth_user_id") or ""
+            if auth_user_id:
+                return f"{prefix}source = %s AND {prefix}auth_user_id = %s", ["portal", auth_user_id]
+            # 匿名池：等值比较（列 NOT NULL DEFAULT ''，可走索引），不泄漏用户会话。
+            return f"{prefix}source = %s AND {prefix}auth_user_id = ''", ["portal"]
 
         if normalized["external_user_id"]:
             return (
@@ -471,8 +492,9 @@ class TopicTaskStore:
                         topic_id, title, chat_topic_id, chat_conversation_id,
                         current_task_id, current_task_status, last_message_seq,
                         agent_id, agent_snapshot_json, permission_mode,
-                        source, website_id, external_user_id, visitor_id
-                    ) VALUES (%s, %s, %s, %s, NULL, NULL, 0, %s, %s, %s, %s, %s, %s, %s)
+                        source, website_id, external_user_id, visitor_id,
+                        auth_user_id, auth_username
+                    ) VALUES (%s, %s, %s, %s, NULL, NULL, 0, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         topic_id,
@@ -486,6 +508,8 @@ class TopicTaskStore:
                         normalized_context["website_id"],
                         normalized_context["external_user_id"],
                         normalized_context["visitor_id"],
+                        normalized_context.get("auth_user_id") or "",
+                        normalized_context.get("auth_username") or "",
                     ),
                 )
             conn.commit()
@@ -515,7 +539,7 @@ class TopicTaskStore:
                     f"""
                     SELECT t.topic_id, t.title, t.chat_topic_id, t.chat_conversation_id,
                            t.current_task_id, t.current_task_status, t.source, t.website_id,
-                           t.external_user_id, t.visitor_id, t.agent_id, t.agent_snapshot_json,
+                           t.external_user_id, t.visitor_id, t.auth_user_id, t.auth_username, t.agent_id, t.agent_snapshot_json,
                            t.permission_mode,
                            t.created_at, t.updated_at,
                            COALESCE(stats.message_count, 0) AS message_count,
@@ -555,6 +579,7 @@ class TopicTaskStore:
         website_id: str | None = None,
         external_user_id: str | None = None,
         visitor_id: str | None = None,
+        auth_user_id: str | None = None,
         agent_id: str | None = None,
         keyword: str | None = None,
         start: str | None = None,
@@ -580,6 +605,7 @@ class TopicTaskStore:
             ("website_id", website_id),
             ("external_user_id", external_user_id),
             ("visitor_id", visitor_id),
+            ("auth_user_id", auth_user_id),
             ("agent_id", agent_id),
         ):
             safe_value = str(value or "").strip()
@@ -618,7 +644,7 @@ class TopicTaskStore:
                     f"""
                     SELECT t.topic_id, t.title, t.chat_topic_id, t.chat_conversation_id,
                            t.current_task_id, t.current_task_status, t.source, t.website_id,
-                           t.external_user_id, t.visitor_id, t.agent_id, t.agent_snapshot_json,
+                           t.external_user_id, t.visitor_id, t.auth_user_id, t.auth_username, t.agent_id, t.agent_snapshot_json,
                            t.permission_mode,
                            t.created_at, t.updated_at,
                            COALESCE(stats.message_count, 0) AS message_count,
@@ -743,7 +769,7 @@ class TopicTaskStore:
                     f"""
                     SELECT t.topic_id, t.title, t.chat_topic_id, t.chat_conversation_id,
                            t.current_task_id, t.current_task_status, t.source, t.website_id,
-                           t.external_user_id, t.visitor_id, t.agent_id, t.agent_snapshot_json,
+                           t.external_user_id, t.visitor_id, t.auth_user_id, t.auth_username, t.agent_id, t.agent_snapshot_json,
                            t.permission_mode,
                            t.created_at, t.updated_at,
                            COALESCE(stats.message_count, 0) AS message_count,
@@ -2892,6 +2918,8 @@ class TopicTaskStore:
             "website_id": str(row.get("website_id") or ""),
             "external_user_id": str(row.get("external_user_id") or ""),
             "visitor_id": str(row.get("visitor_id") or ""),
+            "auth_user_id": str(row.get("auth_user_id") or ""),
+            "auth_username": str(row.get("auth_username") or ""),
             "message_count": int(row.get("message_count") or 0),
             "last_message_preview": str(row.get("last_message_preview") or ""),
             "created_at": _to_iso(row.get("created_at")),

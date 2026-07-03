@@ -251,6 +251,36 @@ DataX 同步任务以 DolphinScheduler 的 `DATAX` 任务节点执行（见 `doc
 
 列映射（`column_mapping`）支持三种形式：留空（全列同步）、列清单（逗号分隔或 JSON 数组 / 源到目标的 JSON 对象映射）、完整 DataX 作业 JSON（含 `job` 键，按自定义模式 `customConfig=1` 下发）。
 
+## DataAgent Authentication (Optional)
+
+DataAgent（智能问数）支持可选的 OAuth2 + 本地管理员登录，以及非认证的运行时配置覆盖（`DATAAGENT_SETTINGS`）。配置采用 **Superset `docker/pythonpath_dev` 同款模式**：`deploy/docker/dataagent/` 目录被 compose 整体挂载进 `dataagent-backend` 容器（`/app/docker/dataagent`，只读），并加入 `sys.path`。
+
+目录布局：
+
+| 文件 | 说明 |
+|---|---|
+| `docker/dataagent/dataagent_config.py` | 仓库自带基础配置（默认 `AUTH_ENABLED=False`，**不要直接改**，升级会覆盖）；末尾自动加载同目录用户覆盖 |
+| `docker/dataagent/dataagent_config_docker.py.example` | 用户覆盖示例（认证 + `DATAAGENT_SETTINGS` 运行时覆盖）；拷贝为 `dataagent_config_docker.py` 后填写 |
+| `docker/dataagent/custom_sso_user_mapper.py.example` | 非标准 IdP 的 userinfo 映射钩子示例（Superset `custom_sso_security_manager.py` 对应物）；拷贝为 `custom_sso_user_mapper.py` 并在覆盖配置里挂 `OAUTH_USERINFO_MAPPER` |
+| `docker/dataagent/.gitignore` | 忽略一切用户文件，只保留自带文件与 `.example` |
+| `docker/nginx/frontend.conf`、`docker/nginx/dataagent-frontend.conf` | 两个前端 nginx 配置的宿主机副本；默认仍用镜像内构建版本，取消 compose 中对应服务 volumes 注释即可切换为宿主机管理 |
+
+启用步骤：
+
+1. `cd deploy/docker/dataagent && cp dataagent_config_docker.py.example dataagent_config_docker.py`
+2. 按注释填写 `SECRET_KEY`（`secrets.token_urlsafe(32)` 生成）、`LOCAL_ADMINS`（bcrypt 哈希）、`OAUTH`、`ADMIN_USERS`（`provider:sub` 稳定标识），置 `AUTH_ENABLED = True`。
+3. 重启 `dataagent-backend`。无需修改 compose。需要自定义扩展模块（如自研 SSO 适配）时，直接把 `.py` 放进同目录并在覆盖文件里 import（目录在 `sys.path` 上）。
+
+语义与回滚（fail-closed）：
+
+- 覆盖文件不存在或 `AUTH_ENABLED=False`（默认） = 认证关闭，行为与无认证版本完全一致。
+- 容器内 `DATAAGENT_CONFIG` env 被注释掉 = 彻底关闭外置配置机制（终极回滚手段）。
+- env 已设置但配置文件缺失 / 不可读 / 有语法错误 / 启用却缺合法 `SECRET_KEY` = 服务启动失败，不会静默降级为无认证。
+- 关闭后果：曾经登录用户名下的会话会重新出现在共享匿名池（恢复完整旧语义，不保留半套隔离）。
+- widget 外嵌会话（`X-ODW-Client: widget`）与主门户嵌入页的匿名会话完全不受认证影响。
+
+详见 `docs/design/2026-07-01-dataagent-auth-design.md` 与 `docs/handbook/`。
+
 ## Common Operations
 
 ### Stop Services

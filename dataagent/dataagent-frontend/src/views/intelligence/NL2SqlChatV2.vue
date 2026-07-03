@@ -53,14 +53,22 @@
                   @click="handleSourceChange('portal')"
                 >门户</button>
                 <button
+                  v-if="authStore.isAdmin"
                   type="button"
                   class="v2-source-tab"
                   :class="{ active: sourceMode === 'widget' }"
                   @click="handleSourceChange('widget')"
                 >Widget</button>
+                <button
+                  v-if="authStore.isAdmin"
+                  type="button"
+                  class="v2-source-tab"
+                  :class="{ active: sourceMode === 'all' }"
+                  @click="handleSourceChange('all')"
+                >全部</button>
               </div>
             </div>
-            <div v-if="isWidgetMode" class="v2-filter-group">
+            <div v-if="sourceMode === 'widget'" class="v2-filter-group">
               <div class="v2-filter-label">用户</div>
               <el-select
                 v-model="filterUser"
@@ -118,6 +126,14 @@
             @click="handleSelectTopic(topic.topic_id)"
           >
             <span class="v2-session-title">{{ topic.title || '新话题' }}</span>
+            <span v-if="isAllMode" class="v2-session-origin">
+              <span class="v2-session-source-badge" :class="`is-${topic.source || 'portal'}`">
+                {{ topic.source === 'widget' ? 'Widget' : '门户' }}
+              </span>
+              <span v-if="topicOwnerLabel(topic)" class="v2-session-owner" :title="topicOwnerLabel(topic)">
+                {{ topicOwnerLabel(topic) }}
+              </span>
+            </span>
             <span v-if="isTopicWorking(topic)" class="v2-session-loading" title="正在分析中...">
               <svg class="v2-session-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                 <circle class="v2-session-spinner-track" cx="12" cy="12" r="10" stroke-width="3" />
@@ -155,7 +171,8 @@
       </div>
 
       <el-scrollbar v-show="messages.length" ref="messagesScrollbarRef" class="v2-messages" @scroll="handleScroll">
-        <div class="v2-messages-inner">
+        <!-- 点击代理：拦截 v-html/markdown 与工具输出里的工作区文件链接，走 Blob 下载 -->
+        <div class="v2-messages-inner" @click="handleWorkspaceFileClick">
           <!-- Message loop -->
           <template v-for="msg in messages" :key="msg.id">
             <!-- User message -->
@@ -291,9 +308,9 @@
                       v-for="file in msg.attachments"
                       :key="file.rel_path"
                       class="v2-msg-attachment"
-                      :href="artifactDownloadUrl(file)"
-                      download
+                      href="#"
                       :title="'下载 ' + file.name"
+                      @click.prevent="downloadArtifact(file)"
                     >
                       <svg class="v2-msg-attachment-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
                       <span class="v2-msg-attachment-name">{{ file.name }}</span>
@@ -323,11 +340,10 @@
                         </button>
                         <a
                           class="v2-msg-attachment-btn"
-                          :href="artifactDownloadUrl(file)"
-                          download
+                          href="#"
                           title="下载"
                           aria-label="下载"
-                          @click.stop
+                          @click.stop.prevent="downloadArtifact(file)"
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" /></svg>
                         </a>
@@ -558,11 +574,10 @@
                 </button>
                 <a
                   class="v2-artifact-row-btn"
-                  :href="artifactDownloadUrl(row.file)"
-                  download
+                  href="#"
                   title="下载"
                   aria-label="下载"
-                  @click.stop
+                  @click.stop.prevent="downloadArtifact(row.file)"
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" /></svg>
                 </a>
@@ -585,7 +600,7 @@
           <div class="v2-artifact-modal-head">
             <span class="v2-artifact-modal-name" :title="previewArtifact.name">{{ previewArtifact.name }}</span>
             <span class="v2-artifact-modal-actions">
-              <a class="v2-artifact-dl-link" :href="artifactDownloadUrl(previewArtifact)" download>下载</a>
+              <a class="v2-artifact-dl-link" href="#" @click.prevent="downloadArtifact(previewArtifact)">下载</a>
               <button type="button" class="v2-artifact-modal-close" title="关闭" @click="closeArtifactPreview">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
               </button>
@@ -601,9 +616,9 @@
               :srcdoc="previewText"
             ></iframe>
             <img
-              v-else-if="isImageArtifact(previewArtifact)"
+              v-else-if="isImageArtifact(previewArtifact) && previewImageUrl"
               class="v2-artifact-modal-img"
-              :src="artifactInlineUrl(previewArtifact)"
+              :src="previewImageUrl"
               :alt="previewArtifact.name"
             />
             <pre v-else-if="isTextArtifact(previewArtifact)" class="v2-artifact-modal-text">{{ previewText }}</pre>
@@ -619,8 +634,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { createNl2SqlApiClient } from '@/api/nl2sql'
+import { createNl2SqlApiClient, DATAAGENT_CLIENT_HEADERS } from '@/api/nl2sql'
 import { dataagentApi } from '@/api/dataagent'
+import { useAuthStore } from '@/stores/auth'
 import ToolOutputRenderer from './ToolOutputRenderer.vue'
 import ChartSpecView from './ChartSpecView.vue'
 import PermissionConfirmationCard from './PermissionConfirmationCard.vue'
@@ -636,8 +652,21 @@ import { useSlashCommands, buildCommands } from './useSlashCommands'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
-const api = createNl2SqlApiClient({ timeout: 300000 })
+// SPA 调用点显式携带 dataagent 标记（auth 启用时后端据此消费会话 Cookie），
+// 401 统一跳登录。widget 走自己的入口，不经过这里。
+const api = createNl2SqlApiClient({
+  timeout: 300000,
+  defaultHeaders: DATAAGENT_CLIENT_HEADERS,
+  onUnauthorized: () => {
+    if (!authStore.enabled) return
+    authStore.currentUser = null
+    if (route.name !== 'Login') {
+      router.push({ path: '/login', query: { redirect: route.fullPath } })
+    }
+  },
+})
 const { topicApi, agentApi } = api
 provide('nl2sqlApi', api)
 
@@ -689,12 +718,15 @@ provide('nl2sqlTopicId', activeTopicId)
 
 // Session-list source / filter / sort. Portal sessions stay editable; widget
 // sessions are a read-only audit view served by the admin endpoint.
-const sourceMode = ref('portal')        // 'portal' | 'widget'
+const sourceMode = ref('portal')        // 'portal' | 'widget' | 'all'（all = 管理员全量审计视图）
 const filterStatus = ref('')            // '' | 'running' | 'error' | 'suspended' | 'finished'
 const filterUser = ref('')              // widget only: 'ext:<id>' | 'vis:<id>'
 const sortOrder = ref('updated_desc')   // 'updated_desc' | 'created_desc' | 'title_asc'
 const filterPopoverVisible = ref(false)
-const isWidgetMode = computed(() => sourceMode.value === 'widget')
+// widget 与 all 共享同一套只读审计行为（不可发送、不镜像路由、经管理端点读消息），
+// 沿用 isWidgetMode 这个既有开关名以避免大范围改名。
+const isWidgetMode = computed(() => sourceMode.value !== 'portal')
+const isAllMode = computed(() => sourceMode.value === 'all')
 const hasActiveFilters = computed(() =>
   sourceMode.value !== 'portal' || filterStatus.value !== '' || sortOrder.value !== 'updated_desc' || filterUser.value !== ''
 )
@@ -999,6 +1031,10 @@ async function loadTopics(options = {}) {
     await loadWidgetTopics()
     return
   }
+  if (sourceMode.value === 'all') {
+    await loadAllTopics()
+    return
+  }
   try {
     const params = { page: 1, page_size: 50 }
     const agentId = currentAgentFilterId()
@@ -1045,6 +1081,34 @@ async function loadWidgetTopics() {
   } catch {
     topics.value = []
   }
+}
+
+// 管理员全量会话（portal 匿名池 + 登录用户 + widget），只读审计视图，
+// 复用 widget 审计的选择/消息钻取路径。
+async function loadAllTopics() {
+  try {
+    const params = { page: 1, page_size: 50, source: '' }
+    const agentId = currentAgentFilterId()
+    if (agentId) params.agent_id = agentId
+    const data = await dataagentApi.listAdminTopics(params)
+    topics.value = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : [])
+    const stillListed = topics.value.some((t) => t.topic_id === activeTopicId.value)
+    if (topics.value.length && (!activeTopicId.value || !stillListed)) {
+      await selectTopic(topics.value[0].topic_id)
+    }
+  } catch {
+    topics.value = []
+  }
+}
+
+// 全量视图里一行会话的归属人：登录用户名 > widget 外部用户 > widget 访客 > 匿名。
+function topicOwnerLabel(topic) {
+  if (topic?.auth_username) return topic.auth_username
+  if (topic?.auth_user_id) return topic.auth_user_id
+  if (topic?.external_user_id) return topic.external_user_id
+  if (topic?.visitor_id) return `访客 ${String(topic.visitor_id).slice(0, 8)}`
+  if ((topic?.source || 'portal') === 'portal') return '匿名'
+  return ''
 }
 
 async function ensureTopicListed(topicId) {
@@ -1190,13 +1254,13 @@ async function handleSourceChange(mode) {
   widgetUserOptions.value = []
   topics.value = []
   await loadTopics()
-  if (isWidgetMode.value) fetchWidgetUsers('')
+  if (sourceMode.value === 'widget') fetchWidgetUsers('')
 }
 
 // Re-query the widget list server-side when the user filter changes so results
 // reflect all matching sessions, not just those on the currently loaded page.
 watch(filterUser, async () => {
-  if (!isWidgetMode.value) return
+  if (sourceMode.value !== 'widget') return
   activeTopicId.value = ''
   messages.value = []
   await loadWidgetTopics()
@@ -1436,6 +1500,7 @@ const artifactsLoading = ref(false)
 const previewArtifact = ref(null)
 const previewText = ref('')
 const previewError = ref('')
+const previewImageUrl = ref('')
 
 function readArtifactsPref() {
   try { return localStorage.getItem(ARTIFACTS_PREF_KEY) === '1' } catch (_e) { return false }
@@ -1501,12 +1566,34 @@ async function refreshArtifacts() {
   }
 }
 
-function artifactDownloadUrl(file) {
-  return topicApi.fileUrl(activeTopicId.value, file.rel_path, { download: true })
+// 登录态下浏览器裸链接导航带不上 dataagent 标记头，SPA 的文件下载统一走
+// fetch → Blob → a[download]（设计文档 3.6）。widget 保留裸 fileUrl 不动。
+async function downloadArtifactBlob(relPath, fileName = '') {
+  const topicId = activeTopicId.value
+  if (!topicId || !relPath) return
+  try {
+    const blob = await topicApi.fetchFileBlob(topicId, relPath)
+    const objectUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = fileName || String(relPath).split('/').pop() || 'download'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(objectUrl)
+  } catch (error) {
+    ElMessage.error('下载失败: ' + (error?.message || error))
+  }
 }
-function artifactInlineUrl(file) {
-  return topicApi.fileUrl(activeTopicId.value, file.rel_path)
+
+function downloadArtifact(file) {
+  return downloadArtifactBlob(file?.rel_path, file?.name)
 }
+
+// markdown/v-html 里的工作区文件链接以自描述 fragment 表示
+// （#odw-file=<encodeURIComponent(relPath)>），由消息容器上的点击代理拦截后
+// 走 Blob 下载。encodeURIComponent 保证写入 HTML 属性时无引号/尖括号/& 注入。
+const WORKSPACE_FILE_FRAGMENT = '#odw-file='
 
 // Message markdown: workspace-relative file links the agent emits
 // (`output/...`, `uploads/...`) become download URLs for the active topic.
@@ -1514,7 +1601,21 @@ function renderMarkdown(text) {
   return renderMarkdownBase(text, { resolveFileHref: resolveWorkspaceFileHref })
 }
 function resolveWorkspaceFileHref(relPath) {
-  return activeTopicId.value ? topicApi.fileUrl(activeTopicId.value, relPath, { download: true }) : ''
+  return activeTopicId.value ? `${WORKSPACE_FILE_FRAGMENT}${encodeURIComponent(String(relPath || ''))}` : ''
+}
+
+// 消息区点击代理：命中文件 fragment 链接（markdown 链接、sql_export 下载等
+// 所有经 resolveWorkspaceFileHref 产出的 <a>）时改走带标记头的 Blob 下载。
+function handleWorkspaceFileClick(event) {
+  const anchor = event.target?.closest?.('a[href*="#odw-file="]')
+  if (!anchor) return
+  const href = anchor.getAttribute('href') || ''
+  const index = href.indexOf(WORKSPACE_FILE_FRAGMENT)
+  if (index < 0) return
+  event.preventDefault()
+  let relPath = href.slice(index + WORKSPACE_FILE_FRAGMENT.length)
+  try { relPath = decodeURIComponent(relPath) } catch { /* keep raw */ }
+  void downloadArtifactBlob(relPath)
 }
 function isHtmlArtifact(file) {
   return /text\/html/.test(file?.content_type || '') || /\.html?$/i.test(file?.name || '')
@@ -1529,18 +1630,34 @@ async function openArtifact(file) {
   previewArtifact.value = file
   previewText.value = ''
   previewError.value = ''
+  releasePreviewImage()
   if (isHtmlArtifact(file) || isTextArtifact(file)) {
     try {
       previewText.value = await topicApi.fetchFileText(activeTopicId.value, file.rel_path)
     } catch (error) {
       previewError.value = String(error?.message || '加载失败')
     }
+  } else if (isImageArtifact(file)) {
+    // 图片同样经带标记头的 fetch 取 Blob（<img src> 裸链接带不上标记头）。
+    try {
+      const blob = await topicApi.fetchFileBlob(activeTopicId.value, file.rel_path)
+      previewImageUrl.value = URL.createObjectURL(blob)
+    } catch (error) {
+      previewError.value = String(error?.message || '加载失败')
+    }
+  }
+}
+function releasePreviewImage() {
+  if (previewImageUrl.value) {
+    URL.revokeObjectURL(previewImageUrl.value)
+    previewImageUrl.value = ''
   }
 }
 function closeArtifactPreview() {
   previewArtifact.value = null
   previewText.value = ''
   previewError.value = ''
+  releasePreviewImage()
 }
 
 function formatBytes(size) {
@@ -1954,6 +2071,25 @@ onBeforeUnmount(() => {
 }
 
 .v2-session-meta { flex-shrink: 0; font-size: 11px; color: #8C8C8C; }
+.v2-session-origin { flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; max-width: 40%; }
+.v2-session-source-badge {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 7px;
+  font-size: 10px;
+  line-height: 15px;
+  color: #2f7bf0;
+  background: #eaf1fd;
+}
+.v2-session-source-badge.is-widget { color: #7b52c8; background: #f1ebfb; }
+.v2-session-owner {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #8C8C8C;
+}
 .v2-session-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 .v2-session-dot.is-error { background: #F56C6C; }
 .v2-session-dot.is-suspended { background: #A0AABF; }

@@ -91,7 +91,7 @@ function parseSseChunk(buffer, onEvent) {
   return rest
 }
 
-function createAxiosClient(baseURL, prefix, timeout, defaultHeaders = {}) {
+function createAxiosClient(baseURL, prefix, timeout, defaultHeaders = {}, onUnauthorized = null) {
   const request = axios.create({
     baseURL: buildUrl(baseURL, prefix),
     timeout,
@@ -102,6 +102,10 @@ function createAxiosClient(baseURL, prefix, timeout, defaultHeaders = {}) {
   request.interceptors.response.use(
     (response) => unwrapResponse(response),
     (error) => {
+      // 认证 401 交给调用方（SPA 跳登录页）。widget 从不传 onUnauthorized，行为不变。
+      if (error?.response?.status === 401 && typeof onUnauthorized === 'function') {
+        onUnauthorized(error)
+      }
       const responseMessage = error?.response?.data?.detail || error?.response?.data?.message
       error.message = responseMessage || error.message || '网络错误'
       return Promise.reject(error)
@@ -115,9 +119,11 @@ export function createNl2SqlApiClient(options = {}) {
   const baseURL = normalizeBaseUrl(options.baseURL)
   const timeout = options.timeout || DEFAULT_TIMEOUT
   const defaultHeaders = options.defaultHeaders || options.headers || {}
-  const runtimeRequest = createAxiosClient(baseURL, RUNTIME_PREFIX, timeout, defaultHeaders)
-  const adminRequest = createAxiosClient(baseURL, ADMIN_PREFIX, timeout, defaultHeaders)
-  const dataagentRequest = createAxiosClient(baseURL, DATAAGENT_PREFIX, timeout, defaultHeaders)
+  // 401 钩子只在 SPA 调用点传入；widget 不传（保持匿名嵌入行为不变）。
+  const onUnauthorized = typeof options.onUnauthorized === 'function' ? options.onUnauthorized : null
+  const runtimeRequest = createAxiosClient(baseURL, RUNTIME_PREFIX, timeout, defaultHeaders, onUnauthorized)
+  const adminRequest = createAxiosClient(baseURL, ADMIN_PREFIX, timeout, defaultHeaders, onUnauthorized)
+  const dataagentRequest = createAxiosClient(baseURL, DATAAGENT_PREFIX, timeout, defaultHeaders, onUnauthorized)
 
   const runtimeApi = {
     getConfig() {
@@ -178,6 +184,18 @@ export function createNl2SqlApiClient(options = {}) {
         throw new Error(await extractHttpError(response))
       }
       return response.text()
+    },
+    // 登录态下浏览器裸链接导航带不上自定义标记头，SPA 的文件下载/预览
+    // 统一改走 fetch → Blob（见设计文档 3.6）。widget 仍用 fileUrl 裸链接。
+    async fetchFileBlob(topicId, relPath) {
+      const response = await fetch(this.fileUrl(topicId, relPath), {
+        credentials: 'include',
+        headers: { ...defaultHeaders }
+      })
+      if (!response.ok) {
+        throw new Error(await extractHttpError(response))
+      }
+      return response.blob()
     }
   }
 
@@ -217,6 +235,7 @@ export function createNl2SqlApiClient(options = {}) {
         {
           method: 'GET',
           headers: { Accept: 'text/event-stream', ...defaultHeaders },
+          credentials: 'include',
           signal
         }
       )
@@ -311,6 +330,28 @@ export function createNl2SqlApiClient(options = {}) {
     },
     updateSettings(data) {
       return adminRequest.put('/settings', data)
+    },
+    listAdminTopics(params = {}) {
+      return adminRequest.get('/topics', { params })
+    }
+  }
+
+  const authApi = {
+    getAuthConfig() {
+      return runtimeRequest.get('/auth/config')
+    },
+    login(username, password) {
+      return runtimeRequest.post('/auth/login', { username, password })
+    },
+    me() {
+      return runtimeRequest.get('/auth/me')
+    },
+    logout() {
+      return runtimeRequest.post('/auth/logout')
+    },
+    oauthAuthorizeUrl(redirect = '') {
+      const query = redirect ? `?redirect=${encodeURIComponent(redirect)}` : ''
+      return buildUrl(baseURL, `${RUNTIME_PREFIX}/auth/oauth/authorize${query}`)
     }
   }
 
@@ -346,6 +387,7 @@ export function createNl2SqlApiClient(options = {}) {
     messageQueueApi,
     scheduleApi,
     adminApi,
+    authApi,
     agentApi,
     eventApi,
     health() {
@@ -353,3 +395,8 @@ export function createNl2SqlApiClient(options = {}) {
     }
   }
 }
+
+// SPA 专用客户端标记：让后端在 auth 启用时对独立站点消费会话 Cookie。
+// 只允许在 SPA 调用点使用，绝不能作为 createNl2SqlApiClient 的工厂默认值 ——
+// widget（含门户嵌入页）共用该工厂，加了默认标记会破坏匿名语义。
+export const DATAAGENT_CLIENT_HEADERS = Object.freeze({ 'X-ODW-Client': 'dataagent' })

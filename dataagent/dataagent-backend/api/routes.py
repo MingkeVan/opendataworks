@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from config import get_settings
 from core.agent_profile_service import DEFAULT_AGENT_ID, build_agent_snapshot, get_agent_profile
+from core.auth import is_auth_enabled, resolve_identity
 from core.followup_suggestions import generate_followup_suggestions
 from core.readonly_query_proxy import (
     QueryProxyConfigError,
@@ -162,6 +163,22 @@ def _origin_allowed(origin: str, allowed_origins: list[str]) -> bool:
 def _request_context(request: Request) -> dict[str, str]:
     client = _clean_header(request.headers.get("X-ODW-Client"), 32).lower()
     if client != "widget":
+        # 三分支客户端语义（docs/design/2026-07-01-dataagent-auth-design.md 3.2）：
+        # dataagent 独立 SPA（显式标记）在 auth 启用时消费会话 Cookie/Bearer；
+        # 其他无标记客户端（含门户嵌入页）永不消费 cookie，保持匿名 portal 池。
+        if client == "dataagent" and is_auth_enabled():
+            identity = resolve_identity(request)
+            if identity is None:
+                raise HTTPException(status_code=401, detail="Not authenticated")
+            return {
+                "source": "portal",
+                "website_id": "",
+                "external_user_id": "",
+                "visitor_id": "",
+                "auth_user_id": identity.user_id,
+                "auth_username": identity.username,
+                "auth_role": identity.role,
+            }
         return {
             "source": "portal",
             "website_id": "",

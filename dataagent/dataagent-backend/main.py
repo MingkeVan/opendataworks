@@ -8,8 +8,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.admin_routes import router as admin_router
+from api.auth_routes import router as auth_router
 from api.routes import router
-from config import get_settings
+from config import get_settings, update_settings
+from core.auth import init_auth
 from core.agent_profile_service import bootstrap_default_agent_profile
 from core.skill_admin_service import bootstrap_admin_settings, reindex_documents_from_disk
 from core.skill_admin_store import get_skill_admin_store
@@ -41,6 +43,7 @@ app.add_middleware(
 )
 
 # 注册路由
+app.include_router(auth_router)
 app.include_router(router)
 app.include_router(admin_router)
 
@@ -56,7 +59,21 @@ async def root():
 
 @app.on_event("startup")
 async def startup():
-    """启动检查：skills 路径、topic/task schema 与 Redis coordinator"""
+    """启动检查：认证配置、skills 路径、topic/task schema 与 Redis coordinator"""
+    # Fail-closed：env 已设置但配置非法时抛 AuthConfigError，服务启动失败，
+    # 绝不静默降级为无认证（见 docs/design/2026-07-01-dataagent-auth-design.md）。
+    auth_settings = init_auth()
+    logger.info(
+        "Auth %s config_path=%s",
+        "enabled" if auth_settings.enabled else "disabled",
+        auth_settings.config_path or "<unset>",
+    )
+    # 外置配置里的 DATAAGENT_SETTINGS 覆盖运行时 Settings（config.py 字段），
+    # 在其余 bootstrap 之前应用，保证后续步骤读到最终值。
+    if auth_settings.runtime_settings:
+        update_settings(auth_settings.runtime_settings)
+        logger.info("Applied DATAAGENT_SETTINGS overrides: %s", sorted(auth_settings.runtime_settings))
+
     try:
         get_skill_admin_store().init_schema()
         bootstrap_admin_settings()

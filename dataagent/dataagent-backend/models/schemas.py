@@ -569,6 +569,8 @@ class AdminWidgetTopicSummary(TopicSummary):
     website_id: str = ""
     external_user_id: str = ""
     visitor_id: str = ""
+    auth_user_id: str = ""
+    auth_username: str = ""
 
 
 class AdminWidgetTopicPage(BaseModel):

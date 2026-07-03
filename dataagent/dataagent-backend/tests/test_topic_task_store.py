@@ -427,3 +427,119 @@ def test_admin_list_widget_users_groups_users_and_forwards_filters(monkeypatch):
     assert params == ["widget", "site_a", "%u_%", "%u_%", 50]
     # Admin facet must not reuse the per-user isolation predicate.
     assert "COALESCE(t.source" not in sql
+
+
+# ---------------------------------------------------------------------------
+# 可见性谓词矩阵（docs/design/2026-07-01-dataagent-auth-design.md 3.5）
+# ---------------------------------------------------------------------------
+
+def test_predicate_auth_disabled_is_legacy_byte_identical(monkeypatch):
+    monkeypatch.setattr("core.topic_task_store.is_auth_enabled", lambda: False)
+    store = TopicTaskStore()
+
+    sql, params = store._topic_context_predicate({"source": "portal"}, alias="t")  # noqa: SLF001
+    assert sql == "COALESCE(t.source, 'portal') = %s"
+    assert params == ["portal"]
+
+    # 即使 context 意外携带 owner 键，关闭态也不加 owner 过滤。
+    sql, params = store._topic_context_predicate(  # noqa: SLF001
+        {"source": "portal", "auth_user_id": "SSO:42"}, alias="t"
+    )
+    assert sql == "COALESCE(t.source, 'portal') = %s"
+    assert params == ["portal"]
+
+
+def test_predicate_auth_enabled_matrix(monkeypatch):
+    monkeypatch.setattr("core.topic_task_store.is_auth_enabled", lambda: True)
+    store = TopicTaskStore()
+
+    # 匿名/无标记客户端：等值比较，匿名池不泄漏用户会话。
+    sql, params = store._topic_context_predicate({"source": "portal"}, alias="t")  # noqa: SLF001
+    assert sql == "t.source = %s AND t.auth_user_id = ''"
+    assert params == ["portal"]
+
+    # 登录普通用户：只看自己。
+    sql, params = store._topic_context_predicate(  # noqa: SLF001
+        {"source": "portal", "auth_user_id": "SSO:42", "auth_role": "user"}, alias="t"
+    )
+    assert sql == "t.source = %s AND t.auth_user_id = %s"
+    assert params == ["portal", "SSO:42"]
+
+    # admin 聊天列表：portal 全量（跨源全量走管理端点 context=None）。
+    sql, params = store._topic_context_predicate(  # noqa: SLF001
+        {"source": "portal", "auth_user_id": "local:admin", "auth_role": "admin"}, alias="t"
+    )
+    assert sql == "t.source = %s"
+    assert params == ["portal"]
+
+    # context=None（管理端点）不过滤。
+    sql, params = store._topic_context_predicate(None, alias="t")  # noqa: SLF001
+    assert sql == "1 = 1"
+    assert params == []
+
+
+def test_predicate_widget_branch_unchanged_regardless_of_auth(monkeypatch):
+    widget_context = {"source": "widget", "website_id": "demo", "external_user_id": "u1"}
+    expected_sql = "t.source = %s AND t.website_id = %s AND t.external_user_id = %s"
+    store = TopicTaskStore()
+
+    for enabled in (True, False):
+        monkeypatch.setattr("core.topic_task_store.is_auth_enabled", lambda enabled=enabled: enabled)
+        sql, params = store._topic_context_predicate(widget_context, alias="t")  # noqa: SLF001
+        assert sql == expected_sql
+        assert params == ["widget", "demo", "u1"]
+
+
+def test_create_topic_writes_auth_owner(monkeypatch):
+    class FakeCursor:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params):
+            self.conn.executed.append((sql, list(params)))
+
+    class FakeConnection:
+        def __init__(self):
+            self.executed = []
+
+        def cursor(self):
+            return FakeCursor(self)
+
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("core.topic_task_store.is_auth_enabled", lambda: True)
+    store = TopicTaskStore()
+    conn = FakeConnection()
+    monkeypatch.setattr(store, "_ensure_ready", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database: conn)
+    monkeypatch.setattr(store, "get_topic", lambda topic_id, context=None: {"topic_id": topic_id})
+
+    store.create_topic(
+        title="趋势分析",
+        context={
+            "source": "portal",
+            "auth_user_id": "SSO:42",
+            "auth_username": "alice",
+            "auth_role": "user",
+        },
+    )
+
+    sql, params = conn.executed[0]
+    assert "auth_user_id, auth_username" in sql
+    assert params[-2:] == ["SSO:42", "alice"]
+
+    # 匿名 portal 创建：owner 为空串。
+    conn.executed.clear()
+    store.create_topic(title="匿名会话", context={"source": "portal"})
+    _, params = conn.executed[0]
+    assert params[-2:] == ["", ""]
