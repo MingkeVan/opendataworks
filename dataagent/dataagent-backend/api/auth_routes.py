@@ -135,6 +135,11 @@ async def oauth_authorize(request: Request):
         "state": issue_oauth_state(redirect_path, nonce=nonce),
     }
     response = RedirectResponse(url=f"{cfg.oauth.authorize_url}?{urlencode(params)}", status_code=302)
+    # nonce Cookie 必须 SameSite=Lax（硬编码，不跟随 cfg.cookie_samesite）：
+    # 回调是 IdP → 本站的顶级跨站 GET 导航，SameSite=Strict 的 Cookie 不会被
+    # 浏览器带回，会让每次 OAuth 登录的绑定校验必失败。Lax 恰好覆盖顶级跨站 GET，
+    # 是 OAuth state Cookie 的标准取值。会话 Cookie da_session 落地后只在同站发送，
+    # 故仍沿用 cfg.cookie_samesite。
     response.set_cookie(
         key=OAUTH_STATE_COOKIE,
         value=nonce,
@@ -142,7 +147,7 @@ async def oauth_authorize(request: Request):
         path="/",
         httponly=True,
         secure=cfg.cookie_secure,
-        samesite=cfg.cookie_samesite,
+        samesite="lax",
     )
     return response
 

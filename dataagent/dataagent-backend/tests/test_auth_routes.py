@@ -34,7 +34,15 @@ def _reset_auth(monkeypatch):
     auth.reset_auth_for_tests()
 
 
-def enable_auth(monkeypatch, tmp_path: Path, *, oauth: bool = False, admin_users: str = "[]", cookie_secure: bool = False) -> None:
+def enable_auth(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    oauth: bool = False,
+    admin_users: str = "[]",
+    cookie_secure: bool = False,
+    cookie_samesite: str = "lax",
+) -> None:
     import bcrypt
 
     password_hash = bcrypt.hashpw(b"admin-pass", bcrypt.gensalt(rounds=4)).decode()
@@ -61,6 +69,7 @@ OAUTH = {
 AUTH_ENABLED = True
 SECRET_KEY = {VALID_SECRET!r}
 COOKIE_SECURE = {cookie_secure!r}
+COOKIE_SAMESITE = {cookie_samesite!r}
 LOCAL_ADMINS = [{{"username": "admin", "password_bcrypt": {password_hash!r}}}]
 ADMIN_USERS = {admin_users}
 {oauth_block}
@@ -152,6 +161,23 @@ def test_oauth_authorize_redirects_with_state(monkeypatch, tmp_path):
     assert f"{auth.OAUTH_STATE_COOKIE}=" in set_cookie
     assert "HttpOnly" in set_cookie
     assert client.cookies.get(auth.OAUTH_STATE_COOKIE) == payload["nonce"]
+
+
+def test_oauth_nonce_cookie_is_lax_even_when_session_samesite_strict(monkeypatch, tmp_path):
+    """P2 回归：nonce Cookie 必须硬编码 SameSite=Lax。若跟随 cfg（strict），
+    浏览器不会在 IdP → 本站的跨站回调导航上带回它，callback 绑定校验必失败，
+    OAuth 登录整体不可用。"""
+    enable_auth(monkeypatch, tmp_path, oauth=True, cookie_samesite="strict")
+    client = TestClient(app)
+
+    response = client.get("/api/v1/nl2sql/auth/oauth/authorize", follow_redirects=False)
+    assert response.status_code == 302
+
+    nonce_cookie = next(
+        c for c in response.headers.get_list("set-cookie") if c.startswith(f"{auth.OAUTH_STATE_COOKIE}=")
+    ).lower()
+    assert "samesite=lax" in nonce_cookie
+    assert "samesite=strict" not in nonce_cookie
 
 
 class _FakeResponse:

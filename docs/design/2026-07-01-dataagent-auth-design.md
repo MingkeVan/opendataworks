@@ -156,7 +156,7 @@ ALTER TABLE da_agent_topic
 
 ## 8. 安全考量
 
-- HttpOnly Cookie 防 XSS 窃取；SameSite=Lax + OAuth state（HMAC 自校验 + 浏览器绑定：authorize 把 nonce 同步种进发起浏览器的 HttpOnly 临时 Cookie `da_oauth_nonce`，callback 比对一致才接受，防登录 CSRF）；生产 Secure。
+- HttpOnly Cookie 防 XSS 窃取；SameSite=Lax + OAuth state（HMAC 自校验 + 浏览器绑定：authorize 把 nonce 同步种进发起浏览器的 HttpOnly 临时 Cookie `da_oauth_nonce`，callback 比对一致才接受，防登录 CSRF）；生产 Secure。`da_oauth_nonce` 的 SameSite **硬编码为 Lax、不跟随 `cookie_samesite`**——回调是 IdP→本站的顶级跨站 GET 导航，Strict Cookie 不会被带回，否则会话 Cookie 配成 Strict 时每次 OAuth 登录必失败；会话 Cookie `da_session` 落地后仅同站发送，故仍沿用配置值。
 - Fail-closed 加载防误配置裸奔（覆盖层：基础配置用 find_spec 判存在后直接 import，覆盖文件内部 import 失败同样启动失败，不吞 ImportError）；SECRET_KEY 强度校验防弱密钥伪造；OAuth 启用时 `userinfo_url`/`redirect_uri` 纳入启动期必填校验（避免上线后回调必失败）；bcrypt 超长口令（>72 字节 ValueError）按认证失败处理而非 500。
 - 稳定标识提权（provider:sub）防 username 漂移/碰撞提权。
 - 开放重定向防护（3.7）；文件 rel path 属性转义防注入；HTML 预览沙箱不放宽。
