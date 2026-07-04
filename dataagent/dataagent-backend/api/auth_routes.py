@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from urllib.parse import urlencode
 
-import httpx
+from authlib.integrations.httpx_client import AsyncOAuth2Client
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
@@ -17,13 +17,15 @@ from pydantic import BaseModel
 from core.auth import (
     OAUTH_STATE_COOKIE,
     OAUTH_STATE_COOKIE_MAX_AGE,
+    ROLE_ADMIN,
+    ROLE_USER,
     AuthIdentity,
     generate_oauth_nonce,
     get_auth_settings,
+    get_security_manager,
     issue_oauth_state,
     issue_session_token,
     require_identity,
-    resolve_oauth_role,
     sanitize_redirect_path,
     verify_local_admin,
     verify_oauth_state,
@@ -54,6 +56,14 @@ def _identity_payload(identity: AuthIdentity) -> dict:
         "role": identity.role,
         "provider": identity.provider,
     }
+
+
+def _notify_login(identity: AuthIdentity) -> None:
+    """on_login 是通知型钩子（审计/部门同步），抛异常只记日志、不阻断登录。"""
+    try:
+        get_security_manager().on_login(identity)
+    except Exception as e:
+        logger.exception("SecurityManager.on_login failed (login continues): %s", e)
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
@@ -97,6 +107,7 @@ async def login(payload: LoginRequest):
     identity = verify_local_admin(payload.username, payload.password)
     if identity is None:
         raise HTTPException(status_code=401, detail="Invalid username or password")
+    _notify_login(identity)
     response = JSONResponse({"code": 200, "data": _identity_payload(identity)})
     _set_session_cookie(response, issue_session_token(identity))
     return response
@@ -153,29 +164,26 @@ async def oauth_authorize(request: Request):
 
 
 async def _exchange_code_for_userinfo(code: str) -> dict:
+    """authlib AsyncOAuth2Client 做 code→token→userinfo（协议层交给主流库）。
+
+    不引 SessionMiddleware / Starlette 集成：state 的浏览器绑定仍由我们的
+    无状态 HMAC + nonce Cookie 方案负责。token 端点认证显式用
+    client_secret_post，与旧实现（凭证放请求体）行为一致。
+    """
     cfg = get_auth_settings()
-    async with httpx.AsyncClient(timeout=_OAUTH_HTTP_TIMEOUT_SECONDS) as client:
-        token_response = await client.post(
-            cfg.oauth.token_url,
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "client_id": cfg.oauth.client_id,
-                "client_secret": cfg.oauth.client_secret,
-                "redirect_uri": cfg.oauth.redirect_uri,
-            },
-            headers={"Accept": "application/json"},
-        )
-        token_response.raise_for_status()
-        token_payload = token_response.json()
-        access_token = str(token_payload.get("access_token") or "")
-        if not access_token:
+    async with AsyncOAuth2Client(
+        client_id=cfg.oauth.client_id,
+        client_secret=cfg.oauth.client_secret,
+        redirect_uri=cfg.oauth.redirect_uri,
+        token_endpoint_auth_method="client_secret_post",
+        timeout=_OAUTH_HTTP_TIMEOUT_SECONDS,
+    ) as client:
+        token = await client.fetch_token(cfg.oauth.token_url, code=code, grant_type="authorization_code")
+        if not str((token or {}).get("access_token") or ""):
             raise HTTPException(status_code=502, detail="OAuth token endpoint returned no access_token")
 
-        userinfo_response = await client.get(
-            cfg.oauth.userinfo_url,
-            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
-        )
+        # AsyncOAuth2Client 持有 token 后自动附带 Bearer 头。
+        userinfo_response = await client.get(cfg.oauth.userinfo_url, headers={"Accept": "application/json"})
         userinfo_response.raise_for_status()
         userinfo = userinfo_response.json()
         if not isinstance(userinfo, dict):
@@ -212,39 +220,38 @@ async def oauth_callback(request: Request):
         logger.exception("OAuth code exchange failed: %s", e)
         return RedirectResponse(url="/login?error=oauth_exchange_failed", status_code=302)
 
-    # 可选 userinfo 映射钩子（Superset custom_sso_security_manager 的
-    # oauth_user_info 对应物）：非标准 IdP 在外置配置里提供 OAUTH_USERINFO_MAPPER
-    # 自行解析 payload；未配置则按 user_id_field / username_field 平铺取值。
-    mapped_role = None
-    if cfg.oauth_userinfo_mapper is not None:
-        try:
-            mapped = cfg.oauth_userinfo_mapper(userinfo)
-        except Exception as e:
-            logger.exception("OAUTH_USERINFO_MAPPER failed: %s", e)
-            return RedirectResponse(url="/login?error=oauth_mapper_failed", status_code=302)
-        if not isinstance(mapped, dict):
-            logger.error("OAUTH_USERINFO_MAPPER must return a dict, got %r", type(mapped))
-            return RedirectResponse(url="/login?error=oauth_mapper_failed", status_code=302)
-        oauth_user_id = str(mapped.get("user_id") or "").strip()
-        username = str(mapped.get("username") or oauth_user_id).strip()
-        role_value = str(mapped.get("role") or "").strip().lower()
-        mapped_role = role_value if role_value in {"admin", "user"} else None
-    else:
-        oauth_user_id = str(userinfo.get(cfg.oauth.user_id_field) or "").strip()
-        username = str(userinfo.get(cfg.oauth.username_field) or oauth_user_id).strip()
+    # SecurityManager.oauth_user_info（Superset 同名扩展点）负责 userinfo →
+    # 用户字段；默认实现按 user_id_field / username_field 平铺取值，非标准 IdP
+    # 用 CUSTOM_SECURITY_MANAGER 子类覆写。运行期异常只使该次登录失败。
+    manager = get_security_manager()
+    provider = cfg.oauth.provider_name
+    try:
+        mapped = manager.oauth_user_info(provider, userinfo)
+    except Exception as e:
+        logger.exception("SecurityManager.oauth_user_info failed: %s", e)
+        return RedirectResponse(url="/login?error=oauth_user_info_failed", status_code=302)
+    if not isinstance(mapped, dict):
+        logger.error("oauth_user_info must return a dict, got %r", type(mapped))
+        return RedirectResponse(url="/login?error=oauth_user_info_failed", status_code=302)
+
+    oauth_user_id = str(mapped.get("user_id") or "").strip()
+    username = str(mapped.get("username") or oauth_user_id).strip()
+    role_value = str(mapped.get("role") or "").strip().lower()
+    mapped_role = role_value if role_value in {ROLE_ADMIN, ROLE_USER} else None
 
     if not oauth_user_id:
         logger.error("OAuth userinfo missing user id: keys=%s", sorted(userinfo))
         return RedirectResponse(url="/login?error=oauth_missing_user_id", status_code=302)
 
-    provider = cfg.oauth.provider_name
     identity = AuthIdentity(
         user_id=f"{provider}:{oauth_user_id}",
         username=username,
-        # 钩子显式返回 role 时优先生效；否则按 ADMIN_USERS（provider:sub）提名。
-        role=mapped_role or resolve_oauth_role(provider, oauth_user_id),
+        # oauth_user_info 显式返回 role 时优先生效；否则走 resolve_role
+        # （默认按 ADMIN_USERS 的 provider:sub 提名）。
+        role=mapped_role or manager.resolve_role(provider, oauth_user_id, userinfo),
         provider=provider,
     )
+    _notify_login(identity)
 
     redirect_path = sanitize_redirect_path(
         state_payload.get("redirect"),

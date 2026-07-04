@@ -148,11 +148,12 @@ ALTER TABLE da_agent_topic
 - 目录内容：
   - `dataagent_config.py`：仓库自带基础配置，默认 `AUTH_ENABLED=False`（挂载即"显式关闭"态，行为与现状一致）；文件末尾 `from dataagent_config_docker import *` 加载同目录用户覆盖（不存在则跳过，Superset `superset_config_docker.py` 同款机制）。除认证外也可用 `DATAAGENT_SETTINGS = {"<config.py Settings 字段>": 值}` 覆盖运行时配置（启动期校验字段名，未知字段 fail-closed）。
   - `dataagent_config_docker.py.example`：用户覆盖示例（SECRET_KEY/bcrypt 生成提示、通用 OIDC 样例、`provider:sub` 提名写法、`DATAAGENT_SETTINGS` 样例）；用户拷贝为 `dataagent_config_docker.py` 填写。
-  - `custom_sso_user_mapper.py.example`：`OAUTH_USERINFO_MAPPER` 钩子示例（Superset `custom_sso_security_manager.py` 的 `oauth_user_info` 对应物）——非标准 IdP（嵌套 payload / 组角色提权）时完全接管 userinfo 解析；钩子返回 `role` 优先于 `ADMIN_USERS`；钩子运行期异常只使该次登录失败，不影响服务。
+  - `custom_sso_security_manager.py.example`：`CUSTOM_SECURITY_MANAGER` 类扩展契约示例（Superset 同款写法：`class CustomSsoSecurityManager(DataAgentSecurityManager)`）。基类 `core/security_manager.py` 提供四个具名扩展点：`oauth_user_info`（非标准 IdP 完全接管 userinfo 解析，返回 `role` 优先于 `resolve_role`）、`resolve_role`（默认 `ADMIN_USERS` provider:sub 提名）、`verify_local_login`（默认 LOCAL_ADMINS bcrypt，可换 LDAP 等）、`on_login`（登录审计/部门同步通知钩子，抛异常不阻断登录）。`oauth_user_info` 运行期异常只使该次登录失败，不影响服务；配置校验要求 `CUSTOM_SECURITY_MANAGER` 必须是基类子类（fail-closed）。
   - `.gitignore`：忽略一切用户文件（覆盖配置、自定义扩展模块如自研 SSO 适配），只保留自带文件与 `.example`。
 - `deploy/docker/nginx/`：两个前端 nginx 配置的宿主机副本 + compose 中注释式挂载；默认仍用镜像内构建版本（单一主路径），需要宿主机管理时取消注释。
 - 无需改 nginx 路由（新端点在已代理前缀之下）。
 - 启用 = 拷贝 example 填写后重启（不改 compose）；彻底回滚 = 注释掉 env 重启；后果见 3.5。用户覆盖文件有语法错误时启动失败（fail-closed 覆盖到用户扩展层）。
+- OAuth 传输层使用 authlib `AsyncOAuth2Client`（code→token→userinfo，token 端点认证 `client_secret_post`）；不引 SessionMiddleware / Starlette 集成，state 的浏览器绑定仍由无状态 HMAC + nonce Cookie 承担。后续 PKCE / OIDC discovery / 多 provider 均为传输层内部升级，不影响扩展契约。
 
 ## 8. 安全考量
 

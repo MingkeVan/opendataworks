@@ -277,7 +277,7 @@ def test_broken_override_module_fails_startup(monkeypatch, tmp_path, _clean_over
 
 def test_override_with_missing_nested_import_fails_startup(monkeypatch, tmp_path, _clean_override_module):
     """P1 回归：覆盖文件存在但其内部 import 失败（如引用缺失的
-    custom_sso_user_mapper）必须让启动失败，绝不静默回落到认证关闭。"""
+    custom_sso_security_manager）必须让启动失败，绝不静默回落到认证关闭。"""
     (tmp_path / "dataagent_config_docker.py").write_text(
         "from missing_custom_module import something\nAUTH_ENABLED = True\n",
         encoding="utf-8",
@@ -339,25 +339,50 @@ def test_dataagent_settings_must_be_dict(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# OAUTH_USERINFO_MAPPER 配置校验（回调行为见 test_auth_routes.py）
+# CUSTOM_SECURITY_MANAGER 配置校验（回调行为见 test_auth_routes.py）
 # ---------------------------------------------------------------------------
 
-def test_userinfo_mapper_must_be_callable(monkeypatch, tmp_path):
-    path = write_config(tmp_path, "OAUTH_USERINFO_MAPPER = 'not-callable'\n")
+@pytest.mark.parametrize(
+    "body",
+    [
+        "CUSTOM_SECURITY_MANAGER = 'not-a-class'\n",
+        "class NotAManager:\n    pass\nCUSTOM_SECURITY_MANAGER = NotAManager\n",
+        # 类实例（而非类本身）也不合法。
+        "from core.security_manager import DataAgentSecurityManager\n"
+        "CUSTOM_SECURITY_MANAGER = DataAgentSecurityManager(None)\n",
+    ],
+    ids=["not-a-class", "not-a-subclass", "instance-not-class"],
+)
+def test_custom_security_manager_must_be_subclass(monkeypatch, tmp_path, body):
+    path = write_config(tmp_path, body)
     monkeypatch.setenv(auth.AUTH_CONFIG_ENV, path)
     with pytest.raises(AuthConfigError):
         init_auth()
 
 
-def test_userinfo_mapper_is_captured(monkeypatch, tmp_path):
+def test_custom_security_manager_is_instantiated(monkeypatch, tmp_path):
     path = write_config(
         tmp_path,
-        "def _mapper(userinfo):\n    return {\"user_id\": userinfo.get(\"uid\")}\n"
-        "OAUTH_USERINFO_MAPPER = _mapper\n",
+        "from core.security_manager import DataAgentSecurityManager\n"
+        "class MyManager(DataAgentSecurityManager):\n"
+        "    def resolve_role(self, provider, user_id, userinfo):\n"
+        "        return 'admin'\n"
+        "CUSTOM_SECURITY_MANAGER = MyManager\n",
     )
     monkeypatch.setenv(auth.AUTH_CONFIG_ENV, path)
     settings = init_auth()
-    assert callable(settings.oauth_userinfo_mapper)
+    assert type(settings.security_manager).__name__ == "MyManager"
+    # 子类覆写经薄委托 resolve_oauth_role 生效。
+    assert resolve_oauth_role("SSO", "anyone") == "admin"
+
+
+def test_default_security_manager_when_not_configured(monkeypatch, tmp_path):
+    path = write_config(tmp_path, "AUTH_ENABLED = False\n")
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, path)
+    settings = init_auth()
+    from core.security_manager import DataAgentSecurityManager
+
+    assert type(settings.security_manager) is DataAgentSecurityManager
 
 
 # ---------------------------------------------------------------------------

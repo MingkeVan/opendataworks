@@ -261,7 +261,7 @@ DataAgent（智能问数）支持可选的 OAuth2 + 本地管理员登录，以�
 |---|---|
 | `docker/dataagent/dataagent_config.py` | 仓库自带基础配置（默认 `AUTH_ENABLED=False`，**不要直接改**，升级会覆盖）；末尾自动加载同目录用户覆盖 |
 | `docker/dataagent/dataagent_config_docker.py.example` | 用户覆盖示例（认证 + `DATAAGENT_SETTINGS` 运行时覆盖）；拷贝为 `dataagent_config_docker.py` 后填写 |
-| `docker/dataagent/custom_sso_user_mapper.py.example` | 非标准 IdP 的 userinfo 映射钩子示例（Superset `custom_sso_security_manager.py` 对应物）；拷贝为 `custom_sso_user_mapper.py` 并在覆盖配置里挂 `OAUTH_USERINFO_MAPPER` |
+| `docker/dataagent/custom_sso_security_manager.py.example` | 自定义 SSO 安全管理器示例（Superset `custom_sso_security_manager.py` 同款写法）：继承 `DataAgentSecurityManager` 覆写 `oauth_user_info` / `resolve_role` / `verify_local_login` / `on_login`；拷贝为 `custom_sso_security_manager.py` 并在覆盖配置里挂 `CUSTOM_SECURITY_MANAGER` |
 | `docker/dataagent/.gitignore` | 忽略一切用户文件，只保留自带文件与 `.example` |
 | `docker/nginx/frontend.conf`、`docker/nginx/dataagent-frontend.conf` | 两个前端 nginx 配置的宿主机副本；默认仍用镜像内构建版本，取消 compose 中对应服务 volumes 注释即可切换为宿主机管理 |
 

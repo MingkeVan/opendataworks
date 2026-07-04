@@ -8,8 +8,9 @@
 
 可配置内容：
 - 认证：`AUTH_ENABLED` / `SECRET_KEY` / `LOCAL_ADMINS` / `OAUTH` / `ADMIN_USERS`
-  / `OAUTH_USERINFO_MAPPER`（非标准 IdP 的 userinfo 映射钩子，见
-  custom_sso_user_mapper.py.example）。
+  / `CUSTOM_SECURITY_MANAGER`（Superset 同款类扩展契约：覆写 oauth_user_info /
+  resolve_role / verify_local_login / on_login，见
+  custom_sso_security_manager.py.example）。
 - 其他运行时配置：`DATAAGENT_SETTINGS = {"<config.py Settings 字段>": 值}`，
   启动时统一应用（如超时/并发档位），字段名见
   `dataagent/dataagent-backend/config.py`。
@@ -54,7 +55,7 @@ DATAAGENT_SETTINGS = {}
 # 加载同目录下的用户扩展（Superset superset_config_docker.py 同款机制）。
 # 先用 find_spec 判断覆盖文件是否存在：不存在 → 按上面的默认值运行（认证关闭）；
 # 存在 → 直接 import，任何错误（语法错误、覆盖文件内部的 import 失败，如
-# `from custom_sso_user_mapper import ...` 但文件缺失）都原样抛出，让启动失败
+# `from custom_sso_security_manager import ...` 但文件缺失）都原样抛出，让启动失败
 # （fail-closed）。不能用 try/except ImportError 包住 import：那会把覆盖文件
 # 内部的导入失败也吞掉，静默回落到认证关闭。
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@
 - [x] T6 `core/topic_task_store.py`：`_normalize_context` 透传 auth 键；`_topic_context_predicate` 按设计 3.5 矩阵；`create_topic` 写 `auth_user_id/auth_username`；行归一化与 `admin_list_topics` 增加 auth 列/过滤。
 - [x] T7 迁移 `alembic/versions/20260701_000019_add_topic_auth_owner.py`（down_revision=`20260613_000018`，幂等 `_has_column`/`_has_index`）：`auth_user_id VARCHAR(255) NOT NULL DEFAULT ''`、`auth_username VARCHAR(255) NOT NULL DEFAULT ''`、`idx_da_agent_topic_auth_updated (source, auth_user_id, updated_at)`；schema 只由 Alembic 管理。
 - [x] T8 `api/admin_routes.py`：settings_router 挂 router 级 `dependencies=[Depends(require_admin)]`；`/api/v1/dataagent` 拆公开只读（3 个 agents GET）与 admin router（构造时显式 `dependencies=[Depends(require_admin)]`）；`/agents/capabilities` 先于 `/agents/{agent_id}` 注册；新增 `GET /api/v1/nl2sql-admin/topics`。
-- [x] T9 `deploy/docker/dataagent/`（Superset docker/pythonpath_dev 同款目录模式）：自带基础配置 `dataagent_config.py`（默认关闭 + 末尾加载用户覆盖，兼容承载非认证的 `DATAAGENT_SETTINGS` 运行时覆盖）、`dataagent_config_docker.py.example`、`custom_sso_user_mapper.py.example`（OAUTH_USERINFO_MAPPER 钩子示例）、目录 `.gitignore`；`core/auth.py` 加载器把配置目录加入 `sys.path` 以支持同目录用户扩展模块。
+- [x] T9 `deploy/docker/dataagent/`（Superset docker/pythonpath_dev 同款目录模式）：自带基础配置 `dataagent_config.py`（默认关闭 + 末尾加载用户覆盖，兼容承载非认证的 `DATAAGENT_SETTINGS` 运行时覆盖）、`dataagent_config_docker.py.example`、`custom_sso_security_manager.py.example`（CUSTOM_SECURITY_MANAGER 类扩展契约示例，Superset 同款写法）、目录 `.gitignore`；`core/auth.py` 加载器把配置目录加入 `sys.path` 以支持同目录用户扩展模块。
 - [x] T10 compose prod/dev + `.env.example` + `deploy/README.md`：`./docker/dataagent` 目录默认挂载 + env 默认指定基础配置（显式关闭态，行为不变）；`deploy/docker/nginx/` 前端 nginx 配置宿主机副本 + 注释式挂载；fail-closed 与回滚说明。
 
 ### 前端（dataagent/dataagent-frontend/）

@@ -33,6 +33,8 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
+from core.security_manager import DataAgentSecurityManager
+
 logger = logging.getLogger(__name__)
 
 AUTH_CONFIG_ENV = "DATAAGENT_CONFIG"
@@ -84,11 +86,10 @@ class AuthSettings:
     oauth: OAuthSettings = field(default_factory=OAuthSettings)
     local_admins: list[dict[str, str]] = field(default_factory=list)
     admin_users: list[str] = field(default_factory=list)
-    # 可选 userinfo → 身份 映射钩子（Superset custom_sso_security_manager 的
-    # oauth_user_info 对应物）：callable(userinfo: dict) -> dict，返回
-    # {"user_id": 必填, "username": 可选, "role": 可选 'admin'/'user'}。
-    # 用于非标准 IdP（嵌套 payload、自定义角色/组逻辑）。
-    oauth_userinfo_mapper: Any = None
+    # CUSTOM_SECURITY_MANAGER 实例（Superset 同款类扩展契约）：
+    # DataAgentSecurityManager 子类，承载 oauth_user_info / resolve_role /
+    # verify_local_login / on_login 四个扩展点；缺省为基类默认实现。
+    security_manager: Any = None
     # DATAAGENT_SETTINGS：非认证的运行时 Settings 覆盖（config.py 字段），
     # main 启动时经 config.update_settings 应用。
     runtime_settings: dict[str, Any] = field(default_factory=dict)
@@ -182,11 +183,14 @@ def _build_settings(module: Any, config_path: str) -> AuthSettings:
         oauth=_parse_oauth(getattr(module, "OAUTH", None)),
         local_admins=_parse_local_admins(getattr(module, "LOCAL_ADMINS", None)),
         admin_users=[str(x).strip() for x in (getattr(module, "ADMIN_USERS", None) or []) if str(x).strip()],
-        oauth_userinfo_mapper=getattr(module, "OAUTH_USERINFO_MAPPER", None),
         config_path=config_path,
     )
-    if settings.oauth_userinfo_mapper is not None and not callable(settings.oauth_userinfo_mapper):
-        raise AuthConfigError("OAUTH_USERINFO_MAPPER 必须是 callable(userinfo: dict) -> dict")
+    manager_cls = getattr(module, "CUSTOM_SECURITY_MANAGER", None)
+    if manager_cls is not None and not (isinstance(manager_cls, type) and issubclass(manager_cls, DataAgentSecurityManager)):
+        raise AuthConfigError(
+            "CUSTOM_SECURITY_MANAGER 必须是 core.security_manager.DataAgentSecurityManager 的子类"
+        )
+    settings.security_manager = (manager_cls or DataAgentSecurityManager)(settings)
 
     raw_runtime = getattr(module, "DATAAGENT_SETTINGS", None)
     if raw_runtime is not None:
@@ -266,6 +270,14 @@ def is_auth_enabled() -> bool:
     return get_auth_settings().enabled
 
 
+def get_security_manager() -> DataAgentSecurityManager:
+    """当前生效的安全管理器。env 未设置（auth 关闭）路径下惰性创建基类实例。"""
+    settings = get_auth_settings()
+    if settings.security_manager is None:
+        settings.security_manager = DataAgentSecurityManager(settings)
+    return settings.security_manager
+
+
 # ---------------------------------------------------------------------------
 # 会话 JWT（HS256）
 # ---------------------------------------------------------------------------
@@ -326,35 +338,14 @@ def resolve_identity(request: Request) -> AuthIdentity | None:
 # ---------------------------------------------------------------------------
 
 def verify_local_admin(username: str, password: str) -> AuthIdentity | None:
-    import bcrypt
-
-    cfg = get_auth_settings()
-    username = str(username or "").strip()
-    for admin in cfg.local_admins:
-        if admin["username"] != username:
-            continue
-        try:
-            matched = bcrypt.checkpw(password.encode("utf-8"), admin["password_bcrypt"].encode("utf-8"))
-        except ValueError:
-            # bcrypt 5 对超过 72 字节的口令抛 ValueError；按认证失败处理而非 500。
-            matched = False
-        if matched:
-            return AuthIdentity(
-                user_id=f"{LOCAL_PROVIDER}:{username}",
-                username=username,
-                role=ROLE_ADMIN,
-                provider=LOCAL_PROVIDER,
-            )
-        break
-    logger.warning("Local admin login failed username=%r", username)
-    return None
+    """薄委托：实现在 DataAgentSecurityManager.verify_local_login（可被子类覆写）。"""
+    return get_security_manager().verify_local_login(username, password)
 
 
-def resolve_oauth_role(provider_name: str, oauth_user_id: str) -> str:
-    """按稳定标识 ``<provider>:<sub>`` 提名管理员；username 不参与提权。"""
-    cfg = get_auth_settings()
-    stable_id = f"{provider_name}:{oauth_user_id}"
-    return ROLE_ADMIN if stable_id in cfg.admin_users else ROLE_USER
+def resolve_oauth_role(provider_name: str, oauth_user_id: str, userinfo: dict[str, Any] | None = None) -> str:
+    """薄委托：实现在 DataAgentSecurityManager.resolve_role（可被子类覆写）。
+    默认按稳定标识 ``<provider>:<sub>`` 提名管理员；username 不参与提权。"""
+    return get_security_manager().resolve_role(provider_name, oauth_user_id, userinfo or {})
 
 
 # ---------------------------------------------------------------------------

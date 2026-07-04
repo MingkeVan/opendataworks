@@ -3,7 +3,7 @@
 拷贝本文件为同目录下的 `dataagent_config_docker.py`（已被 .gitignore 忽略，
 不会入库），按需修改后重启 dataagent-backend 即生效。本目录在容器内位于
 `sys.path` 上，你也可以像 Superset 的 custom_sso_security_manager.py 一样在
-同目录放自定义模块并在这里 import（示例见 custom_sso_user_mapper.py.example）。
+同目录放自定义模块并在这里 import（示例见 custom_sso_security_manager.py.example）。
 """
 
 # ---------------------------------------------------------------------------
@@ -58,18 +58,20 @@ OAUTH = {
 }
 
 # ---------------------------------------------------------------------------
-# 非标准 IdP 的 userinfo 映射钩子（可选，Superset custom_sso_security_manager
-# 的 oauth_user_info 对应物）。配置后 user_id_field / username_field 不再生效，
-# 由钩子完全接管 payload 解析。示例：
+# 自定义安全管理器（可选，Superset CUSTOM_SECURITY_MANAGER 同款写法）。
+# 继承 core.security_manager.DataAgentSecurityManager，可覆写
+# oauth_user_info（非标准 IdP 的 userinfo 解析）/ resolve_role /
+# verify_local_login / on_login（登录审计等）。示例见同目录
+# custom_sso_security_manager.py.example。挂载写法：
 #
-#   from custom_sso_user_mapper import map_sso_userinfo
-#   OAUTH_USERINFO_MAPPER = map_sso_userinfo
+#   from custom_sso_security_manager import CustomSsoSecurityManager
+#   CUSTOM_SECURITY_MANAGER = CustomSsoSecurityManager
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # OAuth 用户提名为管理员：条目为 "<provider_name>:<user_id_field值>"（稳定标识，
 # 即 provider:sub）。username 可变、不保证唯一，不参与提权。
-# 若 OAUTH_USERINFO_MAPPER 返回了 role 字段，则以钩子返回为准。
+# 若自定义 SecurityManager 的 oauth_user_info 返回了 role 字段，则以其为准。
 # ---------------------------------------------------------------------------
 ADMIN_USERS = [
     # "SSO:1024",

@@ -191,11 +191,15 @@ class _FakeResponse:
         return self._payload
 
 
-class _FakeAsyncClient:
+class _FakeOAuth2Client:
+    """伪 authlib AsyncOAuth2Client：fetch_token + 自动带 token 的 get。"""
+
     def __init__(self, *, userinfo):
         self._userinfo = userinfo
+        self.fetch_calls = []
 
     def __call__(self, *args, **kwargs):
+        self.init_kwargs = kwargs
         return self
 
     async def __aenter__(self):
@@ -204,15 +208,16 @@ class _FakeAsyncClient:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    async def post(self, url, **kwargs):
-        return _FakeResponse({"access_token": "at-1"})
+    async def fetch_token(self, url, **kwargs):
+        self.fetch_calls.append((url, kwargs))
+        return {"access_token": "at-1", "token_type": "Bearer"}
 
     async def get(self, url, **kwargs):
         return _FakeResponse(self._userinfo)
 
 
 def _oauth_callback(client, monkeypatch, *, userinfo, redirect="", bind_nonce=True, cookie_nonce=None):
-    monkeypatch.setattr(auth_routes.httpx, "AsyncClient", _FakeAsyncClient(userinfo=userinfo))
+    monkeypatch.setattr(auth_routes, "AsyncOAuth2Client", _FakeOAuth2Client(userinfo=userinfo))
     nonce = auth.generate_oauth_nonce()
     state = auth.issue_oauth_state(redirect, nonce=nonce)
     # 正常流程：authorize 会把 nonce 种进发起浏览器的 HttpOnly Cookie。
@@ -282,11 +287,11 @@ def test_oauth_callback_falls_back_to_safe_redirect(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# OAUTH_USERINFO_MAPPER：非标准 IdP 的 userinfo 映射钩子
-# （Superset custom_sso_security_manager 的 oauth_user_info 对应物）
+# CUSTOM_SECURITY_MANAGER：Superset 同款类扩展契约
+# （oauth_user_info / resolve_role / verify_local_login / on_login）
 # ---------------------------------------------------------------------------
 
-def enable_auth_with_mapper(monkeypatch, tmp_path, *, mapper_body: str) -> None:
+def enable_auth_with_manager(monkeypatch, tmp_path, *, manager_body: str) -> None:
     import bcrypt
 
     password_hash = bcrypt.hashpw(b"admin-pass", bcrypt.gensalt(rounds=4)).decode()
@@ -307,7 +312,7 @@ OAUTH = {{
     "redirect_uri": "https://app.example.com/cb",
     "post_login_redirect": "/intelligent-query/chat",
 }}
-{mapper_body}
+{manager_body}
 """,
         encoding="utf-8",
     )
@@ -315,19 +320,23 @@ OAUTH = {{
     auth.init_auth()
 
 
-NESTED_MAPPER = """
-def _mapper(userinfo):
-    payload = userinfo.get("data") or {}
-    mapped = {"user_id": payload.get("uid"), "username": payload.get("nickname")}
-    if "dataagent-admin" in (payload.get("roles") or []):
-        mapped["role"] = "admin"
-    return mapped
-OAUTH_USERINFO_MAPPER = _mapper
+NESTED_MANAGER = """
+from core.security_manager import DataAgentSecurityManager
+
+class CustomSsoSecurityManager(DataAgentSecurityManager):
+    def oauth_user_info(self, provider, userinfo):
+        payload = userinfo.get("data") or {}
+        mapped = {"user_id": payload.get("uid"), "username": payload.get("nickname")}
+        if "dataagent-admin" in (payload.get("roles") or []):
+            mapped["role"] = "admin"
+        return mapped
+
+CUSTOM_SECURITY_MANAGER = CustomSsoSecurityManager
 """
 
 
-def test_mapper_takes_over_nonstandard_userinfo(monkeypatch, tmp_path):
-    enable_auth_with_mapper(monkeypatch, tmp_path, mapper_body=NESTED_MAPPER)
+def test_manager_takes_over_nonstandard_userinfo(monkeypatch, tmp_path):
+    enable_auth_with_manager(monkeypatch, tmp_path, manager_body=NESTED_MANAGER)
     client = TestClient(app)
 
     response = _oauth_callback(
@@ -341,8 +350,8 @@ def test_mapper_takes_over_nonstandard_userinfo(monkeypatch, tmp_path):
     assert data["role"] == "user"
 
 
-def test_mapper_role_wins_over_admin_users(monkeypatch, tmp_path):
-    enable_auth_with_mapper(monkeypatch, tmp_path, mapper_body=NESTED_MAPPER)
+def test_manager_role_wins_over_admin_users(monkeypatch, tmp_path):
+    enable_auth_with_manager(monkeypatch, tmp_path, manager_body=NESTED_MANAGER)
     client = TestClient(app)
 
     response = _oauth_callback(
@@ -353,8 +362,8 @@ def test_mapper_role_wins_over_admin_users(monkeypatch, tmp_path):
     assert client.get("/api/v1/nl2sql/auth/me").json()["data"]["role"] == "admin"
 
 
-def test_mapper_without_role_falls_back_to_admin_users(monkeypatch, tmp_path):
-    enable_auth_with_mapper(monkeypatch, tmp_path, mapper_body=NESTED_MAPPER)
+def test_manager_without_role_falls_back_to_admin_users(monkeypatch, tmp_path):
+    enable_auth_with_manager(monkeypatch, tmp_path, manager_body=NESTED_MANAGER)
     client = TestClient(app)
 
     response = _oauth_callback(
@@ -362,22 +371,79 @@ def test_mapper_without_role_falls_back_to_admin_users(monkeypatch, tmp_path):
         userinfo={"data": {"uid": "1024", "nickname": "bob", "roles": []}},
     )
     assert response.status_code == 302
-    # 钩子未返回 role → 回落 ADMIN_USERS（SSO:1024）提名。
+    # oauth_user_info 未返回 role → 回落 resolve_role（默认 ADMIN_USERS，SSO:1024）。
     assert client.get("/api/v1/nl2sql/auth/me").json()["data"]["role"] == "admin"
 
 
-def test_mapper_failure_fails_the_login_not_the_service(monkeypatch, tmp_path):
-    enable_auth_with_mapper(
-        monkeypatch, tmp_path,
-        mapper_body="def _mapper(userinfo):\n    raise RuntimeError('boom')\nOAUTH_USERINFO_MAPPER = _mapper\n",
-    )
+BROKEN_MANAGER = """
+from core.security_manager import DataAgentSecurityManager
+
+class CustomSsoSecurityManager(DataAgentSecurityManager):
+    def oauth_user_info(self, provider, userinfo):
+        raise RuntimeError("boom")
+
+CUSTOM_SECURITY_MANAGER = CustomSsoSecurityManager
+"""
+
+
+def test_manager_failure_fails_the_login_not_the_service(monkeypatch, tmp_path):
+    enable_auth_with_manager(monkeypatch, tmp_path, manager_body=BROKEN_MANAGER)
     client = TestClient(app)
 
     response = _oauth_callback(client, monkeypatch, userinfo={"sub": "42"})
     assert response.status_code == 302
-    assert response.headers["location"] == "/login?error=oauth_mapper_failed"
+    assert response.headers["location"] == "/login?error=oauth_user_info_failed"
     # 服务仍健康。
     assert client.get("/api/v1/nl2sql/auth/config").status_code == 200
+
+
+ON_LOGIN_MANAGER = """
+from core.security_manager import DataAgentSecurityManager
+
+class CustomSsoSecurityManager(DataAgentSecurityManager):
+    LOGIN_EVENTS = []
+
+    def on_login(self, identity):
+        type(self).LOGIN_EVENTS.append((identity.provider, identity.user_id))
+
+CUSTOM_SECURITY_MANAGER = CustomSsoSecurityManager
+"""
+
+
+def test_on_login_called_for_local_and_oauth(monkeypatch, tmp_path):
+    enable_auth_with_manager(monkeypatch, tmp_path, manager_body=ON_LOGIN_MANAGER)
+    client = TestClient(app)
+
+    # 本地登录触发 on_login。
+    assert client.post(
+        "/api/v1/nl2sql/auth/login", json={"username": "admin", "password": "admin-pass"}
+    ).status_code == 200
+    # OAuth 登录触发 on_login。
+    assert _oauth_callback(client, monkeypatch, userinfo={"sub": "42"}).status_code == 302
+
+    events = type(auth.get_security_manager()).LOGIN_EVENTS
+    assert ("local", "local:admin") in events
+    assert ("SSO", "SSO:42") in events
+
+
+def test_on_login_failure_does_not_block_login(monkeypatch, tmp_path):
+    enable_auth_with_manager(
+        monkeypatch, tmp_path,
+        manager_body="""
+from core.security_manager import DataAgentSecurityManager
+
+class CustomSsoSecurityManager(DataAgentSecurityManager):
+    def on_login(self, identity):
+        raise RuntimeError("audit sink down")
+
+CUSTOM_SECURITY_MANAGER = CustomSsoSecurityManager
+""",
+    )
+    client = TestClient(app)
+
+    response = client.post("/api/v1/nl2sql/auth/login", json={"username": "admin", "password": "admin-pass"})
+    assert response.status_code == 200
+    assert client.get("/api/v1/nl2sql/auth/me").status_code == 200
 
 
 # ---------------------------------------------------------------------------
