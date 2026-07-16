@@ -27,11 +27,13 @@ COOKIE_SECURE = False
 COOKIE_SAMESITE = "lax"
 
 # ---------------------------------------------------------------------------
-# 本地管理员账号（OAuth 不可用时仍可登录）。password_bcrypt 生成方式：
+# 本地管理员账号（OAuth 不可用时仍可登录）。
+# 默认账号：admin / admin123；password_bcrypt 是 admin123 的 bcrypt 哈希。
+# 如需改密码，可替换下面的哈希，生成方式：
 #   python -c "import bcrypt; print(bcrypt.hashpw(b'your-password', bcrypt.gensalt()).decode())"
 # ---------------------------------------------------------------------------
 LOCAL_ADMINS = [
-    # {"username": "admin", "password_bcrypt": "$2b$12$..."},
+    {"username": "admin", "password_bcrypt": "$2a$10$UH1EXFfUxjTSk75341ddU./2/w63hc0GkmC31RlKgUmiU3eh3iK0i"},
 ]
 
 # ---------------------------------------------------------------------------
