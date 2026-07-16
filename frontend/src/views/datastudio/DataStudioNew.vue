@@ -683,7 +683,6 @@ import {
   formatDuration,
   formatDateTime,
   isAggregateTable,
-  getLayerType,
   isReplicaWarning,
 } from './tableFormat'
 import { useTabPersistence } from './composables/useTabPersistence'
@@ -1829,7 +1828,6 @@ watch(
   isPlatformMetadataMissing,
   isAggregateTable,
   isReplicaWarning,
-  getLayerType,
   getFieldRows,
   startMetaEdit,
   cancelMetaEdit,

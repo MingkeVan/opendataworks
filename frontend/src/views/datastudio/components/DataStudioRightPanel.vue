@@ -639,7 +639,6 @@ const {
   isPlatformMetadataMissing,
   isAggregateTable,
   isReplicaWarning,
-  getLayerType,
   getFieldRows,
   startMetaEdit,
   cancelMetaEdit,
