@@ -67,7 +67,6 @@ class OAuthSettings:
     redirect_uri: str = ""
     user_id_field: str = "sub"
     username_field: str = "preferred_username"
-    post_login_redirect: str = "/"
 
     @property
     def configured(self) -> bool:
@@ -187,7 +186,6 @@ def _parse_oauth_providers(raw: Any) -> OAuthSettings:
         userinfo_url=str(provider.get("userinfo_url") or ""),
         user_id_field=str(provider.get("user_id_field") or "sub"),
         username_field=str(provider.get("username_field") or "preferred_username"),
-        post_login_redirect=str(provider.get("post_login_redirect") or "/"),
     )
     if not oauth.provider_name:
         raise AuthConfigError("OAUTH_PROVIDERS 条目缺少 name")

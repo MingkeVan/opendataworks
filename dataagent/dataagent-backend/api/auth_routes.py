@@ -255,7 +255,7 @@ async def oauth_callback(request: Request):
 
     redirect_path = sanitize_redirect_path(
         state_payload.get("redirect"),
-        fallback=sanitize_redirect_path(cfg.oauth.post_login_redirect, fallback="/"),
+        fallback="/",
     )
     response = RedirectResponse(url=redirect_path, status_code=302)
     _set_session_cookie(response, issue_session_token(identity))
