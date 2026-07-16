@@ -63,7 +63,6 @@ OAUTH_PROVIDERS = [{
     "userinfo_url": "https://sso.example.com/userinfo",
     "user_id_field": "sub",
     "username_field": "preferred_username",
-    "post_login_redirect": "/intelligent-query/chat",
 }]
 """
     config_file = tmp_path / "auth_config.py"
@@ -290,10 +289,11 @@ def test_oauth_callback_rejects_bad_state(monkeypatch, tmp_path):
 def test_oauth_callback_falls_back_to_safe_redirect(monkeypatch, tmp_path):
     enable_auth(monkeypatch, tmp_path, oauth=True)
     client = TestClient(app)
-    # state 中的 redirect 不合法（协议相对 URL）→ 回落 post_login_redirect。
+    # state 中的 redirect 不合法（协议相对 URL）→ 回落根路径，
+    # 由前端 router 决定当前默认页，后端不绑定具体页面 URL。
     response = _oauth_callback(client, monkeypatch, userinfo={"sub": "42"}, redirect="//evil.com")
     assert response.status_code == 302
-    assert response.headers["location"] == "/intelligent-query/chat"
+    assert response.headers["location"] == "/"
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +322,6 @@ OAUTH_PROVIDERS = [{{
         "redirect_uri": "https://app.example.com/cb",
     }},
     "userinfo_url": "https://sso.example.com/userinfo",
-    "post_login_redirect": "/intelligent-query/chat",
 }}]
 {mapper_body}
 """,

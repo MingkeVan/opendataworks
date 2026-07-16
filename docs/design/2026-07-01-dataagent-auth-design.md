@@ -87,9 +87,11 @@ dataagent-frontend 独立 SPA 的所有 API client 显式携带 `X-ODW-Client: d
 - `response_type=code` 和 `grant_type=authorization_code` 由 DataAgent 传输层固定；
   `token_key` 可为 Superset 配置迁移保留，DataAgent 仍从标准
   `access_token` 字段解析令牌。
-- `userinfo_url` / `user_id_field` / `username_field` /
-  `post_login_redirect` 为 DataAgent 扩展字段，保持现有按需 userinfo
-  拉取、身份映射和安全回跳语义。
+- `userinfo_url` / `user_id_field` / `username_field` 为 DataAgent
+  扩展字段，保持现有按需 userinfo 拉取和身份映射语义。
+- OAuth state 中的 redirect 缺失或不安全时固定回退到 `/`，
+  再由前端 router 选择当前默认页；不再提供 `post_login_redirect`
+  配置，避免认证后端绑定可变的页面路径。
 
 ### 3.5 可见性谓词矩阵
 

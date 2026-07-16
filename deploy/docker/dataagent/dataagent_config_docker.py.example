@@ -67,8 +67,6 @@ OAUTH_PROVIDERS = [
     #     # userinfo 响应里的用户唯一标识与显示名字段（标准平铺 payload 时用）。
     #     "user_id_field": "sub",
     #     "username_field": "preferred_username",
-    #     # 登录成功后的回跳路径（仅接受同源应用内路径）。
-    #     "post_login_redirect": "/",
     # }
 ]
 
