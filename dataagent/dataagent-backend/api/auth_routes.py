@@ -79,10 +79,17 @@ def _clear_session_cookie(response: Response) -> None:
 async def auth_config():
     cfg = get_auth_settings()
     if not cfg.enabled:
-        return {"enabled": False, "provider_name": "", "local_login_enabled": False, "oauth_login_enabled": False}
+        return {
+            "enabled": False,
+            "provider_name": "",
+            "provider_icon": "",
+            "local_login_enabled": False,
+            "oauth_login_enabled": False,
+        }
     return {
         "enabled": True,
         "provider_name": cfg.oauth.provider_name if cfg.oauth_login_enabled else "",
+        "provider_icon": cfg.oauth.icon if cfg.oauth_login_enabled else "",
         "local_login_enabled": cfg.local_login_enabled,
         "oauth_login_enabled": cfg.oauth_login_enabled,
     }

@@ -36,6 +36,8 @@ DataAgent 后端（FastAPI :8900）目前完全无认证：
 - 不与主门户 `odw-auth` / `odw_session` 集成（预留：Cookie 名避让、契约互不干扰）。
 - 不做细粒度 RBAC（仅 `admin` / `user`）。
 - v1 不做本地登录失败锁定（记录失败日志）。
+- 本期不支持多 OAuth Provider；但外置配置使用 Superset/FAB 的
+  `OAUTH_PROVIDERS` 列表外形，启动期强制列表最多一项。
 
 ## 3. 核心语义（评审后固化）
 
@@ -70,6 +72,24 @@ dataagent-frontend 独立 SPA 的所有 API client 显式携带 `X-ODW-Client: d
 
 - 本地管理员：配置脚本 `LOCAL_ADMINS=[{username, password_bcrypt}]`，bcrypt 校验，OAuth 不可用时仍可登录。
 - OAuth 提名：`ADMIN_USERS` 条目匹配 `"<provider>:<sub>"`（稳定标识）；**不用 username 提权**（可变、不保证唯一），username 仅做展示。
+
+### 3.4.1 OAuth Provider 配置契约
+
+- 配置键为 `OAUTH_PROVIDERS=[{...}]`，与 Superset/FAB 的列表和
+  `remote_app` 外形对齐；空列表表示不启用 OAuth，多于一项直接
+  fail-closed 启动失败。
+- 旧的非空扁平 `OAUTH` 不保留兼容分支；加载时立即报迁移错误，
+  避免已配 OAuth 被静默忽略后仅剩本地登录。
+- 通用字段映射：`name` 映射 provider 键/登录按钮显示名，
+  `icon` 是 Font Awesome 4 class（如 `fa-github`），
+  `remote_app.client_id/client_secret/authorize_url/access_token_url/redirect_uri`
+  及 `remote_app.client_kwargs.scope` 用于授权码传输。
+- `response_type=code` 和 `grant_type=authorization_code` 由 DataAgent 传输层固定；
+  `token_key` 可为 Superset 配置迁移保留，DataAgent 仍从标准
+  `access_token` 字段解析令牌。
+- `userinfo_url` / `user_id_field` / `username_field` /
+  `post_login_redirect` 为 DataAgent 扩展字段，保持现有按需 userinfo
+  拉取、身份映射和安全回跳语义。
 
 ### 3.5 可见性谓词矩阵
 
@@ -114,7 +134,7 @@ ALTER TABLE da_agent_topic
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/config` | 公开：`{enabled, provider_name, local_login_enabled}` |
+| GET | `/config` | 公开：`{enabled, provider_name, provider_icon, local_login_enabled, oauth_login_enabled}` |
 | POST | `/login` | 本地管理员密码登录，成功 Set-Cookie `da_session` |
 | GET | `/oauth/authorize` | 读配置拼授权 URL + state cookie，302 |
 | GET | `/oauth/callback` | code→token→userinfo→按 `ADMIN_USERS` 定角色→Set-Cookie→302 |
@@ -136,7 +156,8 @@ ALTER TABLE da_agent_topic
 - `authApi`（config/login/me/logout/authorize URL）；`X-ODW-Client: dataagent` 只在 SPA 调用点注入。
 - 两个 client（`nl2sql.js` 工厂 + `dataagent.js`）统一 `onUnauthorized` 钩子 → `/login?redirect=`（消毒后）。
 - Pinia `stores/auth.js`：`bootstrap()`、`isAuthenticated`、`isAdmin`（auth 关闭时为 true）、`loginLocal`、`logout`。
-- `LoginView.vue`：密码表单 + 条件 OAuth 按钮；redirect 消毒。
+- `LoginView.vue`：密码表单 + 条件 OAuth 按钮；OAuth 按钮用
+  Font Awesome 4 渲染 `provider_icon`（空值则仅文字）；redirect 消毒。
 - 路由守卫（仅 auth 启用时生效）+ 管理页路由/菜单按 `isAdmin` 拦截/隐藏。
 - `NL2SqlChatV2.vue` 的 `sourceMode` 增加 `'all'`（仅 admin），显示来源徽标 + 归属人。
 - 文件下载/预览事件代理（3.6）。
@@ -147,7 +168,7 @@ ALTER TABLE da_agent_topic
 - `deploy/docker/dataagent/` 目录由 compose 整体挂载进 dataagent-backend（`/app/docker/dataagent:ro`），env 默认指定 `DATAAGENT_CONFIG=/app/docker/dataagent/dataagent_config.py`；加载器把该目录加入 `sys.path`。
 - 目录内容：
   - `dataagent_config.py`：仓库自带基础配置，默认 `AUTH_ENABLED=False`（挂载即"显式关闭"态，行为与现状一致）；文件末尾 `from dataagent_config_docker import *` 加载同目录用户覆盖（不存在则跳过，Superset `superset_config_docker.py` 同款机制）。除认证外也可用 `DATAAGENT_SETTINGS = {"<config.py Settings 字段>": 值}` 覆盖运行时配置（启动期校验字段名，未知字段 fail-closed）。
-  - `dataagent_config_docker.py.example`：用户覆盖示例（SECRET_KEY/bcrypt 生成提示、通用 OIDC 样例、`provider:sub` 提名写法、`DATAAGENT_SETTINGS` 样例）；用户拷贝为 `dataagent_config_docker.py` 填写。
+  - `dataagent_config_docker.py.example`：用户覆盖示例（SECRET_KEY/bcrypt 生成提示、Superset/FAB 形态的单项 `OAUTH_PROVIDERS` 通用 OIDC 样例、Font Awesome icon、`provider:sub` 提名写法、`DATAAGENT_SETTINGS` 样例）；用户拷贝为 `dataagent_config_docker.py` 填写。
   - `custom_sso_user_mapper.py.example`：`OAUTH_USERINFO_MAPPER` 钩子示例（Superset `custom_sso_security_manager.py` 的 `oauth_user_info` 对应物）——非标准 IdP（嵌套 payload / 组角色提权）时完全接管 userinfo 解析；钩子返回 `role` 优先于 `ADMIN_USERS`；钩子运行期异常只使该次登录失败，不影响服务。
   - `.gitignore`：忽略一切用户文件（覆盖配置、自定义扩展模块如自研 SSO 适配），只保留自带文件与 `.example`。
 - `deploy/docker/nginx/`：两个前端 nginx 配置的宿主机副本 + compose 中注释式挂载；默认仍用镜像内构建版本（单一主路径），需要宿主机管理时取消注释。

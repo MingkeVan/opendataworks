@@ -4,6 +4,7 @@ import router from './router'
 import App from './App.vue'
 import { setDataagentUnauthorizedHandler } from './api/dataagent'
 import './styles/variables.css'
+import 'font-awesome/css/font-awesome.min.css'
 
 const app = createApp(App)
 const pinia = createPinia()

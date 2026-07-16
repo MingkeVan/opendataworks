@@ -1,7 +1,7 @@
 """DataAgent 外置配置加载 + 认证核心（会话 JWT、身份解析与管理员门禁）。
 
 配置来自 env ``DATAAGENT_CONFIG`` 指向的宿主机挂载 Python 文件
-（Superset ``superset_config.py`` 模式）。除认证（AUTH_* / OAUTH / LOCAL_ADMINS /
+（Superset ``superset_config.py`` 模式）。除认证（AUTH_* / OAUTH_PROVIDERS / LOCAL_ADMINS /
 ADMIN_USERS）外，也可通过 ``DATAAGENT_SETTINGS`` 字典覆盖运行时 Settings
 （config.py 中的字段，如超时/并发档位），main 启动时统一应用。
 
@@ -57,6 +57,7 @@ class AuthConfigError(RuntimeError):
 @dataclass
 class OAuthSettings:
     provider_name: str = "SSO"
+    icon: str = ""
     client_id: str = ""
     client_secret: str = ""
     authorize_url: str = ""
@@ -152,34 +153,68 @@ def _parse_local_admins(raw: Any) -> list[dict[str, str]]:
     return admins
 
 
-def _parse_oauth(raw: Any) -> OAuthSettings:
+def _parse_oauth_providers(raw: Any) -> OAuthSettings:
     if raw is None:
         return OAuthSettings()
-    if not isinstance(raw, dict):
-        raise AuthConfigError("OAUTH 必须是 dict")
-    known = {f for f in OAuthSettings.__dataclass_fields__}
-    values = {k: v for k, v in raw.items() if k in known}
-    oauth = OAuthSettings(**{k: str(v) for k, v in values.items()})
-    if any(raw.get(k) for k in ("client_id", "authorize_url", "token_url")) and not oauth.configured:
-        raise AuthConfigError("OAUTH 配置不完整：client_id / authorize_url / token_url 必须同时提供")
-    if oauth.configured:
-        # callback 实际必用的字段也纳入启动期校验，避免"能启动、登录页有 OAuth
-        # 按钮、回调必失败"的上线即不可用状态。
-        missing = [name for name in ("userinfo_url", "redirect_uri") if not getattr(oauth, name)]
-        if missing:
-            raise AuthConfigError(f"OAUTH 配置不完整：缺少回调必需字段 {missing}")
+    if not isinstance(raw, list):
+        raise AuthConfigError("OAUTH_PROVIDERS 必须是 provider dict 列表")
+    if not raw:
+        return OAuthSettings()
+    if len(raw) != 1:
+        raise AuthConfigError("OAUTH_PROVIDERS 本期仅支持单 Provider，必须恰好配置一项")
+    provider = raw[0]
+    if not isinstance(provider, dict):
+        raise AuthConfigError("OAUTH_PROVIDERS 条目必须是 dict")
+    remote_app = provider.get("remote_app")
+    if remote_app is None:
+        remote_app = {}
+    if not isinstance(remote_app, dict):
+        raise AuthConfigError("OAUTH_PROVIDERS.remote_app 必须是 dict")
+    client_kwargs = remote_app.get("client_kwargs")
+    if client_kwargs is None:
+        client_kwargs = {}
+    if not isinstance(client_kwargs, dict):
+        raise AuthConfigError("OAUTH_PROVIDERS.remote_app.client_kwargs 必须是 dict")
+    oauth = OAuthSettings(
+        provider_name=str(provider.get("name") or "").strip(),
+        icon=str(provider.get("icon") or "").strip(),
+        client_id=str(remote_app.get("client_id") or ""),
+        client_secret=str(remote_app.get("client_secret") or ""),
+        authorize_url=str(remote_app.get("authorize_url") or ""),
+        token_url=str(remote_app.get("access_token_url") or ""),
+        scopes=str(client_kwargs.get("scope") or "openid profile"),
+        redirect_uri=str(remote_app.get("redirect_uri") or ""),
+        userinfo_url=str(provider.get("userinfo_url") or ""),
+        user_id_field=str(provider.get("user_id_field") or "sub"),
+        username_field=str(provider.get("username_field") or "preferred_username"),
+        post_login_redirect=str(provider.get("post_login_redirect") or "/"),
+    )
+    if not oauth.provider_name:
+        raise AuthConfigError("OAUTH_PROVIDERS 条目缺少 name")
+    if not oauth.configured:
+        raise AuthConfigError(
+            "OAUTH_PROVIDERS.remote_app 配置不完整："
+            "client_id / authorize_url / access_token_url 必须同时提供"
+        )
+    # callback 实际必用的字段也纳入启动期校验，避免"能启动、登录页有 OAuth
+    # 按钮、回调必失败"的上线即不可用状态。
+    missing = [name for name in ("userinfo_url", "redirect_uri") if not getattr(oauth, name)]
+    if missing:
+        raise AuthConfigError(f"OAUTH_PROVIDERS 配置不完整：缺少回调必需字段 {missing}")
     return oauth
 
 
 def _build_settings(module: Any, config_path: str) -> AuthSettings:
     enabled = bool(getattr(module, "AUTH_ENABLED", False))
+    if getattr(module, "OAUTH", None):
+        raise AuthConfigError("OAUTH 扁平配置已不支持，请迁移为单项 OAUTH_PROVIDERS")
     settings = AuthSettings(
         enabled=enabled,
         session_ttl_seconds=int(getattr(module, "SESSION_TTL_SECONDS", 28800)),
         cookie_name=str(getattr(module, "COOKIE_NAME", "da_session") or "da_session"),
         cookie_secure=bool(getattr(module, "COOKIE_SECURE", False)),
         cookie_samesite=str(getattr(module, "COOKIE_SAMESITE", "lax") or "lax").lower(),
-        oauth=_parse_oauth(getattr(module, "OAUTH", None)),
+        oauth=_parse_oauth_providers(getattr(module, "OAUTH_PROVIDERS", None)),
         local_admins=_parse_local_admins(getattr(module, "LOCAL_ADMINS", None)),
         admin_users=[str(x).strip() for x in (getattr(module, "ADMIN_USERS", None) or []) if str(x).strip()],
         oauth_userinfo_mapper=getattr(module, "OAUTH_USERINFO_MAPPER", None),
@@ -206,7 +241,9 @@ def _build_settings(module: Any, config_path: str) -> AuthSettings:
     if enabled:
         settings.secret_key = _validate_secret_key(getattr(module, "SECRET_KEY", ""))
         if not settings.local_login_enabled and not settings.oauth_login_enabled:
-            raise AuthConfigError("AUTH_ENABLED=True 但 LOCAL_ADMINS 与 OAUTH 均未配置，无任何可用登录方式")
+            raise AuthConfigError(
+                "AUTH_ENABLED=True 但 LOCAL_ADMINS 与 OAUTH_PROVIDERS 均未配置，无任何可用登录方式"
+            )
     return settings
 
 

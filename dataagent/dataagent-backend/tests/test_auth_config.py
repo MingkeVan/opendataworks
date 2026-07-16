@@ -303,6 +303,25 @@ def test_shipped_base_config_does_not_swallow_nested_import_error(monkeypatch, t
         init_auth()
 
 
+def test_shipped_override_example_is_safe_when_copied_unchanged(tmp_path):
+    """Example defaults to auth off with no half-configured OAuth provider."""
+    import shutil
+
+    shipped = (
+        Path(__file__).resolve().parents[3]
+        / "deploy"
+        / "docker"
+        / "dataagent"
+        / "dataagent_config_docker.py.example"
+    )
+    target = tmp_path / "auth_config.py"
+    shutil.copyfile(shipped, target)
+
+    settings = load_auth_settings(str(target))
+    assert settings.enabled is False
+    assert settings.oauth_login_enabled is False
+
+
 def test_shipped_deploy_base_config_is_disabled_by_default(monkeypatch, _clean_override_module):
     shipped = Path(__file__).resolve().parents[3] / "deploy" / "docker" / "dataagent" / "dataagent_config.py"
     assert shipped.is_file(), shipped
@@ -366,21 +385,106 @@ def test_userinfo_mapper_is_captured(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("missing_field", ["userinfo_url", "redirect_uri"])
 def test_oauth_missing_callback_required_field_fails_startup(tmp_path, missing_field):
-    oauth = {
-        "provider_name": "SSO",
-        "client_id": "cid",
-        "client_secret": "secret",
-        "authorize_url": "https://sso.example.com/authorize",
-        "token_url": "https://sso.example.com/token",
+    oauth_provider = {
+        "name": "SSO",
+        "icon": "fa-github",
+        "remote_app": {
+            "client_id": "cid",
+            "client_secret": "secret",
+            "authorize_url": "https://sso.example.com/authorize",
+            "access_token_url": "https://sso.example.com/token",
+            "redirect_uri": "https://app.example.com/cb",
+        },
         "userinfo_url": "https://sso.example.com/userinfo",
-        "redirect_uri": "https://app.example.com/cb",
     }
-    oauth[missing_field] = ""
+    if missing_field == "redirect_uri":
+        oauth_provider["remote_app"][missing_field] = ""
+    else:
+        oauth_provider[missing_field] = ""
     path = write_config(
         tmp_path,
-        f"AUTH_ENABLED = True\nSECRET_KEY = {VALID_SECRET!r}\nOAUTH = {oauth!r}\n",
+        f"AUTH_ENABLED = True\nSECRET_KEY = {VALID_SECRET!r}\n"
+        f"OAUTH_PROVIDERS = {[oauth_provider]!r}\n",
     )
     with pytest.raises(AuthConfigError):
+        load_auth_settings(path)
+
+
+def test_oauth_providers_maps_superset_shape(tmp_path):
+    provider = {
+        "name": "GitHub",
+        "icon": "fa-github",
+        "token_key": "access_token",
+        "remote_app": {
+            "client_id": "cid",
+            "client_secret": "secret",
+            "authorize_url": "https://github.com/login/oauth/authorize",
+            "access_token_url": "https://github.com/login/oauth/access_token",
+            "client_kwargs": {"scope": "read:user user:email"},
+            "redirect_uri": "https://app.example.com/callback",
+            "response_type": "code",
+            "grant_type": "authorization_code",
+        },
+        "userinfo_url": "https://api.github.com/user",
+        "user_id_field": "id",
+        "username_field": "login",
+    }
+    path = write_config(tmp_path, f"OAUTH_PROVIDERS = {[provider]!r}\n")
+    oauth = load_auth_settings(path).oauth
+    assert oauth.provider_name == "GitHub"
+    assert oauth.icon == "fa-github"
+    assert oauth.token_url == provider["remote_app"]["access_token_url"]
+    assert oauth.scopes == "read:user user:email"
+    assert oauth.user_id_field == "id"
+
+
+@pytest.mark.parametrize(
+    "providers",
+    [
+        {"name": "not-a-list"},
+        ({"name": "tuple-is-not-a-list"},),
+        [{"name": "one"}, {"name": "two"}],
+        ["not-a-dict"],
+    ],
+)
+def test_oauth_providers_rejects_unsupported_shapes(tmp_path, providers):
+    path = write_config(tmp_path, f"OAUTH_PROVIDERS = {providers!r}\n")
+    with pytest.raises(AuthConfigError):
+        load_auth_settings(path)
+
+
+def test_nonempty_oauth_provider_cannot_silently_disable_itself(tmp_path):
+    path = write_config(tmp_path, "OAUTH_PROVIDERS = [{'name': 'half-configured'}]\n")
+    with pytest.raises(AuthConfigError, match="remote_app"):
+        load_auth_settings(path)
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        {"name": "bad-remote", "remote_app": []},
+        {
+            "name": "bad-client-kwargs",
+            "remote_app": {
+                "client_id": "cid",
+                "authorize_url": "https://sso.example.com/authorize",
+                "access_token_url": "https://sso.example.com/token",
+                "redirect_uri": "https://app.example.com/callback",
+                "client_kwargs": [],
+            },
+            "userinfo_url": "https://sso.example.com/userinfo",
+        },
+    ],
+)
+def test_oauth_provider_rejects_falsey_non_dict_nested_config(tmp_path, provider):
+    path = write_config(tmp_path, f"OAUTH_PROVIDERS = {[provider]!r}\n")
+    with pytest.raises(AuthConfigError, match="dict"):
+        load_auth_settings(path)
+
+
+def test_legacy_flat_oauth_fails_with_migration_required(tmp_path):
+    path = write_config(tmp_path, "OAUTH = {'provider_name': 'legacy'}\n")
+    with pytest.raises(AuthConfigError, match="OAUTH_PROVIDERS"):
         load_auth_settings(path)
 
 

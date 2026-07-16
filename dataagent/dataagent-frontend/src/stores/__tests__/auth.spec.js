@@ -56,6 +56,7 @@ describe('useAuthStore', () => {
     authApiMock.getAuthConfig.mockResolvedValue({
       enabled: true,
       provider_name: 'SSO',
+      provider_icon: 'fa-github',
       local_login_enabled: true,
       oauth_login_enabled: true
     })
@@ -67,6 +68,8 @@ describe('useAuthStore', () => {
     expect(store.isAuthenticated).toBe(true)
     expect(store.isAdmin).toBe(false)
     expect(store.currentUser.username).toBe('alice')
+    expect(store.providerName).toBe('SSO')
+    expect(store.providerIcon).toBe('fa-github')
   })
 
   it('swallows the me() 401 and reports unauthenticated', async () => {

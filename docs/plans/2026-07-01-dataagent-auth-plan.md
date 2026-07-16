@@ -18,6 +18,9 @@
 - [x] T8 `api/admin_routes.py`：settings_router 挂 router 级 `dependencies=[Depends(require_admin)]`；`/api/v1/dataagent` 拆公开只读（3 个 agents GET）与 admin router（构造时显式 `dependencies=[Depends(require_admin)]`）；`/agents/capabilities` 先于 `/agents/{agent_id}` 注册；新增 `GET /api/v1/nl2sql-admin/topics`。
 - [x] T9 `deploy/docker/dataagent/`（Superset docker/pythonpath_dev 同款目录模式）：自带基础配置 `dataagent_config.py`（默认关闭 + 末尾加载用户覆盖，兼容承载非认证的 `DATAAGENT_SETTINGS` 运行时覆盖）、`dataagent_config_docker.py.example`、`custom_sso_user_mapper.py.example`（OAUTH_USERINFO_MAPPER 钩子示例）、目录 `.gitignore`；`core/auth.py` 加载器把配置目录加入 `sys.path` 以支持同目录用户扩展模块。
 - [x] T10 compose prod/dev + `.env.example` + `deploy/README.md`：`./docker/dataagent` 目录默认挂载 + env 默认指定基础配置（显式关闭态，行为不变）；`deploy/docker/nginx/` 前端 nginx 配置宿主机副本 + 注释式挂载；fail-closed 与回滚说明。
+- [x] T11 OAuth 配置契约优化：扁平 `OAUTH` 切换为 Superset/FAB
+  形态 `OAUTH_PROVIDERS`，启动期限制单 Provider，映射 `remote_app`
+  字段并保留 DataAgent userinfo 扩展字段。
 
 ### 前端（dataagent/dataagent-frontend/）
 
@@ -29,6 +32,8 @@
 - [x] F5/F6 双 client 401 → `/login?redirect=`；侧栏用户名/退出；菜单 isAdmin 隐藏。
 - [x] F7 `sourceMode: 'all'`（admin）→ `listAdminTopics()`。
 - [x] F8 mockServer `GET /api/v1/nl2sql/auth/config` → `{enabled:false}`。
+- [x] F9 引入 Font Awesome 4.7，`/auth/config` 下发 `provider_icon`，
+  `LoginView.vue` 按配置 class 渲染 OAuth 按钮图标。
 
 ### 测试
 
@@ -36,12 +41,31 @@
 - [x] `tests/test_auth_routes.py`：login/me/logout、Set-Cookie HttpOnly/SameSite/Secure 断言、authorize 302+state、mock httpx callback、provider:sub 提名、username 不提权。
 - [x] 扩展 `test_topic_task_store.py`、`test_widget_runtime_routes.py`（widget 优先、无标记带 cookie 仍匿名、dataagent 标记解析身份）、`test_admin_routes.py`（关闭开放回归、启用 401/200、agents GET 公开、capabilities 遮蔽回归、/topics 契约）。
 - [x] 前端 vitest：守卫/isAdmin、auth store、双 client 401、widget 无标记、Blob 链路、沙箱断言、rel path 转义、redirect 消毒、mock auth config。
+- [x] `OAUTH_PROVIDERS` 回归：Superset 形态字段映射、单 Provider
+  限制、callback 必需字段校验、`provider_icon` API/store 传递。
 
 ## 验证
 
 1. `.venv-py313`（或本环境等价 venv）聚焦 pytest；`nvm use` 后 vitest + `npm run build` + `build:widget`。
 2. 本地 MySQL + Redis 可用时：`alembic upgrade head`；冒烟 A（auth 关回归：topics 全链路、widget、admin 开放、`/auth/config` enabled=false）；冒烟 B（auth 开：fail-closed 启动失败验证、登录归属、匿名隔离、文件 Blob、admin 全源、settings 401、widget/门户嵌入不变）；4b 回滚回归（移除 env → 旧谓词）。
 3. 环境不可用的层面（真实 IdP OAuth 端到端、docker 双层 nginx cookie 链路）在交付说明中显式列出。
+
+### 2026-07-16 后续优化验证记录
+
+- 后端：`dataagent/dataagent-backend/.venv-py313`（Python 3.13）运行
+  auth/config/admin/topic/widget 联动回归，112 项全部通过。
+- 前端：按 `.nvmrc` 使用 Node 20.19.0；Vitest 全量 348 项通过，
+  `npm run build` 与 `npm run build:widget` 通过；主 SPA 产物包含
+  `fa-github` CSS 规则和 Font Awesome webfont 资源。
+- 真实 HTTP 冒烟：MySQL `127.0.0.1:3306`（Podman 已有
+  `data-portal-mysql`，业务 schema `opendataworks`，会话 schema `dataagent`）；
+  Redis `127.0.0.1:6379`（Podman `odw-local-redis`，验证期间启动、完成后停止）；
+  Uvicorn 用上述 `.venv-py313` 启动。`GET /api/v1/nl2sql/auth/config` 正确返回
+  `GitHub` / `fa-github`，本地管理员 login + `/api/v1/nl2sql/auth/me` 通过，
+  `/api/v1/nl2sql/auth/oauth/authorize` 正确 302 到 `remote_app` 配置的 URL，且 scope /
+  redirect_uri 与配置一致。
+- 未使用真实 provider 凭证，因此 IdP 交互、code 换 token 及真实
+  userinfo callback 仍是手工对接项；本次没有触发真实模型执行。
 
 ## Rollout / Backout
 
@@ -51,6 +75,6 @@
 ## 手工 Runbook（真实 IdP 对接，环境内无法自动验证）
 
 1. 在 IdP 注册应用，取得 client_id/secret，回调地址 `https://<dataagent-host>/api/v1/nl2sql/auth/oauth/callback`。
-2. 填入配置脚本 `OAUTH` 段；`AUTH_ENABLED=True`；重启。
+2. 填入配置脚本的单项 `OAUTH_PROVIDERS` 段；`AUTH_ENABLED=True`；重启。
 3. 浏览器访问独立站点 → 跳登录页 → OAuth 按钮 → IdP 登录 → 回跳后 `GET /api/v1/nl2sql/auth/me` 确认身份与角色。
 4. 用 `ADMIN_USERS=["<provider>:<sub>"]` 提名一名管理员，重登后确认 `role=admin` 与全量会话视图。
