@@ -20,6 +20,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 }))
 
 import IntelligentQueryView from '../IntelligentQueryView.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const stubs = {
   'router-view': { template: '<div data-test="router-view">routed content</div>' },
@@ -32,17 +33,26 @@ const stubs = {
     props: ['index'],
     template: '<button class="el-menu-item-stub" :data-index="index"><slot /></button>'
   },
-  'el-icon': { template: '<span><slot /></span>' }
+  'el-icon': { template: '<span><slot /></span>' },
+  'el-dropdown': { template: '<div><slot /><slot name="dropdown" /></div>' },
+  'el-dropdown-menu': { template: '<div><slot /></div>' },
+  'el-dropdown-item': { template: '<div><slot /></div>' }
 }
 
-const mountView = (route = {}) => {
+const mountView = (route = {}, currentUser = null) => {
   routeState.path = route.path || '/chat'
   routeState.name = route.name || 'IntelligentQueryChat'
   routeState.query = route.query || {}
   routeState.params = route.params || {}
   routeState.meta = route.meta || { tab: 'chat-v2' }
+  const pinia = createPinia()
+  const authStore = useAuthStore(pinia)
+  if (currentUser) {
+    authStore.enabled = true
+    authStore.currentUser = currentUser
+  }
   return mount(IntelligentQueryView, {
-    global: { stubs, plugins: [createPinia()] }
+    global: { stubs, plugins: [pinia] }
   })
 }
 
@@ -124,5 +134,18 @@ describe('IntelligentQueryView', () => {
     })
 
     expect(wrapper.find('.el-menu-stub').attributes('data-active')).toBe('agents')
+  })
+
+  it('shows readable menus without a role label for regular users', () => {
+    const wrapper = mountView({}, { display_name: 'Alice', role: 'user' })
+
+    expect(wrapper.text()).toContain('Chat')
+    expect(wrapper.text()).toContain('Skills')
+    expect(wrapper.text()).toContain('智能体')
+    expect(wrapper.text()).not.toContain('模型管理')
+    expect(wrapper.text()).not.toContain('Widget 接入')
+    expect(wrapper.text()).toContain('Alice')
+    expect(wrapper.text()).not.toContain('普通用户')
+    expect(wrapper.text()).not.toContain('管理员')
   })
 })

@@ -60,14 +60,14 @@ describe('useAuthStore', () => {
       local_login_enabled: true,
       oauth_login_enabled: true
     })
-    authApiMock.me.mockResolvedValue({ user_id: 'SSO:42', username: 'alice', role: 'user' })
+    authApiMock.me.mockResolvedValue({ user_id: 'SSO:42', display_name: 'alice', role: 'user' })
     const store = useAuthStore()
     await store.bootstrap()
 
     expect(store.enabled).toBe(true)
     expect(store.isAuthenticated).toBe(true)
     expect(store.isAdmin).toBe(false)
-    expect(store.currentUser.username).toBe('alice')
+    expect(store.currentUser.display_name).toBe('alice')
     expect(store.providerName).toBe('SSO')
     expect(store.providerIcon).toBe('fa-github')
   })

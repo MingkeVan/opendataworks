@@ -5,8 +5,10 @@ const routerPush = vi.hoisted(() => vi.fn())
 const routeState = vi.hoisted(() => ({
   params: { agentId: 'agent_1' }
 }))
+const authState = vi.hoisted(() => ({ isAdmin: true }))
 const dataagentApi = vi.hoisted(() => ({
-  getAgent: vi.fn(),
+  getAgentProfile: vi.fn(),
+  getAgentConfiguration: vi.fn(),
   getAgentCapabilities: vi.fn(),
   listDataScopeOptions: vi.fn(),
   updateAgent: vi.fn()
@@ -19,6 +21,10 @@ vi.mock('vue-router', () => ({
 
 vi.mock('@/api/dataagent', () => ({
   dataagentApi
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => authState
 }))
 
 vi.mock('element-plus', async (importOriginal) => {
@@ -59,9 +65,10 @@ const stubs = {
 
 describe('AgentDetailView', () => {
   beforeEach(() => {
+    authState.isAdmin = true
     routerPush.mockReset()
     Object.values(dataagentApi).forEach((fn) => fn.mockReset())
-    dataagentApi.getAgent.mockResolvedValue({
+    dataagentApi.getAgentConfiguration.mockResolvedValue({
       agent_id: 'agent_1',
       name: '营销分析',
       description: '营销场景',
@@ -99,7 +106,7 @@ describe('AgentDetailView', () => {
 
     await flushPromises()
 
-    expect(dataagentApi.getAgent).toHaveBeenCalledWith('agent_1')
+    expect(dataagentApi.getAgentConfiguration).toHaveBeenCalledWith('agent_1')
     expect(wrapper.text()).toContain('营销分析')
 
     wrapper.vm.form.name = '营销分析 Plus'
@@ -140,5 +147,35 @@ describe('AgentDetailView', () => {
       path: '/chat',
       query: { agent_id: 'agent_1' }
     })
+  })
+
+  it('loads readable configuration without env vars for regular users', async () => {
+    authState.isAdmin = false
+    dataagentApi.getAgentProfile.mockResolvedValue({
+      agent_id: 'agent_1',
+      name: '营销分析',
+      description: '营销场景',
+      system_prompt: '只做营销分析',
+      allowed_tools: ['Skill', 'Read'],
+      mcp_server_ids: ['portal'],
+      skill_folders: ['marketing-insights'],
+      max_turns: 12,
+      data_scope: { allowed_scopes: [{ cluster_id: 3, source_type: 'DORIS', database: 'ads_user' }] },
+      preset_questions: ['最近销售趋势']
+    })
+
+    const wrapper = shallowMount(AgentDetailView, { global: { stubs } })
+    await flushPromises()
+
+    expect(dataagentApi.getAgentProfile).toHaveBeenCalledWith('agent_1')
+    expect(dataagentApi.getAgentCapabilities).not.toHaveBeenCalled()
+    expect(dataagentApi.listDataScopeOptions).not.toHaveBeenCalled()
+    expect(wrapper.vm.form.system_prompt).toBe('只做营销分析')
+    expect(wrapper.vm.visibleTools).toEqual(['Skill', 'Read'])
+    expect(wrapper.text()).not.toContain('环境变量 JSON')
+    expect(wrapper.text()).not.toContain('保存')
+
+    await wrapper.vm.handleSave()
+    expect(dataagentApi.updateAgent).not.toHaveBeenCalled()
   })
 })

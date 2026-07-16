@@ -93,25 +93,25 @@ export const routes = [
         path: 'skills',
         name: 'IntelligentQuerySkills',
         component: () => import('@/views/settings/SkillStudio.vue'),
-        meta: { tab: 'skills', title: 'Skills', adminOnly: true }
+        meta: { tab: 'skills', title: 'Skills' }
       },
       {
         path: 'skills/:folder',
         name: 'IntelligentQuerySkillDetail',
         component: () => import('@/views/settings/SkillDetailView.vue'),
-        meta: { tab: 'skills', title: 'Skill 详情', adminOnly: true }
+        meta: { tab: 'skills', title: 'Skill 详情' }
       },
       {
         path: 'agents',
         name: 'IntelligentQueryAgents',
         component: () => import('@/views/intelligence/AgentStudio.vue'),
-        meta: { tab: 'agents', title: '智能体', adminOnly: true }
+        meta: { tab: 'agents', title: '智能体' }
       },
       {
         path: 'agents/:agentId',
         name: 'IntelligentQueryAgentDetail',
         component: () => import('@/views/intelligence/AgentDetailView.vue'),
-        meta: { tab: 'agents', title: '智能体详情', adminOnly: true }
+        meta: { tab: 'agents', title: '智能体详情' }
       },
       {
         path: 'models',

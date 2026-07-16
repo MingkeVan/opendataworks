@@ -407,6 +407,12 @@ class AgentSummary(BaseModel):
     is_builtin: bool = False
 
 
+class AgentCatalogProfile(AgentSummary):
+    """Anonymous-safe profile used by Chat and Widget agent selectors."""
+
+    preset_questions: List[str] = Field(default_factory=list)
+
+
 class AgentProfileBase(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -464,6 +470,23 @@ class AgentProfile(BaseModel):
     skill_folders: List[str] = Field(default_factory=list)
     max_turns: int = 0
     env_vars: Dict[str, str] = Field(default_factory=dict)
+    data_scope: Dict[str, Any] = Field(default_factory=lambda: {"allowed_scopes": []})
+    preset_questions: List[str] = Field(default_factory=list)
+    is_default: bool = False
+    is_builtin: bool = False
+
+
+class AgentReadableProfile(BaseModel):
+    """Authenticated read-only profile. Environment variables stay admin-only."""
+
+    agent_id: str
+    name: str
+    description: str = ""
+    system_prompt: str = ""
+    allowed_tools: List[str] = Field(default_factory=list)
+    mcp_server_ids: List[str] = Field(default_factory=list)
+    skill_folders: List[str] = Field(default_factory=list)
+    max_turns: int = 0
     data_scope: Dict[str, Any] = Field(default_factory=lambda: {"allowed_scopes": []})
     preset_questions: List[str] = Field(default_factory=list)
     is_default: bool = False
@@ -570,7 +593,7 @@ class AdminWidgetTopicSummary(TopicSummary):
     external_user_id: str = ""
     visitor_id: str = ""
     auth_user_id: str = ""
-    auth_username: str = ""
+    auth_display_name: str = ""
 
 
 class AdminWidgetTopicPage(BaseModel):

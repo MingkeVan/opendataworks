@@ -1317,6 +1317,12 @@ const demoAgents = [
   }
 ]
 
+const demoReadableAgent = (agent) => {
+  const profile = clone(agent)
+  delete profile.env_vars
+  return profile
+}
+
 const demoSkillDocuments = [
   {
     id: 'skill-doc-1',
@@ -2600,6 +2606,10 @@ export const demoAdapter = async (config) => {
     return createResponse(config, clone(demoAgents))
   }
 
+  if (method === 'get' && pathname === '/v1/dataagent/agents/profiles') {
+    return createResponse(config, demoAgents.map(demoReadableAgent))
+  }
+
   if (method === 'get' && pathname === '/v1/dataagent/agents/capabilities') {
     return createResponse(config, {
       tools: ['Skill', 'Read', 'Grep', 'Bash'],
@@ -2613,6 +2623,22 @@ export const demoAdapter = async (config) => {
 
   if (method === 'get' && pathname.match(/^\/v1\/dataagent\/agents\/[^/]+$/)) {
     const agentId = decodeURIComponent(pathname.split('/').pop())
+    const agent = demoAgents.find((item) => item.agent_id === agentId)
+    return agent
+      ? createResponse(config, clone(agent))
+      : createRejectedResponse(config, '智能体不存在', 404)
+  }
+
+  if (method === 'get' && pathname.match(/^\/v1\/dataagent\/agents\/[^/]+\/profile$/)) {
+    const agentId = decodeURIComponent(pathname.split('/')[4])
+    const agent = demoAgents.find((item) => item.agent_id === agentId)
+    return agent
+      ? createResponse(config, demoReadableAgent(agent))
+      : createRejectedResponse(config, '智能体不存在', 404)
+  }
+
+  if (method === 'get' && pathname.match(/^\/v1\/dataagent\/agents\/[^/]+\/configuration$/)) {
+    const agentId = decodeURIComponent(pathname.split('/')[4])
     const agent = demoAgents.find((item) => item.agent_id === agentId)
     return agent
       ? createResponse(config, clone(agent))

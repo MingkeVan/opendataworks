@@ -336,7 +336,7 @@ class TopicTaskStore:
             auth_user_id = str((context or {}).get("auth_user_id") or "").strip()
             if auth_user_id:
                 normalized["auth_user_id"] = auth_user_id
-                normalized["auth_username"] = str((context or {}).get("auth_username") or "").strip()
+                normalized["auth_display_name"] = str((context or {}).get("auth_display_name") or "").strip()
                 role = str((context or {}).get("auth_role") or "user").strip().lower()
                 normalized["auth_role"] = role if role in {"admin", "user"} else "user"
             return normalized
@@ -509,7 +509,7 @@ class TopicTaskStore:
                         normalized_context["external_user_id"],
                         normalized_context["visitor_id"],
                         normalized_context.get("auth_user_id") or "",
-                        normalized_context.get("auth_username") or "",
+                        normalized_context.get("auth_display_name") or "",
                     ),
                 )
             conn.commit()
@@ -2919,7 +2919,8 @@ class TopicTaskStore:
             "external_user_id": str(row.get("external_user_id") or ""),
             "visitor_id": str(row.get("visitor_id") or ""),
             "auth_user_id": str(row.get("auth_user_id") or ""),
-            "auth_username": str(row.get("auth_username") or ""),
+            # auth_username is the legacy physical column; expose domain semantics.
+            "auth_display_name": str(row.get("auth_username") or ""),
             "message_count": int(row.get("message_count") or 0),
             "last_message_preview": str(row.get("last_message_preview") or ""),
             "created_at": _to_iso(row.get("created_at")),

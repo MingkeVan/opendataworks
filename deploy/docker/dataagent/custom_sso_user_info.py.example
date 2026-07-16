@@ -18,8 +18,9 @@ access token，因此可像 FAB 一样直接 ``.get("userinfo")``。
 - 入参 ``token_response``：token endpoint 返回的完整 dict。
 - 入参 ``oauth_remotes``：provider → 已绑定 token 的同步 HTTP client；相对 URL
   基于 ``remote_app.api_base_url`` 解析，单次 HTTP 请求超时固定为 15 秒。
-- 返回 dict 必须含稳定 ``sub``；可含 ``preferred_username`` / ``name`` /
-  ``email`` 和 ``role``（仅 ``admin`` / ``user``）。
+- 返回 dict 必须含稳定 ``sub``；可直接返回最终 ``display_name``，也兼容
+  ``preferred_username`` / ``name`` / ``email``，以及 ``role``（仅 ``admin`` /
+  ``user``）。
 - 钩子必须同步，DataAgent 会在线程中执行，避免阻塞 FastAPI 事件循环。
 - 同一钩子可能被并发调用；不要使用未加锁的共享可变状态，也不要记录
   ``token_response``、access token 或 refresh token。
@@ -41,7 +42,7 @@ def oauth_user_info(provider: str, token_response: dict, oauth_remotes: dict) ->
     claims = {
         # 唯一标识优先取不可变字段（uid/sub），不要用邮箱/昵称等可变值。
         "sub": str(payload.get("uid") or payload.get("sub") or ""),
-        "preferred_username": str(
+        "display_name": str(
             payload.get("nickname") or payload.get("preferred_username") or ""
         ),
     }

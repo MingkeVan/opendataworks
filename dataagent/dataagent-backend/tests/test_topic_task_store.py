@@ -529,13 +529,14 @@ def test_create_topic_writes_auth_owner(monkeypatch):
         context={
             "source": "portal",
             "auth_user_id": "SSO:42",
-            "auth_username": "alice",
+            "auth_display_name": "alice",
             "auth_role": "user",
         },
     )
 
     sql, params = conn.executed[0]
     assert "auth_user_id, auth_username" in sql
+    assert params[-1] == "alice"
     assert params[-2:] == ["SSO:42", "alice"]
 
     # 匿名 portal 创建：owner 为空串。

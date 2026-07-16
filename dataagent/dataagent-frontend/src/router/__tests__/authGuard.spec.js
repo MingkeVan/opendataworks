@@ -62,22 +62,33 @@ describe('auth router guard', () => {
 
   it('lets authenticated users through', async () => {
     authState.enabled = true
-    authState.currentUser = { username: 'alice', role: 'user' }
+    authState.currentUser = { display_name: 'alice', role: 'user' }
     const route = await navigate('/chat')
     expect(route.path).toBe('/chat')
   })
 
   it('blocks non-admin users from admin-only routes', async () => {
     authState.enabled = true
-    authState.currentUser = { username: 'alice', role: 'user' }
+    authState.currentUser = { display_name: 'alice', role: 'user' }
     authState.isAdmin = false
     const route = await navigate('/models')
     expect(route.path).toBe('/chat')
   })
 
+  it.each(['/skills', '/skills/demo', '/agents', '/agents/agent_1'])(
+    'lets non-admin users access readable route %s',
+    async (path) => {
+      authState.enabled = true
+      authState.currentUser = { display_name: 'alice', role: 'user' }
+      authState.isAdmin = false
+      const route = await navigate(path)
+      expect(route.path).toBe(path)
+    }
+  )
+
   it('applies the canonical admin guard after a legacy route redirect', async () => {
     authState.enabled = true
-    authState.currentUser = { username: 'alice', role: 'user' }
+    authState.currentUser = { display_name: 'alice', role: 'user' }
     authState.isAdmin = false
     const route = await navigate('/intelligent-query/models')
     expect(route.path).toBe('/chat')
@@ -85,7 +96,7 @@ describe('auth router guard', () => {
 
   it('lets admins into admin-only routes', async () => {
     authState.enabled = true
-    authState.currentUser = { username: 'admin', role: 'admin' }
+    authState.currentUser = { display_name: 'admin', role: 'admin' }
     authState.isAdmin = true
     const route = await navigate('/models')
     expect(route.path).toBe('/models')
@@ -93,7 +104,7 @@ describe('auth router guard', () => {
 
   it('bounces a logged-in user away from /login', async () => {
     authState.enabled = true
-    authState.currentUser = { username: 'alice', role: 'user' }
+    authState.currentUser = { display_name: 'alice', role: 'user' }
     const route = await navigate('/login')
     expect(route.path).toBe('/chat')
   })

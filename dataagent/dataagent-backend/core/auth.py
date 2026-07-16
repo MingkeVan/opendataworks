@@ -111,7 +111,7 @@ class AuthIdentity:
     """已认证主体。``user_id`` 为命名空间化稳定标识（local:<u> / <provider>:<sub>）。"""
 
     user_id: str
-    username: str
+    display_name: str
     role: str
     provider: str
 
@@ -401,7 +401,7 @@ def issue_session_token(identity: AuthIdentity, now: float | None = None) -> str
     issued_at = int(now if now is not None else time.time())
     payload = {
         "sub": identity.user_id,
-        "name": identity.username,
+        "name": identity.display_name,
         "role": identity.role,
         "provider": identity.provider,
         "iat": issued_at,
@@ -426,7 +426,7 @@ def verify_session_token(token: str) -> AuthIdentity | None:
     role = str(payload.get("role") or ROLE_USER)
     return AuthIdentity(
         user_id=user_id,
-        username=str(payload.get("name") or user_id),
+        display_name=str(payload.get("name") or user_id),
         role=role if role in {ROLE_ADMIN, ROLE_USER} else ROLE_USER,
         provider=str(payload.get("provider") or ""),
     )
@@ -465,7 +465,7 @@ def verify_local_admin(username: str, password: str) -> AuthIdentity | None:
         if matched:
             return AuthIdentity(
                 user_id=f"{LOCAL_PROVIDER}:{username}",
-                username=username,
+                display_name=username,
                 role=ROLE_ADMIN,
                 provider=LOCAL_PROVIDER,
             )
@@ -475,7 +475,7 @@ def verify_local_admin(username: str, password: str) -> AuthIdentity | None:
 
 
 def resolve_oauth_role(provider_name: str, oauth_user_id: str) -> str:
-    """按稳定标识 ``<provider>:<sub>`` 提名管理员；username 不参与提权。"""
+    """按稳定标识 ``<provider>:<sub>`` 提名管理员；display_name 不参与提权。"""
     cfg = get_auth_settings()
     stable_id = f"{provider_name}:{oauth_user_id}"
     return ROLE_ADMIN if stable_id in cfg.admin_users else ROLE_USER
@@ -494,6 +494,13 @@ def require_identity(request: Request) -> AuthIdentity:
     if identity is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return identity
+
+
+def require_user(request: Request) -> AuthIdentity | None:
+    """普通用户端点门禁。auth 关闭时 no-op，启用时要求有效会话。"""
+    if not is_auth_enabled():
+        return None
+    return require_identity(request)
 
 
 def require_admin(request: Request) -> AuthIdentity | None:

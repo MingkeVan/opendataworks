@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
-from core.auth import require_admin
+from core.auth import require_admin, require_user
 from core.agent_profile_service import (
     agent_capabilities,
     create_agent_profile,
@@ -40,10 +40,12 @@ from models.schemas import (
     AdminWidgetUser,
     AdminWidgetUserList,
     AgentCapabilitiesResponse,
+    AgentCatalogProfile,
     AgentDataScopeOption,
     AgentProfile,
     AgentProfileCreateRequest,
     AgentProfileUpdateRequest,
+    AgentReadableProfile,
     AgentSlashCommandsResponse,
     ModelDetectionRequest,
     ModelDetectionResponse,
@@ -66,6 +68,7 @@ router = APIRouter()
 # 与无认证时代行为一致。router 级依赖，新增端点自动受保护。
 settings_router = APIRouter(prefix="/api/v1/nl2sql-admin", dependencies=[Depends(require_admin)])
 skills_router = APIRouter(prefix="/api/v1/dataagent", dependencies=[Depends(require_admin)])
+user_router = APIRouter(prefix="/api/v1/dataagent", dependencies=[Depends(require_user)])
 # 聊天页与 widget 依赖的三个只读 agents 端点必须保持公开（匿名嵌入场景）。
 agents_public_router = APIRouter(prefix="/api/v1/dataagent")
 
@@ -236,7 +239,7 @@ async def admin_list_widget_topic_messages(
     return TopicMessagePageResponse.model_validate(payload)
 
 
-@skills_router.get("/skills/documents", response_model=list[SkillDocumentSummary])
+@user_router.get("/skills/documents", response_model=list[SkillDocumentSummary])
 async def get_skill_documents():
     return [SkillDocumentSummary.model_validate(item) for item in list_documents()]
 
@@ -251,9 +254,14 @@ async def get_data_scope_options():
     return [AgentDataScopeOption.model_validate(item) for item in list_data_scope_options()]
 
 
-@agents_public_router.get("/agents", response_model=list[AgentProfile])
+@agents_public_router.get("/agents", response_model=list[AgentCatalogProfile])
 async def get_agents():
-    return [AgentProfile.model_validate(item) for item in list_agent_profiles()]
+    return [AgentCatalogProfile.model_validate(item) for item in list_agent_profiles()]
+
+
+@user_router.get("/agents/profiles", response_model=list[AgentReadableProfile])
+async def get_readable_agent_profiles():
+    return [AgentReadableProfile.model_validate(item) for item in list_agent_profiles()]
 
 
 @skills_router.post("/agents", response_model=AgentProfile)
@@ -268,8 +276,24 @@ async def create_agent(request: AgentProfileCreateRequest):
     return AgentProfile.model_validate(profile)
 
 
-@agents_public_router.get("/agents/{agent_id}", response_model=AgentProfile)
+@agents_public_router.get("/agents/{agent_id}", response_model=AgentCatalogProfile)
 async def get_agent(agent_id: str):
+    profile = get_agent_profile(agent_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="agent not found")
+    return AgentCatalogProfile.model_validate(profile)
+
+
+@user_router.get("/agents/{agent_id}/profile", response_model=AgentReadableProfile)
+async def get_readable_agent_profile(agent_id: str):
+    profile = get_agent_profile(agent_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="agent not found")
+    return AgentReadableProfile.model_validate(profile)
+
+
+@skills_router.get("/agents/{agent_id}/configuration", response_model=AgentProfile)
+async def get_agent_configuration(agent_id: str):
     profile = get_agent_profile(agent_id)
     if not profile:
         raise HTTPException(status_code=404, detail="agent not found")
@@ -318,7 +342,7 @@ async def delete_agent(agent_id: str):
     return {"status": "ok"}
 
 
-@skills_router.get("/skills/documents/{document_id}", response_model=SkillDocumentDetail)
+@user_router.get("/skills/documents/{document_id}", response_model=SkillDocumentDetail)
 async def get_skill_document(document_id: int):
     document = get_document_detail(document_id)
     if not document:
@@ -382,7 +406,7 @@ async def delete_skill(folder: str):
     return SkillUninstallResponse.model_validate(result)
 
 
-@skills_router.post("/skills/documents/{document_id}/compare", response_model=SkillDocumentCompareResponse)
+@user_router.post("/skills/documents/{document_id}/compare", response_model=SkillDocumentCompareResponse)
 async def compare_skill_document(document_id: int, request: SkillDocumentCompareRequest):
     try:
         result = compare_document_versions(
@@ -412,4 +436,5 @@ async def rollback_skill_document(document_id: int, version_id: int):
 # 公开的动态路径 /agents/{agent_id} 注册，否则 capabilities 会被当作 agent_id。
 router.include_router(settings_router)
 router.include_router(skills_router)
+router.include_router(user_router)
 router.include_router(agents_public_router)

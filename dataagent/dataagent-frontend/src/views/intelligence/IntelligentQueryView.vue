@@ -18,15 +18,15 @@
           <el-icon><MagicStick /></el-icon>
           <span>Chat</span>
         </el-menu-item>
+        <el-menu-item index="skills">
+          <el-icon><Collection /></el-icon>
+          <span>Skills</span>
+        </el-menu-item>
+        <el-menu-item index="agents">
+          <el-icon><User /></el-icon>
+          <span>智能体</span>
+        </el-menu-item>
         <template v-if="authStore.isAdmin">
-          <el-menu-item index="skills">
-            <el-icon><Collection /></el-icon>
-            <span>Skills</span>
-          </el-menu-item>
-          <el-menu-item index="agents">
-            <el-icon><User /></el-icon>
-            <span>智能体</span>
-          </el-menu-item>
           <el-menu-item index="models">
             <el-icon><Cpu /></el-icon>
             <span>模型管理</span>
@@ -41,14 +41,11 @@
         <el-dropdown trigger="click" @command="handleUserCommand">
           <span class="intelligent-query-user__trigger">
             <el-icon><User /></el-icon>
-            <span class="intelligent-query-user__name">{{ authStore.currentUser.username }}</span>
+            <span class="intelligent-query-user__name">{{ authStore.currentUser.display_name }}</span>
           </span>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item disabled>
-                {{ authStore.currentUser.role === 'admin' ? '管理员' : '普通用户' }}
-              </el-dropdown-item>
-              <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
+              <el-dropdown-item command="logout">退出登录</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>

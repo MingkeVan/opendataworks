@@ -3,9 +3,9 @@
     <header class="agent-studio-head">
       <div>
         <h2>智能体</h2>
-        <p>为不同数据问答场景配置专属 Skills、工具与提示词。</p>
+        <p>浏览不同数据问答场景的 Skills、工具与提示词配置。</p>
       </div>
-      <el-button type="primary" :icon="Plus" :loading="creating" @click="handleCreate">新建智能体</el-button>
+      <el-button v-if="canManage" type="primary" :icon="Plus" :loading="creating" @click="handleCreate">新建智能体</el-button>
     </header>
 
     <el-skeleton v-if="loading" :rows="6" animated />
@@ -38,10 +38,10 @@
           <el-tooltip content="开启对话" placement="top">
             <el-button :icon="ChatLineRound" circle @click="handleChat(agent)" />
           </el-tooltip>
-          <el-tooltip content="查看编辑" placement="top">
-            <el-button :icon="Edit" circle @click="handleDetail(agent)" />
+          <el-tooltip :content="canManage ? '查看编辑' : '查看详情'" placement="top">
+            <el-button :icon="canManage ? Edit : View" circle @click="handleDetail(agent)" />
           </el-tooltip>
-          <el-tooltip v-if="!isBuiltinAgent(agent)" content="删除" placement="top">
+          <el-tooltip v-if="canManage && !isBuiltinAgent(agent)" content="删除" placement="top">
             <el-button :icon="Delete" circle type="danger" plain @click="handleDelete(agent)" />
           </el-tooltip>
         </div>
@@ -53,13 +53,16 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ChatLineRound, Delete, Edit, Plus } from '@element-plus/icons-vue'
+import { ChatLineRound, Delete, Edit, Plus, View } from '@element-plus/icons-vue'
 import { dataagentApi } from '@/api/dataagent'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
+const authStore = useAuthStore()
+const canManage = computed(() => authStore.isAdmin)
 const agents = ref([])
 const loading = ref(false)
 const creating = ref(false)
@@ -69,13 +72,14 @@ const isBuiltinAgent = (agent) => Boolean(agent?.is_builtin || agent?.is_default
 const loadAgents = async () => {
   loading.value = true
   try {
-    agents.value = await dataagentApi.listAgents()
+    agents.value = await dataagentApi.listAgentProfiles()
   } finally {
     loading.value = false
   }
 }
 
 const handleCreate = async () => {
+  if (!canManage.value) return
   creating.value = true
   try {
     const created = await dataagentApi.createAgent({
@@ -113,6 +117,7 @@ const handleChat = (agent) => {
 }
 
 const handleDelete = async (agent) => {
+  if (!canManage.value) return
   await ElMessageBox.confirm(`确认删除智能体「${agent.name}」？`, '删除智能体', {
     type: 'warning',
     confirmButtonText: '删除',

@@ -94,12 +94,16 @@ export const dataagentApi = {
     return dataagentRequest.post(`/v1/dataagent/skills/documents/${documentId}/versions/${versionId}/rollback`)
   },
 
-  listAgents() {
-    return dataagentRequest.get('/v1/dataagent/agents')
+  listAgentProfiles() {
+    return dataagentRequest.get('/v1/dataagent/agents/profiles')
   },
 
-  getAgent(agentId) {
-    return dataagentRequest.get(`/v1/dataagent/agents/${encodeURIComponent(agentId)}`)
+  getAgentProfile(agentId) {
+    return dataagentRequest.get(`/v1/dataagent/agents/${encodeURIComponent(agentId)}/profile`)
+  },
+
+  getAgentConfiguration(agentId) {
+    return dataagentRequest.get(`/v1/dataagent/agents/${encodeURIComponent(agentId)}/configuration`)
   },
 
   createAgent(data) {

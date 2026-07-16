@@ -1,5 +1,9 @@
 # DataAgent OAuth 认证与管理员登录设计（外置 Python 配置脚本）
 
+> 2026-07-16 后续调整：身份展示字段、普通用户菜单和只读权限边界由
+> `docs/design/2026-07-16-dataagent-display-name-and-user-navigation-design.md`
+> 覆盖；其中领域字段 `username` 已改为 `display_name`。
+
 - 日期: 2026-07-01
 - 状态: 已评审（多轮评审意见已吸收）
 - 范围: `dataagent/dataagent-backend/`、`dataagent/dataagent-frontend/`、`deploy/`

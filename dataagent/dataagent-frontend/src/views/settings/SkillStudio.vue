@@ -13,6 +13,7 @@
           class="skill-studio__search"
         />
         <el-upload
+          v-if="canManage"
           accept=".zip,application/zip"
           :show-file-list="false"
           :disabled="importLoading"
@@ -35,7 +36,7 @@
             <div class="skill-card__title">{{ skill.folder }}</div>
             <div class="skill-card__path">{{ skill.folder }}/{{ skill.primaryPath || skill.primaryFileName }}</div>
           </div>
-          <div class="skill-card__switch">
+          <div v-if="canManage" class="skill-card__switch">
             <span class="skill-card__switch-label">启用</span>
             <el-switch
               :model-value="skill.enabled"
@@ -58,6 +59,7 @@
         <div class="skill-card__footer">
           <el-button text type="primary" @click="openSkillDetail(skill.folder)">查看详情</el-button>
           <el-button
+            v-if="canManage"
             text
             type="primary"
             :loading="downloadingFolder === skill.folder"
@@ -66,7 +68,7 @@
             下载
           </el-button>
           <el-button
-            v-if="skill.source === 'managed'"
+            v-if="canManage && skill.source === 'managed'"
             text
             type="danger"
             @click="confirmUninstallSkill(skill)"
@@ -90,9 +92,12 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { dataagentApi } from '@/api/dataagent'
+import { useAuthStore } from '@/stores/auth'
 import { buildSkillItems, sourceLabel } from './skillAdminShared'
 
 const router = useRouter()
+const authStore = useAuthStore()
+const canManage = computed(() => authStore.isAdmin)
 
 const listLoading = ref(false)
 const importLoading = ref(false)
@@ -126,7 +131,7 @@ const enabledSummary = computed(() => {
 const emptyDescription = computed(() => (
   String(searchKeyword.value || '').trim()
     ? '没有匹配的 Skill'
-    : '当前目录还没有可管理的 Skill'
+    : '当前目录还没有 Skill'
 ))
 
 const notifyError = (error, fallbackMessage) => {
@@ -158,6 +163,7 @@ const openSkillDetail = (folder) => {
 }
 
 const setSkillEnabled = async (skill, enabled) => {
+  if (!canManage.value) return
   if (!skill?.folder || Boolean(enabled) === Boolean(skill.enabled)) return
   if (!enabled && isOnlyEnabledSkill(skill)) {
     ElMessage.warning('至少需要保留一个启用 Skill')
@@ -186,6 +192,7 @@ const beforeSkillUpload = (file) => {
 }
 
 const handleSkillUpload = async ({ file }) => {
+  if (!canManage.value) return
   if (!file) return
   importLoading.value = true
   try {
@@ -205,6 +212,7 @@ const handleSkillUpload = async ({ file }) => {
 }
 
 const downloadSkill = async (skill) => {
+  if (!canManage.value) return
   if (!skill?.folder || downloadingFolder.value) return
   downloadingFolder.value = skill.folder
   try {
@@ -226,6 +234,7 @@ const downloadSkill = async (skill) => {
 }
 
 const confirmUninstallSkill = async (skill) => {
+  if (!canManage.value) return
   if (!skill?.folder || skill.source !== 'managed') return
   try {
     await ElMessageBox.prompt(

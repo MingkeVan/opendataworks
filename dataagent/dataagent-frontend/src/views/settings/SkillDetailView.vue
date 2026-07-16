@@ -22,7 +22,7 @@
               </el-tag>
             </div>
 
-            <div class="skill-panel__runtime">
+            <div v-if="canManage" class="skill-panel__runtime">
               <span class="skill-panel__runtime-label">启用</span>
               <el-switch
                 :model-value="skillItem.enabled"
@@ -34,7 +34,7 @@
             </div>
 
             <el-button
-              v-if="skillItem.source === 'managed'"
+              v-if="canManage && skillItem.source === 'managed'"
               class="skill-panel__uninstall"
               type="danger"
               plain
@@ -80,11 +80,11 @@
                 <div class="detail-panel__path">
                   {{ folder }}/{{ detail.relative_path }} · {{ detail.content_type }} ·
                   {{ detail.enabled ? '已启用' : '未启用' }} ·
-                  {{ editorDirty ? '未保存' : '已同步' }} ·
+                  {{ canManage && editorDirty ? '未保存' : '已同步' }} ·
                   {{ formatTime(detail.updated_at) }}
                 </div>
               </div>
-              <div class="detail-panel__actions">
+              <div v-if="canManage" class="detail-panel__actions">
                 <el-button @click="resetEditor" :disabled="!editorDirty">重置</el-button>
                 <el-button
                   type="primary"
@@ -100,7 +100,7 @@
             <div class="detail-panel__editor">
               <TextCodeEditor
                 v-model="editorContent"
-                :read-only="detail.editable === false"
+                :read-only="!canManage || detail.editable === false"
                 :placeholder="detail.content_type === 'json' ? '请输入 JSON 内容' : '请输入文件内容'"
               />
             </div>
@@ -137,7 +137,7 @@
               <el-table-column label="操作" width="150" fixed="right">
                 <template #default="{ row }">
                   <el-button text type="primary" @click="openCompareDialog(row.id)">对比</el-button>
-                  <el-button text type="danger" :disabled="row.is_current" @click="confirmRollback(row)">
+                  <el-button v-if="canManage" text type="danger" :disabled="row.is_current" @click="confirmRollback(row)">
                     回滚
                   </el-button>
                 </template>
@@ -147,7 +147,7 @@
         </template>
 
         <section v-else class="detail-panel detail-panel--empty">
-          <el-empty description="请选择一个文件开始查看和编辑" :image-size="110" />
+          <el-empty description="请选择一个文件查看内容" :image-size="110" />
         </section>
       </main>
     </div>
@@ -221,6 +221,7 @@ import { useRoute, useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { dataagentApi } from '@/api/dataagent'
+import { useAuthStore } from '@/stores/auth'
 import TextCodeEditor from '@/components/TextCodeEditor.vue'
 import SkillFileTreeNode from './components/SkillFileTreeNode.vue'
 import {
@@ -233,6 +234,8 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
+const canManage = computed(() => authStore.isAdmin)
 
 const listLoading = ref(false)
 const detailLoading = ref(false)
@@ -351,6 +354,7 @@ const loadDocuments = async () => {
 }
 
 const saveDocument = async () => {
+  if (!canManage.value) return
   if (!detail.value) return
   let summary = '前端保存'
   try {
@@ -422,6 +426,7 @@ const normalizeCompareVersionId = (versionId) => (
 )
 
 const confirmRollback = async (version) => {
+  if (!canManage.value) return
   if (!detail.value || !version?.id || version.is_current) return
   try {
     await ElMessageBox.confirm(
@@ -450,6 +455,7 @@ const confirmRollback = async (version) => {
 }
 
 const toggleSkillEnabled = async (enabled) => {
+  if (!canManage.value) return
   if (!folder.value || Boolean(enabled) === Boolean(skillItem.value?.enabled)) return
   if (!enabled && runtimeSwitchDisabled.value) {
     ElMessage.warning('至少需要保留一个启用 Skill')
@@ -469,6 +475,7 @@ const toggleSkillEnabled = async (enabled) => {
 }
 
 const confirmUninstallCurrentSkill = async () => {
+  if (!canManage.value) return
   if (!folder.value || skillItem.value?.source !== 'managed') return
   try {
     await ElMessageBox.prompt(
