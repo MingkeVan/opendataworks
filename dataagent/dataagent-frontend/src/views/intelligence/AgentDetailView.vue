@@ -10,7 +10,7 @@
       </div>
       <div class="agent-detail-actions">
         <el-button :icon="ChatLineRound" @click="openChat">开启对话</el-button>
-        <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
+        <el-button v-if="canManage" type="primary" :loading="saving" @click="handleSave">保存</el-button>
       </div>
     </header>
 
@@ -40,10 +40,10 @@
             <section v-if="activeTab === 'basic'" key="basic" class="agent-panel-section">
               <h3>基础信息</h3>
               <el-form-item label="名称">
-                <el-input v-model="form.name" maxlength="128" show-word-limit placeholder="请输入智能体名称" />
+                <el-input v-model="form.name" :disabled="!canManage" maxlength="128" show-word-limit placeholder="请输入智能体名称" />
               </el-form-item>
               <el-form-item label="描述">
-                <el-input v-model="form.description" type="textarea" :rows="4" placeholder="请输入描述信息" />
+                <el-input v-model="form.description" :disabled="!canManage" type="textarea" :rows="4" placeholder="请输入描述信息" />
               </el-form-item>
             </section>
 
@@ -53,6 +53,7 @@
               <el-form-item label="系统提示词">
                 <el-input
                   v-model="form.system_prompt"
+                  :disabled="!canManage"
                   type="textarea"
                   :rows="14"
                   placeholder="请输入系统提示词"
@@ -67,6 +68,7 @@
               <el-form-item v-for="(_, i) in 3" :key="i" :label="`问题 ${i + 1}`">
                 <el-input
                   v-model="form.preset_questions[i]"
+                  :disabled="!canManage"
                   maxlength="200"
                   show-word-limit
                   clearable
@@ -79,22 +81,23 @@
             <section v-else-if="activeTab === 'tools'" key="tools" class="agent-panel-section">
               <h3>预授权工具</h3>
               <div class="tool-card-list">
-                <div v-for="tool in capabilities.tools" :key="tool" class="tool-card">
+                <div v-for="tool in visibleTools" :key="tool" class="tool-card">
                   <div class="tool-card-header">
                     <span class="tool-card-name">{{ tool }}</span>
                     <el-switch
                       :model-value="form.allowed_tools.includes(tool)"
+                      :disabled="!canManage"
                       @change="(val) => toggleTool(tool, val)"
                     />
                   </div>
                 </div>
               </div>
-              <el-divider v-if="capabilities.mcp_servers.length" />
-              <template v-if="capabilities.mcp_servers.length">
+              <el-divider v-if="visibleMcpServers.length" />
+              <template v-if="visibleMcpServers.length">
                 <h3>MCP 服务</h3>
                 <el-checkbox-group v-model="form.mcp_server_ids">
-                  <div v-for="server in capabilities.mcp_servers" :key="server.id" class="tool-card">
-                    <el-checkbox :label="server.id">{{ server.name }}</el-checkbox>
+                  <div v-for="server in visibleMcpServers" :key="server.id" class="tool-card">
+                    <el-checkbox :label="server.id" :disabled="!canManage">{{ server.name }}</el-checkbox>
                   </div>
                 </el-checkbox-group>
               </template>
@@ -104,23 +107,24 @@
             <section v-else-if="activeTab === 'skills'" key="skills" class="agent-panel-section">
               <h3>Skills</h3>
               <div class="skill-card-list">
-                <div v-for="skill in capabilities.skills" :key="skill.folder" class="skill-card">
+                <div v-for="skill in visibleSkills" :key="skill.folder" class="skill-card">
                   <div class="skill-card-header">
                     <span class="skill-card-name">{{ skill.folder }}</span>
                     <el-switch
                       :model-value="form.skill_folders.includes(skill.folder)"
+                      :disabled="!canManage"
                       @change="(val) => toggleSkill(skill.folder, val)"
                     />
                   </div>
                 </div>
               </div>
-              <el-empty v-if="!capabilities.skills.length" description="暂无可用 Skill" :image-size="80" />
+              <el-empty v-if="!visibleSkills.length" description="暂无可用 Skill" :image-size="80" />
             </section>
 
             <!-- 数据范围 -->
             <section v-else-if="activeTab === 'scope'" key="scope" class="agent-panel-section">
               <h3>数据范围</h3>
-              <el-form-item label="允许访问的 Schema">
+              <el-form-item v-if="canManage" label="允许访问的 Schema">
                 <el-select
                   v-model="scopeSelection"
                   multiple
@@ -148,9 +152,9 @@
             <section v-else-if="activeTab === 'advanced'" key="advanced" class="agent-panel-section">
               <h3>高级设置</h3>
               <el-form-item label="会话轮次数上限">
-                <el-input-number v-model="form.max_turns" :min="0" :max="200" />
+                <el-input-number v-model="form.max_turns" :disabled="!canManage" :min="0" :max="200" />
               </el-form-item>
-              <el-form-item label="环境变量 JSON">
+              <el-form-item v-if="canManage" label="环境变量 JSON">
                 <el-input v-model="envVarsText" type="textarea" :rows="8" placeholder="{}" />
               </el-form-item>
             </section>
@@ -167,9 +171,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, ChatLineRound } from '@element-plus/icons-vue'
 import { dataagentApi } from '@/api/dataagent'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
+const canManage = computed(() => authStore.isAdmin)
 const loading = ref(false)
 const saving = ref(false)
 const envVarsText = ref('{}')
@@ -192,6 +199,20 @@ const capabilities = reactive({
   mcp_servers: [],
   skills: []
 })
+
+const visibleTools = computed(() => (
+  canManage.value ? capabilities.tools : form.allowed_tools
+))
+const visibleMcpServers = computed(() => (
+  canManage.value
+    ? capabilities.mcp_servers
+    : form.mcp_server_ids.map((id) => ({ id, name: id }))
+))
+const visibleSkills = computed(() => (
+  canManage.value
+    ? capabilities.skills
+    : form.skill_folders.map((folder) => ({ folder }))
+))
 
 const form = reactive({
   agent_id: '',
@@ -229,6 +250,7 @@ const scopeLabel = (scope) => {
 }
 
 const toggleTool = (tool, val) => {
+  if (!canManage.value) return
   if (val) {
     if (!form.allowed_tools.includes(tool)) form.allowed_tools.push(tool)
   } else {
@@ -237,6 +259,7 @@ const toggleTool = (tool, val) => {
 }
 
 const toggleSkill = (folder, val) => {
+  if (!canManage.value) return
   if (val) {
     if (!form.skill_folders.includes(folder)) form.skill_folders.push(folder)
   } else {
@@ -271,17 +294,26 @@ const applyAgent = (agent) => {
 const loadDetail = async () => {
   loading.value = true
   try {
-    const [agent, caps, scopeOptions] = await Promise.all([
-      dataagentApi.getAgent(agentId.value),
-      dataagentApi.getAgentCapabilities(),
-      dataagentApi.listDataScopeOptions()
-    ])
-    Object.assign(capabilities, {
-      tools: caps?.tools || [],
-      mcp_servers: caps?.mcp_servers || [],
-      skills: caps?.skills || []
-    })
-    dataScopeOptions.value = Array.isArray(scopeOptions) ? scopeOptions : []
+    let agent
+    if (canManage.value) {
+      const [configuration, caps, scopeOptions] = await Promise.all([
+        dataagentApi.getAgentConfiguration(agentId.value),
+        dataagentApi.getAgentCapabilities(),
+        dataagentApi.listDataScopeOptions()
+      ])
+      agent = configuration
+      Object.assign(capabilities, {
+        tools: caps?.tools || [],
+        mcp_servers: caps?.mcp_servers || [],
+        skills: caps?.skills || []
+      })
+      dataScopeOptions.value = Array.isArray(scopeOptions) ? scopeOptions : []
+    } else {
+      agent = await dataagentApi.getAgentProfile(agentId.value)
+      dataScopeOptions.value = Array.isArray(agent?.data_scope?.allowed_scopes)
+        ? agent.data_scope.allowed_scopes
+        : []
+    }
     applyAgent(agent)
   } finally {
     loading.value = false
@@ -322,6 +354,7 @@ const buildPayload = () => {
 }
 
 const handleSave = async () => {
+  if (!canManage.value) return
   saving.value = true
   try {
     const saved = await dataagentApi.updateAgent(form.agent_id, buildPayload())

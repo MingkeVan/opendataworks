@@ -1101,9 +1101,9 @@ async function loadAllTopics() {
   }
 }
 
-// 全量视图里一行会话的归属人：登录用户名 > widget 外部用户 > widget 访客 > 匿名。
+// 全量视图里一行会话的归属人：登录显示名称 > widget 外部用户 > widget 访客 > 匿名。
 function topicOwnerLabel(topic) {
-  if (topic?.auth_username) return topic.auth_username
+  if (topic?.auth_display_name) return topic.auth_display_name
   if (topic?.auth_user_id) return topic.auth_user_id
   if (topic?.external_user_id) return topic.external_user_id
   if (topic?.visitor_id) return `访客 ${String(topic.visitor_id).slice(0, 8)}`

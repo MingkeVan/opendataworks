@@ -10,6 +10,7 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 const routerPush = vi.hoisted(() => vi.fn())
+const authState = vi.hoisted(() => ({ isAdmin: true }))
 
 const messageMocks = vi.hoisted(() => ({
   success: vi.fn(),
@@ -24,6 +25,10 @@ const messageBoxMocks = vi.hoisted(() => ({
 
 vi.mock('@/api/dataagent', () => ({
   dataagentApi: apiMocks
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => authState
 }))
 
 vi.mock('vue-router', async (importOriginal) => ({
@@ -113,6 +118,7 @@ const mountView = () => shallowMount(SkillStudio, {
 
 describe('SkillStudio', () => {
   beforeEach(() => {
+    authState.isAdmin = true
     apiMocks.listSkillDocuments.mockReset()
     apiMocks.updateSkillRuntime.mockReset()
     apiMocks.importSkill.mockReset()
@@ -294,5 +300,20 @@ describe('SkillStudio', () => {
     const builtinSkill = wrapper.vm.filteredSkills.find((item) => item.folder === 'dataagent-nl2sql')
     await wrapper.vm.confirmUninstallSkill(builtinSkill)
     expect(apiMocks.uninstallSkill).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders a read-only skill catalog for regular users', async () => {
+    authState.isAdmin = false
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('查看详情')
+    expect(wrapper.text()).not.toContain('导入 Skill')
+    expect(wrapper.text()).not.toContain('下载')
+    expect(wrapper.text()).not.toContain('卸载')
+
+    const targetSkill = wrapper.vm.filteredSkills.find((item) => item.folder === 'marketing-insights')
+    await wrapper.vm.setSkillEnabled(targetSkill, true)
+    expect(apiMocks.updateSkillRuntime).not.toHaveBeenCalled()
   })
 })

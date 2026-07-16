@@ -451,8 +451,8 @@ LOCAL_ADMINS = [{{"username": "admin", "password_bcrypt": {password_hash!r}}}]
     return auth
 
 
-def _session_cookie(auth, *, user_id="SSO:42", username="alice", role="user"):
-    identity = auth.AuthIdentity(user_id=user_id, username=username, role=role, provider="SSO")
+def _session_cookie(auth, *, user_id="SSO:42", display_name="alice", role="user"):
+    identity = auth.AuthIdentity(user_id=user_id, display_name=display_name, role=role, provider="SSO")
     return {"da_session": auth.issue_session_token(identity)}
 
 
@@ -503,13 +503,13 @@ def test_dataagent_client_resolves_identity_from_cookie(monkeypatch, tmp_path):
         response = client.get(
             "/api/v1/nl2sql/topics",
             headers={"X-ODW-Client": "dataagent"},
-            cookies=_session_cookie(auth, user_id="SSO:42", username="alice"),
+            cookies=_session_cookie(auth, user_id="SSO:42", display_name="alice"),
         )
         assert response.status_code == 200
         context = store.calls[-1][1]
         assert context["source"] == "portal"
         assert context["auth_user_id"] == "SSO:42"
-        assert context["auth_username"] == "alice"
+        assert context["auth_display_name"] == "alice"
         assert context["auth_role"] == "user"
     finally:
         auth.reset_auth_for_tests()

@@ -12,6 +12,7 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 const routerPush = vi.hoisted(() => vi.fn())
+const authState = vi.hoisted(() => ({ isAdmin: true }))
 const routeState = vi.hoisted(() => ({
   params: {
     folder: 'marketing-insights'
@@ -31,6 +32,10 @@ const messageBoxMocks = vi.hoisted(() => ({
 
 vi.mock('@/api/dataagent', () => ({
   dataagentApi: apiMocks
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => authState
 }))
 
 vi.mock('vue-router', async (importOriginal) => ({
@@ -140,6 +145,7 @@ const mountView = () => shallowMount(SkillDetailView, {
 
 describe('SkillDetailView', () => {
   beforeEach(() => {
+    authState.isAdmin = true
     apiMocks.listSkillDocuments.mockReset()
     apiMocks.getSkillDocument.mockReset()
     apiMocks.updateSkillRuntime.mockReset()
@@ -282,5 +288,21 @@ describe('SkillDetailView', () => {
     expect(apiMocks.uninstallSkill).toHaveBeenCalledWith('marketing-insights')
     expect(messageMocks.success).toHaveBeenCalledWith('Skill「marketing-insights」已卸载')
     expect(routerPush).toHaveBeenCalledWith({ name: 'IntelligentQuerySkills' })
+  })
+
+  it('keeps skill content and version comparison read-only for regular users', async () => {
+    authState.isAdmin = false
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('保存')
+    expect(wrapper.text()).not.toContain('卸载 Skill')
+    expect(wrapper.text()).not.toContain('回滚')
+    expect(wrapper.vm.canManage).toBe(false)
+
+    await wrapper.vm.saveDocument()
+    await wrapper.vm.toggleSkillEnabled(true)
+    expect(apiMocks.updateSkillDocument).not.toHaveBeenCalled()
+    expect(apiMocks.updateSkillRuntime).not.toHaveBeenCalled()
   })
 })

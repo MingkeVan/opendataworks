@@ -165,12 +165,12 @@ def test_jwt_roundtrip_and_expiry(monkeypatch, tmp_path):
     monkeypatch.setenv(auth.AUTH_CONFIG_ENV, enable_local_admin_auth(tmp_path))
     init_auth()
 
-    identity = AuthIdentity(user_id="SSO:42", username="alice", role="user", provider="SSO")
+    identity = AuthIdentity(user_id="SSO:42", display_name="alice", role="user", provider="SSO")
     token = issue_session_token(identity)
     decoded = verify_session_token(token)
     assert decoded is not None
     assert decoded.user_id == "SSO:42"
-    assert decoded.username == "alice"
+    assert decoded.display_name == "alice"
     assert decoded.role == "user"
 
     expired = issue_session_token(identity, now=time.time() - 999999)
@@ -199,7 +199,7 @@ def test_admin_users_promotes_by_stable_id_not_username(monkeypatch, tmp_path):
     init_auth()
 
     assert resolve_oauth_role("SSO", "1024") == "admin"
-    # username（或其它 sub）不提权。
+    # display_name（或其它 sub）不提权。
     assert resolve_oauth_role("SSO", "alice") == "user"
     assert resolve_oauth_role("OTHER", "1024") == "user"
 

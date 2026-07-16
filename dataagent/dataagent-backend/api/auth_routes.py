@@ -75,7 +75,7 @@ def _require_enabled() -> None:
 def _identity_payload(identity: AuthIdentity) -> dict:
     return {
         "user_id": identity.user_id,
-        "username": identity.username,
+        "display_name": identity.display_name,
         "role": identity.role,
         "provider": identity.provider,
     }
@@ -297,15 +297,15 @@ async def oauth_callback(provider: str, request: Request):
         )
         return _terminal_oauth_redirect("oauth_missing_user_id")
 
-    username = oauth_user_id
-    for claim in ("preferred_username", "name", "email"):
+    display_name = oauth_user_id
+    for claim in ("display_name", "preferred_username", "name", "email"):
         candidate = userinfo.get(claim)
         if candidate in (None, ""):
             continue
         if not _valid_identity_text(candidate):
             logger.error("OAUTH_USER_INFO returned invalid display claim=%s", claim)
             return _terminal_oauth_redirect("oauth_user_info_failed")
-        username = candidate
+        display_name = candidate
         break
 
     role_value = userinfo.get("role")
@@ -323,7 +323,7 @@ async def oauth_callback(provider: str, request: Request):
         return _terminal_oauth_redirect("oauth_missing_user_id")
     identity = AuthIdentity(
         user_id=f"{provider}:{oauth_user_id}",
-        username=username,
+        display_name=display_name,
         # 钩子显式返回 role 时优先生效；否则按 ADMIN_USERS（provider:sub）提名。
         role=mapped_role or resolve_oauth_role(provider, oauth_user_id),
         provider=provider,

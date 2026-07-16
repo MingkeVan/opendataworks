@@ -323,13 +323,14 @@ def test_oauth_callback_issues_session_and_redirects(monkeypatch, tmp_path):
     assert me.status_code == 200
     data = me.json()["data"]
     assert data["user_id"] == "SSO:42"
-    assert data["username"] == "alice"
+    assert data["display_name"] == "alice"
     assert data["role"] == "user"
 
 
 @pytest.mark.parametrize(
-    ("userinfo", "expected_username"),
+    ("userinfo", "expected_display_name"),
     [
+        ({"sub": "42", "display_name": "Alice Z", "preferred_username": "alice"}, "Alice Z"),
         ({"sub": "42", "preferred_username": "alice", "name": "Alice"}, "alice"),
         ({"sub": "42", "name": "Alice", "email": "alice@example.com"}, "Alice"),
         ({"sub": "42", "email": "alice@example.com"}, "alice@example.com"),
@@ -340,14 +341,14 @@ def test_oauth_callback_uses_oidc_display_name_fallbacks(
     monkeypatch,
     tmp_path,
     userinfo,
-    expected_username,
+    expected_display_name,
 ):
     enable_auth(monkeypatch, tmp_path, oauth=True)
     client = TestClient(app)
 
     response = _oauth_callback(client, monkeypatch, userinfo=userinfo)
     assert response.status_code == 302
-    assert client.get("/api/v1/nl2sql/auth/me").json()["data"]["username"] == expected_username
+    assert client.get("/api/v1/nl2sql/auth/me").json()["data"]["display_name"] == expected_display_name
 
 
 def test_oauth_callback_requires_normalized_sub(monkeypatch, tmp_path):
@@ -397,7 +398,7 @@ def test_oauth_callback_rejects_invalid_display_or_role_claims(monkeypatch, tmp_
     assert client.get("/api/v1/nl2sql/auth/me").status_code == 401
 
 
-def test_oauth_callback_promotes_admin_by_provider_sub_not_username(monkeypatch, tmp_path):
+def test_oauth_callback_promotes_admin_by_provider_sub_not_display_name(monkeypatch, tmp_path):
     enable_auth(monkeypatch, tmp_path, oauth=True, admin_users='["SSO:1024"]')
     client = TestClient(app)
 
@@ -406,7 +407,7 @@ def test_oauth_callback_promotes_admin_by_provider_sub_not_username(monkeypatch,
     assert client.get("/api/v1/nl2sql/auth/me").json()["data"]["role"] == "admin"
 
     client.cookies.clear()
-    # username 与提名值相同也不提权（提名只认 provider:sub）。
+    # display_name 与提名值相同也不提权（提名只认 provider:sub）。
     not_promoted = _oauth_callback(client, monkeypatch, userinfo={"sub": "7", "preferred_username": "SSO:1024"})
     assert not_promoted.status_code == 302
     assert client.get("/api/v1/nl2sql/auth/me").json()["data"]["role"] == "user"
@@ -598,7 +599,7 @@ def test_oauth_user_info_uses_token_bound_remote_get(monkeypatch, tmp_path):
     assert _FakeRemoteClient.last_get == ("userinfo", {})
     me = client.get("/api/v1/nl2sql/auth/me").json()["data"]
     assert me["user_id"] == "SSO:remote-sub"
-    assert me["username"] == "remote-user"
+    assert me["display_name"] == "remote-user"
 
 
 def test_sync_oauth_user_info_normalizes_nonstandard_payload(monkeypatch, tmp_path):
@@ -613,7 +614,7 @@ def test_sync_oauth_user_info_normalizes_nonstandard_payload(monkeypatch, tmp_pa
     assert response.status_code == 302
     data = client.get("/api/v1/nl2sql/auth/me").json()["data"]
     assert data["user_id"] == "SSO:7"
-    assert data["username"] == "小王"
+    assert data["display_name"] == "小王"
     assert data["role"] == "user"
 
 

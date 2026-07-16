@@ -2,8 +2,9 @@ import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const routerPush = vi.hoisted(() => vi.fn())
+const authState = vi.hoisted(() => ({ isAdmin: true }))
 const dataagentApi = vi.hoisted(() => ({
-  listAgents: vi.fn(),
+  listAgentProfiles: vi.fn(),
   createAgent: vi.fn(),
   deleteAgent: vi.fn()
 }))
@@ -14,6 +15,10 @@ vi.mock('vue-router', () => ({
 
 vi.mock('@/api/dataagent', () => ({
   dataagentApi
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => authState
 }))
 
 vi.mock('element-plus', () => ({
@@ -38,9 +43,10 @@ const stubs = {
 
 describe('AgentStudio', () => {
   beforeEach(() => {
+    authState.isAdmin = true
     routerPush.mockReset()
     Object.values(dataagentApi).forEach((fn) => fn.mockReset())
-    dataagentApi.listAgents.mockResolvedValue([
+    dataagentApi.listAgentProfiles.mockResolvedValue([
       {
         agent_id: 'agent_default',
         name: '默认智能问数助手',
@@ -60,7 +66,7 @@ describe('AgentStudio', () => {
 
     await flushPromises()
 
-    expect(dataagentApi.listAgents).toHaveBeenCalledTimes(1)
+    expect(dataagentApi.listAgentProfiles).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('默认智能问数助手')
     expect(wrapper.text()).toContain('1 Skills')
     expect(wrapper.text()).toContain('1 Schema')
@@ -92,5 +98,17 @@ describe('AgentStudio', () => {
       path: '/chat',
       query: { agent_id: 'agent_default' }
     })
+  })
+
+  it('hides create and delete actions from regular users', async () => {
+    authState.isAdmin = false
+    const wrapper = shallowMount(AgentStudio, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('新建智能体')
+    await wrapper.vm.handleCreate()
+    await wrapper.vm.handleDelete({ agent_id: 'agent_default', name: '默认智能问数助手' })
+    expect(dataagentApi.createAgent).not.toHaveBeenCalled()
+    expect(dataagentApi.deleteAgent).not.toHaveBeenCalled()
   })
 })

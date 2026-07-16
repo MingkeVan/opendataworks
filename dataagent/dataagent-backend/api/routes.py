@@ -176,7 +176,7 @@ def _request_context(request: Request) -> dict[str, str]:
                 "external_user_id": "",
                 "visitor_id": "",
                 "auth_user_id": identity.user_id,
-                "auth_username": identity.username,
+                "auth_display_name": identity.display_name,
                 "auth_role": identity.role,
             }
         return {

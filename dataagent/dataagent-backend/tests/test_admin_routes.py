@@ -546,7 +546,7 @@ LOCAL_ADMINS = [{{"username": "admin", "password_bcrypt": {password_hash!r}}}]
 
 
 def _bearer(auth, *, role):
-    identity = auth.AuthIdentity(user_id=f"local:{role}", username=role, role=role, provider="local")
+    identity = auth.AuthIdentity(user_id=f"local:{role}", display_name=role, role=role, provider="local")
     return {"Authorization": f"Bearer {auth.issue_session_token(identity)}"}
 
 
@@ -555,6 +555,7 @@ def test_admin_routes_require_admin_when_auth_enabled(monkeypatch, tmp_path):
     try:
         store = _FakeWidgetStore()
         monkeypatch.setattr(admin_routes, "get_topic_task_store", lambda: store)
+        monkeypatch.setattr(admin_routes, "list_documents", lambda: [])
         client = TestClient(app)
 
         # 未登录 → 401
@@ -567,6 +568,12 @@ def test_admin_routes_require_admin_when_auth_enabled(monkeypatch, tmp_path):
         # 普通用户 → 403
         user_headers = _bearer(auth, role="user")
         assert client.get("/api/v1/nl2sql-admin/topics", headers=user_headers).status_code == 403
+        assert client.get("/api/v1/dataagent/skills/documents", headers=user_headers).status_code == 200
+        assert client.put(
+            "/api/v1/dataagent/skills/runtime/demo",
+            json={"enabled": True},
+            headers=user_headers,
+        ).status_code == 403
 
         # admin → 放行
         admin_headers = _bearer(auth, role="admin")
@@ -577,18 +584,52 @@ def test_admin_routes_require_admin_when_auth_enabled(monkeypatch, tmp_path):
         auth.reset_auth_for_tests()
 
 
-def test_agents_read_endpoints_stay_public_when_auth_enabled(monkeypatch, tmp_path):
+def test_agent_responses_are_layered_by_authentication(monkeypatch, tmp_path):
     auth = _enable_auth(monkeypatch, tmp_path)
     try:
-        profile = {"agent_id": "agent_1", "name": "x", "skill_folders": []}
+        profile = {
+            "agent_id": "agent_1",
+            "name": "x",
+            "description": "readable",
+            "system_prompt": "internal instructions",
+            "allowed_tools": ["Read"],
+            "mcp_server_ids": ["portal"],
+            "skill_folders": ["demo"],
+            "data_scope": {"allowed_scopes": [{"database": "ads"}]},
+            "env_vars": {"SECRET_TOKEN": "hidden"},
+        }
         monkeypatch.setattr(admin_routes, "list_agent_profiles", lambda: [profile])
         monkeypatch.setattr(admin_routes, "get_agent_profile", lambda agent_id: profile if agent_id == "agent_1" else None)
         client = TestClient(app)
 
-        # widget / 匿名嵌入依赖的三个只读端点必须保持公开。
-        assert client.get("/api/v1/dataagent/agents").status_code == 200
-        assert client.get("/api/v1/dataagent/agents/agent_1").status_code == 200
+        # Widget / 匿名嵌入依赖的三个端点保持公开，但目录 DTO 不泄露配置。
+        public_list = client.get("/api/v1/dataagent/agents")
+        assert public_list.status_code == 200
+        assert set(public_list.json()[0]) == {
+            "agent_id", "name", "description", "is_default", "is_builtin", "preset_questions"
+        }
+        public_detail = client.get("/api/v1/dataagent/agents/agent_1")
+        assert public_detail.status_code == 200
+        assert "system_prompt" not in public_detail.json()
+        assert "env_vars" not in public_detail.json()
         assert client.get("/api/v1/dataagent/agents/agent_1/slash-commands").status_code == 200
+
+        # 普通用户读取完整只读配置，但 env_vars 始终排除。
+        user_headers = _bearer(auth, role="user")
+        readable = client.get("/api/v1/dataagent/agents/agent_1/profile", headers=user_headers)
+        assert readable.status_code == 200
+        assert readable.json()["system_prompt"] == "internal instructions"
+        assert readable.json()["mcp_server_ids"] == ["portal"]
+        assert readable.json()["data_scope"]["allowed_scopes"][0]["database"] == "ads"
+        assert "env_vars" not in readable.json()
+
+        # 管理员配置端点保留完整 Profile。
+        configuration = client.get(
+            "/api/v1/dataagent/agents/agent_1/configuration",
+            headers=_bearer(auth, role="admin"),
+        )
+        assert configuration.status_code == 200
+        assert configuration.json()["env_vars"] == {"SECRET_TOKEN": "hidden"}
     finally:
         auth.reset_auth_for_tests()
 
