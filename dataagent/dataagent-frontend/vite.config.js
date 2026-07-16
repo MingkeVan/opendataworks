@@ -91,6 +91,10 @@ export default defineConfig(() => {
     server: {
       port: 3001,
       proxy: {
+        '/oauth-authorized': {
+          target: 'http://localhost:8900',
+          changeOrigin: true
+        },
         '/api/v1/dataagent': {
           target: 'http://localhost:8900',
           changeOrigin: true

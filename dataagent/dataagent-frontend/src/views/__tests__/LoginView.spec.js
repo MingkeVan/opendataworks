@@ -20,7 +20,7 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  sanitizeRedirectPath: () => '/intelligent-query/chat',
+  sanitizeRedirectPath: () => '/',
   useAuthStore: () => authState
 }))
 

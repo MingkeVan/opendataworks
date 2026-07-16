@@ -1,8 +1,8 @@
 """DataAgent 外置配置加载 + 认证核心（会话 JWT、身份解析与管理员门禁）。
 
 配置来自 env ``DATAAGENT_CONFIG`` 指向的宿主机挂载 Python 文件
-（Superset ``superset_config.py`` 模式）。除认证（AUTH_* / OAUTH_PROVIDERS / LOCAL_ADMINS /
-ADMIN_USERS）外，也可通过 ``DATAAGENT_SETTINGS`` 字典覆盖运行时 Settings
+（Superset ``superset_config.py`` 模式）。除认证（AUTH_* / OAUTH_PROVIDERS / OAUTH_USER_INFO /
+LOCAL_ADMINS / ADMIN_USERS）外，也可通过 ``DATAAGENT_SETTINGS`` 字典覆盖运行时 Settings
 （config.py 中的字段，如超时/并发档位），main 启动时统一应用。
 
 语义为 fail-closed：
@@ -21,6 +21,7 @@ import base64
 import hashlib
 import hmac
 import importlib.util
+import inspect
 import json
 import logging
 import os
@@ -30,6 +31,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from fastapi import HTTPException, Request
 
@@ -48,6 +50,7 @@ ROLE_USER = "user"
 LOCAL_PROVIDER = "local"
 
 _STATE_TTL_SECONDS = 600
+_MAX_OAUTH_PROVIDER_NAME_LENGTH = 64
 
 
 class AuthConfigError(RuntimeError):
@@ -62,11 +65,11 @@ class OAuthSettings:
     client_secret: str = ""
     authorize_url: str = ""
     token_url: str = ""
-    userinfo_url: str = ""
+    api_base_url: str = ""
     scopes: str = "openid profile"
     redirect_uri: str = ""
-    user_id_field: str = "sub"
-    username_field: str = "preferred_username"
+    response_type: str = "code"
+    grant_type: str = "authorization_code"
 
     @property
     def configured(self) -> bool:
@@ -84,11 +87,11 @@ class AuthSettings:
     oauth: OAuthSettings = field(default_factory=OAuthSettings)
     local_admins: list[dict[str, str]] = field(default_factory=list)
     admin_users: list[str] = field(default_factory=list)
-    # 可选 userinfo → 身份 映射钩子（Superset custom_sso_security_manager 的
-    # oauth_user_info 对应物）：callable(userinfo: dict) -> dict，返回
-    # {"user_id": 必填, "username": 可选, "role": 可选 'admin'/'user'}。
-    # 用于非标准 IdP（嵌套 payload、自定义角色/组逻辑）。
-    oauth_userinfo_mapper: Any = None
+    # Superset custom SecurityManager.oauth_user_info 的轻量对应物：
+    # callable(provider: str, token_response: dict, oauth_remotes: dict) -> dict。
+    # oauth_remotes[provider] 是绑定 token/api_base_url 的同步 HTTP client；
+    # 钩子负责获取并归一化用户信息，返回必须含稳定 sub，可选显示 claims 与 role。
+    oauth_user_info: Any = None
     # DATAAGENT_SETTINGS：非认证的运行时 Settings 覆盖（config.py 字段），
     # main 启动时经 config.update_settings 应用。
     runtime_settings: dict[str, Any] = field(default_factory=dict)
@@ -164,11 +167,25 @@ def _parse_oauth_providers(raw: Any) -> OAuthSettings:
     provider = raw[0]
     if not isinstance(provider, dict):
         raise AuthConfigError("OAUTH_PROVIDERS 条目必须是 dict")
+    deprecated_fields = sorted(
+        field for field in ("userinfo_url", "user_id_field", "username_field") if field in provider
+    )
+    if deprecated_fields:
+        raise AuthConfigError(
+            "OAUTH_PROVIDERS 顶层字段已不支持: "
+            f"{deprecated_fields}；请迁移到 "
+            "OAUTH_USER_INFO(provider, token_response, oauth_remotes) 自定义钩子"
+        )
     remote_app = provider.get("remote_app")
     if remote_app is None:
         remote_app = {}
     if not isinstance(remote_app, dict):
         raise AuthConfigError("OAUTH_PROVIDERS.remote_app 必须是 dict")
+    if "userinfo_endpoint" in remote_app:
+        raise AuthConfigError(
+            "OAUTH_PROVIDERS.remote_app.userinfo_endpoint 已不支持；"
+            "请通过 OAUTH_USER_INFO 的 oauth_remotes[provider] 获取用户信息"
+        )
     client_kwargs = remote_app.get("client_kwargs")
     if client_kwargs is None:
         client_kwargs = {}
@@ -181,24 +198,72 @@ def _parse_oauth_providers(raw: Any) -> OAuthSettings:
         client_secret=str(remote_app.get("client_secret") or ""),
         authorize_url=str(remote_app.get("authorize_url") or ""),
         token_url=str(remote_app.get("access_token_url") or ""),
+        api_base_url=str(remote_app.get("api_base_url") or ""),
         scopes=str(client_kwargs.get("scope") or "openid profile"),
         redirect_uri=str(remote_app.get("redirect_uri") or ""),
-        userinfo_url=str(provider.get("userinfo_url") or ""),
-        user_id_field=str(provider.get("user_id_field") or "sub"),
-        username_field=str(provider.get("username_field") or "preferred_username"),
+        response_type=str(remote_app.get("response_type") or "code"),
+        grant_type=str(remote_app.get("grant_type") or "authorization_code"),
     )
     if not oauth.provider_name:
         raise AuthConfigError("OAUTH_PROVIDERS 条目缺少 name")
+    if (
+        len(oauth.provider_name) > _MAX_OAUTH_PROVIDER_NAME_LENGTH
+        or oauth.provider_name.casefold() == LOCAL_PROVIDER
+        or not oauth.provider_name[0].isalnum()
+        or any(
+            not (char.isalnum() or char in "._-")
+            for char in oauth.provider_name
+        )
+    ):
+        raise AuthConfigError(
+            "OAUTH_PROVIDERS.name 必须是 1-64 位安全 Provider key："
+            "以字母或数字开头，仅含字母、数字、'.'、'_'、'-'，且不能使用保留值 'local'"
+        )
     if not oauth.configured:
         raise AuthConfigError(
             "OAUTH_PROVIDERS.remote_app 配置不完整："
             "client_id / authorize_url / access_token_url 必须同时提供"
         )
+    if oauth.response_type != "code":
+        raise AuthConfigError(
+            "DataAgent 当前仅支持 OAuth 授权码模式，remote_app.response_type 必须为 'code'"
+        )
+    if oauth.grant_type != "authorization_code":
+        raise AuthConfigError(
+            "DataAgent 当前仅支持 OAuth 授权码模式，remote_app.grant_type 必须为 "
+            "'authorization_code'"
+        )
     # callback 实际必用的字段也纳入启动期校验，避免"能启动、登录页有 OAuth
     # 按钮、回调必失败"的上线即不可用状态。
-    missing = [name for name in ("userinfo_url", "redirect_uri") if not getattr(oauth, name)]
+    missing = [name for name in ("api_base_url", "redirect_uri") if not getattr(oauth, name)]
     if missing:
-        raise AuthConfigError(f"OAUTH_PROVIDERS 配置不完整：缺少回调必需字段 {missing}")
+        raise AuthConfigError(f"OAUTH_PROVIDERS 配置不完整：缺少 OAuth 必需字段 {missing}")
+    api_base = urlparse(oauth.api_base_url)
+    if (
+        api_base.scheme not in {"http", "https"}
+        or not api_base.netloc
+        or api_base.params
+        or api_base.query
+        or api_base.fragment
+        or not oauth.api_base_url.endswith("/")
+    ):
+        raise AuthConfigError(
+            "OAUTH_PROVIDERS.remote_app.api_base_url 必须是以 '/' 结尾的绝对 HTTP(S) URL"
+        )
+    redirect = urlparse(oauth.redirect_uri)
+    expected_callback_path = f"/oauth-authorized/{oauth.provider_name}"
+    if (
+        redirect.scheme not in {"http", "https"}
+        or not redirect.netloc
+        or unquote(redirect.path) != expected_callback_path
+        or redirect.params
+        or redirect.query
+        or redirect.fragment
+    ):
+        raise AuthConfigError(
+            "OAUTH_PROVIDERS.remote_app.redirect_uri 必须是绝对 URL，且路径严格为 "
+            f"{expected_callback_path!r}"
+        )
     return oauth
 
 
@@ -206,6 +271,11 @@ def _build_settings(module: Any, config_path: str) -> AuthSettings:
     enabled = bool(getattr(module, "AUTH_ENABLED", False))
     if getattr(module, "OAUTH", None):
         raise AuthConfigError("OAUTH 扁平配置已不支持，请迁移为单项 OAUTH_PROVIDERS")
+    if getattr(module, "OAUTH_USERINFO_MAPPER", None) is not None:
+        raise AuthConfigError(
+            "OAUTH_USERINFO_MAPPER 已不支持；请迁移为 "
+            "OAUTH_USER_INFO(provider, token_response, oauth_remotes)"
+        )
     settings = AuthSettings(
         enabled=enabled,
         session_ttl_seconds=int(getattr(module, "SESSION_TTL_SECONDS", 28800)),
@@ -215,11 +285,30 @@ def _build_settings(module: Any, config_path: str) -> AuthSettings:
         oauth=_parse_oauth_providers(getattr(module, "OAUTH_PROVIDERS", None)),
         local_admins=_parse_local_admins(getattr(module, "LOCAL_ADMINS", None)),
         admin_users=[str(x).strip() for x in (getattr(module, "ADMIN_USERS", None) or []) if str(x).strip()],
-        oauth_userinfo_mapper=getattr(module, "OAUTH_USERINFO_MAPPER", None),
+        oauth_user_info=getattr(module, "OAUTH_USER_INFO", None),
         config_path=config_path,
     )
-    if settings.oauth_userinfo_mapper is not None and not callable(settings.oauth_userinfo_mapper):
-        raise AuthConfigError("OAUTH_USERINFO_MAPPER 必须是 callable(userinfo: dict) -> dict")
+    if settings.oauth_user_info is not None and not callable(settings.oauth_user_info):
+        raise AuthConfigError(
+            "OAUTH_USER_INFO 必须是 callable(provider, token_response, oauth_remotes) -> dict"
+        )
+    if settings.oauth_user_info is not None and (
+        inspect.iscoroutinefunction(settings.oauth_user_info)
+        or inspect.iscoroutinefunction(getattr(settings.oauth_user_info, "__call__", None))
+    ):
+        raise AuthConfigError("OAUTH_USER_INFO 必须是同步 callable；DataAgent 会在线程中执行")
+    if settings.oauth_user_info is not None:
+        try:
+            inspect.signature(settings.oauth_user_info).bind("provider", {}, {})
+        except (TypeError, ValueError) as e:
+            raise AuthConfigError(
+                "OAUTH_USER_INFO 必须接受 (provider, token_response, oauth_remotes) 三个参数"
+            ) from e
+    if settings.oauth_login_enabled and settings.oauth_user_info is None:
+        raise AuthConfigError(
+            "OAUTH_PROVIDERS 已配置，但缺少 "
+            "OAUTH_USER_INFO(provider, token_response, oauth_remotes)"
+        )
 
     raw_runtime = getattr(module, "DATAAGENT_SETTINGS", None)
     if raw_runtime is not None:
@@ -441,9 +530,18 @@ def _state_signature(payload: str) -> str:
     return hmac.new(cfg.secret_key.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def issue_oauth_state(redirect_path: str = "", nonce: str | None = None) -> str:
+def issue_oauth_state(
+    redirect_path: str = "",
+    nonce: str | None = None,
+    provider: str = "",
+) -> str:
     payload = json.dumps(
-        {"nonce": nonce or generate_oauth_nonce(), "ts": int(time.time()), "redirect": redirect_path},
+        {
+            "nonce": nonce or generate_oauth_nonce(),
+            "ts": int(time.time()),
+            "redirect": redirect_path,
+            "provider": provider,
+        },
         separators=(",", ":"),
     )
     encoded = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")

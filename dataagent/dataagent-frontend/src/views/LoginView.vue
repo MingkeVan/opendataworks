@@ -73,6 +73,8 @@ const errorMessage = ref('')
 
 const OAUTH_ERROR_MESSAGES = {
   oauth_exchange_failed: 'OAuth 登录失败：令牌交换未成功，请重试或联系管理员',
+  oauth_user_info_failed: 'OAuth 登录失败：用户信息处理未成功，请重试或联系管理员',
+  oauth_denied: 'OAuth 登录已取消或被身份提供方拒绝',
   oauth_missing_user_id: 'OAuth 登录失败：身份服务未返回用户标识',
   access_denied: 'OAuth 登录已取消'
 }

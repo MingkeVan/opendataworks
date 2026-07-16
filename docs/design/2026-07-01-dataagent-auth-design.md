@@ -65,7 +65,7 @@ dataagent-frontend 独立 SPA 的所有 API client 显式携带 `X-ODW-Client: d
 ### 3.3 会话令牌
 
 - HS256 JWT，Cookie `da_session`（与门户 `odw_session` 避让），claims `{sub, name, role, provider, exp}`。
-- `sub` 命名空间化：本地账号 `local:<username>`，OAuth 用户 `<provider>:<user_id_field值>`。
+- `sub` 命名空间化：本地账号 `local:<username>`，OAuth 用户 `<provider>:<OIDC sub>`。
 - Cookie 属性：**HttpOnly 硬编码为 True（不可配置）**、`SameSite` 默认 `lax`、生产 `COOKIE_SECURE=True`。
 
 ### 3.4 管理员提名（稳定标识）
@@ -81,14 +81,28 @@ dataagent-frontend 独立 SPA 的所有 API client 显式携带 `X-ODW-Client: d
 - 旧的非空扁平 `OAUTH` 不保留兼容分支；加载时立即报迁移错误，
   避免已配 OAuth 被静默忽略后仅剩本地登录。
 - 通用字段映射：`name` 映射 provider 键/登录按钮显示名，
+  同时用于回调路径和身份命名空间，因此限制为 1-64 位安全 key、保留
+  `local` 且不允许 `:` / `/` / `%` 等路径或命名空间分隔字符；
   `icon` 是 Font Awesome 4 class（如 `fa-github`），
-  `remote_app.client_id/client_secret/authorize_url/access_token_url/redirect_uri`
-  及 `remote_app.client_kwargs.scope` 用于授权码传输。
-- `response_type=code` 和 `grant_type=authorization_code` 由 DataAgent 传输层固定；
+  `remote_app.client_id/client_secret/authorize_url/access_token_url/api_base_url/redirect_uri`
+  及 `remote_app.client_kwargs.scope` 用于授权码传输；`redirect_uri` 必须是
+  绝对 URL，且路径遵循 FAB 约定 `/oauth-authorized/<provider name>`。
+- `remote_app.response_type`（默认 `code`）和 `remote_app.grant_type`
+  （默认 `authorization_code`）进入实际 authorize/token 请求，不再由传输层写死；
+  当前执行路径只实现授权码模式，显式配置其他值会 fail-closed 启动失败；
   `token_key` 可为 Superset 配置迁移保留，DataAgent 仍从标准
   `access_token` 字段解析令牌。
-- `userinfo_url` / `user_id_field` / `username_field` 为 DataAgent
-  扩展字段，保持现有按需 userinfo 拉取和身份映射语义。
+- 不在 `OAUTH_PROVIDERS` 显式配置 userinfo 端点或 payload 字段。与 FAB
+  `SecurityManager.oauth_user_info(provider, token_response)` 的扩展边界一致，OAuth
+  启用时外置配置必须提供同步 `OAUTH_USER_INFO(provider, token_response,
+  oauth_remotes)` callable。DataAgent 用 token response 和
+  `remote_app.api_base_url` 构造已绑定 token 的 `oauth_remotes[provider]`，钩子可像
+  FAB 一样调用 `.get("userinfo")`，并返回归一化 dict。返回必须含稳定字符串
+  `sub`，可含 `preferred_username` / `name` / `email` 及 `role`。DataAgent 固定用
+  `sub` 作为身份，显示名按上述 claims 回退，`role` 仅接受 `admin` / `user`。
+- 顶层 `userinfo_url` / `user_id_field` / `username_field`、
+  `remote_app.userinfo_endpoint` 和旧 `OAUTH_USERINFO_MAPPER` 均不保留兼容分支；
+  检测到后 fail-closed 并提示迁移到 `OAUTH_USER_INFO`，避免被静默忽略。
 - OAuth state 中的 redirect 缺失或不安全时固定回退到 `/`，
   再由前端 router 选择当前默认页；不再提供 `post_login_redirect`
   配置，避免认证后端绑定可变的页面路径。
@@ -132,14 +146,14 @@ ALTER TABLE da_agent_topic
 
 ## 5. 接口设计
 
-### 5.1 认证接口（`/api/v1/nl2sql/auth`，复用现有 nginx 代理前缀）
+### 5.1 认证接口
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/config` | 公开：`{enabled, provider_name, provider_icon, local_login_enabled, oauth_login_enabled}` |
 | POST | `/login` | 本地管理员密码登录，成功 Set-Cookie `da_session` |
 | GET | `/oauth/authorize` | 读配置拼授权 URL + state cookie，302 |
-| GET | `/oauth/callback` | code→token→userinfo→按 `ADMIN_USERS` 定角色→Set-Cookie→302 |
+| GET | `/oauth-authorized/{provider}`（根路径） | FAB 约定回调；校验 provider/state 后 code→token→`OAUTH_USER_INFO`→按 `ADMIN_USERS` 定角色→Set-Cookie→302 |
 | GET | `/me` | 当前身份（未登录 401） |
 | POST | `/logout` | 清 Cookie |
 
@@ -171,16 +185,18 @@ ALTER TABLE da_agent_topic
 - 目录内容：
   - `dataagent_config.py`：仓库自带基础配置，默认 `AUTH_ENABLED=False`（挂载即"显式关闭"态，行为与现状一致）；文件末尾 `from dataagent_config_docker import *` 加载同目录用户覆盖（不存在则跳过，Superset `superset_config_docker.py` 同款机制）。除认证外也可用 `DATAAGENT_SETTINGS = {"<config.py Settings 字段>": 值}` 覆盖运行时配置（启动期校验字段名，未知字段 fail-closed）。
   - `dataagent_config_docker.py.example`：用户覆盖示例（SECRET_KEY/bcrypt 生成提示、Superset/FAB 形态的单项 `OAUTH_PROVIDERS` 通用 OIDC 样例、Font Awesome icon、`provider:sub` 提名写法、`DATAAGENT_SETTINGS` 样例）；用户拷贝为 `dataagent_config_docker.py` 填写。
-  - `custom_sso_user_mapper.py.example`：`OAUTH_USERINFO_MAPPER` 钩子示例（Superset `custom_sso_security_manager.py` 的 `oauth_user_info` 对应物）——非标准 IdP（嵌套 payload / 组角色提权）时完全接管 userinfo 解析；钩子返回 `role` 优先于 `ADMIN_USERS`；钩子运行期异常只使该次登录失败，不影响服务。
+  - `custom_sso_user_info.py.example`：`OAUTH_USER_INFO` 钩子示例（Superset `custom_sso_security_manager.py` 的 `oauth_user_info` 对应物）——接收 provider、token response 与已绑定 token 的 `oauth_remotes`，通过 `oauth_remotes[provider].get("userinfo")` 获取并归一化；返回 `role` 时优先于 `ADMIN_USERS`；钩子运行期异常只使该次登录失败，不影响服务。
   - `.gitignore`：忽略一切用户文件（覆盖配置、自定义扩展模块如自研 SSO 适配），只保留自带文件与 `.example`。
-- `deploy/docker/nginx/`：两个前端 nginx 配置的宿主机副本 + compose 中注释式挂载；默认仍用镜像内构建版本（单一主路径），需要宿主机管理时取消注释。
-- 无需改 nginx 路由（新端点在已代理前缀之下）。
+- `deploy/docker/nginx/`：两个前端 nginx 配置的宿主机副本 + compose 中注释式挂载；默认仍用镜像内构建版本（单一主路径），需要宿主机管理时取消注释。DataAgent 独立站点的镜像内配置与宿主机副本均以 `^~` 显式代理根路径
+  `/oauth-authorized/` 到 dataagent-backend，开发态 Vite 配置同样代理该路径，
+  保证回调不会被 SPA fallback 或静态资源正则吞掉。主门户/widget 仍维持匿名语义，
+  不新增 OAuth 回调入口。
 - 启用 = 拷贝 example 填写后重启（不改 compose）；彻底回滚 = 注释掉 env 重启；后果见 3.5。用户覆盖文件有语法错误时启动失败（fail-closed 覆盖到用户扩展层）。
 
 ## 8. 安全考量
 
-- HttpOnly Cookie 防 XSS 窃取；SameSite=Lax + OAuth state（HMAC 自校验 + 浏览器绑定：authorize 把 nonce 同步种进发起浏览器的 HttpOnly 临时 Cookie `da_oauth_nonce`，callback 比对一致才接受，防登录 CSRF）；生产 Secure。`da_oauth_nonce` 的 SameSite **硬编码为 Lax、不跟随 `cookie_samesite`**——回调是 IdP→本站的顶级跨站 GET 导航，Strict Cookie 不会被带回，否则会话 Cookie 配成 Strict 时每次 OAuth 登录必失败；会话 Cookie `da_session` 落地后仅同站发送，故仍沿用配置值。
-- Fail-closed 加载防误配置裸奔（覆盖层：基础配置用 find_spec 判存在后直接 import，覆盖文件内部 import 失败同样启动失败，不吞 ImportError）；SECRET_KEY 强度校验防弱密钥伪造；OAuth 启用时 `userinfo_url`/`redirect_uri` 纳入启动期必填校验（避免上线后回调必失败）；bcrypt 超长口令（>72 字节 ValueError）按认证失败处理而非 500。
+- HttpOnly Cookie 防 XSS 窃取；SameSite=Lax + OAuth state（HMAC 自校验 + 浏览器绑定：authorize 把 nonce 同步种进发起浏览器的 HttpOnly 临时 Cookie `da_oauth_nonce`，callback 比对一致才接受，且签名 state 绑定 provider，防登录 CSRF/跨 Provider 事务错配）；生产 Secure。`da_oauth_nonce` 的 SameSite **硬编码为 Lax、不跟随 `cookie_samesite`**——回调是 IdP→本站的顶级跨站 GET 导航，Strict Cookie 不会被带回，否则会话 Cookie 配成 Strict 时每次 OAuth 登录必失败；会话 Cookie `da_session` 落地后仅同站发送，故仍沿用配置值。
+- Fail-closed 加载防误配置裸奔（覆盖层：基础配置用 find_spec 判存在后直接 import，覆盖文件内部 import 失败同样启动失败，不吞 ImportError）；SECRET_KEY 强度校验防弱密钥伪造；OAuth 启用时 `OAUTH_USER_INFO` callable、`api_base_url` 与 `redirect_uri` 纳入启动期必填校验，并校验回调路径严格匹配 `/oauth-authorized/<provider>`（避免上线后回调必失败）；同步 userinfo 钩子在线程中执行，remote client 强制 15 秒 HTTP 超时，避免阻塞事件循环；bcrypt 超长口令（>72 字节 ValueError）按认证失败处理而非 500。
 - 稳定标识提权（provider:sub）防 username 漂移/碰撞提权。
 - 开放重定向防护（3.7）；文件 rel path 属性转义防注入；HTML 预览沙箱不放宽。
 - CORS `allow_origins=["*"]`+credentials：Starlette 会回显 Origin；由 SameSite=Lax + HttpOnly + 同源 nginx 链路缓解，预留 `AUTH_ALLOWED_ORIGINS` 后续项。

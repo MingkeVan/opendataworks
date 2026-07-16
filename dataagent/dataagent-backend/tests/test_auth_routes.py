@@ -42,29 +42,35 @@ def enable_auth(
     admin_users: str = "[]",
     cookie_secure: bool = False,
     cookie_samesite: str = "lax",
+    response_type: str = "code",
+    grant_type: str = "authorization_code",
 ) -> None:
     import bcrypt
 
     password_hash = bcrypt.hashpw(b"admin-pass", bcrypt.gensalt(rounds=4)).decode()
     oauth_block = ""
     if oauth:
-        oauth_block = """
-OAUTH_PROVIDERS = [{
-    "name": "SSO",
-    "icon": "fa-github",
-    "remote_app": {
-        "client_id": "cid",
-        "client_secret": "secret",
-        "authorize_url": "https://sso.example.com/authorize",
-        "access_token_url": "https://sso.example.com/token",
-        "client_kwargs": {"scope": "openid profile"},
-        "redirect_uri": "https://app.example.com/api/v1/nl2sql/auth/oauth/callback",
-    },
-    "userinfo_url": "https://sso.example.com/userinfo",
-    "user_id_field": "sub",
-    "username_field": "preferred_username",
-}]
-"""
+        oauth_provider = {
+            "name": "SSO",
+            "icon": "fa-github",
+            "remote_app": {
+                "client_id": "cid",
+                "client_secret": "secret",
+                "authorize_url": "https://sso.example.com/authorize",
+                "access_token_url": "https://sso.example.com/token",
+                "api_base_url": "https://sso.example.com/api/",
+                "client_kwargs": {"scope": "openid profile"},
+                "redirect_uri": "https://app.example.com/oauth-authorized/SSO",
+                "response_type": response_type,
+                "grant_type": grant_type,
+            },
+        }
+        oauth_block = (
+            f"OAUTH_PROVIDERS = {[oauth_provider]!r}\n"
+            "def _oauth_user_info(provider, token_response, oauth_remotes):\n"
+            "    return token_response.get('userinfo') or {'sub': 'configured-sub'}\n"
+            "OAUTH_USER_INFO = _oauth_user_info\n"
+        )
     config_file = tmp_path / "auth_config.py"
     config_file.write_text(
         f"""
@@ -101,6 +107,7 @@ def test_login_endpoints_are_404_when_disabled():
     assert client.get("/api/v1/nl2sql/auth/me").status_code == 404
     assert client.post("/api/v1/nl2sql/auth/logout").status_code == 404
     assert client.get("/api/v1/nl2sql/auth/oauth/authorize").status_code == 404
+    assert client.get("/oauth-authorized/SSO").status_code == 404
 
 
 def test_auth_config_exposes_oauth_provider_name_and_icon(monkeypatch, tmp_path):
@@ -154,7 +161,7 @@ def test_oauth_authorize_redirects_with_state(monkeypatch, tmp_path):
     client = TestClient(app)
 
     response = client.get(
-        "/api/v1/nl2sql/auth/oauth/authorize?redirect=/intelligent-query/chat",
+        "/api/v1/nl2sql/auth/oauth/authorize?redirect=/chat",
         follow_redirects=False,
     )
     assert response.status_code == 302
@@ -164,11 +171,12 @@ def test_oauth_authorize_redirects_with_state(monkeypatch, tmp_path):
     assert query["client_id"] == ["cid"]
     assert query["response_type"] == ["code"]
     assert query["scope"] == ["openid profile"]
-    assert query["redirect_uri"] == ["https://app.example.com/api/v1/nl2sql/auth/oauth/callback"]
+    assert query["redirect_uri"] == ["https://app.example.com/oauth-authorized/SSO"]
     state = query["state"][0]
     payload = auth.verify_oauth_state(state)
     assert payload is not None
-    assert payload["redirect"] == "/intelligent-query/chat"
+    assert payload["redirect"] == "/chat"
+    assert payload["provider"] == "SSO"
 
     # authorize 必须把 state nonce 同步种进发起浏览器的 HttpOnly Cookie（CSRF 绑定）。
     set_cookie = response.headers.get("set-cookie", "")
@@ -206,8 +214,10 @@ class _FakeResponse:
 
 
 class _FakeAsyncClient:
-    def __init__(self, *, userinfo):
-        self._userinfo = userinfo
+    last_post = None
+
+    def __init__(self, *, token_payload=None):
+        self._token_payload = {"access_token": "at-1"} if token_payload is None else token_payload
 
     def __call__(self, *args, **kwargs):
         return self
@@ -219,23 +229,79 @@ class _FakeAsyncClient:
         return False
 
     async def post(self, url, **kwargs):
-        return _FakeResponse({"access_token": "at-1"})
-
-    async def get(self, url, **kwargs):
-        return _FakeResponse(self._userinfo)
+        type(self).last_post = (url, kwargs)
+        return _FakeResponse(self._token_payload)
 
 
-def _oauth_callback(client, monkeypatch, *, userinfo, redirect="", bind_nonce=True, cookie_nonce=None):
-    monkeypatch.setattr(auth_routes.httpx, "AsyncClient", _FakeAsyncClient(userinfo=userinfo))
+class _FakeRemoteClient:
+    last_init = None
+    last_get = None
+
+    def __init__(self, *, base_url, headers, timeout):
+        type(self).last_init = {
+            "base_url": base_url,
+            "headers": headers,
+            "timeout": timeout,
+        }
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def get(self, url, **kwargs):
+        type(self).last_get = (url, kwargs)
+        return _FakeResponse({"sub": "remote-sub", "preferred_username": "remote-user"})
+
+
+def _oauth_callback(
+    client,
+    monkeypatch,
+    *,
+    userinfo,
+    redirect="",
+    bind_nonce=True,
+    cookie_nonce=None,
+    provider="SSO",
+    state_provider="SSO",
+    use_config_handler=False,
+    handler_calls=None,
+    token_payload=None,
+):
+    token_payload = {"access_token": "at-1"} if token_payload is None else token_payload
+    if use_config_handler:
+        token_payload = dict(token_payload)
+        token_payload["userinfo"] = userinfo
+    monkeypatch.setattr(
+        auth_routes.httpx,
+        "AsyncClient",
+        _FakeAsyncClient(token_payload=token_payload),
+    )
+    if not use_config_handler:
+        def _oauth_user_info(provider_name, response, oauth_remotes):
+            if handler_calls is not None:
+                remote = oauth_remotes[provider_name]
+                handler_calls.append(
+                    (
+                        provider_name,
+                        response.copy(),
+                        str(remote.base_url),
+                        remote.headers.get("Authorization"),
+                    )
+                )
+            return userinfo
+
+        auth.get_auth_settings().oauth_user_info = _oauth_user_info
     nonce = auth.generate_oauth_nonce()
-    state = auth.issue_oauth_state(redirect, nonce=nonce)
+    state = auth.issue_oauth_state(redirect, nonce=nonce, provider=state_provider)
     # 正常流程：authorize 会把 nonce 种进发起浏览器的 HttpOnly Cookie。
     if bind_nonce:
         client.cookies.set(auth.OAUTH_STATE_COOKIE, cookie_nonce if cookie_nonce is not None else nonce)
     else:
         client.cookies.delete(auth.OAUTH_STATE_COOKIE) if auth.OAUTH_STATE_COOKIE in client.cookies else None
     return client.get(
-        f"/api/v1/nl2sql/auth/oauth/callback?code=abc&state={state}",
+        f"/oauth-authorized/{provider}?code=abc&state={state}",
         follow_redirects=False,
     )
 
@@ -247,10 +313,10 @@ def test_oauth_callback_issues_session_and_redirects(monkeypatch, tmp_path):
     response = _oauth_callback(
         client, monkeypatch,
         userinfo={"sub": "42", "preferred_username": "alice"},
-        redirect="/intelligent-query/chat",
+        redirect="/chat",
     )
     assert response.status_code == 302
-    assert response.headers["location"] == "/intelligent-query/chat"
+    assert response.headers["location"] == "/chat"
     assert "HttpOnly" in response.headers.get("set-cookie", "")
 
     me = client.get("/api/v1/nl2sql/auth/me")
@@ -259,6 +325,76 @@ def test_oauth_callback_issues_session_and_redirects(monkeypatch, tmp_path):
     assert data["user_id"] == "SSO:42"
     assert data["username"] == "alice"
     assert data["role"] == "user"
+
+
+@pytest.mark.parametrize(
+    ("userinfo", "expected_username"),
+    [
+        ({"sub": "42", "preferred_username": "alice", "name": "Alice"}, "alice"),
+        ({"sub": "42", "name": "Alice", "email": "alice@example.com"}, "Alice"),
+        ({"sub": "42", "email": "alice@example.com"}, "alice@example.com"),
+        ({"sub": "42"}, "42"),
+    ],
+)
+def test_oauth_callback_uses_oidc_display_name_fallbacks(
+    monkeypatch,
+    tmp_path,
+    userinfo,
+    expected_username,
+):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    client = TestClient(app)
+
+    response = _oauth_callback(client, monkeypatch, userinfo=userinfo)
+    assert response.status_code == 302
+    assert client.get("/api/v1/nl2sql/auth/me").json()["data"]["username"] == expected_username
+
+
+def test_oauth_callback_requires_normalized_sub(monkeypatch, tmp_path):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    client = TestClient(app)
+
+    response = _oauth_callback(
+        client,
+        monkeypatch,
+        userinfo={"preferred_username": "alice", "id": "legacy-id"},
+    )
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?error=oauth_missing_user_id"
+    assert client.get("/api/v1/nl2sql/auth/me").status_code == 401
+
+
+@pytest.mark.parametrize(
+    "sub",
+    [123, {"id": "42"}, ["42"], " 42", "42\n", "x" * 255],
+)
+def test_oauth_callback_rejects_invalid_or_oversized_sub(monkeypatch, tmp_path, sub):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    client = TestClient(app)
+
+    response = _oauth_callback(client, monkeypatch, userinfo={"sub": sub})
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?error=oauth_missing_user_id"
+    assert client.get("/api/v1/nl2sql/auth/me").status_code == 401
+
+
+@pytest.mark.parametrize(
+    "userinfo",
+    [
+        {"sub": "42", "preferred_username": 123},
+        {"sub": "42", "preferred_username": "alice\n"},
+        {"sub": "42", "role": "ADMIN"},
+        {"sub": "42", "role": ["admin"]},
+    ],
+)
+def test_oauth_callback_rejects_invalid_display_or_role_claims(monkeypatch, tmp_path, userinfo):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    client = TestClient(app)
+
+    response = _oauth_callback(client, monkeypatch, userinfo=userinfo)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?error=oauth_user_info_failed"
+    assert client.get("/api/v1/nl2sql/auth/me").status_code == 401
 
 
 def test_oauth_callback_promotes_admin_by_provider_sub_not_username(monkeypatch, tmp_path):
@@ -280,10 +416,99 @@ def test_oauth_callback_rejects_bad_state(monkeypatch, tmp_path):
     enable_auth(monkeypatch, tmp_path, oauth=True)
     client = TestClient(app)
     response = client.get(
-        "/api/v1/nl2sql/auth/oauth/callback?code=abc&state=tampered.state",
+        "/oauth-authorized/SSO?code=abc&state=tampered.state",
         follow_redirects=False,
     )
     assert response.status_code == 400
+
+
+def test_oauth_provider_error_requires_valid_state_and_uses_fixed_error(monkeypatch, tmp_path):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    client = TestClient(app)
+
+    invalid = client.get(
+        "/oauth-authorized/SSO?error=sensitive-provider-message&state=tampered.state",
+        follow_redirects=False,
+    )
+    assert invalid.status_code == 400
+
+    nonce = auth.generate_oauth_nonce()
+    state = auth.issue_oauth_state("/", nonce=nonce, provider="SSO")
+    client.cookies.set(auth.OAUTH_STATE_COOKIE, nonce)
+    denied = client.get(
+        f"/oauth-authorized/SSO?error=sensitive-provider-message&state={state}",
+        follow_redirects=False,
+    )
+    assert denied.status_code == 302
+    assert denied.headers["location"] == "/login?error=oauth_denied"
+    assert "sensitive-provider-message" not in denied.headers["location"]
+    set_cookies = denied.headers.get_list("set-cookie")
+    assert any(f'{auth.OAUTH_STATE_COOKIE}=""' in cookie for cookie in set_cookies)
+
+
+def test_oauth_callback_rejects_unknown_provider(monkeypatch, tmp_path):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    client = TestClient(app)
+
+    response = _oauth_callback(client, monkeypatch, userinfo={"sub": "42"}, provider="unknown")
+    assert response.status_code == 404
+
+
+def test_legacy_oauth_callback_route_is_not_exposed(monkeypatch, tmp_path):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    response = TestClient(app).get(
+        "/api/v1/nl2sql/auth/oauth/callback?code=abc&state=unused",
+        follow_redirects=False,
+    )
+    assert response.status_code == 404
+
+
+def test_oauth_callback_rejects_state_for_another_provider(monkeypatch, tmp_path):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    client = TestClient(app)
+
+    response = _oauth_callback(
+        client,
+        monkeypatch,
+        userinfo={"sub": "42"},
+        state_provider="Other",
+    )
+    assert response.status_code == 400
+
+
+def test_oauth_transport_reads_response_and_grant_types_from_settings(monkeypatch, tmp_path):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    # 启动期只允许授权码模式。这里在已校验的设置对象上放入辨识值，专门证明
+    # authorize/token 传输读取配置对象，而不是继续在路由里写死常量。
+    settings = auth.get_auth_settings()
+    settings.oauth.response_type = "code-from-settings"
+    settings.oauth.grant_type = "grant-from-settings"
+    client = TestClient(app)
+
+    authorize = client.get("/api/v1/nl2sql/auth/oauth/authorize", follow_redirects=False)
+    query = parse_qs(urlparse(authorize.headers["location"]).query)
+    assert query["response_type"] == ["code-from-settings"]
+
+    handler_calls = []
+    callback = _oauth_callback(
+        client,
+        monkeypatch,
+        userinfo={"sub": "42"},
+        handler_calls=handler_calls,
+    )
+    assert callback.status_code == 302
+    token_url, token_request = _FakeAsyncClient.last_post
+    assert token_url == "https://sso.example.com/token"
+    assert token_request["data"]["grant_type"] == "grant-from-settings"
+    assert token_request["data"]["redirect_uri"] == "https://app.example.com/oauth-authorized/SSO"
+    assert handler_calls == [
+        (
+            "SSO",
+            {"access_token": "at-1"},
+            "https://sso.example.com/api/",
+            "Bearer at-1",
+        )
+    ]
 
 
 def test_oauth_callback_falls_back_to_safe_redirect(monkeypatch, tmp_path):
@@ -297,11 +522,10 @@ def test_oauth_callback_falls_back_to_safe_redirect(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# OAUTH_USERINFO_MAPPER：非标准 IdP 的 userinfo 映射钩子
-# （Superset custom_sso_security_manager 的 oauth_user_info 对应物）
+# OAUTH_USER_INFO：对应 Superset custom SecurityManager.oauth_user_info
 # ---------------------------------------------------------------------------
 
-def enable_auth_with_mapper(monkeypatch, tmp_path, *, mapper_body: str) -> None:
+def enable_auth_with_user_info(monkeypatch, tmp_path, *, handler_body: str) -> None:
     import bcrypt
 
     password_hash = bcrypt.hashpw(b"admin-pass", bcrypt.gensalt(rounds=4)).decode()
@@ -319,11 +543,11 @@ OAUTH_PROVIDERS = [{{
         "client_secret": "secret",
         "authorize_url": "https://sso.example.com/authorize",
         "access_token_url": "https://sso.example.com/token",
-        "redirect_uri": "https://app.example.com/cb",
+        "api_base_url": "https://sso.example.com/api/",
+        "redirect_uri": "https://app.example.com/oauth-authorized/SSO",
     }},
-    "userinfo_url": "https://sso.example.com/userinfo",
 }}]
-{mapper_body}
+{handler_body}
 """,
         encoding="utf-8",
     )
@@ -331,24 +555,60 @@ OAUTH_PROVIDERS = [{{
     auth.init_auth()
 
 
-NESTED_MAPPER = """
-def _mapper(userinfo):
+NESTED_USER_INFO = """
+def _oauth_user_info(provider, token_response, oauth_remotes):
+    userinfo = token_response.get("userinfo") or {}
     payload = userinfo.get("data") or {}
-    mapped = {"user_id": payload.get("uid"), "username": payload.get("nickname")}
+    mapped = {"sub": payload.get("uid"), "preferred_username": payload.get("nickname")}
     if "dataagent-admin" in (payload.get("roles") or []):
         mapped["role"] = "admin"
     return mapped
-OAUTH_USERINFO_MAPPER = _mapper
+OAUTH_USER_INFO = _oauth_user_info
+"""
+
+REMOTE_USER_INFO = """
+def _oauth_user_info(provider, token_response, oauth_remotes):
+    response = oauth_remotes[provider].get("userinfo")
+    response.raise_for_status()
+    return response.json()
+OAUTH_USER_INFO = _oauth_user_info
 """
 
 
-def test_mapper_takes_over_nonstandard_userinfo(monkeypatch, tmp_path):
-    enable_auth_with_mapper(monkeypatch, tmp_path, mapper_body=NESTED_MAPPER)
+def test_oauth_user_info_uses_token_bound_remote_get(monkeypatch, tmp_path):
+    enable_auth_with_user_info(monkeypatch, tmp_path, handler_body=REMOTE_USER_INFO)
+    monkeypatch.setattr(auth_routes.httpx, "Client", _FakeRemoteClient)
+    client = TestClient(app)
+
+    response = _oauth_callback(
+        client,
+        monkeypatch,
+        userinfo={},
+        use_config_handler=True,
+    )
+    assert response.status_code == 302
+    assert _FakeRemoteClient.last_init == {
+        "base_url": "https://sso.example.com/api/",
+        "headers": {
+            "Authorization": "Bearer at-1",
+            "Accept": "application/json",
+        },
+        "timeout": 15.0,
+    }
+    assert _FakeRemoteClient.last_get == ("userinfo", {})
+    me = client.get("/api/v1/nl2sql/auth/me").json()["data"]
+    assert me["user_id"] == "SSO:remote-sub"
+    assert me["username"] == "remote-user"
+
+
+def test_sync_oauth_user_info_normalizes_nonstandard_payload(monkeypatch, tmp_path):
+    enable_auth_with_user_info(monkeypatch, tmp_path, handler_body=NESTED_USER_INFO)
     client = TestClient(app)
 
     response = _oauth_callback(
         client, monkeypatch,
         userinfo={"code": 0, "data": {"uid": "7", "nickname": "小王", "roles": []}},
+        use_config_handler=True,
     )
     assert response.status_code == 302
     data = client.get("/api/v1/nl2sql/auth/me").json()["data"]
@@ -357,43 +617,109 @@ def test_mapper_takes_over_nonstandard_userinfo(monkeypatch, tmp_path):
     assert data["role"] == "user"
 
 
-def test_mapper_role_wins_over_admin_users(monkeypatch, tmp_path):
-    enable_auth_with_mapper(monkeypatch, tmp_path, mapper_body=NESTED_MAPPER)
+def test_oauth_user_info_role_wins_over_admin_users(monkeypatch, tmp_path):
+    enable_auth_with_user_info(monkeypatch, tmp_path, handler_body=NESTED_USER_INFO)
     client = TestClient(app)
 
     response = _oauth_callback(
         client, monkeypatch,
         userinfo={"data": {"uid": "7", "nickname": "ops", "roles": ["dataagent-admin"]}},
+        use_config_handler=True,
     )
     assert response.status_code == 302
     assert client.get("/api/v1/nl2sql/auth/me").json()["data"]["role"] == "admin"
 
 
-def test_mapper_without_role_falls_back_to_admin_users(monkeypatch, tmp_path):
-    enable_auth_with_mapper(monkeypatch, tmp_path, mapper_body=NESTED_MAPPER)
+def test_oauth_user_info_without_role_falls_back_to_admin_users(monkeypatch, tmp_path):
+    enable_auth_with_user_info(monkeypatch, tmp_path, handler_body=NESTED_USER_INFO)
     client = TestClient(app)
 
     response = _oauth_callback(
         client, monkeypatch,
         userinfo={"data": {"uid": "1024", "nickname": "bob", "roles": []}},
+        use_config_handler=True,
     )
     assert response.status_code == 302
     # 钩子未返回 role → 回落 ADMIN_USERS（SSO:1024）提名。
     assert client.get("/api/v1/nl2sql/auth/me").json()["data"]["role"] == "admin"
 
 
-def test_mapper_failure_fails_the_login_not_the_service(monkeypatch, tmp_path):
-    enable_auth_with_mapper(
+def test_oauth_user_info_failure_is_redacted_and_does_not_stop_service(
+    monkeypatch,
+    tmp_path,
+    caplog,
+):
+    enable_auth_with_user_info(
         monkeypatch, tmp_path,
-        mapper_body="def _mapper(userinfo):\n    raise RuntimeError('boom')\nOAUTH_USERINFO_MAPPER = _mapper\n",
+        handler_body=(
+            "def _oauth_user_info(provider, token_response, oauth_remotes):\n"
+            "    raise RuntimeError('refresh_token=super-secret')\n"
+            "OAUTH_USER_INFO = _oauth_user_info\n"
+        ),
     )
     client = TestClient(app)
 
-    response = _oauth_callback(client, monkeypatch, userinfo={"sub": "42"})
+    response = _oauth_callback(
+        client,
+        monkeypatch,
+        userinfo={"sub": "42"},
+        use_config_handler=True,
+    )
     assert response.status_code == 302
-    assert response.headers["location"] == "/login?error=oauth_mapper_failed"
+    assert response.headers["location"] == "/login?error=oauth_user_info_failed"
+    assert "super-secret" not in caplog.text
+    assert "error_type=RuntimeError" in caplog.text
     # 服务仍健康。
     assert client.get("/api/v1/nl2sql/auth/config").status_code == 200
+
+
+def test_oauth_user_info_non_dict_fails_the_login(monkeypatch, tmp_path):
+    enable_auth_with_user_info(
+        monkeypatch,
+        tmp_path,
+        handler_body=(
+            "def _oauth_user_info(provider, token_response, oauth_remotes):\n"
+            "    return []\n"
+            "OAUTH_USER_INFO = _oauth_user_info\n"
+        ),
+    )
+    client = TestClient(app)
+
+    response = _oauth_callback(
+        client,
+        monkeypatch,
+        userinfo={"sub": "42"},
+        use_config_handler=True,
+    )
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?error=oauth_user_info_failed"
+
+
+@pytest.mark.parametrize(
+    "token_payload",
+    [
+        {},
+        {"access_token": 123},
+        {"access_token": "at-1", "token_type": "mac"},
+        {"access_token": "at-1", "token_type": 0},
+    ],
+)
+def test_invalid_token_payload_is_exchange_failure(monkeypatch, tmp_path, token_payload):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    client = TestClient(app)
+    handler_calls = []
+
+    response = _oauth_callback(
+        client,
+        monkeypatch,
+        userinfo={"sub": "42"},
+        handler_calls=handler_calls,
+        token_payload=token_payload,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?error=oauth_exchange_failed"
+    assert handler_calls == []
 
 
 # ---------------------------------------------------------------------------
