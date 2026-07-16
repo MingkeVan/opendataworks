@@ -51,6 +51,7 @@
         class="login-button oauth-button"
         @click="handleOauthLogin"
       >
+        <i v-if="authStore.providerIcon" class="fa" :class="authStore.providerIcon" aria-hidden="true" />
         通过 {{ authStore.providerName || 'SSO' }} 登录
       </el-button>
     </el-card>
@@ -151,5 +152,9 @@ function handleOauthLogin() {
 
 .oauth-button {
   margin-top: 4px;
+}
+
+.oauth-button i {
+  margin-right: 8px;
 }
 </style>

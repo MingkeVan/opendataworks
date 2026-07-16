@@ -2554,6 +2554,7 @@ export const demoAdapter = async (config) => {
     return createResponse(config, {
       enabled: false,
       provider_name: '',
+      provider_icon: '',
       local_login_enabled: false,
       oauth_login_enabled: false
     })

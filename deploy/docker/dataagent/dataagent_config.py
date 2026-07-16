@@ -7,7 +7,7 @@
 `superset_config.py` 一样加载同目录下的用户扩展模块。
 
 可配置内容：
-- 认证：`AUTH_ENABLED` / `SECRET_KEY` / `LOCAL_ADMINS` / `OAUTH` / `ADMIN_USERS`
+- 认证：`AUTH_ENABLED` / `SECRET_KEY` / `LOCAL_ADMINS` / `OAUTH_PROVIDERS` / `ADMIN_USERS`
   / `OAUTH_USERINFO_MAPPER`（非标准 IdP 的 userinfo 映射钩子，见
   custom_sso_user_mapper.py.example）。
 - 其他运行时配置：`DATAAGENT_SETTINGS = {"<config.py Settings 字段>": 值}`，
@@ -44,7 +44,7 @@ COOKIE_SECURE = False
 COOKIE_SAMESITE = "lax"
 
 LOCAL_ADMINS = []
-OAUTH = {}
+OAUTH_PROVIDERS = []
 ADMIN_USERS = []
 
 # 非认证的运行时 Settings 覆盖（config.py 字段），默认不覆盖任何值。

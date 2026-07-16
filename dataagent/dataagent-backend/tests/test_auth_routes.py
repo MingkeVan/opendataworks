@@ -49,19 +49,22 @@ def enable_auth(
     oauth_block = ""
     if oauth:
         oauth_block = """
-OAUTH = {
-    "provider_name": "SSO",
-    "client_id": "cid",
-    "client_secret": "secret",
-    "authorize_url": "https://sso.example.com/authorize",
-    "token_url": "https://sso.example.com/token",
+OAUTH_PROVIDERS = [{
+    "name": "SSO",
+    "icon": "fa-github",
+    "remote_app": {
+        "client_id": "cid",
+        "client_secret": "secret",
+        "authorize_url": "https://sso.example.com/authorize",
+        "access_token_url": "https://sso.example.com/token",
+        "client_kwargs": {"scope": "openid profile"},
+        "redirect_uri": "https://app.example.com/api/v1/nl2sql/auth/oauth/callback",
+    },
     "userinfo_url": "https://sso.example.com/userinfo",
-    "scopes": "openid profile",
-    "redirect_uri": "https://app.example.com/api/v1/nl2sql/auth/oauth/callback",
     "user_id_field": "sub",
     "username_field": "preferred_username",
     "post_login_redirect": "/intelligent-query/chat",
-}
+}]
 """
     config_file = tmp_path / "auth_config.py"
     config_file.write_text(
@@ -87,6 +90,7 @@ def test_auth_config_reports_disabled_when_env_unset():
     assert response.json() == {
         "enabled": False,
         "provider_name": "",
+        "provider_icon": "",
         "local_login_enabled": False,
         "oauth_login_enabled": False,
     }
@@ -98,6 +102,15 @@ def test_login_endpoints_are_404_when_disabled():
     assert client.get("/api/v1/nl2sql/auth/me").status_code == 404
     assert client.post("/api/v1/nl2sql/auth/logout").status_code == 404
     assert client.get("/api/v1/nl2sql/auth/oauth/authorize").status_code == 404
+
+
+def test_auth_config_exposes_oauth_provider_name_and_icon(monkeypatch, tmp_path):
+    enable_auth(monkeypatch, tmp_path, oauth=True)
+    response = TestClient(app).get("/api/v1/nl2sql/auth/config")
+    assert response.status_code == 200
+    assert response.json()["provider_name"] == "SSO"
+    assert response.json()["provider_icon"] == "fa-github"
+    assert response.json()["oauth_login_enabled"] is True
 
 
 def test_local_login_sets_httponly_cookie_and_me_roundtrip(monkeypatch, tmp_path):
@@ -151,6 +164,8 @@ def test_oauth_authorize_redirects_with_state(monkeypatch, tmp_path):
     query = parse_qs(location.query)
     assert query["client_id"] == ["cid"]
     assert query["response_type"] == ["code"]
+    assert query["scope"] == ["openid profile"]
+    assert query["redirect_uri"] == ["https://app.example.com/api/v1/nl2sql/auth/oauth/callback"]
     state = query["state"][0]
     payload = auth.verify_oauth_state(state)
     assert payload is not None
@@ -297,16 +312,18 @@ AUTH_ENABLED = True
 SECRET_KEY = {VALID_SECRET!r}
 LOCAL_ADMINS = [{{"username": "admin", "password_bcrypt": {password_hash!r}}}]
 ADMIN_USERS = ["SSO:1024"]
-OAUTH = {{
-    "provider_name": "SSO",
-    "client_id": "cid",
-    "client_secret": "secret",
-    "authorize_url": "https://sso.example.com/authorize",
-    "token_url": "https://sso.example.com/token",
+OAUTH_PROVIDERS = [{{
+    "name": "SSO",
+    "remote_app": {{
+        "client_id": "cid",
+        "client_secret": "secret",
+        "authorize_url": "https://sso.example.com/authorize",
+        "access_token_url": "https://sso.example.com/token",
+        "redirect_uri": "https://app.example.com/cb",
+    }},
     "userinfo_url": "https://sso.example.com/userinfo",
-    "redirect_uri": "https://app.example.com/cb",
     "post_login_redirect": "/intelligent-query/chat",
-}}
+}}]
 {mapper_body}
 """,
         encoding="utf-8",

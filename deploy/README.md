@@ -268,7 +268,9 @@ DataAgent（智能问数）支持可选的 OAuth2 + 本地管理员登录，以�
 启用步骤：
 
 1. `cd deploy/docker/dataagent && cp dataagent_config_docker.py.example dataagent_config_docker.py`
-2. 按注释填写 `SECRET_KEY`（`secrets.token_urlsafe(32)` 生成）、`LOCAL_ADMINS`（bcrypt 哈希）、`OAUTH`、`ADMIN_USERS`（`provider:sub` 稳定标识），置 `AUTH_ENABLED = True`。
+2. 按注释填写 `SECRET_KEY`（`secrets.token_urlsafe(32)` 生成）、`LOCAL_ADMINS`（bcrypt 哈希）、单项 `OAUTH_PROVIDERS`（Superset/FAB `remote_app` 形态，`icon` 支持 Font Awesome 4 class）、`ADMIN_USERS`（`provider:sub` 稳定标识），置 `AUTH_ENABLED = True`。
+   早期版本的扁平 `OAUTH` 不再接受；检测到非空旧配置时服务会
+   fail-closed 启动失败并提示迁移，避免静默丢失 OAuth 登录。
 3. 重启 `dataagent-backend`。无需修改 compose。需要自定义扩展模块（如自研 SSO 适配）时，直接把 `.py` 放进同目录并在覆盖文件里 import（目录在 `sys.path` 上）。
 
 语义与回滚（fail-closed）：

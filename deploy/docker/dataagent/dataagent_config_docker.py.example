@@ -7,7 +7,7 @@
 """
 
 # ---------------------------------------------------------------------------
-# 认证总开关。置 True 前先完成 SECRET_KEY 与至少一种登录方式（LOCAL_ADMINS / OAUTH）。
+# 认证总开关。置 True 前先完成 SECRET_KEY 与至少一种登录方式（LOCAL_ADMINS / OAUTH_PROVIDERS）。
 # ---------------------------------------------------------------------------
 AUTH_ENABLED = False
 
@@ -35,27 +35,40 @@ LOCAL_ADMINS = [
 ]
 
 # ---------------------------------------------------------------------------
-# OAuth2 授权码模式（通用 OIDC Provider）。三项核心（client_id / authorize_url /
-# token_url）齐全才视为已配置；留空则登录页只提供本地密码登录。
+# OAuth2 授权码模式（通用 OIDC Provider）。外形与 Superset/FAB 的
+# OAUTH_PROVIDERS 一致；本期仅支持单 Provider，配置多项会启动失败。
+# remote_app 内三项核心（client_id / authorize_url / access_token_url）
+# 齐全才视为已配置；保持下方空列表则登录页只提供本地密码登录。
+# 要启用 OAuth，将下方 provider 模板取消注释并填入真实值。
 # ---------------------------------------------------------------------------
-OAUTH = {
-    # 登录按钮显示名，同时作为用户稳定标识的 provider 前缀（见 ADMIN_USERS）。
-    "provider_name": "SSO",
-    "client_id": "",
-    "client_secret": "",
-    "authorize_url": "https://sso.example.com/oauth/authorize",
-    "token_url": "https://sso.example.com/oauth/token",
-    "userinfo_url": "https://sso.example.com/oauth/userinfo",
-    "scopes": "openid profile",
-    # 必须与 IdP 侧注册的回调一致：
-    #   https://<dataagent-host>/api/v1/nl2sql/auth/oauth/callback
-    "redirect_uri": "",
-    # userinfo 响应里的用户唯一标识与显示名字段（标准平铺 payload 时用）。
-    "user_id_field": "sub",
-    "username_field": "preferred_username",
-    # 登录成功后的回跳路径（仅接受同源应用内路径）。
-    "post_login_redirect": "/",
-}
+OAUTH_PROVIDERS = [
+    # {
+    #     # Provider 键和登录按钮显示名，也作为用户稳定标识前缀。
+    #     "name": "SSO",
+    #     # Font Awesome 4 class，如 fa-github / fa-google；留空则不显示图标。
+    #     "icon": "fa-github",
+    #     # token_key 为 FAB/Superset 兼容字段；DataAgent 直接解析 access_token。
+    #     "token_key": "access_token",
+    #     "remote_app": {
+    #         "client_id": "your-client-id",
+    #         "client_secret": "your-client-secret",
+    #         "authorize_url": "https://sso.example.com/oauth/authorize",
+    #         "access_token_url": "https://sso.example.com/oauth/token",
+    #         "client_kwargs": {"scope": "openid profile"},
+    #         # 必须与 IdP 侧注册的回调一致：
+    #         #   https://<dataagent-host>/api/v1/nl2sql/auth/oauth/callback
+    #         "redirect_uri": "https://<dataagent-host>/api/v1/nl2sql/auth/oauth/callback",
+    #         # DataAgent 传输层固定使用 code / authorization_code，无需配置。
+    #     },
+    #     # 以下是 DataAgent 扩展字段：按需拉取 userinfo 并映射用户。
+    #     "userinfo_url": "https://sso.example.com/oauth/userinfo",
+    #     # userinfo 响应里的用户唯一标识与显示名字段（标准平铺 payload 时用）。
+    #     "user_id_field": "sub",
+    #     "username_field": "preferred_username",
+    #     # 登录成功后的回跳路径（仅接受同源应用内路径）。
+    #     "post_login_redirect": "/",
+    # }
+]
 
 # ---------------------------------------------------------------------------
 # 非标准 IdP 的 userinfo 映射钩子（可选，Superset custom_sso_security_manager

@@ -18,6 +18,7 @@ export const useAuthStore = defineStore('auth', {
     // 无登录页、无守卫、管理功能照旧可用。
     enabled: false,
     providerName: '',
+    providerIcon: '',
     localLoginEnabled: false,
     oauthLoginEnabled: false,
     currentUser: null,
@@ -37,6 +38,7 @@ export const useAuthStore = defineStore('auth', {
         const config = await authApi.getAuthConfig()
         this.enabled = Boolean(config?.enabled)
         this.providerName = String(config?.provider_name || '')
+        this.providerIcon = String(config?.provider_icon || '')
         this.localLoginEnabled = Boolean(config?.local_login_enabled)
         this.oauthLoginEnabled = Boolean(config?.oauth_login_enabled)
       } catch (_error) {
