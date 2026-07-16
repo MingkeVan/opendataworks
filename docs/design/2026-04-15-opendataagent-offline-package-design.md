@@ -129,10 +129,10 @@ opendataagent-deployment/
 - 现有 `build-release.sh` 继续负责源码发布包
 - 新增离线包脚本单独负责镜像型交付物
 - 两者互补，不强行合并成单一脚本，避免把“无容器环境的源码构建”和“需要容器运行时的镜像导出”绑死在一起
-- GitHub Actions `docker-build.yml` 继续负责主仓库的镜像与主离线包，同时额外调用 `opendataagent/scripts/create-offline-package.sh`
-- 同一 workflow 额外把 `opendataagent-server` 与 `opendataagent-web` 纳入 build-and-push 矩阵
+- GitHub Actions `docker-build.yml` 继续负责主仓库的镜像、主离线包和 `opendataagent` 离线包附件
+- `opendataagent-server` 与 `opendataagent-web` 在线镜像由独立的 `opendataagent-build.yml` workflow 构建和推送
 - Release 附件中同时保留：
-  - `opendataworks-deployment-<tag>.tar.gz`
+  - `opendataworks-deployment-<tag>.tar.xz`
   - `opendataagent-deployment-<tag>.tar.gz`
   - 对应 `.sha256` 文件
 - Release 正文中的 Docker 镜像区同时保留：

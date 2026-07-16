@@ -55,16 +55,6 @@ jobs:
             context: .
             dockerfile: ./dataagent/portal-mcp/Dockerfile
             build_args: ""
-          - name: opendataagent-server
-            image: opendataagent-server
-            context: ./opendataagent/server
-            dockerfile: ./opendataagent/server/Dockerfile
-            build_args: ""
-          - name: opendataagent-web
-            image: opendataagent-web
-            context: ./opendataagent/web
-            dockerfile: ./opendataagent/web/Dockerfile
-            build_args: ""
           - name: dataagent-evals-builtin
             image: opendataworks-dataagent-evals-builtin
             context: .
@@ -98,12 +88,6 @@ jobs:
             type=semver,pattern={{version}}
             type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version != '' && (github.event.inputs.version != 'latest' || github.ref == 'refs/heads/main') }}
-
-      - name: Sync root skills for opendataagent server image
-        if: matrix.service.name == 'opendataagent-server'
-        run: |
-          chmod +x opendataagent/scripts/sync-root-skills.sh
-          opendataagent/scripts/sync-root-skills.sh
 
       - name: Build
         id: build
@@ -383,8 +367,6 @@ jobs:
           echo "- \`${{ secrets.DOCKER_USERNAME }}/opendataworks-portal-mcp\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`${{ secrets.DOCKER_USERNAME }}/opendataworks-dataagent-evals-builtin\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`${{ secrets.DOCKER_USERNAME }}/opendataworks-dataagent-evals-deepeval\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ secrets.DOCKER_USERNAME }}/opendataagent-server\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ secrets.DOCKER_USERNAME }}/opendataagent-web\`" >> $GITHUB_STEP_SUMMARY
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Platforms supported:" >> $GITHUB_STEP_SUMMARY
@@ -401,7 +383,5 @@ jobs:
           echo "docker pull ${{ secrets.DOCKER_USERNAME }}/opendataworks-portal-mcp:latest" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ secrets.DOCKER_USERNAME }}/opendataworks-dataagent-evals-builtin:latest" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ secrets.DOCKER_USERNAME }}/opendataworks-dataagent-evals-deepeval:latest" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ secrets.DOCKER_USERNAME }}/opendataagent-server:latest" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ secrets.DOCKER_USERNAME }}/opendataagent-web:latest" >> $GITHUB_STEP_SUMMARY
 
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

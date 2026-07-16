@@ -13,7 +13,7 @@
 - 新增离线包目录结构与共享 skills 复制逻辑
 - 更新 `opendataagent` 部署文档和 README
 - 更新 GitHub release workflow，把 `opendataagent` 离线包纳入 tag/latest release 附件与正文链接
-- 更新 GitHub release workflow，把 `opendataagent-server/web` 镜像纳入构建推送矩阵与 release 正文链接
+- 更新 GitHub release workflow，把 `opendataagent-server/web` 镜像纳入 release 正文链接；在线镜像构建由独立 `opendataagent-build.yml` workflow 负责
 - 做脚本 help / compose config / 打包级别验证
 
 本轮不覆盖：
@@ -68,11 +68,12 @@
 
 ### Phase 4: GitHub Release 集成
 
-- 更新 `.github/workflows/docker-build.yml`
-- 在 `build-and-push` 矩阵中新增：
+- 更新 `.github/workflows/docker-build.yml`，让 tag/latest release 继续上传 `opendataagent` 离线包
+- 新增或维护独立 `.github/workflows/opendataagent-build.yml`
+- 在 `opendataagent-build.yml` 中构建并推送：
   - `opendataagent-server`
   - `opendataagent-web`
-- `opendataagent-server` 构建前执行 `opendataagent/scripts/sync-root-skills.sh`
+- `opendataagent-server` 在线镜像构建前执行 `opendataagent/scripts/sync-root-skills.sh`
 - 在 tag release 中新增：
   - `opendataagent/scripts/create-offline-package.sh`
   - `opendataagent-deployment-<version>.tar.gz`
