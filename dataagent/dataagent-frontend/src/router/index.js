@@ -1,28 +1,74 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-// Legacy `?tab=` values mapped onto the real child route segments so existing
-// deep links keep working after the menu became route-driven.
-const LEGACY_TAB_TO_SEGMENT = {
-  chat: 'chat',
-  'chat-v2': 'chat',
-  skills: 'skills',
-  agents: 'agents',
-  models: 'models',
-  widget: 'widget'
+// Legacy `?tab=` values mapped onto the canonical, user-facing page paths.
+const LEGACY_TAB_TO_PATH = {
+  chat: '/chat',
+  'chat-v2': '/chat',
+  skills: '/skills',
+  agents: '/agents',
+  models: '/models',
+  widget: '/widget-access'
+}
+
+const withoutLegacyTab = (query = {}) => {
+  const { tab: _omitTab, ...rest } = query
+  return rest
 }
 
 export const redirectLegacyTab = (to) => {
-  const tab = String(to.query.tab || '')
-  const segment = LEGACY_TAB_TO_SEGMENT[tab] || 'chat'
-  const { tab: _omitTab, ...query } = to.query
-  return { path: `/intelligent-query/${segment}`, query, hash: to.hash }
+  const rawTab = Array.isArray(to.query.tab) ? to.query.tab[0] : to.query.tab
+  const tab = String(rawTab || '')
+  return {
+    path: LEGACY_TAB_TO_PATH[tab] || '/chat',
+    query: withoutLegacyTab(to.query),
+    hash: to.hash
+  }
+}
+
+const legacyPathSegments = (rawPathMatch) => {
+  if (Array.isArray(rawPathMatch)) {
+    return rawPathMatch.map((segment) => String(segment)).filter(Boolean)
+  }
+  return String(rawPathMatch || '').split('/').filter(Boolean)
+}
+
+export const redirectLegacyIntelligentQueryPath = (to) => {
+  const segments = legacyPathSegments(to.params.pathMatch)
+  const query = withoutLegacyTab(to.query)
+  const common = { query, hash: to.hash }
+
+  if (segments.length === 1) {
+    const routeNames = {
+      chat: 'IntelligentQueryChat',
+      skills: 'IntelligentQuerySkills',
+      agents: 'IntelligentQueryAgents',
+      models: 'IntelligentQueryModels',
+      widget: 'IntelligentQueryWidget'
+    }
+    const name = routeNames[segments[0]]
+    if (name) return { name, params: {}, ...common }
+  }
+
+  if (segments.length === 2 && segments[0] === 'skills') {
+    return {
+      name: 'IntelligentQuerySkillDetail',
+      params: { folder: segments[1] },
+      ...common
+    }
+  }
+
+  if (segments.length === 2 && segments[0] === 'agents') {
+    return {
+      name: 'IntelligentQueryAgentDetail',
+      params: { agentId: segments[1] },
+      ...common
+    }
+  }
+
+  return { path: '/chat', ...common }
 }
 
 export const routes = [
-  {
-    path: '/',
-    redirect: '/intelligent-query/chat'
-  },
   {
     path: '/login',
     name: 'Login',
@@ -30,13 +76,12 @@ export const routes = [
     meta: { public: true, title: '登录' }
   },
   {
-    path: '/intelligent-query',
+    path: '/',
     component: () => import('@/views/intelligence/IntelligentQueryView.vue'),
     children: [
       {
         path: '',
-        // Honour legacy `/intelligent-query?tab=skills` style links.
-        redirect: redirectLegacyTab
+        redirect: (to) => ({ path: '/chat', query: to.query, hash: to.hash })
       },
       {
         path: 'chat',
@@ -75,7 +120,7 @@ export const routes = [
         meta: { tab: 'models', title: '模型管理', adminOnly: true }
       },
       {
-        path: 'widget',
+        path: 'widget-access',
         name: 'IntelligentQueryWidget',
         component: () => import('@/views/settings/WidgetAccessConfig.vue'),
         meta: { tab: 'widget', title: 'Widget 接入', adminOnly: true }
@@ -83,9 +128,17 @@ export const routes = [
     ]
   },
   {
+    path: '/intelligent-query',
+    redirect: redirectLegacyTab
+  },
+  {
+    path: '/intelligent-query/:pathMatch(.*)*',
+    redirect: redirectLegacyIntelligentQueryPath
+  },
+  {
     path: '/nl2sql',
-    // Reuse the legacy tab mapping so /nl2sql?tab=skills lands on the matching
-    // section (and drops the now-unused tab param) instead of always Chat.
+    // Keep old bookmarks usable while removing this implementation term from
+    // the final browser URL.
     redirect: redirectLegacyTab
   }
 ]
@@ -108,7 +161,7 @@ router.beforeEach(async (to) => {
   if (to.meta?.public) {
     // 已登录再访问 /login：直接回应用。
     if (to.name === 'Login' && authStore.currentUser) {
-      return { path: '/intelligent-query/chat' }
+      return { path: '/chat' }
     }
     return true
   }
@@ -116,7 +169,7 @@ router.beforeEach(async (to) => {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
   if (to.meta?.adminOnly && !authStore.isAdmin) {
-    return { path: '/intelligent-query/chat' }
+    return { path: '/chat' }
   }
   return true
 })

@@ -60,7 +60,7 @@ Use this method if you have internet access and are deploying directly from the 
    主链路默认地址：
    - 门户首页: `http://localhost:8081/`
    - 主前端智能问数入口: `http://localhost:8081/intelligent-query`
-   - DataAgent Frontend: `http://localhost:8901/`
+   - DataAgent Frontend: `http://localhost:8901/chat`
    - DataAgent Backend: `http://localhost:8900`
    - Portal MCP Health: `http://localhost:8801/health`
    - Portal MCP Streamable HTTP: `http://localhost:8801/mcp/`
@@ -140,7 +140,7 @@ Use this method for isolated environments without internet access. You will use 
    离线包中的主链地址：
    - 门户首页: `http://localhost:8081/`
    - 主前端智能问数入口: `http://localhost:8081/intelligent-query`
-   - DataAgent Frontend: `http://localhost:8901/`
+   - DataAgent Frontend: `http://localhost:8901/chat`
    - DataAgent Backend: `http://localhost:8900`
    - Portal MCP Health: `http://localhost:8801/health`
    - Portal MCP Streamable HTTP: `http://localhost:8801/mcp/`

@@ -25,7 +25,7 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 const routeState = vi.hoisted(() => ({
-  path: '/intelligent-query/chat',
+  path: '/chat',
   name: 'IntelligentQueryChat',
   query: {},
   params: {}
@@ -219,7 +219,7 @@ describe('NL2SqlChatV2 URL location', () => {
       topic_id: '', page: 1, page_size: 500, order: 'asc', total: 0, items: []
     })
 
-    routeState.path = '/intelligent-query/chat'
+    routeState.path = '/chat'
     routeState.name = 'IntelligentQueryChat'
     routeState.query = {}
     routeState.params = {}
@@ -440,7 +440,7 @@ describe('NL2SqlChatV2 URL location', () => {
       order: 'asc'
     })
     expect(routerReplace).toHaveBeenLastCalledWith({
-      path: '/intelligent-query/chat',
+      path: '/chat',
       query: {
         topic_id: 'topic-2'
       }
@@ -479,7 +479,7 @@ describe('NL2SqlChatV2 URL location', () => {
     expect(wrapper.text()).not.toContain('first answer')
     expect(wrapper.find('.v2-session-item.active').exists()).toBe(false)
     expect(routerReplace).toHaveBeenLastCalledWith({
-      path: '/intelligent-query/chat',
+      path: '/chat',
       query: {
         agent_id: 'agent_sales'
       }

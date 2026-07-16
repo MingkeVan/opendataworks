@@ -111,7 +111,7 @@ server {
 | 组件 | 文件 | 说明 |
 | --- | --- | --- |
 | Backend | `application.yml` | DB、Dolphin/Dinky、日志、CORS |
-| Frontend | `frontend/nginx.conf` | 反向代理 `/api/` 至 `backend:8080/api/`，仅代理 `/dataagent/widget/` 至 `dataagent-frontend:80/widget/`（内嵌 Agent问答 widget bundle），并代理 `/api/v1/dataagent/`、`/api/v1/nl2sql-admin/`、`/api/v1/nl2sql/` 至 `dataagent-backend:8900`；DataAgent 完整前端经 `dataagent-frontend`（:8901）根路径直接访问 |
+| Frontend | `frontend/nginx.conf` | 反向代理 `/api/` 至 `backend:8080/api/`，仅代理 `/dataagent/widget/` 至 `dataagent-frontend:80/widget/`（内嵌 Agent问答 widget bundle），并代理 `/api/v1/dataagent/`、`/api/v1/nl2sql-admin/`、`/api/v1/nl2sql/` 至 `dataagent-backend:8900`；DataAgent 完整前端经 `dataagent-frontend`（:8901）的 `/chat` 等页面路径直接访问 |
 | DataAgent Frontend | `dataagent/dataagent-frontend` | 智能问数独立前端、管理页与 Widget bundle |
 | DataAgent Backend | `dataagent/dataagent-backend` | 智能问数 API、Skills 管理、NL2SQL 会话服务 |
 | Opendataagent | `opendataagent/deploy/.env.example` | 独立 agent 平台的端口、数据库和管理员令牌 |
