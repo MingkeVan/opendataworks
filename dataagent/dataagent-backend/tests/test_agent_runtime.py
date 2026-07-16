@@ -399,7 +399,7 @@ def test_workspace_boundary_allows_offloaded_tool_result_read(tmp_path: Path):
 
     # Oversized tool results are offloaded to
     # <HOME>/.claude/projects/<encoded-cwd>/<session>/tool-results/<id>.{txt,json}
-    # and the agent is told to Read that path; only that read is allowed.
+    # and the agent is pointed at that path; Read is allowed to view it directly.
     tool_results = _claude_project_dir(home, workspace) / "session-abc" / "tool-results"
     for name in ("toolu_01.txt", "toolu_02.json"):
         assert agent_runtime._validate_workspace_tool_boundary(
@@ -409,6 +409,122 @@ def test_workspace_boundary_allows_offloaded_tool_result_read(tmp_path: Path):
             allowed_roots,
             runtime_env,
         ) is None
+
+
+def test_workspace_boundary_allows_bash_view_of_offloaded_tool_result(tmp_path: Path):
+    home = tmp_path / "home"
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable, "HOME": str(home)}
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
+
+    # The CLI's "Full output saved to: <path>" pointer does not say which tool to
+    # use, so an agent that *views* the offloaded result with a read-only Bash
+    # command (instead of Read) must not be denied as "outside workspace".
+    tool_result_file = (
+        _claude_project_dir(home, workspace) / "session-abc" / "tool-results" / "toolu_01.txt"
+    )
+    for command in (
+        f"cat {tool_result_file}",
+        f"head -n 50 {tool_result_file}",
+        f"grep foo {tool_result_file}",
+        f"tail -n 5 {tool_result_file} | head",
+    ):
+        assert agent_runtime._validate_workspace_tool_boundary(
+            "Bash",
+            {"command": command},
+            workspace,
+            allowed_roots,
+            runtime_env,
+        ) is None, f"expected read-only view {command!r} to be allowed"
+
+
+def test_workspace_boundary_denies_bash_mutation_of_offloaded_tool_result(tmp_path: Path):
+    home = tmp_path / "home"
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable, "HOME": str(home)}
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
+
+    tool_result_file = (
+        _claude_project_dir(home, workspace) / "session-abc" / "tool-results" / "toolu_01.txt"
+    )
+    outside_target = tmp_path / "outside.txt"
+
+    # The offloaded-result allowance is read-only. Commands that would delete,
+    # move, execute, or overwrite the file (which lives outside the workspace)
+    # must not slip through the exception, and neither may a redirect target,
+    # including the no-space forms shlex.split hides inside a glued token.
+    for command in (
+        f"rm {tool_result_file}",
+        f"mv {tool_result_file} {workspace / 'copy.txt'}",
+        f"python {tool_result_file}",
+        f"tee {tool_result_file}",
+        f"cat {tool_result_file} > {outside_target}",
+        f"cat {tool_result_file} >{outside_target}",
+        f"cat {tool_result_file} >>{outside_target}",
+        f"cat {tool_result_file} 2>{outside_target}",
+        f"cat foo >{tool_result_file}",
+    ):
+        denial = agent_runtime._validate_workspace_tool_boundary(
+            "Bash",
+            {"command": command},
+            workspace,
+            allowed_roots,
+            runtime_env,
+        )
+        assert denial is not None, f"expected denial for {command!r}"
+        assert "outside workspace" in denial
+
+
+def test_workspace_boundary_denies_complex_bash_with_offloaded_tool_result(tmp_path: Path):
+    home = tmp_path / "home"
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable, "HOME": str(home)}
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
+
+    tool_result_file = (
+        _claude_project_dir(home, workspace) / "session-abc" / "tool-results" / "toolu_01.txt"
+    )
+
+    for command in (
+        f"cat {tool_result_file}\nrm {tool_result_file}",
+        f"cat <(rm {tool_result_file})",
+        f"cat <(python {tool_result_file})",
+    ):
+        denial = agent_runtime._validate_workspace_tool_boundary(
+            "Bash",
+            {"command": command},
+            workspace,
+            allowed_roots,
+            runtime_env,
+        )
+        assert denial is not None, f"expected denial for {command!r}"
+        assert "unsupported shell syntax" in denial
+
+
+def test_workspace_boundary_denies_pager_view_of_offloaded_tool_result(tmp_path: Path):
+    home = tmp_path / "home"
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable, "HOME": str(home)}
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
+
+    tool_result_file = (
+        _claude_project_dir(home, workspace) / "session-abc" / "tool-results" / "toolu_01.txt"
+    )
+
+    for command in (f"less {tool_result_file}", f"more {tool_result_file}"):
+        denial = agent_runtime._validate_workspace_tool_boundary(
+            "Bash",
+            {"command": command},
+            workspace,
+            allowed_roots,
+            runtime_env,
+        )
+        assert denial is not None, f"expected denial for {command!r}"
+        assert "outside workspace" in denial
 
 
 def test_workspace_boundary_denies_session_state_and_non_read_tools(tmp_path: Path):
@@ -438,11 +554,14 @@ def test_workspace_boundary_denies_session_state_and_non_read_tools(tmp_path: Pa
         assert denial is not None, f"expected Read denial for {target}"
         assert "outside workspace" in denial
 
-    # The exception is Read-only; LS/Glob/Grep into the tool-results dir stay denied.
+    # The exception only covers Read and Bash on the offloaded file itself;
+    # LS/Glob/Grep into the tool-results dir stay denied, and Bash into the
+    # dir (rather than an exact offloaded file) stays denied too.
     for tool_name, payload in (
         ("LS", {"path": str(tool_results)}),
         ("Glob", {"path": str(tool_results), "pattern": "*.txt"}),
         ("Grep", {"path": str(tool_results)}),
+        ("Bash", {"command": f"ls {tool_results}"}),
     ):
         denial = agent_runtime._validate_workspace_tool_boundary(
             tool_name, payload, workspace, allowed_roots, runtime_env
