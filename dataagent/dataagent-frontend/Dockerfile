@@ -8,7 +8,7 @@ RUN npm install
 COPY dataagent/dataagent-frontend ./
 RUN npm run build && npm run build:widget
 
-FROM nginx:alpine
+FROM nginx:1.30.3-alpine
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY dataagent/dataagent-frontend/nginx.conf /etc/nginx/conf.d/default.conf

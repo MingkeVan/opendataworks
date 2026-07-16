@@ -19,7 +19,7 @@ COPY . .
 RUN npm run build
 
 # 生产运行镜像 - 使用 nginx 提供静态文件
-FROM nginx:alpine
+FROM nginx:1.30.3-alpine
 
 # 复制构建产物到 nginx
 COPY --from=builder /app/dist /usr/share/nginx/html
