@@ -4,7 +4,7 @@ import { createNl2SqlApiClient, DATAAGENT_CLIENT_HEADERS } from '@/api/nl2sql'
 const { authApi } = createNl2SqlApiClient({ defaultHeaders: DATAAGENT_CLIENT_HEADERS })
 
 // 只接受同源应用内路径，防开放重定向（与后端 sanitize_redirect_path 同规则）。
-export function sanitizeRedirectPath(raw, fallback = '/intelligent-query/chat') {
+export function sanitizeRedirectPath(raw, fallback = '/chat') {
   const value = String(raw || '').trim()
   if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\')) {
     return fallback

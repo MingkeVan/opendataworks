@@ -111,7 +111,7 @@ dataagent-frontend 独立 SPA 的所有 API client 显式携带 `X-ODW-Client: d
 
 ### 3.7 开放重定向防护
 
-登录页 `?redirect=` 与 OAuth 回跳只接受同源应用内路径：必须以单个 `/` 开头，拒绝绝对 URL、`//host` 协议相对形式、含 `\` 变体；非法值回落 `/intelligent-query`。
+登录页 `?redirect=` 与 OAuth 回跳只接受同源应用内路径：必须以单个 `/` 开头，拒绝绝对 URL、`//host` 协议相对形式、含 `\` 变体；非法值回落独立 DataAgent 的 `/chat`。
 
 ## 4. 数据模型
 

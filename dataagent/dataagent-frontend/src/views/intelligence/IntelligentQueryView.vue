@@ -77,13 +77,13 @@ const handleUserCommand = async (command) => {
   router.push('/login')
 }
 
-// Each menu entry maps to a real child route under /intelligent-query.
+// Each menu entry maps directly to a user-facing page route.
 const MENU_TO_PATH = {
-  'chat-v2': '/intelligent-query/chat',
-  skills: '/intelligent-query/skills',
-  agents: '/intelligent-query/agents',
-  models: '/intelligent-query/models',
-  widget: '/intelligent-query/widget'
+  'chat-v2': '/chat',
+  skills: '/skills',
+  agents: '/agents',
+  models: '/models',
+  widget: '/widget-access'
 }
 
 const brandLogo = `${import.meta.env.BASE_URL}opendataworks-icon.svg`

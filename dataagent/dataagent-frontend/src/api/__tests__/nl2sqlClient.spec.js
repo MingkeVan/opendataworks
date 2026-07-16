@@ -211,8 +211,8 @@ describe('auth wiring', () => {
     client.authApi.login('admin', 'pw')
     expect(clients[0].post).toHaveBeenCalledWith('/auth/login', { username: 'admin', password: 'pw' })
 
-    expect(client.authApi.oauthAuthorizeUrl('/intelligent-query/chat')).toBe(
-      'https://odw.example.com/api/v1/nl2sql/auth/oauth/authorize?redirect=%2Fintelligent-query%2Fchat'
+    expect(client.authApi.oauthAuthorizeUrl('/chat')).toBe(
+      'https://odw.example.com/api/v1/nl2sql/auth/oauth/authorize?redirect=%2Fchat'
     )
   })
 

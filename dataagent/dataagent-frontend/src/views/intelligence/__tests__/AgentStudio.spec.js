@@ -81,4 +81,16 @@ describe('AgentStudio', () => {
       params: { agentId: 'agent_1' }
     })
   })
+
+  it('opens an agent chat through the readable chat URL', async () => {
+    const wrapper = shallowMount(AgentStudio, { global: { stubs } })
+
+    await flushPromises()
+    wrapper.vm.handleChat({ agent_id: 'agent_default' })
+
+    expect(routerPush).toHaveBeenCalledWith({
+      path: '/chat',
+      query: { agent_id: 'agent_default' }
+    })
+  })
 })

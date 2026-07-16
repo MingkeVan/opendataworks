@@ -339,7 +339,7 @@ const goBack = () => {
 }
 
 const openChat = () => {
-  router.push({ path: '/intelligent-query/chat', query: { agent_id: form.agent_id } })
+  router.push({ path: '/chat', query: { agent_id: form.agent_id } })
 }
 
 onMounted(loadDetail)

@@ -4,7 +4,7 @@ import { createPinia } from 'pinia'
 
 const routerPush = vi.hoisted(() => vi.fn())
 const routeState = vi.hoisted(() => ({
-  path: '/intelligent-query/chat',
+  path: '/chat',
   name: 'IntelligentQueryChat',
   query: {},
   params: {},
@@ -36,7 +36,7 @@ const stubs = {
 }
 
 const mountView = (route = {}) => {
-  routeState.path = route.path || '/intelligent-query/chat'
+  routeState.path = route.path || '/chat'
   routeState.name = route.name || 'IntelligentQueryChat'
   routeState.query = route.query || {}
   routeState.params = route.params || {}
@@ -62,7 +62,7 @@ describe('IntelligentQueryView', () => {
 
   it('highlights the menu entry from the matched route meta', () => {
     const wrapper = mountView({
-      path: '/intelligent-query/skills',
+      path: '/skills',
       name: 'IntelligentQuerySkills',
       meta: { tab: 'skills' }
     })
@@ -72,7 +72,7 @@ describe('IntelligentQueryView', () => {
 
   it('falls back to chat when the route meta has no tab', () => {
     const wrapper = mountView({
-      path: '/intelligent-query/chat',
+      path: '/chat',
       name: 'IntelligentQueryChat',
       meta: {}
     })
@@ -84,15 +84,18 @@ describe('IntelligentQueryView', () => {
     const wrapper = mountView()
 
     await wrapper.vm.handleMenuSelect('models')
-    expect(routerPush).toHaveBeenCalledWith('/intelligent-query/models')
+    expect(routerPush).toHaveBeenCalledWith('/models')
 
     await wrapper.vm.handleMenuSelect('skills')
-    expect(routerPush).toHaveBeenCalledWith('/intelligent-query/skills')
+    expect(routerPush).toHaveBeenCalledWith('/skills')
+
+    await wrapper.vm.handleMenuSelect('widget')
+    expect(routerPush).toHaveBeenCalledWith('/widget-access')
   })
 
   it('does not navigate when selecting the already active route', async () => {
     const wrapper = mountView({
-      path: '/intelligent-query/models',
+      path: '/models',
       name: 'IntelligentQueryModels',
       meta: { tab: 'models' }
     })
@@ -103,7 +106,7 @@ describe('IntelligentQueryView', () => {
 
   it('keeps Skills highlighted on the skill detail route', () => {
     const wrapper = mountView({
-      path: '/intelligent-query/skills/marketing-insights',
+      path: '/skills/marketing-insights',
       name: 'IntelligentQuerySkillDetail',
       params: { folder: 'marketing-insights' },
       meta: { tab: 'skills' }
@@ -114,7 +117,7 @@ describe('IntelligentQueryView', () => {
 
   it('keeps 智能体 highlighted on the agent detail route', () => {
     const wrapper = mountView({
-      path: '/intelligent-query/agents/agent_1',
+      path: '/agents/agent_1',
       name: 'IntelligentQueryAgentDetail',
       params: { agentId: 'agent_1' },
       meta: { tab: 'agents' }

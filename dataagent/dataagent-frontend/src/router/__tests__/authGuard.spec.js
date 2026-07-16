@@ -10,7 +10,7 @@ const authState = vi.hoisted(() => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => authState,
-  sanitizeRedirectPath: (raw, fallback = '/intelligent-query/chat') => {
+  sanitizeRedirectPath: (raw, fallback = '/chat') => {
     const value = String(raw || '').trim()
     if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return fallback
     return value
@@ -49,44 +49,52 @@ describe('auth router guard', () => {
   })
 
   it('is transparent when auth is disabled', async () => {
-    const route = await navigate('/intelligent-query/chat')
-    expect(route.path).toBe('/intelligent-query/chat')
+    const route = await navigate('/chat')
+    expect(route.path).toBe('/chat')
   })
 
   it('redirects unauthenticated users to /login with redirect', async () => {
     authState.enabled = true
-    const route = await navigate('/intelligent-query/chat')
+    const route = await navigate('/chat')
     expect(route.path).toBe('/login')
-    expect(route.query.redirect).toContain('/intelligent-query/chat')
+    expect(route.query.redirect).toContain('/chat')
   })
 
   it('lets authenticated users through', async () => {
     authState.enabled = true
     authState.currentUser = { username: 'alice', role: 'user' }
-    const route = await navigate('/intelligent-query/chat')
-    expect(route.path).toBe('/intelligent-query/chat')
+    const route = await navigate('/chat')
+    expect(route.path).toBe('/chat')
   })
 
   it('blocks non-admin users from admin-only routes', async () => {
     authState.enabled = true
     authState.currentUser = { username: 'alice', role: 'user' }
     authState.isAdmin = false
+    const route = await navigate('/models')
+    expect(route.path).toBe('/chat')
+  })
+
+  it('applies the canonical admin guard after a legacy route redirect', async () => {
+    authState.enabled = true
+    authState.currentUser = { username: 'alice', role: 'user' }
+    authState.isAdmin = false
     const route = await navigate('/intelligent-query/models')
-    expect(route.path).toBe('/intelligent-query/chat')
+    expect(route.path).toBe('/chat')
   })
 
   it('lets admins into admin-only routes', async () => {
     authState.enabled = true
     authState.currentUser = { username: 'admin', role: 'admin' }
     authState.isAdmin = true
-    const route = await navigate('/intelligent-query/models')
-    expect(route.path).toBe('/intelligent-query/models')
+    const route = await navigate('/models')
+    expect(route.path).toBe('/models')
   })
 
   it('bounces a logged-in user away from /login', async () => {
     authState.enabled = true
     authState.currentUser = { username: 'alice', role: 'user' }
     const route = await navigate('/login')
-    expect(route.path).toBe('/intelligent-query/chat')
+    expect(route.path).toBe('/chat')
   })
 })

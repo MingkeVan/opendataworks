@@ -9,6 +9,7 @@
 说明：
 
 - 主应用 `frontend` 不再编译智能问数页面源码；入口 `/intelligent-query` 通过远程 `OpenDataWorksWidget` JS 以内嵌模式加载 DataAgent 问答页。
+- 独立 `dataagent-frontend` 使用面向用户的页面路径：`/chat`、`/skills`、`/agents`、`/models`、`/widget-access`；`/intelligent-query`、`/intelligent-query/*` 与 `/nl2sql` 仅作为旧链接兼容入口。
 - `dataagent-frontend` 是模型、Skills、智能体、Widget 接入配置等 DataAgent 管理 UI 的归属目录，并负责构建 `/widget/opendataworks-widget.bundle.js`。本地联调时，若需要 portal 正确加载 widget，需在 `dataagent-frontend` 目录下先执行一次 `npm run build:widget`，后续 widget 源码有改动时同样需要重新执行。
 - 原 Java `dataagent-backend` 模块已删除。
 - 通用问数 SQL 方法、表字段发现策略、SQL 前检查和结果收口已收敛到 `dataagent-backend/prompts/data_agent_system_prompt.md`，不再由独立通用问数 skill 承载。

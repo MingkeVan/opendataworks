@@ -26,11 +26,11 @@ describe('sanitizeRedirectPath', () => {
     [''],
     [null]
   ])('rejects unsafe value %s', (raw) => {
-    expect(sanitizeRedirectPath(raw)).toBe('/intelligent-query/chat')
+    expect(sanitizeRedirectPath(raw)).toBe('/chat')
   })
 
   it('accepts same-origin app paths', () => {
-    expect(sanitizeRedirectPath('/intelligent-query/chat?x=1')).toBe('/intelligent-query/chat?x=1')
+    expect(sanitizeRedirectPath('/chat?x=1')).toBe('/chat?x=1')
   })
 })
 

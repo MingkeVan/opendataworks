@@ -129,4 +129,16 @@ describe('AgentDetailView', () => {
       { cluster_id: 3, source_type: 'DORIS', database: 'ads_user' }
     ])
   })
+
+  it('opens chat through the readable chat URL', async () => {
+    const wrapper = shallowMount(AgentDetailView, { global: { stubs } })
+
+    await flushPromises()
+    wrapper.vm.openChat()
+
+    expect(routerPush).toHaveBeenCalledWith({
+      path: '/chat',
+      query: { agent_id: 'agent_1' }
+    })
+  })
 })

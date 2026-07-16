@@ -932,7 +932,7 @@ function replaceRouteTopic(topicId, messageId = '') {
   }
 
   const navigation = router.replace({
-    path: route.path || '/intelligent-query/chat',
+    path: route.path || '/chat',
     query,
   })
   if (navigation?.catch) {
