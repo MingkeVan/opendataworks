@@ -60,9 +60,10 @@ _OFFLOADED_TOOL_RESULT_SUFFIXES = frozenset({".txt", ".json"})
 _BASH_OPERATOR_CHARS = frozenset("();<>|&")
 _BASH_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # The offloaded tool-result file lives outside the workspace, so the only Bash use
-# the boundary hook permits is *viewing* it. These command words read their inputs
-# to stdout and have no default option that writes to a path argument, so granting
-# the tool-result exception to their non-redirect arguments stays read-only.
+# the boundary hook permits is *viewing* it. These command words behave as simple
+# read filters for path arguments, so granting the tool-result exception to their
+# non-redirect arguments stays read-only. Pagers such as less/more are excluded
+# because environment hooks such as LESSOPEN can execute arbitrary preprocessors.
 # Mutating/executing commands (rm, mv, cp, tee, dd, sed -i, python, ...) and
 # redirect targets are intentionally excluded and fall through to denial.
 _BASH_READONLY_COMMANDS = frozenset(
@@ -71,8 +72,6 @@ _BASH_READONLY_COMMANDS = frozenset(
         "tac",
         "head",
         "tail",
-        "less",
-        "more",
         "nl",
         "wc",
         "cut",
@@ -261,6 +260,27 @@ def _tokenize_bash_command(command: str) -> list[str]:
         return command.split()
 
 
+def _bash_command_has_linebreak(command: str) -> bool:
+    return "\n" in command or "\r" in command
+
+
+def _bash_command_has_process_substitution(tokens: list[str]) -> bool:
+    return any(token in {"<(", ">("} for token in tokens)
+
+
+def _bash_references_offloaded_tool_result(tokens: list[str], tool_result_root: Path | None) -> bool:
+    if tool_result_root is None:
+        return False
+    for token in tokens:
+        normalized = _normalize_bash_token(token)
+        if not normalized.startswith("/"):
+            continue
+        candidate = Path(normalized).expanduser().resolve(strict=False)
+        if _is_offloaded_tool_result_path(candidate, tool_result_root):
+            return True
+    return False
+
+
 def _classify_bash_operator(token: str) -> str | None:
     """Return ``"redirect"``/``"separator"`` when ``token`` is a shell operator.
 
@@ -282,6 +302,14 @@ def _validate_bash_workspace_boundary(
     if _BASH_PARENT_SEGMENT_RE.search(command.replace("\\", "/")):
         return "Bash command uses a parent directory segment; stay inside the current agent workspace."
     tokens = _tokenize_bash_command(command)
+
+    if _bash_references_offloaded_tool_result(tokens, tool_result_root) and (
+        _bash_command_has_linebreak(command) or _bash_command_has_process_substitution(tokens)
+    ):
+        return (
+            "Bash command uses unsupported shell syntax with an offloaded tool result; "
+            "use Read or a simple single-line read-only command."
+        )
 
     python_bin = str((runtime_env or {}).get("DATAAGENT_PYTHON_BIN") or "").strip()
     allowed_executable = Path(python_bin).expanduser().resolve(strict=False) if python_bin else None

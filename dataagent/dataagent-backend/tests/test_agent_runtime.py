@@ -477,6 +477,56 @@ def test_workspace_boundary_denies_bash_mutation_of_offloaded_tool_result(tmp_pa
         assert "outside workspace" in denial
 
 
+def test_workspace_boundary_denies_complex_bash_with_offloaded_tool_result(tmp_path: Path):
+    home = tmp_path / "home"
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable, "HOME": str(home)}
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
+
+    tool_result_file = (
+        _claude_project_dir(home, workspace) / "session-abc" / "tool-results" / "toolu_01.txt"
+    )
+
+    for command in (
+        f"cat {tool_result_file}\nrm {tool_result_file}",
+        f"cat <(rm {tool_result_file})",
+        f"cat <(python {tool_result_file})",
+    ):
+        denial = agent_runtime._validate_workspace_tool_boundary(
+            "Bash",
+            {"command": command},
+            workspace,
+            allowed_roots,
+            runtime_env,
+        )
+        assert denial is not None, f"expected denial for {command!r}"
+        assert "unsupported shell syntax" in denial
+
+
+def test_workspace_boundary_denies_pager_view_of_offloaded_tool_result(tmp_path: Path):
+    home = tmp_path / "home"
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable, "HOME": str(home)}
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
+
+    tool_result_file = (
+        _claude_project_dir(home, workspace) / "session-abc" / "tool-results" / "toolu_01.txt"
+    )
+
+    for command in (f"less {tool_result_file}", f"more {tool_result_file}"):
+        denial = agent_runtime._validate_workspace_tool_boundary(
+            "Bash",
+            {"command": command},
+            workspace,
+            allowed_roots,
+            runtime_env,
+        )
+        assert denial is not None, f"expected denial for {command!r}"
+        assert "outside workspace" in denial
+
+
 def test_workspace_boundary_denies_session_state_and_non_read_tools(tmp_path: Path):
     home = tmp_path / "home"
     workspace = tmp_path / "runtime" / "topic_1" / "workspace"
