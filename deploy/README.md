@@ -261,7 +261,7 @@ DataAgent（智能问数）支持可选的 OAuth2 + 本地管理员登录，以�
 |---|---|
 | `docker/dataagent/dataagent_config.py` | 仓库自带基础配置（默认 `AUTH_ENABLED=False`，**不要直接改**，升级会覆盖）；末尾自动加载同目录用户覆盖 |
 | `docker/dataagent/dataagent_config_docker.py.example` | 用户覆盖示例（认证 + `DATAAGENT_SETTINGS` 运行时覆盖）；拷贝为 `dataagent_config_docker.py` 后填写 |
-| `docker/dataagent/custom_sso_user_mapper.py.example` | 非标准 IdP 的 userinfo 映射钩子示例（Superset `custom_sso_security_manager.py` 对应物）；拷贝为 `custom_sso_user_mapper.py` 并在覆盖配置里挂 `OAUTH_USERINFO_MAPPER` |
+| `docker/dataagent/custom_sso_user_info.py.example` | UserInfo 获取与归一化钩子示例（Superset `SecurityManager.oauth_user_info` 对应物）；拷贝为 `custom_sso_user_info.py` 并在覆盖配置里挂 `OAUTH_USER_INFO` |
 | `docker/dataagent/.gitignore` | 忽略一切用户文件，只保留自带文件与 `.example` |
 | `docker/nginx/frontend.conf`、`docker/nginx/dataagent-frontend.conf` | 两个前端 nginx 配置的宿主机副本；默认仍用镜像内构建版本，取消 compose 中对应服务 volumes 注释即可切换为宿主机管理 |
 
@@ -269,6 +269,7 @@ DataAgent（智能问数）支持可选的 OAuth2 + 本地管理员登录，以�
 
 1. `cd deploy/docker/dataagent && cp dataagent_config_docker.py.example dataagent_config_docker.py`
 2. 按注释填写 `SECRET_KEY`（`secrets.token_urlsafe(32)` 生成）、`LOCAL_ADMINS`（bcrypt 哈希）、单项 `OAUTH_PROVIDERS`（Superset/FAB `remote_app` 形态，`icon` 支持 Font Awesome 4 class）、`ADMIN_USERS`（`provider:sub` 稳定标识），置 `AUTH_ENABLED = True`。
+   OAuth 的 `redirect_uri` 必须注册为 `https://<dataagent-host>/oauth-authorized/<provider_name>`；`api_base_url`、`response_type` 与 `grant_type` 在 `remote_app` 中配置。OAuth 启用时还必须从自定义模块导入 `OAUTH_USER_INFO(provider, token_response, oauth_remotes)`；钩子可通过 `oauth_remotes[provider].get("userinfo")` 获取并归一化用户信息。
    早期版本的扁平 `OAUTH` 不再接受；检测到非空旧配置时服务会
    fail-closed 启动失败并提示迁移，避免静默丢失 OAuth 登录。
 3. 重启 `dataagent-backend`。无需修改 compose。需要自定义扩展模块（如自研 SSO 适配）时，直接把 `.py` 放进同目录并在覆盖文件里 import（目录在 `sys.path` 上）。

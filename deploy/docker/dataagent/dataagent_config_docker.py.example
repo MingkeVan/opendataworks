@@ -3,7 +3,7 @@
 拷贝本文件为同目录下的 `dataagent_config_docker.py`（已被 .gitignore 忽略，
 不会入库），按需修改后重启 dataagent-backend 即生效。本目录在容器内位于
 `sys.path` 上，你也可以像 Superset 的 custom_sso_security_manager.py 一样在
-同目录放自定义模块并在这里 import（示例见 custom_sso_user_mapper.py.example）。
+同目录放自定义模块并在这里 import（示例见 custom_sso_user_info.py.example）。
 """
 
 # ---------------------------------------------------------------------------
@@ -45,7 +45,8 @@ LOCAL_ADMINS = [
 # ---------------------------------------------------------------------------
 OAUTH_PROVIDERS = [
     # {
-    #     # Provider 键和登录按钮显示名，也作为用户稳定标识前缀。
+    #     # Provider 键和登录按钮显示名，也作为用户稳定标识前缀；应使用
+    #     # 1-64 位安全 key（如 SSO / github），不能使用保留值 local。
     #     "name": "SSO",
     #     # Font Awesome 4 class，如 fa-github / fa-google；留空则不显示图标。
     #     "icon": "fa-github",
@@ -56,33 +57,33 @@ OAUTH_PROVIDERS = [
     #         "client_secret": "your-client-secret",
     #         "authorize_url": "https://sso.example.com/oauth/authorize",
     #         "access_token_url": "https://sso.example.com/oauth/token",
+    #         # oauth_remotes[provider].get("userinfo") 的相对 URL 基址。
+    #         "api_base_url": "https://sso.example.com/oauth/",
     #         "client_kwargs": {"scope": "openid profile"},
-    #         # 必须与 IdP 侧注册的回调一致：
-    #         #   https://<dataagent-host>/api/v1/nl2sql/auth/oauth/callback
-    #         "redirect_uri": "https://<dataagent-host>/api/v1/nl2sql/auth/oauth/callback",
-    #         # DataAgent 传输层固定使用 code / authorization_code，无需配置。
+    #         # 必须与 IdP 侧注册的回调一致，路径遵循 FAB/Superset 约定，
+    #         # 末段与上面的 name 完全一致：
+    #         #   https://<dataagent-host>/oauth-authorized/SSO
+    #         "redirect_uri": "https://<dataagent-host>/oauth-authorized/SSO",
+    #         # DataAgent 当前只实现授权码模式；其他值会 fail-closed 启动失败。
+    #         "response_type": "code",
+    #         "grant_type": "authorization_code",
     #     },
-    #     # 以下是 DataAgent 扩展字段：按需拉取 userinfo 并映射用户。
-    #     "userinfo_url": "https://sso.example.com/oauth/userinfo",
-    #     # userinfo 响应里的用户唯一标识与显示名字段（标准平铺 payload 时用）。
-    #     "user_id_field": "sub",
-    #     "username_field": "preferred_username",
     # }
 ]
 
 # ---------------------------------------------------------------------------
-# 非标准 IdP 的 userinfo 映射钩子（可选，Superset custom_sso_security_manager
-# 的 oauth_user_info 对应物）。配置后 user_id_field / username_field 不再生效，
-# 由钩子完全接管 payload 解析。示例：
+# UserInfo 获取与归一化钩子（OAuth 启用时必填），语义对应 Superset/FAB
+# custom SecurityManager.oauth_user_info(provider, token_response)。端点和 Provider
+# 特定解析逻辑放在自定义模块，不进入通用 OAUTH_PROVIDERS。示例：
 #
-#   from custom_sso_user_mapper import map_sso_userinfo
-#   OAUTH_USERINFO_MAPPER = map_sso_userinfo
+#   from custom_sso_user_info import oauth_user_info
+#   OAUTH_USER_INFO = oauth_user_info
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# OAuth 用户提名为管理员：条目为 "<provider_name>:<user_id_field值>"（稳定标识，
-# 即 provider:sub）。username 可变、不保证唯一，不参与提权。
-# 若 OAUTH_USERINFO_MAPPER 返回了 role 字段，则以钩子返回为准。
+# OAuth 用户提名为管理员：条目为 "<provider_name>:<sub>"（稳定标识）。
+# username 可变、不保证唯一，不参与提权。
+# 若 OAUTH_USER_INFO 返回了 role 字段，则以钩子返回为准。
 # ---------------------------------------------------------------------------
 ADMIN_USERS = [
     # "SSO:1024",

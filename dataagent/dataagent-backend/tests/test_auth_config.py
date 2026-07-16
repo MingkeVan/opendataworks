@@ -34,6 +34,11 @@ from core.auth import (
 from core.topic_task_store import TopicTaskStore
 
 VALID_SECRET = "unit-test-secret-key-0123456789abcdef-0123456789"
+VALID_OAUTH_USER_INFO = (
+    "def _oauth_user_info(provider, token_response, oauth_remotes):\n"
+    "    return {'sub': 'test-sub'}\n"
+    "OAUTH_USER_INFO = _oauth_user_info\n"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -277,7 +282,7 @@ def test_broken_override_module_fails_startup(monkeypatch, tmp_path, _clean_over
 
 def test_override_with_missing_nested_import_fails_startup(monkeypatch, tmp_path, _clean_override_module):
     """P1 回归：覆盖文件存在但其内部 import 失败（如引用缺失的
-    custom_sso_user_mapper）必须让启动失败，绝不静默回落到认证关闭。"""
+    custom_sso_user_info）必须让启动失败，绝不静默回落到认证关闭。"""
     (tmp_path / "dataagent_config_docker.py").write_text(
         "from missing_custom_module import something\nAUTH_ENABLED = True\n",
         encoding="utf-8",
@@ -358,32 +363,54 @@ def test_dataagent_settings_must_be_dict(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# OAUTH_USERINFO_MAPPER 配置校验（回调行为见 test_auth_routes.py）
+# OAUTH_USER_INFO 配置校验（回调行为见 test_auth_routes.py）
 # ---------------------------------------------------------------------------
 
-def test_userinfo_mapper_must_be_callable(monkeypatch, tmp_path):
-    path = write_config(tmp_path, "OAUTH_USERINFO_MAPPER = 'not-callable'\n")
+def test_legacy_userinfo_mapper_requires_migration(monkeypatch, tmp_path):
+    path = write_config(tmp_path, "OAUTH_USERINFO_MAPPER = lambda userinfo: userinfo\n")
     monkeypatch.setenv(auth.AUTH_CONFIG_ENV, path)
-    with pytest.raises(AuthConfigError):
+    with pytest.raises(AuthConfigError, match="OAUTH_USER_INFO"):
         init_auth()
 
 
-def test_userinfo_mapper_is_captured(monkeypatch, tmp_path):
-    path = write_config(
-        tmp_path,
-        "def _mapper(userinfo):\n    return {\"user_id\": userinfo.get(\"uid\")}\n"
-        "OAUTH_USERINFO_MAPPER = _mapper\n",
-    )
+def test_oauth_user_info_must_be_callable(monkeypatch, tmp_path):
+    path = write_config(tmp_path, "OAUTH_USER_INFO = 'not-callable'\n")
+    monkeypatch.setenv(auth.AUTH_CONFIG_ENV, path)
+    with pytest.raises(AuthConfigError, match="callable"):
+        init_auth()
+
+
+def test_oauth_user_info_is_captured(monkeypatch, tmp_path):
+    path = write_config(tmp_path, VALID_OAUTH_USER_INFO)
     monkeypatch.setenv(auth.AUTH_CONFIG_ENV, path)
     settings = init_auth()
-    assert callable(settings.oauth_userinfo_mapper)
+    assert callable(settings.oauth_user_info)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "async def _handler(provider, token_response, oauth_remotes):\n    return {'sub': 'x'}\n"
+        "OAUTH_USER_INFO = _handler\n",
+        "class _Handler:\n"
+        "    async def __call__(self, provider, token_response, oauth_remotes):\n"
+        "        return {'sub': 'x'}\n"
+        "OAUTH_USER_INFO = _Handler()\n",
+        "def _handler(provider, token_response):\n    return {'sub': 'x'}\n"
+        "OAUTH_USER_INFO = _handler\n",
+    ],
+)
+def test_oauth_user_info_rejects_async_or_wrong_signature(tmp_path, body):
+    path = write_config(tmp_path, body)
+    with pytest.raises(AuthConfigError, match="OAUTH_USER_INFO"):
+        load_auth_settings(path)
 
 
 # ---------------------------------------------------------------------------
 # OAuth 启动期校验：callback 实际必需字段（P2 回归）
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("missing_field", ["userinfo_url", "redirect_uri"])
+@pytest.mark.parametrize("missing_field", ["api_base_url", "redirect_uri"])
 def test_oauth_missing_callback_required_field_fails_startup(tmp_path, missing_field):
     oauth_provider = {
         "name": "SSO",
@@ -393,18 +420,15 @@ def test_oauth_missing_callback_required_field_fails_startup(tmp_path, missing_f
             "client_secret": "secret",
             "authorize_url": "https://sso.example.com/authorize",
             "access_token_url": "https://sso.example.com/token",
-            "redirect_uri": "https://app.example.com/cb",
+            "api_base_url": "https://sso.example.com/api/",
+            "redirect_uri": "https://app.example.com/oauth-authorized/SSO",
         },
-        "userinfo_url": "https://sso.example.com/userinfo",
     }
-    if missing_field == "redirect_uri":
-        oauth_provider["remote_app"][missing_field] = ""
-    else:
-        oauth_provider[missing_field] = ""
+    oauth_provider["remote_app"][missing_field] = ""
     path = write_config(
         tmp_path,
         f"AUTH_ENABLED = True\nSECRET_KEY = {VALID_SECRET!r}\n"
-        f"OAUTH_PROVIDERS = {[oauth_provider]!r}\n",
+        f"OAUTH_PROVIDERS = {[oauth_provider]!r}\n{VALID_OAUTH_USER_INFO}",
     )
     with pytest.raises(AuthConfigError):
         load_auth_settings(path)
@@ -420,22 +444,167 @@ def test_oauth_providers_maps_superset_shape(tmp_path):
             "client_secret": "secret",
             "authorize_url": "https://github.com/login/oauth/authorize",
             "access_token_url": "https://github.com/login/oauth/access_token",
+            "api_base_url": "https://api.github.com/",
             "client_kwargs": {"scope": "read:user user:email"},
-            "redirect_uri": "https://app.example.com/callback",
+            "redirect_uri": "https://app.example.com/oauth-authorized/GitHub",
             "response_type": "code",
             "grant_type": "authorization_code",
         },
-        "userinfo_url": "https://api.github.com/user",
-        "user_id_field": "id",
-        "username_field": "login",
     }
-    path = write_config(tmp_path, f"OAUTH_PROVIDERS = {[provider]!r}\n")
+    path = write_config(
+        tmp_path,
+        f"OAUTH_PROVIDERS = {[provider]!r}\n{VALID_OAUTH_USER_INFO}",
+    )
     oauth = load_auth_settings(path).oauth
     assert oauth.provider_name == "GitHub"
     assert oauth.icon == "fa-github"
     assert oauth.token_url == provider["remote_app"]["access_token_url"]
+    assert oauth.api_base_url == provider["remote_app"]["api_base_url"]
     assert oauth.scopes == "read:user user:email"
-    assert oauth.user_id_field == "id"
+    assert oauth.response_type == "code"
+    assert oauth.grant_type == "authorization_code"
+
+
+@pytest.mark.parametrize(
+    "provider_name",
+    ["local", "LOCAL", "local:corp", ".", "..", "bad/name", "%2F", "-SSO", "S" * 65],
+)
+def test_oauth_provider_name_is_safe_path_and_identity_namespace(tmp_path, provider_name):
+    provider = {
+        "name": provider_name,
+        "remote_app": {
+            "client_id": "cid",
+            "authorize_url": "https://sso.example.com/authorize",
+            "access_token_url": "https://sso.example.com/token",
+            "api_base_url": "https://sso.example.com/api/",
+            "redirect_uri": f"https://app.example.com/oauth-authorized/{provider_name}",
+        },
+    }
+    path = write_config(tmp_path, f"OAUTH_PROVIDERS = {[provider]!r}\n")
+    with pytest.raises(AuthConfigError, match="Provider key"):
+        load_auth_settings(path)
+
+
+@pytest.mark.parametrize("field", ["userinfo_url", "user_id_field", "username_field"])
+def test_oauth_provider_rejects_removed_top_level_fields(tmp_path, field):
+    provider = {
+        "name": "SSO",
+        "remote_app": {
+            "client_id": "cid",
+            "authorize_url": "https://sso.example.com/authorize",
+            "access_token_url": "https://sso.example.com/token",
+            "api_base_url": "https://sso.example.com/api/",
+            "redirect_uri": "https://app.example.com/oauth-authorized/SSO",
+        },
+        field: "legacy",
+    }
+    path = write_config(tmp_path, f"OAUTH_PROVIDERS = {[provider]!r}\n")
+    with pytest.raises(AuthConfigError, match="已不支持"):
+        load_auth_settings(path)
+
+
+def test_oauth_provider_rejects_explicit_userinfo_endpoint(tmp_path):
+    provider = {
+        "name": "SSO",
+        "remote_app": {
+            "client_id": "cid",
+            "authorize_url": "https://sso.example.com/authorize",
+            "access_token_url": "https://sso.example.com/token",
+            "userinfo_endpoint": "https://sso.example.com/userinfo",
+            "api_base_url": "https://sso.example.com/api/",
+            "redirect_uri": "https://app.example.com/oauth-authorized/SSO",
+        },
+    }
+    path = write_config(tmp_path, f"OAUTH_PROVIDERS = {[provider]!r}\n")
+    with pytest.raises(AuthConfigError, match="OAUTH_USER_INFO"):
+        load_auth_settings(path)
+
+
+def test_oauth_provider_requires_user_info_handler(tmp_path):
+    provider = {
+        "name": "SSO",
+        "remote_app": {
+            "client_id": "cid",
+            "authorize_url": "https://sso.example.com/authorize",
+            "access_token_url": "https://sso.example.com/token",
+            "api_base_url": "https://sso.example.com/api/",
+            "redirect_uri": "https://app.example.com/oauth-authorized/SSO",
+        },
+    }
+    path = write_config(tmp_path, f"OAUTH_PROVIDERS = {[provider]!r}\n")
+    with pytest.raises(AuthConfigError, match="缺少 OAUTH_USER_INFO"):
+        load_auth_settings(path)
+
+
+@pytest.mark.parametrize(
+    "redirect_uri",
+    [
+        "https://app.example.com/api/v1/nl2sql/auth/oauth/callback",
+        "https://app.example.com/oauth-authorized/Other",
+        "/oauth-authorized/SSO",
+        "https://app.example.com/oauth-authorized/SSO?next=/chat",
+    ],
+)
+def test_oauth_redirect_uri_must_use_fab_provider_callback(tmp_path, redirect_uri):
+    provider = {
+        "name": "SSO",
+        "remote_app": {
+            "client_id": "cid",
+            "authorize_url": "https://sso.example.com/authorize",
+            "access_token_url": "https://sso.example.com/token",
+            "api_base_url": "https://sso.example.com/api/",
+            "redirect_uri": redirect_uri,
+        },
+    }
+    path = write_config(tmp_path, f"OAUTH_PROVIDERS = {[provider]!r}\n")
+    with pytest.raises(AuthConfigError, match="oauth-authorized"):
+        load_auth_settings(path)
+
+
+@pytest.mark.parametrize(
+    "api_base_url",
+    [
+        "https://sso.example.com/api",
+        "/api/",
+        "ftp://sso.example.com/api/",
+        "https://sso.example.com/api/?tenant=1",
+    ],
+)
+def test_oauth_api_base_url_must_be_absolute_and_end_with_slash(tmp_path, api_base_url):
+    provider = {
+        "name": "SSO",
+        "remote_app": {
+            "client_id": "cid",
+            "authorize_url": "https://sso.example.com/authorize",
+            "access_token_url": "https://sso.example.com/token",
+            "api_base_url": api_base_url,
+            "redirect_uri": "https://app.example.com/oauth-authorized/SSO",
+        },
+    }
+    path = write_config(tmp_path, f"OAUTH_PROVIDERS = {[provider]!r}\n")
+    with pytest.raises(AuthConfigError, match="api_base_url"):
+        load_auth_settings(path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("response_type", "token"), ("grant_type", "client_credentials")],
+)
+def test_oauth_provider_rejects_unsupported_flow_values(tmp_path, field, value):
+    provider = {
+        "name": "SSO",
+        "remote_app": {
+            "client_id": "cid",
+            "authorize_url": "https://sso.example.com/authorize",
+            "access_token_url": "https://sso.example.com/token",
+            "api_base_url": "https://sso.example.com/api/",
+            "redirect_uri": "https://app.example.com/oauth-authorized/SSO",
+            field: value,
+        },
+    }
+    path = write_config(tmp_path, f"OAUTH_PROVIDERS = {[provider]!r}\n")
+    with pytest.raises(AuthConfigError, match="授权码模式"):
+        load_auth_settings(path)
 
 
 @pytest.mark.parametrize(
@@ -469,10 +638,10 @@ def test_nonempty_oauth_provider_cannot_silently_disable_itself(tmp_path):
                 "client_id": "cid",
                 "authorize_url": "https://sso.example.com/authorize",
                 "access_token_url": "https://sso.example.com/token",
-                "redirect_uri": "https://app.example.com/callback",
+                "api_base_url": "https://sso.example.com/api/",
+                "redirect_uri": "https://app.example.com/oauth-authorized/bad-client-kwargs",
                 "client_kwargs": [],
             },
-            "userinfo_url": "https://sso.example.com/userinfo",
         },
     ],
 )
