@@ -611,6 +611,15 @@ import { tableApi } from '@/api/table'
 import DataStudioRightPanelLineage from './DataStudioRightPanelLineage.vue'
 import TableVersionHistoryPanel from './TableVersionHistoryPanel.vue'
 import { isDemoMode } from '@/demo/runtime'
+import {
+  resolveTableRowCount,
+  resolveTableStorageSize,
+  resolveTableDorisCreateTime,
+  resolveTableDorisUpdateTime,
+  formatRowCountDisplay,
+  formatStorageSizeDisplay,
+  parseTimeToMs,
+} from '../tableFormat'
 import { loadEcharts } from '@/utils/loadEcharts'
 
 const props = defineProps({
@@ -791,60 +800,6 @@ const startPanelResize = (event) => {
 onBeforeUnmount(() => {
   stopPanelResize()
 })
-
-const resolveTableRowCount = (table) => {
-  if (!table) return null
-  const value = table.rowCount ?? table.tableRows ?? table.table_rows
-  if (value === null || value === undefined || value === '') return null
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-const resolveTableStorageSize = (table) => {
-  if (!table) return null
-  const value = table.storageSize ?? table.dataSize ?? table.dataLength ?? table.data_length
-  if (value === null || value === undefined || value === '') return null
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-const resolveTableDorisCreateTime = (table) => {
-  if (!table) return ''
-  return table.dorisCreateTime || table.createTime || table.CREATE_TIME || ''
-}
-
-const resolveTableDorisUpdateTime = (table) => {
-  if (!table) return ''
-  return table.dorisUpdateTime || ''
-}
-
-const formatRowCountDisplay = (value) => {
-  if (value === null || value === undefined) return '-'
-  return Number(value).toLocaleString('zh-CN')
-}
-
-const formatStorageSizeDisplay = (value) => {
-  if (value === null || value === undefined) return '-'
-  if (value === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-  let num = Number(value)
-  let unitIndex = 0
-  while (num >= 1024 && unitIndex < units.length - 1) {
-    num /= 1024
-    unitIndex += 1
-  }
-  return num >= 10 ? `${num.toFixed(0)} ${units[unitIndex]}` : `${num.toFixed(1)} ${units[unitIndex]}`
-}
-
-const parseTimeToMs = (value) => {
-  if (!value) return 0
-  if (typeof value === 'number') return value
-  const text = String(value)
-  const parsed = Date.parse(text)
-  if (!Number.isNaN(parsed)) return parsed
-  const fallback = Date.parse(text.replace(' ', 'T'))
-  return Number.isNaN(fallback) ? 0 : fallback
-}
 
 const trendDialogTitle = computed(() => {
   const metricName = trendMetric.value === 'dataSize' ? '数据量' : '行数'
