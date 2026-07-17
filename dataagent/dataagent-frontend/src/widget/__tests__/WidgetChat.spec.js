@@ -798,6 +798,28 @@ describe('WidgetChat history conversations', () => {
     }))
   })
 
+  it('resets the textarea height after sending a multiline question', async () => {
+    const { wrapper } = mountChat({ config: { displayMode: 'inline' } })
+    await flushPromises()
+
+    const textarea = wrapper.get('textarea')
+    let scrollHeight = 96
+    Object.defineProperty(textarea.element, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight
+    })
+
+    await textarea.setValue('第一行\n第二行\n第三行')
+    expect(textarea.element.style.height).toBe('96px')
+
+    scrollHeight = 30
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(textarea.element.value).toBe('')
+    expect(textarea.element.style.height).toBe('30px')
+  })
+
   it('queues outbound messages until runtime config is ready', async () => {
     let resolveConfig
     apiMocks.runtimeApi.getConfig.mockReturnValue(new Promise((resolve) => {
