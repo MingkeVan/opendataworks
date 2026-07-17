@@ -3,6 +3,7 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV HOME=/dataagent_runtime
+ENV DATAAGENT_RUNTIME_ROOT=/dataagent_runtime
 
 WORKDIR /opt/dataagent-backend
 

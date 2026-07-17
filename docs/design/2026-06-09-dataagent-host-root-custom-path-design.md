@@ -18,8 +18,9 @@ tell the host Docker/Podman daemon where to bind-mount each topic's
 (`sandbox_runner_main._host_sandbox_root()` →
 `Path(raw).expanduser().resolve()`).
 
-Any custom `DATAAGENT_HOST_ROOT` (even an absolute one) is broken, and a
-relative value is doubly broken. There are two independent defects:
+The runner and launcher now separate the host and container roots, but a
+follow-up defect remains in the backend file APIs. The complete failure had
+three independent parts:
 
 1. Runner conflates two roots. `sandbox_runner_main` used `DATAAGENT_HOST_ROOT`
    for both (a) the filesystem prep it performs *inside its own container*
@@ -43,12 +44,21 @@ relative value is doubly broken. There are two independent defects:
    source. `scripts/start.sh` already normalizes `DATAAGENT_SKILLS_DIR` via
    `resolve_dataagent_skills_dir()` but had no equivalent for the runtime root.
 
+3. Backend file APIs still conflate the roots. The backend receives `.env`
+   through `env_file`, so a custom host value such as
+   `/data/odw/dataagent_runtime` is also visible in the backend container.
+   `core.topic_workspace` used that host path for `list_files()` and downloads,
+   even though the volume is mounted inside the backend at the fixed path
+   `/dataagent_runtime`. Sandbox tasks successfully write the host file, but the
+   backend checks a different, container-local path and returns `file not found`.
+
 ## Problem
 
-Operators cannot point the DataAgent runtime root at a custom host directory:
-the sandbox runner writes its topic prep to the wrong (container-local) path, so
-the custom directory stays empty and sandbox tasks fail. Relative values fail
-additionally because the runner re-resolves them against its own filesystem.
+With a custom host directory, sandbox tasks can produce files successfully but
+the backend cannot list, preview, or download them because it reads the host
+path string from inside its container. Downloading must not depend on a sandbox
+child: children are disposable, while topic files live on the shared persistent
+volume and remain available through the backend.
 
 ## Scope
 
@@ -57,10 +67,12 @@ additionally because the runner re-resolves them against its own filesystem.
   host root (`DATAAGENT_HOST_ROOT`) only for child bind-mount sources.
 - Normalize a relative `DATAAGENT_HOST_ROOT` to an absolute host path in
   `scripts/start.sh` before invoking compose, mirroring the skills-dir handling.
+- Separate the backend's container-visible runtime root from the host bind
+  source so file APIs always read the shared volume directly.
 - Keep the container-visible runtime root fixed at `/dataagent_runtime` and the
   compose contract unchanged.
 
-Affected stacks: DataAgent runner (`dataagent/dataagent-backend/sandbox_runner_main.py`)
+Affected stacks: DataAgent backend and runner (`dataagent/dataagent-backend`)
 and deployment (`scripts/start.sh`, `deploy/.env.example`, `deploy/README.md`).
 
 ## Solution
@@ -93,11 +105,25 @@ mounted volume regardless of where that volume is on the host.
 Direct `docker compose` invocations that bypass `start.sh` still require an
 absolute value; this is documented in `.env.example` and `deploy/README.md`.
 
+Follow-up fix — backend runtime-root separation:
+
+- Add the internal `DATAAGENT_RUNTIME_ROOT` setting. `core.topic_workspace`
+  resolves implicit topic paths from this container-visible root first, then
+  falls back to `DATAAGENT_HOST_ROOT` for local, non-container execution.
+- Set `DATAAGENT_RUNTIME_ROOT=/dataagent_runtime` in the backend image. The
+  backend therefore lists and serves files from its mounted volume regardless
+  of the host directory used as the compose bind source.
+- Keep download handling in the backend. It authorizes the topic, confines the
+  relative path, and serves the persistent file without requiring a live or
+  reusable sandbox child.
+
 ## Interfaces
 
-- No new or removed `.env` variables. `DATAAGENT_HOST_ROOT` semantics widen from
+- No new operator-facing `.env` variables. `DATAAGENT_HOST_ROOT` semantics widen from
   "absolute host path" to "absolute or `deploy/`-relative host path when launched
   via `start.sh`".
+- `DATAAGENT_RUNTIME_ROOT` is an internal image contract for the backend's
+  container-visible mount path, not a deployment tuning knob.
 - Container runtime root stays fixed at `/dataagent_runtime` (an internal module
   constant, not an `.env` knob).
 
@@ -108,6 +134,10 @@ absolute value; this is documented in `.env.example` and `deploy/README.md`.
   cannot know the host's `deploy/` location), so the launcher is the correct
   single place to normalize it; raw `docker compose` keeps the explicit
   absolute-path requirement instead of a second, unreliable resolution layer.
-- The container runtime root is kept as a fixed constant (test-overridable by
-  monkeypatch) rather than a new setting, honoring the consolidation design's
-  "container root is not an external knob" rule.
+- The backend image supplies the container runtime root as a fixed internal
+  environment value. The setting exists so local tests and non-container
+  execution can select the process-visible root explicitly, but it is not an
+  operator-facing deployment knob.
+- Local source execution still falls back to `DATAAGENT_HOST_ROOT`, preserving
+  existing `.dataagent_runtime` development setups without container-only path
+  detection or a sandbox download proxy.

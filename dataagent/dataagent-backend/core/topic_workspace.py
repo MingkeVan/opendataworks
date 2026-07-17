@@ -37,7 +37,10 @@ def _resolve_runtime_root(raw: str | None = None) -> Path:
         try:
             from config import get_settings
 
-            value = str(get_settings().dataagent_host_root or "").strip()
+            settings = get_settings()
+            value = str(getattr(settings, "dataagent_runtime_root", "") or "").strip()
+            if not value:
+                value = str(settings.dataagent_host_root or "").strip()
         except Exception:
             value = ""
     if value:

@@ -10,6 +10,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from config import get_settings, update_settings
+from core.topic_files import safe_workspace_file
 from core.topic_workspace import (
     cleanup_orphan_topic_workspaces,
     delete_topic_workspace,
@@ -35,15 +36,56 @@ def test_resolve_topic_workspace_uses_topic_id_only(monkeypatch, tmp_path: Path)
     assert workspace == tmp_path / "topics" / "topic-unsafe-id" / "workspace"
 
 
-def test_resolve_topic_workspace_uses_configured_runtime_root(tmp_path: Path):
-    original_root = get_settings().dataagent_host_root
-    update_settings({"dataagent_host_root": str(tmp_path / "configured-runtime")})
+def test_resolve_topic_workspace_prefers_container_runtime_root(tmp_path: Path):
+    original_runtime_root = get_settings().dataagent_runtime_root
+    original_host_root = get_settings().dataagent_host_root
+    container_root = tmp_path / "container-runtime"
+    host_root = tmp_path / "host-runtime"
+    output_file = container_root / "topic_1" / "workspace" / "output" / "report.html"
+    output_file.parent.mkdir(parents=True)
+    output_file.write_text("<h1>ok</h1>", encoding="utf-8")
+    update_settings(
+        {
+            "dataagent_runtime_root": str(container_root),
+            "dataagent_host_root": str(host_root),
+        }
+    )
+    try:
+        workspace = resolve_topic_workspace("topic_1")
+        resolved_file = safe_workspace_file("topic_1", "output/report.html")
+    finally:
+        update_settings(
+            {
+                "dataagent_runtime_root": original_runtime_root,
+                "dataagent_host_root": original_host_root,
+            }
+        )
+
+    assert workspace == container_root / "topic_1" / "workspace"
+    assert resolved_file == output_file
+
+
+def test_resolve_topic_workspace_falls_back_to_host_root_for_local_execution(tmp_path: Path):
+    original_runtime_root = get_settings().dataagent_runtime_root
+    original_host_root = get_settings().dataagent_host_root
+    host_root = tmp_path / "local-runtime"
+    update_settings(
+        {
+            "dataagent_runtime_root": "",
+            "dataagent_host_root": str(host_root),
+        }
+    )
     try:
         workspace = resolve_topic_workspace("topic_1")
     finally:
-        update_settings({"dataagent_host_root": original_root})
+        update_settings(
+            {
+                "dataagent_runtime_root": original_runtime_root,
+                "dataagent_host_root": original_host_root,
+            }
+        )
 
-    assert workspace == tmp_path / "configured-runtime" / "topic_1" / "workspace"
+    assert workspace == host_root / "topic_1" / "workspace"
 
 
 def test_prepare_topic_workspace_copies_enabled_skills(monkeypatch, tmp_path: Path):
