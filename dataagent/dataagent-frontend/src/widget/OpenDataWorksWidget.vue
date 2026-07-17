@@ -17,10 +17,10 @@
           <div class="odw-panel__title">{{ config.projectName }}</div>
         </div>
         <div class="odw-panel__actions">
-          <button class="odw-icon-button" type="button" aria-label="新建会话" title="新建会话" @click="newConversation">
+          <button v-if="!state.loginRequired" class="odw-icon-button" type="button" aria-label="新建会话" title="新建会话" @click="newConversation">
             <Plus class="odw-icon-svg" aria-hidden="true" />
           </button>
-          <button class="odw-icon-button odw-history-toggle" type="button" aria-label="历史会话" title="历史会话" @click="toggleHistory">
+          <button v-if="!state.loginRequired" class="odw-icon-button odw-history-toggle" type="button" aria-label="历史会话" title="历史会话" @click="toggleHistory">
             <svg class="odw-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M3 3v5h5" />
               <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
@@ -102,7 +102,7 @@ const {
 
 onMounted(() => {
   bind()
-  if (isInline.value) {
+  if (isInline.value && !props.state.loginRequired) {
     props.state.track?.('widget_open')
   }
 })
@@ -110,7 +110,7 @@ onBeforeUnmount(unbind)
 
 const open = () => {
   props.state.isOpen = true
-  props.state.track?.('widget_open')
+  if (!props.state.loginRequired) props.state.track?.('widget_open')
   props.emit('open')
 }
 
@@ -121,7 +121,7 @@ const openIfNotDragged = () => {
 
 const close = () => {
   props.state.isOpen = false
-  props.state.track?.('widget_close')
+  if (!props.state.loginRequired) props.state.track?.('widget_close')
   props.emit('close')
 }
 

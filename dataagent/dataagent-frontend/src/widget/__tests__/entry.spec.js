@@ -88,6 +88,7 @@ describe('installWidget', () => {
     script.dataset.websiteId = 'demo'
     script.dataset.agentId = 'demo'
     script.dataset.projectName = 'Demo'
+    script.dataset.allowAnonymous = 'true'
     document.body.appendChild(script)
 
     const controller = installWidget(script)
@@ -108,6 +109,7 @@ describe('installWidget', () => {
     script.dataset.websiteId = 'demo'
     script.dataset.agentId = 'demo'
     script.dataset.projectName = 'Demo'
+    script.dataset.allowAnonymous = 'true'
     document.body.appendChild(script)
 
     const controller = installWidget(script)
@@ -124,12 +126,32 @@ describe('installWidget', () => {
     expect(typeof window.OpenDataWorksWidget.ask).toBe('function')
   })
 
+  it('blocks public message and ask APIs while login is required', async () => {
+    const script = document.createElement('script')
+    script.dataset.websiteId = 'demo'
+    script.dataset.agentId = 'demo'
+    document.body.appendChild(script)
+
+    const controller = installWidget(script)
+    const loginRequired = vi.fn()
+    controller.on('login:required', loginRequired)
+
+    controller.sendMessage('blocked message')
+    controller.ask('blocked ask')
+    await nextTick()
+
+    expect(loginRequired).toHaveBeenCalledTimes(2)
+    expect(document.querySelector('[data-odw-ask-modal]')).toBeNull()
+    expect(document.querySelector('[data-odw-widget-root]').shadowRoot.textContent).not.toContain('blocked message')
+  })
+
   it('mounts inline widgets into the configured container without a launcher', () => {
     const target = document.createElement('div')
     target.id = 'odw-intelligent-query'
     document.body.appendChild(target)
     const script = document.createElement('script')
     script.dataset.websiteId = 'demo'
+    script.dataset.allowAnonymous = 'true'
     script.dataset.displayMode = 'inline'
     script.dataset.containerId = 'odw-intelligent-query'
     document.body.appendChild(script)

@@ -46,6 +46,11 @@ const stubs = {
     emits: ['update:modelValue'],
     template: '<span class="color-picker" />'
   },
+  'el-switch': {
+    props: ['modelValue'],
+    emits: ['update:modelValue'],
+    template: '<button class="switch" type="button" @click="$emit(\'update:modelValue\', !modelValue)" />'
+  },
   'el-tooltip': { template: '<span><slot /><slot name="content" /></span>' },
   'el-icon': { template: '<i><slot /></i>' },
   Check: { template: '<i />' },
@@ -69,7 +74,7 @@ describe('WidgetAccessConfig', () => {
   it('renders existing sites from settings', async () => {
     apiMocks.getSettings.mockResolvedValue({
       widget_allowed_sites: [
-        { website_id: 'demo', allowed_origins: ['https://a.com'], project_name: 'Demo', project_color: '#4A90A4' }
+        { website_id: 'demo', allowed_origins: ['https://a.com'], project_name: 'Demo', project_color: '#4A90A4', allow_anonymous: false }
       ]
     })
     const wrapper = mountConfig()
@@ -93,7 +98,7 @@ describe('WidgetAccessConfig', () => {
   it('adds a site and saves the normalized payload', async () => {
     apiMocks.getSettings.mockResolvedValue({ widget_allowed_sites: [] })
     apiMocks.updateSettings.mockResolvedValue({
-      widget_allowed_sites: [{ website_id: 'new-site', allowed_origins: ['https://b.com'], project_name: '', project_color: '' }]
+      widget_allowed_sites: [{ website_id: 'new-site', allowed_origins: ['https://b.com'], project_name: '', project_color: '', allow_anonymous: true }]
     })
     const wrapper = mountConfig()
     await flushPromises()
@@ -101,6 +106,7 @@ describe('WidgetAccessConfig', () => {
     wrapper.vm.addSite()
     await flushPromises()
     wrapper.vm.sites[0].website_id = 'new-site'
+    wrapper.vm.sites[0].allow_anonymous = true
     wrapper.vm.sites[0].allowed_origins = ['https://b.com', 'https://b.com', '']
     await flushPromises()
 
@@ -108,7 +114,7 @@ describe('WidgetAccessConfig', () => {
     await flushPromises()
 
     expect(apiMocks.updateSettings).toHaveBeenCalledWith({
-      widget_allowed_sites: [{ website_id: 'new-site', project_name: '', project_color: '', allowed_origins: ['https://b.com'] }]
+      widget_allowed_sites: [{ website_id: 'new-site', project_name: '', project_color: '', allow_anonymous: true, allowed_origins: ['https://b.com'] }]
     })
     expect(messageMocks.success).toHaveBeenCalled()
   })

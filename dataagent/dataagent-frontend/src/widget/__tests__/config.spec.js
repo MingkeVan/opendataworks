@@ -31,14 +31,34 @@ describe('parseWidgetConfig', () => {
     expect(config.headers).not.toHaveProperty('X-ODW-Visitor-Id')
   })
 
-  it('uses a generated visitor id when no user id is available', () => {
+  it('does not generate a visitor id by default when no user id is available', () => {
     const script = document.createElement('script')
     script.dataset.websiteId = 'demo'
+    script.dataset.loginUrl = '/login'
     window.localStorage.clear()
 
     const config = parseWidgetConfig(script)
 
     expect(config.userId).toBe('')
+    expect(config.visitorId).toBe('')
+    expect(config.allowAnonymous).toBe(false)
+    expect(config.loginUrl).toBe('/login')
+    expect(config.headers).toMatchObject({
+      'X-ODW-Client': 'widget',
+      'X-ODW-Website-Id': 'demo'
+    })
+    expect(config.headers).not.toHaveProperty('X-ODW-Visitor-Id')
+  })
+
+  it('generates a visitor id only when anonymous access is explicitly enabled', () => {
+    const script = document.createElement('script')
+    script.dataset.websiteId = 'demo'
+    script.dataset.allowAnonymous = 'true'
+    window.localStorage.clear()
+
+    const config = parseWidgetConfig(script)
+
+    expect(config.allowAnonymous).toBe(true)
     expect(config.visitorId).toMatch(/^visitor_/)
     expect(config.headers).toMatchObject({
       'X-ODW-Client': 'widget',

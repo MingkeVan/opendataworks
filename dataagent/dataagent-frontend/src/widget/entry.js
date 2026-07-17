@@ -1,6 +1,6 @@
 import { createApp, reactive } from 'vue'
 import OpenDataWorksWidget from './OpenDataWorksWidget.vue'
-import { parseWidgetConfig, resolveCurrentScript, resolveVisitorId } from './config'
+import { isWidgetLoginRequired, parseBooleanFlag, parseWidgetConfig, resolveCurrentScript, resolveVisitorId } from './config'
 import { WIDGET_STYLES } from './styles'
 import { createWidgetTracker } from './tracking'
 
@@ -580,6 +580,8 @@ export function installWidget(scriptOrConfig = resolveCurrentScript()) {
     config.position = config.position || 'bottom-right'
     config.projectName = config.projectName || '智能问数'
     config.projectColor = config.projectColor || '#4A90A4'
+    config.allowAnonymous = parseBooleanFlag(config.allowAnonymous)
+    config.loginUrl = String(config.loginUrl || '').trim()
     if (!config.headers) {
       const websiteId = String(config.websiteId || '').trim()
       if (websiteId) {
@@ -587,7 +589,7 @@ export function installWidget(scriptOrConfig = resolveCurrentScript()) {
         config.headers = { 'X-ODW-Client': 'widget', 'X-ODW-Website-Id': websiteId }
         if (userId) {
           config.headers['X-ODW-User-Id'] = userId
-        } else {
+        } else if (config.allowAnonymous) {
           config.headers['X-ODW-Visitor-Id'] = config.visitorId || resolveVisitorId(websiteId)
         }
       } else {
@@ -624,9 +626,11 @@ export function installWidget(scriptOrConfig = resolveCurrentScript()) {
     headers: config.headers || {}
   })
 
+  const initialLoginRequired = isWidgetLoginRequired(config)
   const state = reactive({
     isOpen: config.displayMode === 'inline',
-    historyOpen: config.displayMode === 'inline' && parentWidth >= 600,
+    historyOpen: config.displayMode === 'inline' && parentWidth >= 600 && !initialLoginRequired,
+    loginRequired: initialLoginRequired,
     isBusy: false,
     outboundMessage: '',
     cancelSignal: 0,
@@ -673,13 +677,27 @@ export function installWidget(scriptOrConfig = resolveCurrentScript()) {
       const message = String(text || '').trim()
       if (!message) return
       state.isOpen = true
+      if (state.loginRequired) {
+        emit('login:required')
+        return
+      }
       scheduleOutboundMessage(state, message)
     },
     ask(text) {
+      if (state.loginRequired) {
+        state.isOpen = true
+        emit('login:required')
+        return
+      }
       openAskModal(text)
       emit('ask:open', { text: String(text || '').trim() })
     },
     openAskModal(text) {
+      if (state.loginRequired) {
+        state.isOpen = true
+        emit('login:required')
+        return
+      }
       openAskModal(text)
       emit('ask:open', { text: String(text || '').trim() })
     },
@@ -693,22 +711,26 @@ export function installWidget(scriptOrConfig = resolveCurrentScript()) {
     },
     openHistory() {
       state.isOpen = true
+      if (state.loginRequired) return
       state.historyOpen = true
       emit('history:open')
     },
     newConversation() {
       state.isOpen = true
+      if (state.loginRequired) return
       state.newConversationSignal += 1
       emit('conversation:new')
     },
     selectConversation(topicId) {
       state.isOpen = true
+      if (state.loginRequired) return
       state.requestedTopicId = String(topicId || '')
       state.selectConversationSignal += 1
       emit('conversation:select', { topicId: state.requestedTopicId })
     },
     deleteConversation(topicId) {
       state.isOpen = true
+      if (state.loginRequired) return
       state.deleteRequestedTopicId = String(topicId || '')
       state.deleteConversationSignal += 1
       emit('conversation:delete', { topicId: state.deleteRequestedTopicId })

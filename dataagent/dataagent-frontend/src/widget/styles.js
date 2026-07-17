@@ -543,6 +543,59 @@ export const WIDGET_STYLES = `
   position: relative;
 }
 
+.query-login-required {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 32px 24px;
+  text-align: center;
+}
+
+.query-login-required-icon {
+  width: 38px;
+  height: 38px;
+  margin-bottom: 18px;
+  color: var(--accent);
+}
+
+.query-login-required-title {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.query-login-required-text {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.query-login-required-action {
+  min-width: 104px;
+  margin-top: 22px;
+  padding: 9px 18px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.query-login-required-action:hover {
+  filter: brightness(0.94);
+}
+
 .query-messages {
   flex: 1;
   min-height: 0;

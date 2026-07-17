@@ -56,7 +56,7 @@ In scope:
 Out of scope:
 
 - Main Java backend changes.
-- Public anonymous widget access.
+- Public anonymous widget access without explicit site opt-in. Anonymous access is disabled by default; the current integration contract is documented in `dataagent/dataagent-frontend/examples/widget/README.md`.
 - SSO or signed identity tokens.
 - Exposing Skills, model management, or portal navigation in the widget.
 
@@ -104,7 +104,7 @@ Widget calls add these headers:
 - `X-ODW-Client: widget`
 - `X-ODW-Website-Id: <website_id>`
 - `X-ODW-User-Id: <business_user_id>`
-- `X-ODW-Visitor-Id: <generated_visitor_id>` when no user id is provided
+- `X-ODW-Visitor-Id: <generated_visitor_id>` only when no user id is provided and anonymous access is explicitly enabled by both the embed configuration and the backend site policy
 
 Widget runtime payloads also include `agent_id` from the embedding script's `data-agent-id`. Widget topic creation requires this value so the selected DataAgent profile snapshot, including its `data_scope`, is stored on the topic. Widget topic listing and message delivery pass the same `agent_id` to keep history filtering and task validation aligned with the selected agent.
 
@@ -127,7 +127,7 @@ Direct user id headers provide internal product-level isolation, not cryptograph
 
 ### Allowed Sites
 
-DataAgent reads `WIDGET_ALLOWED_SITES_JSON`, for example:
+Allowed sites are managed from the DataAgent `/widget-access` page and persisted in `da_agent_settings.raw_json` as `widget_allowed_sites`, for example:
 
 ```json
 [
@@ -135,12 +135,13 @@ DataAgent reads `WIDGET_ALLOWED_SITES_JSON`, for example:
     "website_id": "your-project",
     "allowed_origins": ["https://app.example.com"],
     "project_name": "Your Project",
-    "project_color": "#4A90A4"
+    "project_color": "#4A90A4",
+    "allow_anonymous": false
   }
 ]
 ```
 
-Widget requests with an unknown `website_id` or disallowed `Origin` receive 403. Empty configuration allows no widget sites by default.
+Widget requests with an unknown `website_id` or disallowed `Origin` receive 403. Empty configuration allows no widget sites by default. Missing `allow_anonymous` is treated as `false`; anonymous use also requires `data-allow-anonymous="true"` in the embedding configuration. The complete setup and troubleshooting guide lives in `dataagent/dataagent-frontend/examples/widget/README.md`.
 
 ## Tradeoffs
 

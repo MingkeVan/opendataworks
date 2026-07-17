@@ -71,6 +71,21 @@
           <el-form-item>
             <template #label>
               <span class="field-label">
+                匿名访问
+                <el-tooltip content="关闭后，接入方必须提供用户身份；未登录用户只能看到登录提示。" placement="top">
+                  <el-icon><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </span>
+            </template>
+            <div class="anonymous-row">
+              <el-switch v-model="site.allow_anonymous" />
+              <span class="anonymous-state">{{ site.allow_anonymous ? '允许匿名访客使用' : '必须登录后使用' }}</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item>
+            <template #label>
+              <span class="field-label">
                 允许来源（Origin）
                 <el-tooltip placement="top">
                   <template #content>
@@ -121,6 +136,7 @@ const normalizeSite = (raw = {}) => ({
   website_id: String(raw.website_id || ''),
   project_name: String(raw.project_name || ''),
   project_color: String(raw.project_color || ''),
+  allow_anonymous: raw.allow_anonymous === true,
   allowed_origins: Array.isArray(raw.allowed_origins) ? raw.allowed_origins.map((item) => String(item || '')) : []
 })
 
@@ -128,6 +144,7 @@ const toPayloadSite = (site) => ({
   website_id: String(site.website_id || '').trim(),
   project_name: String(site.project_name || '').trim(),
   project_color: String(site.project_color || '').trim(),
+  allow_anonymous: site.allow_anonymous === true,
   allowed_origins: (site.allowed_origins || [])
     .map((item) => String(item || '').trim())
     .filter((item, index, arr) => item && arr.indexOf(item) === index)
@@ -370,6 +387,17 @@ onMounted(loadSettings)
 
 .color-input {
   width: 160px;
+}
+
+.anonymous-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.anonymous-state {
+  font-size: 13px;
+  color: #53677e;
 }
 
 .origin-list {
