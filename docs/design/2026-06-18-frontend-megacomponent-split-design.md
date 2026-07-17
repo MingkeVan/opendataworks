@@ -132,8 +132,9 @@ src/views/datastudio/
 - F17a：右面板 7 个纯解析/格式化函数逐字迁入 `tableFormat.js`,补 6 个单测。
 - F17b `usePanelVerticalResize`：右面板上下分栏拖拽与按 tab 记忆迁入 composable,配 5 个单测。
 - F17c `TableTrendDialog.vue`（202 行）：趋势弹窗自包含化（ECharts 生命周期内聚,父组件 `ref.open(metric)` 触发）；同时补 `DataStudioRightPanel.smoke.spec.js` 挂载冒烟（此前该组件被 DataStudioNew 冒烟 stub,无任何运行时覆盖）。
-- 行数结果：`DataStudioNew.vue` 3553 → **1217** 行；`DataStudioRightPanel.vue` 1985 → 1678 行（F17c 后）。
-- F17d（后补完成）：先删除血缘区抽取时遗留的 ~380 行死样式（`.lineage-header/.flow-*/.connection-*` 等,父作用域规则无法命中子组件内层元素,逐选择器核对;`.lineage-panel` 命中子组件根元素故保留）;再抽出 `DataStudioRightPanelBasic.vue`(360)/`DataStudioRightPanelColumns.vue`(243)/`DataStudioRightPanelAccess.vue`(163) 三个 pane 子组件——它们直接 `inject('dataStudioCtx')`(祖先 provide),零新增接线;`TableTrendDialog` 随唯一调用方迁入 Basic。CSS 归属:pane 专属规则随迁;与父组件剩余 DDL/版本 pane 共享的脚手架类(`.meta-section/.section-*/.meta-scroll`)在父组件转为 `.meta-tabs :deep(...)`,单份规则同时作用于父子。**`DataStudioRightPanel.vue` 最终 625 行,达成 <800 目标。**
+- F17c 阶段行数结果：`DataStudioNew.vue` 3553 → **1217** 行；`DataStudioRightPanel.vue` 1985 → 1678 行。
+- F17d（后补完成）：先删除血缘区抽取时遗留的 ~380 行死样式（`.lineage-header/.flow-*/.connection-*` 等,父作用域规则无法命中子组件内层元素,逐选择器核对;`.lineage-panel` 命中子组件根元素故保留）;再抽出 `DataStudioRightPanelBasic.vue`(当前 365)/`DataStudioRightPanelColumns.vue`(247)/`DataStudioRightPanelAccess.vue`(174) 三个 pane 子组件——它们直接 `inject('dataStudioCtx')`(祖先 provide),零新增接线;`TableTrendDialog` 随唯一调用方迁入 Basic。CSS 归属:pane 专属规则随迁;与父组件剩余 DDL/版本 pane 共享的脚手架类(`.meta-section/.section-*/.meta-scroll`)在父组件转为 `.meta-tabs :deep(...)`,单份规则同时作用于父子。Review 后补修复列头样式串联与 scoped 子组件响应式断点失效,同时删除已无模板目标的血缘断点规则；`DataStudioRightPanel.vue` 最终 **597** 行,达成 <800 目标。
+- F16b review 后补：删除 `DataStudioNew.vue` 中遗留的 93 行查询面板重复样式,查询面板样式由 `DataStudioQueryPanel.vue` 单点维护；`DataStudioNew.vue` 最终 **1124** 行。
 - 验证口径：每片 `nvm use` 后 lint（0 error）/test/build 全绿；有状态切片另做 **demo 模式 Playwright 浏览器冒烟**（`npm run dev:demo` + 预装 Chromium,无真实后端/MySQL,与 F9/F10 的真实后端冒烟不同级）：目录树懒加载展开、打开表 Tab、右面板 DDL/访问 tab、SqlEditor 输入并执行、Tab 关闭与刷新恢复、右面板分栏拖拽、趋势弹窗 canvas 渲染均通过；唯一 console error 为既有 `/dataagent/widget` 资源代理 500。
 
 ## 6. 权衡
@@ -165,6 +166,6 @@ src/views/datastudio/
 - `WorkflowDetail.vue`(2792)：同法 composables 化。
 - ~~`TaskEditDrawer`：从 `views/` 迁入 `components/`~~（已完成）。
 - ~~`DataStudioRightPanel.vue`(1985)：瘦身~~（F17a–c 已降至 1678,余量见下）。
-- ~~F17d：RightPanel 三个 tab pane 子组件化~~（已完成,RightPanel 625 行达标）。
-- `DataStudioNew.vue` 若要继续逼近 <800：候选是 PersistentTabs 内层 `tab-grid` 整体抽片与剩余 ~600 行布局样式的下沉,收益/回归比一般,暂不强推。
+- ~~F17d：RightPanel 三个 tab pane 子组件化~~（已完成,RightPanel 597 行达标）。
+- `DataStudioNew.vue` 若要继续逼近 <800：候选是 PersistentTabs 内层 `tab-grid` 整体抽片与剩余 ~350 行布局样式的下沉,收益/回归比一般,暂不强推。
 - `dataStudioCtx`（31 键）现有 4 个消费者（RightPanel 及其 Basic/Columns/Access 子 pane）,按域拆分（meta/fields/nav）可另行评估,收益已不迫切。

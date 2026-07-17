@@ -147,6 +147,7 @@
 - 查询工具栏+异步 SqlEditor(~103 行)+样式组随迁；复用并扩展 `dataStudioQueryCtx`。
 - 触及: 新增 `components/DataStudioQueryPanel.vue`(240 行)；`DataStudioNew.vue` 1656 → 1559。
 - 验证: lint/test/build + demo 冒烟(编辑器输入 SQL 并经新工具栏执行)。提交 `8f32893`。
+- Review 后补: 删除父组件遗留的 93 行查询面板重复样式,`DataStudioNew.vue` 1217 → 1124；lint/test/build + computed-style 冒烟通过。提交 `eed3a913`。
 
 ### F16c — DataStudioCatalogNode.vue（已完成）
 - 树节点 scoped-slot(~126 行)+样式组随迁；新增 `provide('dataStudioCatalogCtx')`；锚定 `.catalog-tree` 的悬停/选中态 `:deep()` 规则留父组件。
@@ -173,12 +174,13 @@
 - 主片: 抽出 `DataStudioRightPanelBasic.vue`(360,含随迁的 TableTrendDialog 宿主)/`DataStudioRightPanelColumns.vue`(243)/`DataStudioRightPanelAccess.vue`(163);子组件直接 `inject('dataStudioCtx')`,零新增契约;DDL/版本 pane 留父组件。共享脚手架样式在父组件转 `.meta-tabs :deep(...)`(单份作用父子),pane 专属样式随迁;唯一特异性平手选择器 `.section-header.small` 与基类无属性交叠,已核对。
 - 测试: RightPanel 冒烟 spec 增加逐 pane 挂载用例(3 个子组件 × 假 ctx)。
 - 验证: lint/test/build(31 files/160) + demo 冒烟 11 项全过(五个 pane 数据渲染、Basic 内趋势弹窗 canvas、纵向拖拽、`:deep()` 穿透样式 computed-style 校验)。提交 `6d44999`。
-- **RightPanel 1299 → 625 行,<800 目标达成。**
+- Review 后补: 修复列头样式与 `.code-shell` 规则串联、将 1320/1200/768px 断点移入对应 scoped 子组件,删除已无模板目标的血缘断点规则；Basic/Columns/Access 当前为 365/247/174 行,RightPanel 625 → 597。lint/test/build + computed-style 断点冒烟通过。提交 `88929905`。
+- **RightPanel 1299 → 597 行,<800 目标达成。**
 
 ### 续篇行数汇总
-- `DataStudioNew.vue`: 3553 → **1217** 行
-- `DataStudioRightPanel.vue`: 1985 → **625** 行(F17a–d,<800 达标)
-- 新增: ResultPanel 533、CatalogNode 403、QueryPanel 240、TrendDialog 202、RightPanelBasic 360、RightPanelColumns 243、RightPanelAccess 163、useStudioTabs 467、useTableActions 334、usePanelVerticalResize 117
+- `DataStudioNew.vue`: 3553 → **1124** 行
+- `DataStudioRightPanel.vue`: 1985 → **597** 行(F17a–d,<800 达标)
+- 新增: ResultPanel 533、CatalogNode 403、QueryPanel 240、TrendDialog 202、RightPanelBasic 365、RightPanelColumns 247、RightPanelAccess 174、useStudioTabs 467、useTableActions 334、usePanelVerticalResize 117
 - 测试: 121 → **160** 通过(新增 39：useStudioTabs 13、useTableActions 12、tableFormat +6、usePanelVerticalResize 5、RightPanel 冒烟 3)
 
 ## 回滚策略
