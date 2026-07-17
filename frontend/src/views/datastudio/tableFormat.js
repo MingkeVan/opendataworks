@@ -67,3 +67,59 @@ export const isReplicaWarning = (value) => {
   const num = Number(value)
   return Number.isFinite(num) && num > 0 && num < 3
 }
+
+// 右侧面板的表值解析/展示格式化（P2-2 F17a），从 DataStudioRightPanel.vue 逐字抽出。
+
+export const resolveTableRowCount = (table) => {
+  if (!table) return null
+  const value = table.rowCount ?? table.tableRows ?? table.table_rows
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+export const resolveTableStorageSize = (table) => {
+  if (!table) return null
+  const value = table.storageSize ?? table.dataSize ?? table.dataLength ?? table.data_length
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+export const resolveTableDorisCreateTime = (table) => {
+  if (!table) return ''
+  return table.dorisCreateTime || table.createTime || table.CREATE_TIME || ''
+}
+
+export const resolveTableDorisUpdateTime = (table) => {
+  if (!table) return ''
+  return table.dorisUpdateTime || ''
+}
+
+export const formatRowCountDisplay = (value) => {
+  if (value === null || value === undefined) return '-'
+  return Number(value).toLocaleString('zh-CN')
+}
+
+export const formatStorageSizeDisplay = (value) => {
+  if (value === null || value === undefined) return '-'
+  if (value === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  let num = Number(value)
+  let unitIndex = 0
+  while (num >= 1024 && unitIndex < units.length - 1) {
+    num /= 1024
+    unitIndex += 1
+  }
+  return num >= 10 ? `${num.toFixed(0)} ${units[unitIndex]}` : `${num.toFixed(1)} ${units[unitIndex]}`
+}
+
+export const parseTimeToMs = (value) => {
+  if (!value) return 0
+  if (typeof value === 'number') return value
+  const text = String(value)
+  const parsed = Date.parse(text)
+  if (!Number.isNaN(parsed)) return parsed
+  const fallback = Date.parse(text.replace(' ', 'T'))
+  return Number.isNaN(fallback) ? 0 : fallback
+}

@@ -113,6 +113,76 @@
 - 验证: lint/test/build；统计组件行数下降。
 - 回退: 单提交回退。
 
+---
+
+## 续篇（2026-07-17，F12–F17）
+
+> 环境与验证说明：本轮在远程容器执行,采用 demo 模式 Playwright 浏览器冒烟（`npm run dev:demo` + 预装 Chromium,src/demo/mockServer 提供数据,无真实后端/MySQL）,与 F9/F10 的真实后端冒烟不同级,已如实标注。每片底线验证 = `nvm use` 后 lint(0 error)/test/build + DataStudioNew mount 冒烟。
+
+### F12 — 死代码清理（已完成）
+- 删除主组件死模板块 621–1119（旧右侧 meta 面板整块 HTML 注释）；逐选择器机械核对后删除 46 个孤儿样式规则块；保留活引用的 `.meta-info/.meta-item/.meta-message/.lineage-count` 与动态类/`:deep()` 运行时类；恢复检查确认 `.tab-left` 的 `min-height:0` 由其自有规则承接。
+- 触及: `DataStudioNew.vue`（3553 → 2759 行）。
+- 验证: lint/test/build + mount 冒烟 + demo 冒烟(结果面板信息行、目录树样式无回归)。提交 `b8c26a1`。
+
+### F13 — dataStudioCtx 死键收敛（已完成）
+- 移除 `getLayerType` 键 + RightPanel 解构 + 无用导入；grep 确认仅剩 `tableFormat.js` 导出与 Lineage 直接 import。契约 32 → 31 键。
+- 触及: `DataStudioNew.vue`、`components/DataStudioRightPanel.vue`。提交 `0e76e55`。
+
+### F14 — useStudioTabs（已完成,F8 残留收口）
+- 簇 C（~413 行）迁入 `composables/useStudioTabs.js`；共享 ref 所有权留在组件；全部依赖在装配点前声明,原 `(...args) => openTableTab(...args)` 前向引用闭环；`provide` 键集合不变。
+- 测试: `__tests__/useStudioTabs.spec.js`（13 tests：状态形状、增删关变迁、开表去重、loadTabData 去重/失败、恢复补水）。
+- 验证: lint/test/build(28 files/134) + demo 冒烟(目录树展开→开表 Tab→右面板渲染、新建/切换/关闭查询 Tab、刷新恢复)。提交 `78c2aec`。
+
+### F15 — useTableActions（已完成）
+- 簇 D+E（~288 行）迁入 `composables/useTableActions.js`；metaTab watcher 留组件改调返回值；随迁清理 ElMessageBox/lineageApi/copyText/showDemoReadonlyMessage 导入。
+- 测试: `__tests__/useTableActions.spec.js`（12 tests：loadDdl 双路径/失败、loadAccessStats 去重/缓存/错误、删除确认/取消、元数据同步、goLineage 守卫、saveAsTask 校验、copyDdl、handleTaskSuccess）。
+- 验证: lint/test/build(29/146) + demo 冒烟(DDL tab 加载真实 demo DDL、访问 tab、SELECT 1 全流程)。提交 `bd8a2cd`。
+
+### F16a — DataStudioResultPanel.vue（已完成）
+- 结果面板模板(~286 行)+样式组随迁；新增 `provide('dataStudioQueryCtx')`；props 仅 `tab`；顺带删除孤儿 `.warning-icon`。
+- 触及: 新增 `components/DataStudioResultPanel.vue`(533 行)；`DataStudioNew.vue` 2122 → 1656。
+- 验证: lint/test/build + demo 冒烟(信息/Result/历史 tab、表格图表切换、导出按钮、执行流)。提交 `9523a59`。
+
+### F16b — DataStudioQueryPanel.vue（已完成,即计划中的 QueryToolbar）
+- 查询工具栏+异步 SqlEditor(~103 行)+样式组随迁；复用并扩展 `dataStudioQueryCtx`。
+- 触及: 新增 `components/DataStudioQueryPanel.vue`(240 行)；`DataStudioNew.vue` 1656 → 1559。
+- 验证: lint/test/build + demo 冒烟(编辑器输入 SQL 并经新工具栏执行)。提交 `8f32893`。
+- Review 后补: 删除父组件遗留的 93 行查询面板重复样式,`DataStudioNew.vue` 1217 → 1124；lint/test/build + computed-style 冒烟通过。提交 `eed3a913`。
+
+### F16c — DataStudioCatalogNode.vue（已完成）
+- 树节点 scoped-slot(~126 行)+样式组随迁；新增 `provide('dataStudioCatalogCtx')`；锚定 `.catalog-tree` 的悬停/选中态 `:deep()` 规则留父组件。
+- 触及: 新增 `components/DataStudioCatalogNode.vue`(403 行)；`DataStudioNew.vue` 1559 → 1206。
+- 验证: lint/test/build + demo 冒烟(树渲染/懒加载/开表一致) + 截图对比；computed-style 探针确认窄侧栏表名截断为抽取前既有行为(非回归)。提交 `8d65956`。
+
+### F17a — 右面板表值解析/格式化 → tableFormat.js（已完成）
+- `resolveTableRowCount/StorageSize/DorisCreateTime/DorisUpdateTime、formatRowCountDisplay/StorageSizeDisplay、parseTimeToMs` 逐字迁入 `tableFormat.js` + 6 个单测。
+- 触及: `tableFormat.js`、`__tests__/tableFormat.spec.js`、`DataStudioRightPanel.vue`(1985 → 1940)。提交 `f0a7c38`。
+
+### F17b — usePanelVerticalResize（已完成）
+- 右面板上下分栏(~120 行)迁入 `composables/usePanelVerticalResize.js`(activeTabId/hasTableTab 为依赖,常量转默认参数) + 5 个单测(宿主组件挂载覆盖 clamp/记忆/样式门控/42% 播种/拖拽监听生命周期)。
+- 触及: `DataStudioRightPanel.vue`(1940 → 1857)。
+- 验证: lint/test/build(30/157) + demo 冒烟(拖拽 `--right-top` 336px → 396px)。提交 `c9091cd`。
+
+### F17c — TableTrendDialog.vue（已完成）
+- 趋势弹窗(~150 行脚本+弹窗模板+ECharts 生命周期+`.trend-*` 样式)自包含化；父组件 `trendDialogRef?.open(metric)` 触发；随迁清理 6 个失效导入。
+- 新增 `__tests__/DataStudioRightPanel.smoke.spec.js`(2 tests,假 dataStudioCtx + shallowMount,补齐 RightPanel 的运行时回归网)。
+- 触及: 新增 `components/TableTrendDialog.vue`(202 行)；`DataStudioRightPanel.vue`(1857 → 1678)。
+- 验证: lint/test/build(31/159) + demo 冒烟(行数链接打开弹窗、ECharts canvas 渲染)。提交 `ec777bc`。
+
+### F17d — RightPanel tab pane 子组件化（已完成）
+- 预备片: 删除血缘区抽取遗留的 ~380 行死样式与死 `sourceTypeLabel` computed（逐选择器核对;`.lineage-panel` 命中子组件根元素保留）。提交 `91c2464`。RightPanel 1679 → 1299。
+- 主片: 抽出 `DataStudioRightPanelBasic.vue`(360,含随迁的 TableTrendDialog 宿主)/`DataStudioRightPanelColumns.vue`(243)/`DataStudioRightPanelAccess.vue`(163);子组件直接 `inject('dataStudioCtx')`,零新增契约;DDL/版本 pane 留父组件。共享脚手架样式在父组件转 `.meta-tabs :deep(...)`(单份作用父子),pane 专属样式随迁;唯一特异性平手选择器 `.section-header.small` 与基类无属性交叠,已核对。
+- 测试: RightPanel 冒烟 spec 增加逐 pane 挂载用例(3 个子组件 × 假 ctx)。
+- 验证: lint/test/build(31 files/160) + demo 冒烟 11 项全过(五个 pane 数据渲染、Basic 内趋势弹窗 canvas、纵向拖拽、`:deep()` 穿透样式 computed-style 校验)。提交 `6d44999`。
+- Review 后补: 修复列头样式与 `.code-shell` 规则串联、将 1320/1200/768px 断点移入对应 scoped 子组件,删除已无模板目标的血缘断点规则；Basic/Columns/Access 当前为 365/247/174 行,RightPanel 625 → 597。lint/test/build + computed-style 断点冒烟通过。提交 `88929905`。
+- **RightPanel 1299 → 597 行,<800 目标达成。**
+
+### 续篇行数汇总
+- `DataStudioNew.vue`: 3553 → **1124** 行
+- `DataStudioRightPanel.vue`: 1985 → **597** 行(F17a–d,<800 达标)
+- 新增: ResultPanel 533、CatalogNode 403、QueryPanel 240、TrendDialog 202、RightPanelBasic 365、RightPanelColumns 247、RightPanelAccess 174、useStudioTabs 467、useTableActions 334、usePanelVerticalResize 117
+- 测试: 121 → **160** 通过(新增 39：useStudioTabs 13、useTableActions 12、tableFormat +6、usePanelVerticalResize 5、RightPanel 冒烟 3)
+
 ## 回滚策略
 
 - 每个 F 任务为独立提交，问题时按提交回退。
