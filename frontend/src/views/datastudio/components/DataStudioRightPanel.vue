@@ -539,7 +539,6 @@ const {
   box-sizing: border-box;
 }
 
-:deep(.columns-table th.el-table__cell),
 .code-shell {
   flex: 1;
   min-height: 0;
@@ -594,32 +593,5 @@ const {
   border: 1px dashed var(--line-strong);
   border-radius: 10px;
   background: var(--panel);
-}
-
-@media (max-width: 1320px) {
-  .metrics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .flow-track {
-    grid-template-columns: 1fr;
-    gap: 6px;
-  }
-
-  .flow-arrow {
-    transform: rotate(90deg);
-  }
-}
-
-@media (max-width: 1200px) {
-  .basic-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 768px) {
-  .metrics-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

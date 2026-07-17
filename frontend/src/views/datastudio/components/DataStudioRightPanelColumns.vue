@@ -240,4 +240,8 @@ const fieldRows = computed(() => getFieldRows(activeTabId.value))
   flex: 1;
   min-height: 0;
 }
+:deep(.columns-table th.el-table__cell) {
+  background: #f2f7ff;
+  color: var(--text-sub);
+}
 </style>

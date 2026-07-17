@@ -160,4 +160,15 @@ const refreshAccess = () => {
   color: var(--text);
   word-break: break-word;
 }
+@media (max-width: 1320px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

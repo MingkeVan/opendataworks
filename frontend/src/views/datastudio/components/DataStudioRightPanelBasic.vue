@@ -357,4 +357,9 @@ const trendDialogRef = ref(null)
 .warning-icon {
   font-size: 12px;
 }
+@media (max-width: 1200px) {
+  .basic-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
