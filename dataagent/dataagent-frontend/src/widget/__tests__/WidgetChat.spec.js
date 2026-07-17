@@ -5,6 +5,9 @@ import { nextTick, reactive } from 'vue'
 import WidgetChat from '../WidgetChat.vue'
 import widgetChatSource from '../WidgetChat.vue?raw'
 
+const createObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL')
+const revokeObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL')
+
 // ECharts touches the canvas API, which jsdom doesn't fully implement. The chart
 // promotion tests only care about which container the chart lands in, so stub the
 // renderer to keep the conclusion-area direct chart from emitting canvas errors.
@@ -46,7 +49,8 @@ const apiMocks = vi.hoisted(() => ({
     getTopicMessages: vi.fn(),
     deleteTopic: vi.fn(),
     updateTopic: vi.fn(),
-    updateMessageFeedback: vi.fn()
+    updateMessageFeedback: vi.fn(),
+    fetchFileBlob: vi.fn()
   },
   taskApi: {
     deliverMessage: vi.fn(),
@@ -151,6 +155,7 @@ describe('WidgetChat history conversations', () => {
     apiMocks.topicApi.deleteTopic.mockResolvedValue({ status: 'ok' })
     apiMocks.topicApi.updateTopic.mockImplementation(async (topicId, payload) => topic(topicId, '已更新会话', payload))
     apiMocks.topicApi.updateMessageFeedback.mockImplementation(async (_topicId, messageId, feedback) => ({ message_id: messageId, feedback }))
+    apiMocks.topicApi.fetchFileBlob.mockResolvedValue(new Blob(['file-content']))
     apiMocks.taskApi.deliverMessage.mockResolvedValue({ task_id: 'task-1' })
     apiMocks.taskApi.getTask.mockResolvedValue({ task_status: 'finished' })
     apiMocks.taskApi.streamSdkEvents.mockResolvedValue()
@@ -159,6 +164,10 @@ describe('WidgetChat history conversations', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    if (createObjectURLDescriptor) Object.defineProperty(URL, 'createObjectURL', createObjectURLDescriptor)
+    else Reflect.deleteProperty(URL, 'createObjectURL')
+    if (revokeObjectURLDescriptor) Object.defineProperty(URL, 'revokeObjectURL', revokeObjectURLDescriptor)
+    else Reflect.deleteProperty(URL, 'revokeObjectURL')
   })
 
   it('renders inline with portal-style layout, model info, suggestions, and no delete actions', async () => {
@@ -302,6 +311,50 @@ describe('WidgetChat history conversations', () => {
     await wrapper.get('[data-testid="feedback-dislike-msg-topic-2"]').trigger('click')
     expect(apiMocks.topicApi.updateMessageFeedback).toHaveBeenCalledWith('topic-2', 'msg-topic-2', 'dislike')
     expect(wrapper.get('[data-testid="feedback-dislike-msg-topic-2"]').classes()).toContain('active')
+  })
+
+  it('downloads widget attachments and markdown files through the header-aware API client', async () => {
+    apiMocks.topicApi.getTopicMessages.mockImplementation(async (topicId) => ({
+      topic_id: topicId,
+      total: 1,
+      items: [
+        {
+          message_id: `msg-${topicId}`,
+          sender_type: 'assistant',
+          content: '[下载明细](output/detail.csv)',
+          status: 'success',
+          seq_id: 1,
+          attachments: [
+            { name: '销售报表.xlsx', rel_path: 'output/销售报表.xlsx', size: 12, kind: 'output' }
+          ]
+        }
+      ]
+    }))
+    const createObjectURL = vi.fn().mockReturnValue('blob:widget-download')
+    const revokeObjectURL = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    const { wrapper } = mountChat({ config: { displayMode: 'inline' } })
+    await flushPromises()
+    await wrapper.get('[data-testid="history-topic-topic-2"]').trigger('click')
+    await flushPromises()
+
+    const attachment = wrapper.get('.query-msg-attachment')
+    expect(attachment.attributes('href')).toBe('#odw-file=output%2F%E9%94%80%E5%94%AE%E6%8A%A5%E8%A1%A8.xlsx')
+    await attachment.trigger('click')
+    await flushPromises()
+    expect(apiMocks.topicApi.fetchFileBlob).toHaveBeenCalledWith('topic-2', 'output/销售报表.xlsx')
+
+    const markdownLink = wrapper.get('.query-main-text a')
+    expect(markdownLink.attributes('href')).toBe('#odw-file=output%2Fdetail.csv')
+    await markdownLink.trigger('click')
+    await flushPromises()
+    expect(apiMocks.topicApi.fetchFileBlob).toHaveBeenCalledWith('topic-2', 'output/detail.csv')
+    expect(createObjectURL).toHaveBeenCalledTimes(2)
+    expect(anchorClick).toHaveBeenCalledTimes(2)
+    expect(revokeObjectURL).toHaveBeenCalledTimes(2)
   })
 
   it('falls back when the widget clipboard API rejects and shows copy feedback', async () => {
