@@ -30,6 +30,7 @@ def test_backend_dockerfile_uses_opt_backend_and_no_bundled_skills():
     content = BACKEND_DOCKERFILE.read_text(encoding="utf-8")
 
     assert "ENV HOME=/dataagent_runtime" in content
+    assert "ENV DATAAGENT_RUNTIME_ROOT=/dataagent_runtime" in content
     assert OLD_SANDBOX_ROOT_ENV not in content
     assert "mkdir -p /dataagent_runtime /app/.claude/skills" in content
     assert OLD_WORKSPACES_ROOT not in content

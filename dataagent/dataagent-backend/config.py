@@ -95,6 +95,10 @@ class Settings(BaseSettings):
     dataagent_ask_user_question_enabled: bool = True
 
     # ---- Topic runtime root / sandbox ----
+    # Filesystem root visible to the current process. Containerized backend
+    # processes read the shared volume at /dataagent_runtime; local execution
+    # leaves this empty and falls back to dataagent_host_root.
+    dataagent_runtime_root: str = ""
     # Host-visible persistent root used by the sandbox runner when asking the
     # host Docker/Podman daemon to bind-mount topic subdirectories into child
     # containers.

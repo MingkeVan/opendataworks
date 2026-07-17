@@ -20,13 +20,22 @@ Paired design: `docs/design/2026-06-09-dataagent-host-root-custom-path-design.md
    - Before the compose `up`, set and `export DATAAGENT_HOST_ROOT` to the
      resolved absolute path and echo it so the chosen host directory is visible.
 
-3. Documentation.
+3. Backend runtime-root separation.
+   - Add internal `dataagent_runtime_root` configuration and prefer it in
+     `core/topic_workspace.py` for implicit topic path resolution.
+   - Set `DATAAGENT_RUNTIME_ROOT=/dataagent_runtime` in the backend image so
+     file listing, preview, download, cleanup, and attachment detection use the
+     mounted volume instead of the host bind-source string.
+   - Keep `DATAAGENT_HOST_ROOT` as the local fallback and runner child-bind
+     source; do not proxy file downloads to disposable sandbox children.
+
+4. Documentation.
    - `deploy/.env.example`: document that `DATAAGENT_HOST_ROOT` accepts a custom
      absolute path or a `deploy/`-relative path (expanded by `start.sh`), and
      that raw `docker compose` needs an absolute value.
    - `deploy/README.md`: same note on both DataAgent runtime-root bullets.
 
-4. Tests.
+5. Tests.
    - `dataagent/dataagent-backend/tests/test_sandbox_runner_main.py`: add an
      autouse fixture redirecting `CONTAINER_RUNTIME_ROOT` to a temp dir; assert
      the runner creates topic workspace/home/logs under the container root while
@@ -34,11 +43,21 @@ Paired design: `docs/design/2026-06-09-dataagent-host-root-custom-path-design.md
      never leaks in as a bind source.
    - `tests/test_deepeval_packaging_hooks.py`: assert `start.sh` defines
      `resolve_dataagent_host_root` and exports the resolved value before compose.
+   - `dataagent/dataagent-backend/tests/test_topic_workspace.py`: verify the
+     container runtime root wins over a distinct host root and resolves an
+     existing `output/report.html`; verify local fallback remains unchanged.
+   - `dataagent/dataagent-backend/tests/test_runner_dockerfile.py`: assert the
+     backend image declares its fixed container-visible runtime root.
 
 ## Touched files
 
 - `dataagent/dataagent-backend/sandbox_runner_main.py`
+- `dataagent/dataagent-backend/config.py`
+- `dataagent/dataagent-backend/core/topic_workspace.py`
+- `dataagent/dataagent-backend/Dockerfile`
 - `dataagent/dataagent-backend/tests/test_sandbox_runner_main.py`
+- `dataagent/dataagent-backend/tests/test_topic_workspace.py`
+- `dataagent/dataagent-backend/tests/test_runner_dockerfile.py`
 - `scripts/start.sh`
 - `deploy/.env.example`
 - `deploy/README.md`
@@ -50,6 +69,10 @@ Paired design: `docs/design/2026-06-09-dataagent-host-root-custom-path-design.md
 
 - `pytest dataagent/dataagent-backend/tests/test_sandbox_runner_main.py` (host vs
   container root separation).
+- `pytest dataagent/dataagent-backend/tests/test_topic_workspace.py
+  dataagent/dataagent-backend/tests/test_topic_files.py
+  dataagent/dataagent-backend/tests/test_runner_dockerfile.py` (backend direct
+  persistent-volume reads and file path confinement).
 - `pytest tests/test_deepeval_packaging_hooks.py` for the packaging/launcher
   assertions.
 - `bash -n scripts/start.sh` and a shell unit check that
@@ -62,11 +85,11 @@ Paired design: `docs/design/2026-06-09-dataagent-host-root-custom-path-design.md
 
 ## Rollout
 
-- Runner code + launcher + docs change. The runner image must be rebuilt to pick
-  up the `sandbox_runner_main.py` fix. Deployments using the default
-  `/dataagent_runtime` are behavior-unchanged.
+- Backend/runner code + launcher + docs change. Both backend and runner images
+  must be rebuilt for the complete custom-root fix. Deployments using the
+  default `/dataagent_runtime` are behavior-unchanged.
 
 ## Backout
 
-- Revert the `sandbox_runner_main.py`, `scripts/start.sh`, `.env.example`, and
-  `README.md` edits. No data migration is involved.
+- Revert the backend runtime-root changes plus the earlier runner/launcher edits.
+  No data migration is involved; files remain in the existing host volume.
