@@ -7,9 +7,9 @@
       'is-history-open': historyVisible
     }"
   >
-    <div v-if="historyVisible" class="query-sidebar-backdrop" @click="closeHistory" />
+    <div v-if="historyVisible && !loginRequired" class="query-sidebar-backdrop" @click="closeHistory" />
 
-    <aside v-if="historyVisible" class="query-sidebar" aria-label="历史会话">
+    <aside v-if="historyVisible && !loginRequired" class="query-sidebar" aria-label="历史会话">
       <div class="query-sidebar-head">
         <button class="query-btn-new" type="button" data-testid="new-conversation" @click="newConversation">
           新建会话
@@ -50,9 +50,17 @@
     </aside>
 
     <main class="query-main">
-      <div v-if="copyNotice" class="query-copy-toast" role="status">{{ copyNotice }}</div>
+      <div v-if="loginRequired" class="query-login-required" data-testid="widget-login-required">
+        <Lock class="query-login-required-icon" aria-hidden="true" />
+        <div class="query-login-required-title">请先登录</div>
+        <div class="query-login-required-text">登录后即可使用智能问数</div>
+        <a v-if="loginUrl" class="query-login-required-action" :href="loginUrl">前往登录</a>
+        <button v-else class="query-login-required-action" type="button" @click="reloadPage">刷新页面</button>
+      </div>
 
-      <div ref="messagesEl" class="query-messages" @scroll="onMessagesScroll">
+      <div v-if="!loginRequired && copyNotice" class="query-copy-toast" role="status">{{ copyNotice }}</div>
+
+      <div v-if="!loginRequired" ref="messagesEl" class="query-messages" @scroll="onMessagesScroll">
         <div
           class="query-messages-inner"
           :class="{ 'is-empty': !messages.length }"
@@ -221,7 +229,7 @@
       </div>
 
       <!-- Composer bar -->
-      <form class="query-composer-bar" :class="{ 'is-landing': !messages.length }" @submit.prevent="send">
+      <form v-if="!loginRequired" class="query-composer-bar" :class="{ 'is-landing': !messages.length }" @submit.prevent="send">
         <div class="query-composer-wrap">
           <template v-if="!messages.length">
             <div v-if="!providers.length" class="query-config-empty">
@@ -345,6 +353,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, triggerRef, watch } from 'vue'
+import { Lock } from '@element-plus/icons-vue'
 import { createNl2SqlApiClient } from '@/api/nl2sql'
 import ToolOutputRenderer from '@/views/intelligence/ToolOutputRenderer.vue'
 import ChartSpecView from '@/views/intelligence/ChartSpecView.vue'
@@ -356,6 +365,7 @@ import { useNl2SqlChat } from '@/views/intelligence/useNl2SqlChat'
 import { useChatMessageActions } from '@/views/intelligence/useChatMessageActions'
 import SlashCommandMenu from '@/views/intelligence/SlashCommandMenu.vue'
 import { useSlashCommands, buildCommands } from '@/views/intelligence/useSlashCommands'
+import { isWidgetLoginRequired } from './config'
 
 const props = defineProps({
   config: {
@@ -370,10 +380,19 @@ const props = defineProps({
 
 const emit = defineEmits(['event', 'consumed-outbound'])
 
+const loginRequired = ref(isWidgetLoginRequired(props.config))
+const requireLogin = () => {
+  loginRequired.value = true
+  props.state.loginRequired = true
+  props.state.historyOpen = false
+  emit('event', { name: 'login:required' })
+}
+
 const api = createNl2SqlApiClient({
   baseURL: props.config.apiBaseUrl,
   timeout: 300000,
-  defaultHeaders: props.config.headers
+  defaultHeaders: props.config.headers,
+  onUnauthorized: requireLogin
 })
 provide('nl2sqlApi', api)
 
@@ -442,6 +461,8 @@ const copyNotice = ref('')
 
 const isInline = computed(() => props.config.displayMode === 'inline')
 const agentId = computed(() => String(props.config.agentId || '').trim())
+const loginUrl = computed(() => String(props.config.loginUrl || '').trim())
+const reloadPage = () => window.location.reload()
 
 // Shared NL2SQL conversation engine. The widget keeps its own demo/mock send,
 // tracking, outbound API, and shadow-DOM template; everything else is the engine.
@@ -486,6 +507,15 @@ watch(
     // A finished run may have reported new SDK slash commands (built-ins surface
     // only after the first run); refresh the authoritative list.
     if (previous && !value) void loadSlashCommands()
+  },
+  { immediate: true }
+)
+
+watch(
+  loginRequired,
+  (value) => {
+    props.state.loginRequired = value
+    if (value) props.state.historyOpen = false
   },
   { immediate: true }
 )
@@ -996,7 +1026,9 @@ watch(
 
 onMounted(async () => {
   document.addEventListener('click', handleToolbarDropdownOutsideClick, true)
+  if (loginRequired.value) return
   await loadConfig()
+  if (loginRequired.value) return
   if (agentId.value && agentId.value !== 'demo') {
     try {
       const agentProfile = await api.agentApi.getAgent(agentId.value)

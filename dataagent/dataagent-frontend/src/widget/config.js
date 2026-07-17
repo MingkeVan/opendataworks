@@ -14,6 +14,8 @@ const randomId = () => {
 
 const visitorStorageKey = (websiteId) => `odw_widget_visitor_id_${websiteId || 'default'}`
 
+export const parseBooleanFlag = (value) => value === true || String(value || '').trim().toLowerCase() === 'true'
+
 export function resolveCurrentScript() {
   if (typeof document === 'undefined') return null
   return document.currentScript || document.querySelector('script[data-website-id][src*="opendataworks-widget"]')
@@ -37,7 +39,9 @@ export function parseWidgetConfig(script = resolveCurrentScript()) {
   const websiteId = String(dataset.websiteId || '').trim()
   const userId = String(dataset.userId || '').trim()
   const agentId = String(dataset.agentId || '').trim()
-  const visitorId = userId ? '' : resolveVisitorId(websiteId)
+  const allowAnonymous = parseBooleanFlag(dataset.allowAnonymous)
+  const visitorId = userId || !allowAnonymous ? '' : resolveVisitorId(websiteId)
+  const loginUrl = String(dataset.loginUrl || '').trim()
   const apiBaseUrl = trimTrailingSlash(dataset.apiBaseUrl || (script?.src ? new URL(script.src, window.location.href).origin : ''))
   const projectName = String(dataset.projectName || DEFAULT_PROJECT_NAME).trim() || DEFAULT_PROJECT_NAME
   const projectColor = String(dataset.projectColor || DEFAULT_PROJECT_COLOR).trim() || DEFAULT_PROJECT_COLOR
@@ -51,7 +55,7 @@ export function parseWidgetConfig(script = resolveCurrentScript()) {
   }
   if (userId) {
     headers['X-ODW-User-Id'] = userId
-  } else {
+  } else if (visitorId) {
     headers['X-ODW-Visitor-Id'] = visitorId
   }
 
@@ -60,6 +64,8 @@ export function parseWidgetConfig(script = resolveCurrentScript()) {
     userId,
     agentId,
     visitorId,
+    allowAnonymous,
+    loginUrl,
     projectName,
     projectColor,
     apiBaseUrl,
@@ -68,4 +74,11 @@ export function parseWidgetConfig(script = resolveCurrentScript()) {
     containerId,
     headers
   }
+}
+
+export function isWidgetLoginRequired(config = {}) {
+  const websiteId = String(config.websiteId || config.headers?.['X-ODW-Website-Id'] || '').trim()
+  if (!websiteId) return false
+  const userId = String(config.userId || config.headers?.['X-ODW-User-Id'] || '').trim()
+  return !userId && config.allowAnonymous !== true
 }

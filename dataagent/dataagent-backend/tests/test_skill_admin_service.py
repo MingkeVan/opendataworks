@@ -230,6 +230,7 @@ def test_normalize_widget_allowed_sites_from_json_string():
             "allowed_origins": ["https://a.com"],
             "project_name": "Demo",
             "project_color": "#4A90A4",
+            "allow_anonymous": False,
         }
     ]
 
@@ -247,6 +248,7 @@ def test_normalize_widget_allowed_sites_drops_invalid_and_duplicate_entries():
 
     assert [item["website_id"] for item in sites] == ["dup"]
     assert sites[0]["allowed_origins"] == []
+    assert sites[0]["allow_anonymous"] is False
 
 
 def test_merge_settings_payload_carries_widget_allowed_sites_from_patch():
@@ -257,7 +259,12 @@ def test_merge_settings_payload_carries_widget_allowed_sites_from_patch():
         },
         {
             "widget_allowed_sites": [
-                {"website_id": "new", "allowed_origins": ["https://b.com"], "project_color": "#000"}
+                {
+                    "website_id": "new",
+                    "allowed_origins": ["https://b.com"],
+                    "project_color": "#000",
+                    "allow_anonymous": True,
+                }
             ]
         },
     )
@@ -268,6 +275,7 @@ def test_merge_settings_payload_carries_widget_allowed_sites_from_patch():
             "allowed_origins": ["https://b.com"],
             "project_name": "",
             "project_color": "#000",
+            "allow_anonymous": True,
         }
     ]
 
@@ -287,6 +295,7 @@ def test_merge_settings_payload_preserves_widget_allowed_sites_without_patch():
             "allowed_origins": ["*"],
             "project_name": "",
             "project_color": "",
+            "allow_anonymous": False,
         }
     ]
 

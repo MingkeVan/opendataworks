@@ -191,8 +191,6 @@ def _request_context(request: Request) -> dict[str, str]:
     visitor_id = _clean_header(request.headers.get("X-ODW-Visitor-Id"), 128)
     if not website_id:
         raise HTTPException(status_code=400, detail="X-ODW-Website-Id is required")
-    if not external_user_id and not visitor_id:
-        raise HTTPException(status_code=400, detail="X-ODW-User-Id or X-ODW-Visitor-Id is required")
 
     matched_site = None
     for site in _allowed_widget_sites():
@@ -212,6 +210,15 @@ def _request_context(request: Request) -> dict[str, str]:
     if not _origin_allowed(req_origin, allowed_origins):
         logger.warning(f"Widget origin rejected: origin={req_origin!r} allowed={allowed_origins!r}")
         raise HTTPException(status_code=403, detail="Widget origin is not allowed")
+
+    if not external_user_id and (not visitor_id or matched_site.get("allow_anonymous") is not True):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "WIDGET_LOGIN_REQUIRED",
+                "message": "请先登录后使用智能问数",
+            },
+        )
 
     return {
         "source": "widget",

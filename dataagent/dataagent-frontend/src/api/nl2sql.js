@@ -102,12 +102,20 @@ function createAxiosClient(baseURL, prefix, timeout, defaultHeaders = {}, onUnau
   request.interceptors.response.use(
     (response) => unwrapResponse(response),
     (error) => {
-      // 认证 401 交给调用方（SPA 跳登录页）。widget 从不传 onUnauthorized，行为不变。
+      const responseDetail = error?.response?.data?.detail
+      const responseMessage = typeof responseDetail === 'object'
+        ? responseDetail?.message
+        : (responseDetail || error?.response?.data?.message)
+      const responseCode = typeof responseDetail === 'object'
+        ? responseDetail?.code
+        : error?.response?.data?.code
+      if (responseCode) error.code = String(responseCode)
+      error.message = String(responseMessage || error.message || '网络错误')
+
+      // 认证 401 交给调用方：SPA 可跳转登录页，Widget 切换到未登录状态。
       if (error?.response?.status === 401 && typeof onUnauthorized === 'function') {
         onUnauthorized(error)
       }
-      const responseMessage = error?.response?.data?.detail || error?.response?.data?.message
-      error.message = responseMessage || error.message || '网络错误'
       return Promise.reject(error)
     }
   )
@@ -119,7 +127,6 @@ export function createNl2SqlApiClient(options = {}) {
   const baseURL = normalizeBaseUrl(options.baseURL)
   const timeout = options.timeout || DEFAULT_TIMEOUT
   const defaultHeaders = options.defaultHeaders || options.headers || {}
-  // 401 钩子只在 SPA 调用点传入；widget 不传（保持匿名嵌入行为不变）。
   const onUnauthorized = typeof options.onUnauthorized === 'function' ? options.onUnauthorized : null
   const runtimeRequest = createAxiosClient(baseURL, RUNTIME_PREFIX, timeout, defaultHeaders, onUnauthorized)
   const adminRequest = createAxiosClient(baseURL, ADMIN_PREFIX, timeout, defaultHeaders, onUnauthorized)

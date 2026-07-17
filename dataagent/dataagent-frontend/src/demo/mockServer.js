@@ -1112,12 +1112,14 @@ const demoProviderSettings = {
   widget_allowed_sites: [
     {
       website_id: 'mall-portal',
+      allow_anonymous: false,
       project_name: '商城官网',
       project_color: '#4A90A4',
       allowed_origins: ['https://mall.demo.example.com']
     },
     {
       website_id: 'ops-console',
+      allow_anonymous: false,
       project_name: '运营后台',
       project_color: '#7C5CFC',
       allowed_origins: ['https://ops.demo.example.com']

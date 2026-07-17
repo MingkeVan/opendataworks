@@ -222,8 +222,23 @@ describe('auth wiring', () => {
     // 每个 axios client 的 response 拦截器第二个参数是错误处理器。
     const rejectHandler = clients[0].interceptors.response.use.mock.calls[0][1]
 
-    await expect(rejectHandler({ response: { status: 401 }, message: 'x' })).rejects.toBeTruthy()
+    const loginError = {
+      response: {
+        status: 401,
+        data: {
+          detail: {
+            code: 'WIDGET_LOGIN_REQUIRED',
+            message: '请先登录后使用智能问数'
+          }
+        }
+      },
+      message: 'x'
+    }
+    await expect(rejectHandler(loginError)).rejects.toBe(loginError)
     expect(onUnauthorized).toHaveBeenCalledTimes(1)
+    expect(onUnauthorized).toHaveBeenCalledWith(loginError)
+    expect(loginError.code).toBe('WIDGET_LOGIN_REQUIRED')
+    expect(loginError.message).toBe('请先登录后使用智能问数')
 
     await expect(rejectHandler({ response: { status: 500 }, message: 'x' })).rejects.toBeTruthy()
     expect(onUnauthorized).toHaveBeenCalledTimes(1)

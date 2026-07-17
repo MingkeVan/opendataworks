@@ -170,6 +170,54 @@ describe('WidgetChat history conversations', () => {
     else Reflect.deleteProperty(URL, 'revokeObjectURL')
   })
 
+  it('shows the login-required state without loading data when anonymous access is disabled', async () => {
+    const { wrapper, state } = mountChat({
+      config: {
+        userId: '',
+        allowAnonymous: false,
+        loginUrl: '/login',
+        headers: {
+          'X-ODW-Client': 'widget',
+          'X-ODW-Website-Id': 'demo'
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="widget-login-required"]').text()).toContain('请先登录')
+    expect(wrapper.get('.query-login-required-action').attributes('href')).toBe('/login')
+    expect(wrapper.find('.query-composer-bar').exists()).toBe(false)
+    expect(wrapper.find('.query-sidebar').exists()).toBe(false)
+    expect(state.loginRequired).toBe(true)
+    expect(apiMocks.runtimeApi.getConfig).not.toHaveBeenCalled()
+    expect(apiMocks.topicApi.listTopics).not.toHaveBeenCalled()
+  })
+
+  it('switches to the login-required state when the backend rejects anonymous access', async () => {
+    const { wrapper, state } = mountChat({
+      config: {
+        userId: '',
+        allowAnonymous: true,
+        headers: {
+          'X-ODW-Client': 'widget',
+          'X-ODW-Website-Id': 'demo',
+          'X-ODW-Visitor-Id': 'visitor-test'
+        }
+      }
+    })
+
+    await flushPromises()
+    const clientOptions = apiMocks.createClient.mock.calls.at(-1)[0]
+    clientOptions.onUnauthorized({ code: 'WIDGET_LOGIN_REQUIRED' })
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="widget-login-required"]').exists()).toBe(true)
+    expect(wrapper.get('.query-login-required-action').text()).toBe('刷新页面')
+    expect(state.loginRequired).toBe(true)
+    expect(state.historyOpen).toBe(false)
+  })
+
   it('renders inline with portal-style layout, model info, suggestions, and no delete actions', async () => {
     const { wrapper } = mountChat({ config: { displayMode: 'inline' } })
 

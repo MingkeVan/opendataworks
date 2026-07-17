@@ -210,6 +210,7 @@ def _normalize_widget_allowed_sites(raw: Any) -> list[dict[str, Any]]:
             "allowed_origins": origin_list,
             "project_name": str(item.get("project_name") or "").strip()[:128],
             "project_color": str(item.get("project_color") or "").strip()[:32],
+            "allow_anonymous": item.get("allow_anonymous") is True,
         })
     return normalized
 

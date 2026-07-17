@@ -114,7 +114,7 @@ def install_fake_store(monkeypatch):
     return store
 
 
-def install_widget_settings(monkeypatch):
+def install_widget_settings(monkeypatch, *, allow_anonymous=False):
     monkeypatch.setattr(
         routes,
         "get_settings",
@@ -139,6 +139,7 @@ def install_widget_settings(monkeypatch):
                     "allowed_origins": ["https://host.example.com"],
                     "project_name": "Demo",
                     "project_color": "#4A90A4",
+                    "allow_anonymous": allow_anonymous,
                 }
             ]
         },
@@ -260,7 +261,7 @@ def test_widget_topic_create_uses_requested_agent_snapshot(monkeypatch):
 
 
 def test_widget_requests_fall_back_to_visitor_context_without_user_id(monkeypatch):
-    install_widget_settings(monkeypatch)
+    install_widget_settings(monkeypatch, allow_anonymous=True)
     install_agent_profile(monkeypatch)
     store = install_fake_store(monkeypatch)
     client = TestClient(app)
@@ -277,6 +278,38 @@ def test_widget_requests_fall_back_to_visitor_context_without_user_id(monkeypatc
     assert context["website_id"] == "demo"
     assert context["external_user_id"] == ""
     assert context["visitor_id"] == "visitor-abc"
+
+
+def test_widget_requests_reject_visitor_when_anonymous_access_is_disabled(monkeypatch):
+    install_widget_settings(monkeypatch)
+    install_agent_profile(monkeypatch)
+    store = install_fake_store(monkeypatch)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/nl2sql/topics",
+        headers=widget_headers("", visitor_id="visitor-abc"),
+        json={"title": "匿名访客", "agent_id": "agent_widget"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == {
+        "code": "WIDGET_LOGIN_REQUIRED",
+        "message": "请先登录后使用智能问数",
+    }
+    assert store.calls == [("init_schema", None)]
+
+
+def test_widget_requests_without_identity_require_login(monkeypatch):
+    install_widget_settings(monkeypatch, allow_anonymous=True)
+    store = install_fake_store(monkeypatch)
+    client = TestClient(app)
+
+    response = client.get("/api/v1/nl2sql/topics", headers=widget_headers(""))
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "WIDGET_LOGIN_REQUIRED"
+    assert store.calls == [("init_schema", None)]
 
 
 def test_widget_origin_must_match_allowed_site(monkeypatch):

@@ -33,7 +33,8 @@ Widget 接入白名单（哪些站点 `website_id` + 允许来源 `Origin` 可�
 
 - `AdminSettingsResponse` 增加 `widget_allowed_sites: List[WidgetAllowedSite]`。
 - `AdminSettingsUpdateRequest` 增加可选 `widget_allowed_sites`。
-- `WidgetAllowedSite`：`website_id` / `allowed_origins[]` / `project_name` / `project_color`。
+- `WidgetAllowedSite`：`website_id` / `allowed_origins[]` / `project_name` / `project_color` / `allow_anonymous`。
+- `allow_anonymous` 缺失时按 `false` 处理；匿名访问的接入参数、后端校验和未登录 UI 以 `dataagent/dataagent-frontend/examples/widget/README.md` 为准。
 
 ### 运行时取数
 
@@ -44,7 +45,7 @@ Widget 接入白名单（哪些站点 `website_id` + 允许来源 `Origin` 可�
 ### 前端
 
 - `IntelligentQueryView.vue` 侧边栏新增独立菜单项「Widget 接入」（tab=`widget`）。
-- 新增 `views/settings/WidgetAccessConfig.vue`：站点卡片列表，支持新增/删除站点、编辑 `website_id`/项目名/主题色、动态增删允许来源；脏检查驱动保存；保存前校验 `website_id` 非空且不重复。
+- 新增 `views/settings/WidgetAccessConfig.vue`：站点卡片列表，支持新增/删除站点、编辑 `website_id`/项目名/主题色、配置匿名访问、动态增删允许来源；脏检查驱动保存；保存前校验 `website_id` 非空且不重复。
 
 ## 取舍
 

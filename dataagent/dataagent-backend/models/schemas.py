@@ -262,6 +262,7 @@ class WidgetAllowedSite(BaseModel):
     allowed_origins: List[str] = Field(default_factory=list)
     project_name: str = ""
     project_color: str = ""
+    allow_anonymous: bool = False
 
 
 class AdminSettingsResponse(BaseModel):
