@@ -185,8 +185,8 @@ export function createNl2SqlApiClient(options = {}) {
       }
       return response.text()
     },
-    // 登录态下浏览器裸链接导航带不上自定义标记头，SPA 的文件下载/预览
-    // 统一改走 fetch → Blob（见设计文档 3.6）。widget 仍用 fileUrl 裸链接。
+    // 浏览器裸链接导航带不上 SPA/dataagent/widget 的自定义上下文头，文件
+    // 下载统一改走 fetch -> Blob，由各聊天界面触发浏览器保存。
     async fetchFileBlob(topicId, relPath) {
       const response = await fetch(this.fileUrl(topicId, relPath), {
         credentials: 'include',

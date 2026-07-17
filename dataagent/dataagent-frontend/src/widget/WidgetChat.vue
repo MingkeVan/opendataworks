@@ -53,7 +53,11 @@
       <div v-if="copyNotice" class="query-copy-toast" role="status">{{ copyNotice }}</div>
 
       <div ref="messagesEl" class="query-messages" @scroll="onMessagesScroll">
-        <div class="query-messages-inner" :class="{ 'is-empty': !messages.length }">
+        <div
+          class="query-messages-inner"
+          :class="{ 'is-empty': !messages.length }"
+          @click="handleWorkspaceFileClick"
+        >
           <div v-if="errorText" class="query-error-card query-error-banner">
             <span class="query-error-label">错误</span>
             <span>{{ errorText }}</span>
@@ -165,8 +169,8 @@
                     v-for="file in msg.attachments"
                     :key="file.rel_path"
                     class="query-msg-attachment"
-                    :href="attachmentDownloadUrl(file)"
-                    download
+                    :href="resolveWorkspaceFileHref(file.rel_path)"
+                    :data-file-name="file.name"
                     :title="'下载 ' + file.name"
                   >
                     <svg class="query-msg-attachment-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
@@ -558,13 +562,44 @@ const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 // uses (copy/preview); rendering splits it into text/chart segments instead.
 const cleanTextForDisplay = (content) => stripChartSpecsFromText(String(content || '')).trim()
 
-// Message markdown: workspace-relative file links the agent emits
-// (`output/...`, `uploads/...`) become download URLs for the active topic.
+const WORKSPACE_FILE_FRAGMENT = '#odw-file='
+
+// Message markdown and attachment cards use a self-describing fragment. The
+// message container intercepts it and downloads with the widget context headers.
 const renderMarkdown = (text) => renderMarkdownBase(text, { resolveFileHref: resolveWorkspaceFileHref })
 const resolveWorkspaceFileHref = (relPath) => (
-  topicId.value ? api.topicApi.fileUrl(topicId.value, relPath, { download: true }) : ''
+  topicId.value ? `${WORKSPACE_FILE_FRAGMENT}${encodeURIComponent(String(relPath || ''))}` : ''
 )
-const attachmentDownloadUrl = (file) => api.topicApi.fileUrl(topicId.value, file.rel_path, { download: true })
+
+const downloadWorkspaceFile = async (relPath, fileName = '') => {
+  if (!topicId.value || !relPath) return
+  try {
+    const blob = await api.topicApi.fetchFileBlob(topicId.value, relPath)
+    const objectUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = fileName || String(relPath).split('/').pop() || 'download'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(objectUrl)
+  } catch (error) {
+    errorText.value = `下载失败: ${error?.message || error}`
+  }
+}
+
+const handleWorkspaceFileClick = (event) => {
+  const anchor = event.target?.closest?.('a[href*="#odw-file="]')
+  if (!anchor) return
+  const href = anchor.getAttribute('href') || ''
+  const index = href.indexOf(WORKSPACE_FILE_FRAGMENT)
+  if (index < 0) return
+  event.preventDefault()
+  let relPath = href.slice(index + WORKSPACE_FILE_FRAGMENT.length)
+  try { relPath = decodeURIComponent(relPath) } catch { /* keep raw */ }
+  void downloadWorkspaceFile(relPath, anchor.dataset.fileName || '')
+}
+
 const formatBytes = (size) => {
   const n = Number(size) || 0
   if (n < 1024) return `${n} B`

@@ -101,6 +101,34 @@ describe('createNl2SqlApiClient', () => {
     )
   })
 
+  it('fetches file blobs with widget context headers', async () => {
+    const headers = {
+      'X-ODW-Client': 'widget',
+      'X-ODW-Website-Id': 'demo',
+      'X-ODW-User-Id': 'user-123'
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      blob: vi.fn().mockResolvedValue(new Blob(['file-content']))
+    })
+
+    try {
+      const client = createNl2SqlApiClient({
+        baseURL: 'https://odw.example.com',
+        defaultHeaders: headers
+      })
+
+      await client.topicApi.fetchFileBlob('topic-widget', 'output/report.csv')
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://odw.example.com/api/v1/nl2sql/topics/topic-widget/files/output/report.csv',
+        { credentials: 'include', headers }
+      )
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
   it('exposes safe runtime config through the unified runtime API', () => {
     const client = createNl2SqlApiClient()
 
