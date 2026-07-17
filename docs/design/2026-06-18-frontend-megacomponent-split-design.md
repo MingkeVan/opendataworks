@@ -104,6 +104,13 @@ src/views/datastudio/
 - **composable 契约**：`useXxx(deps)` 接收所需依赖（如 ref、api、cfg），返回该簇的状态与方法；composable 之间不互相反向依赖，避免环。
 - **纯工具**：无 Vue 依赖、无副作用，纯输入输出，便于单测。
 
+### 5.0 契约变更记录（2026-07-17 起）
+
+- `dataStudioCtx`（F13）：移除死键 `getLayerType`（其模板引用全部位于 F12 删除的死代码块内；`DataStudioRightPanelLineage` 一直直接 `import { getLayerType } from '../tableFormat'`）。契约从 32 键收敛为 31 键，其余键名/语义不变。
+- 新增 `provide('dataStudioQueryCtx')`（F16a/F16b）：消费者为 `DataStudioResultPanel` 与 `DataStudioQueryPanel`，键集合 = `tabStates, dataSources, getSourceName, getSchemaOptions, handleQuerySourceSelect, handleQueryDatabaseSelect, executeQuery, stopQuery, resetQuery, saveAsTask, getSqlCompletionContext, handleSqlSelectionChange, getLiveDurationMs, getStatementStatusTagType, getDisplayResultSets, isResultSetType, getResultSetCountText, getResultSetAlertType, exportResult, getResultRowKeyPrefix, applyHistory, historyData, historyPager, historyLoading, getNumericColumns, setChartRef, canRenderChart`（由 `useQueryExecution`/`useResultChart`/`useSqlCompletion`/`useTableActions` 返回值与共享状态装配）。
+- 新增 `provide('dataStudioCatalogCtx')`（F16c）：消费者为 `DataStudioCatalogNode`,键集合 = `dbLoading, schemaLoading, schemaCountLoading, tableLoading, setTableRef, getProgressWidth, getDatasourceIconUrl, isDatasourceIconInactive, isViewTable, getTableCount, getTableCountByType, getTableRowCount, getTableStorageSize, refreshDatasourceNode, refreshSchemaNode, isPlatformMetadataMissing, getUpstreamCount, getDownstreamCount`。
+- CSS 作用域约束（F16c）：锚定在 `.catalog-tree` 上的悬停/选中态规则保留在 `DataStudioNew.vue` 的 `:deep()` 中（必须从 el-tree 所有者穿透）；节点内部元素样式随 `DataStudioCatalogNode` 迁移。
+
 ### 5.1 当前落地状态（2026-06-18）
 
 - 已完成 F1–F10b。
@@ -112,6 +119,21 @@ src/views/datastudio/
 - 已完成 F10a `useResultChart`：ECharts 实例、图表 DOM ref、默认选列、渲染、resize 同步与销毁已从 `DataStudioNew.vue` 移入 `composables/useResultChart.js`；纯选列评分继续复用 `chartColumnSelect.js`，`provide('dataStudioCtx')` 键集合保持不变。
 - 已完成 F10b `useTableMetaEditing`：业务域/数据域加载、表元数据编辑、字段编辑草稿、取消回滚、字段增删改和保存刷新已从 `DataStudioNew.vue` 移入 `composables/useTableMetaEditing.js`；右侧面板 `inject` 的 `dataStudioCtx` 键集合保持不变。
 - 当前 `DataStudioNew.vue` 已从 6108 行降至 3568 行；新增 `useQueryExecution.js` 729 行、`useResultChart.js` 252 行、`useTableMetaEditing.js` 382 行。
+
+### 5.2 续篇落地状态（2026-07-17，F12–F17c）
+
+- F12：删除主组件死模板块（旧右侧 meta 面板 HTML 注释，~499 行）与 46 个无法再匹配的孤儿样式规则块（逐选择器核对；动态类 `catalog-node--${type}` 与 `:deep()` 运行时类保留）。3553 → 2759 行。
+- F13：`dataStudioCtx` 移除死键 `getLayerType`（见 §5.0）。
+- F14 `useStudioTabs`：完成 F8 残留，Tab 生命周期（`createTabState/openTableTab/loadTabData/hydrateRestoredTableTabs/disposeTabResources/handleTab*` 等,~413 行）移入 `composables/useStudioTabs.js`,共享 ref 所有权仍在组件；配 13 个单测。
+- F15 `useTableActions`：建表/删表/元数据同步、DDL/访问统计加载、任务与血缘跳转（~288 行）移入 `composables/useTableActions.js`；配 12 个单测。
+- F16a `DataStudioResultPanel.vue`（533 行）：结果面板模板+样式随迁,经 `dataStudioQueryCtx` 接线,props 仅 `tab`。
+- F16b `DataStudioQueryPanel.vue`（240 行）：查询工具栏+异步 SqlEditor 随迁,复用同一 `dataStudioQueryCtx`。
+- F16c `DataStudioCatalogNode.vue`（403 行）：目录树节点模板+样式随迁,经 `dataStudioCatalogCtx` 接线,props 仅 `data`。
+- F17a：右面板 7 个纯解析/格式化函数逐字迁入 `tableFormat.js`,补 6 个单测。
+- F17b `usePanelVerticalResize`：右面板上下分栏拖拽与按 tab 记忆迁入 composable,配 5 个单测。
+- F17c `TableTrendDialog.vue`（202 行）：趋势弹窗自包含化（ECharts 生命周期内聚,父组件 `ref.open(metric)` 触发）；同时补 `DataStudioRightPanel.smoke.spec.js` 挂载冒烟（此前该组件被 DataStudioNew 冒烟 stub,无任何运行时覆盖）。
+- 行数结果：`DataStudioNew.vue` 3553 → **1217** 行；`DataStudioRightPanel.vue` 1985 → **1678** 行（余量主要是 basic/columns/access 三个 tab pane 与 ~800 行样式,见 §9 F17d）。
+- 验证口径：每片 `nvm use` 后 lint（0 error）/test/build 全绿；有状态切片另做 **demo 模式 Playwright 浏览器冒烟**（`npm run dev:demo` + 预装 Chromium,无真实后端/MySQL,与 F9/F10 的真实后端冒烟不同级）：目录树懒加载展开、打开表 Tab、右面板 DDL/访问 tab、SqlEditor 输入并执行、Tab 关闭与刷新恢复、右面板分栏拖拽、趋势弹窗 canvas 渲染均通过；唯一 console error 为既有 `/dataagent/widget` 资源代理 500。
 
 ## 6. 权衡
 
@@ -140,5 +162,8 @@ src/views/datastudio/
 ## 9. 后续（同类技术债 roadmap，另行设计）
 
 - `WorkflowDetail.vue`(2792)：同法 composables 化。
-- `TaskEditDrawer`：从 `views/` 迁入 `components/`，消除「视图导入视图」的跨视图耦合。
-- `DataStudioRightPanel.vue`(1985)：随 `dataStudioCtx` 契约收敛一并瘦身。
+- ~~`TaskEditDrawer`：从 `views/` 迁入 `components/`~~（已完成）。
+- ~~`DataStudioRightPanel.vue`(1985)：瘦身~~（F17a–c 已降至 1678,余量见下）。
+- F17d（未做）：`DataStudioRightPanel.vue` 的 basic/columns/access 三个 tab pane 子组件化 + 样式随迁,是把该组件压到 <800 行的必经一步。
+- `DataStudioNew.vue` 若要继续逼近 <800：候选是 PersistentTabs 内层 `tab-grid` 整体抽片与剩余 ~600 行布局样式的下沉,收益/回归比一般,暂不强推。
+- `dataStudioCtx`（31 键、单消费者）可评估整体收敛为 props 或按域拆分（meta/fields/nav）,需与 F17d 一并设计。
