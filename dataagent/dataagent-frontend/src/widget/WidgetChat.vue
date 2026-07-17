@@ -913,6 +913,13 @@ const onComposerInput = () => {
   resizeTextarea()
 }
 
+// Sending clears inputText programmatically, which does not fire the textarea's
+// input event. Re-measure after Vue flushes the empty value so a multiline
+// question cannot leave the composer stuck at its previous height.
+watch(inputText, (value) => {
+  if (!value) nextTick(() => resizeTextarea())
+})
+
 // Enter 发送，Shift + Enter 换行;输入法组合输入期间的回车用于确认候选词,不发送。
 const onComposerKeydown = (event) => {
   if (slash.handleKeydown(event)) return
