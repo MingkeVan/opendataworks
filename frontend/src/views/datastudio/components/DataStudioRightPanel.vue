@@ -183,7 +183,7 @@
                           type="primary"
                           class="metric-link"
                           :disabled="!state.table?.id"
-                          @click="openTrendDialog('rowCount')"
+                          @click="trendDialogRef?.open('rowCount')"
                         >
                           {{ formatRowCountDisplay(resolveTableRowCount(state.table)) }}
                         </el-button>
@@ -194,7 +194,7 @@
                           type="primary"
                           class="metric-link"
                           :disabled="!state.table?.id"
-                          @click="openTrendDialog('dataSize')"
+                          @click="trendDialogRef?.open('dataSize')"
                         >
                           {{ formatStorageSizeDisplay(resolveTableStorageSize(state.table)) }}
                         </el-button>
@@ -584,18 +584,7 @@
         @go-lineage="goLineage(activeTabId)"
       />
 
-      <el-dialog
-        v-model="trendDialogVisible"
-        :title="trendDialogTitle"
-        width="760px"
-        append-to-body
-        destroy-on-close
-      >
-        <div class="trend-dialog-body" v-loading="trendHistoryLoading">
-          <div v-if="trendSeries.length" ref="trendChartRef" class="trend-chart"></div>
-          <el-empty v-else description="暂无统计趋势数据（等待定时同步后可查看）" :image-size="72" />
-        </div>
-      </el-dialog>
+      <TableTrendDialog ref="trendDialogRef" :table="state.table" />
     </div>
 
     <div v-else class="right-empty">
@@ -605,11 +594,11 @@
 </template>
 
 <script setup>
-import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, inject, ref } from 'vue'
 import { Warning } from '@element-plus/icons-vue'
-import { tableApi } from '@/api/table'
 import DataStudioRightPanelLineage from './DataStudioRightPanelLineage.vue'
 import TableVersionHistoryPanel from './TableVersionHistoryPanel.vue'
+import TableTrendDialog from './TableTrendDialog.vue'
 import { isDemoMode } from '@/demo/runtime'
 import {
   resolveTableRowCount,
@@ -618,9 +607,7 @@ import {
   resolveTableDorisUpdateTime,
   formatRowCountDisplay,
   formatStorageSizeDisplay,
-  parseTimeToMs,
 } from '../tableFormat'
-import { loadEcharts } from '@/utils/loadEcharts'
 import { usePanelVerticalResize } from '../composables/usePanelVerticalResize'
 
 const props = defineProps({
@@ -678,12 +665,7 @@ const activeTabItem = computed(() => {
   return (openTabs.value || []).find((item) => String(item?.id) === id) || null
 })
 
-const trendDialogVisible = ref(false)
-const trendMetric = ref('rowCount')
-const trendHistoryLoading = ref(false)
-const trendSeries = ref([])
-const trendChartRef = ref(null)
-let trendChartInstance = null
+const trendDialogRef = ref(null)
 
 const rootClass = computed(() => [
   'right-root',
@@ -718,157 +700,6 @@ const {
 })
 
 
-const trendDialogTitle = computed(() => {
-  const metricName = trendMetric.value === 'dataSize' ? '数据量' : '行数'
-  const tableName = state.value?.table?.tableName || '-'
-  return `${tableName} ${metricName}趋势`
-})
-
-const openTrendDialog = async (metric) => {
-  if (!state.value?.table?.id) return
-  trendMetric.value = metric === 'dataSize' ? 'dataSize' : 'rowCount'
-  trendDialogVisible.value = true
-  await loadTrendSeries()
-}
-
-const loadTrendSeries = async () => {
-  const tableId = state.value?.table?.id
-  if (!tableId) {
-    trendSeries.value = []
-    return
-  }
-
-  trendHistoryLoading.value = true
-  try {
-    const history = await tableApi.getStatisticsHistory(tableId, 60)
-    const list = Array.isArray(history) ? history : []
-    trendSeries.value = [...list].sort((a, b) => {
-      return parseTimeToMs(a?.statisticsTime || a?.createdAt) - parseTimeToMs(b?.statisticsTime || b?.createdAt)
-    })
-  } catch (error) {
-    trendSeries.value = []
-    console.error('加载统计趋势失败', error)
-  } finally {
-    trendHistoryLoading.value = false
-  }
-
-  await nextTick()
-  void renderTrendChart()
-}
-
-const buildTrendValues = () => {
-  const labels = []
-  const values = []
-  trendSeries.value.forEach((item) => {
-    const time = item?.statisticsTime || item?.createdAt || ''
-    const value = trendMetric.value === 'dataSize'
-      ? Number(item?.dataSize ?? 0)
-      : Number(item?.rowCount ?? 0)
-    labels.push(formatDateTime(time))
-    values.push(Number.isFinite(value) ? value : 0)
-  })
-  return { labels, values }
-}
-
-const renderTrendChart = async () => {
-  if (!trendDialogVisible.value || !trendChartRef.value || !trendSeries.value.length) return
-
-  if (!trendChartInstance) {
-    const echarts = await loadEcharts()
-    if (!trendDialogVisible.value || !trendChartRef.value || !trendSeries.value.length) {
-      return
-    }
-    trendChartInstance = echarts.init(trendChartRef.value)
-  }
-
-  const { labels, values } = buildTrendValues()
-  const metricLabel = trendMetric.value === 'dataSize' ? '数据量' : '行数'
-
-  trendChartInstance.setOption({
-    animationDuration: 300,
-    grid: { top: 30, left: 56, right: 20, bottom: 66, containLabel: true },
-    tooltip: {
-      trigger: 'axis',
-      valueFormatter: (val) => (
-        trendMetric.value === 'dataSize'
-          ? formatStorageSizeDisplay(Number(val))
-          : formatRowCountDisplay(Number(val))
-      )
-    },
-    xAxis: {
-      type: 'category',
-      data: labels,
-      axisLabel: {
-        rotate: labels.length > 10 ? 28 : 0,
-        color: '#5d7491',
-        fontSize: 11
-      },
-      axisLine: { lineStyle: { color: '#d8e3f1' } }
-    },
-    yAxis: {
-      type: 'value',
-      name: metricLabel,
-      nameTextStyle: { color: '#5d7491', fontSize: 12 },
-      axisLine: { show: false },
-      axisLabel: {
-        color: '#5d7491',
-        fontSize: 11,
-        formatter: (val) => (
-          trendMetric.value === 'dataSize'
-            ? formatStorageSizeDisplay(Number(val))
-            : formatRowCountDisplay(Number(val))
-        )
-      },
-      splitLine: { lineStyle: { color: '#eef3fa' } }
-    },
-    series: [
-      {
-        name: metricLabel,
-        type: 'line',
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 6,
-        lineStyle: { width: 2, color: '#4178c1' },
-        itemStyle: { color: '#4178c1' },
-        areaStyle: { color: 'rgba(65, 120, 193, 0.16)' },
-        data: values
-      }
-    ]
-  })
-
-  trendChartInstance.resize()
-}
-
-watch(
-  () => trendMetric.value,
-  () => {
-    if (trendDialogVisible.value) {
-      void renderTrendChart()
-    }
-  }
-)
-
-watch(
-  () => trendDialogVisible.value,
-  async (visible) => {
-    if (visible) {
-      await nextTick()
-      void renderTrendChart()
-      return
-    }
-    if (trendChartInstance) {
-      trendChartInstance.dispose()
-      trendChartInstance = null
-    }
-  }
-)
-
-onBeforeUnmount(() => {
-  if (trendChartInstance) {
-    trendChartInstance.dispose()
-    trendChartInstance = null
-  }
-})
 
 const sourceTypeLabel = computed(() => {
   const table = state.value?.table
@@ -1146,15 +977,6 @@ const formatAccessDuration = (value) => {
 .lineage-pane {
   min-height: 0;
   height: 100%;
-}
-
-.trend-dialog-body {
-  min-height: 320px;
-}
-
-.trend-chart {
-  width: 100%;
-  height: 320px;
 }
 
 .right-root.is-pane-resizing {
