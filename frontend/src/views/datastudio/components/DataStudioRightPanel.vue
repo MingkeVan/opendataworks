@@ -621,6 +621,7 @@ import {
   parseTimeToMs,
 } from '../tableFormat'
 import { loadEcharts } from '@/utils/loadEcharts'
+import { usePanelVerticalResize } from '../composables/usePanelVerticalResize'
 
 const props = defineProps({
   visualVariant: {
@@ -677,21 +678,12 @@ const activeTabItem = computed(() => {
   return (openTabs.value || []).find((item) => String(item?.id) === id) || null
 })
 
-const panelShellRef = ref(null)
-const panelTopHeights = ref({})
-const isPanelResizing = ref(false)
-let panelResizeMoveHandler = null
-let panelResizeUpHandler = null
 const trendDialogVisible = ref(false)
 const trendMetric = ref('rowCount')
 const trendHistoryLoading = ref(false)
 const trendSeries = ref([])
 const trendChartRef = ref(null)
 let trendChartInstance = null
-const DEFAULT_TOP_HEIGHT = 340
-const MIN_TOP_HEIGHT = 260
-const MIN_BOTTOM_HEIGHT = 280
-const PANEL_RESIZER_HEIGHT = 6
 
 const rootClass = computed(() => [
   'right-root',
@@ -714,92 +706,17 @@ const state = computed(() => {
   return tabStates[id] || null
 })
 
-const clampTopHeight = (height, containerHeight = 0) => {
-  const maxTop = containerHeight > 0
-    ? Math.max(MIN_TOP_HEIGHT, containerHeight - MIN_BOTTOM_HEIGHT - PANEL_RESIZER_HEIGHT)
-    : 520
-  return Math.max(MIN_TOP_HEIGHT, Math.min(maxTop, height))
-}
-
-const getCurrentTopHeight = (tabId) => {
-  if (!tabId) return DEFAULT_TOP_HEIGHT
-  const stored = panelTopHeights.value[tabId]
-  return Number.isFinite(stored) ? stored : DEFAULT_TOP_HEIGHT
-}
-
-const panelShellStyle = computed(() => {
-  if (!hasTableTab.value) return {}
-  return {
-    '--right-top': `${getCurrentTopHeight(activeTabId.value)}px`
-  }
+// 右侧面板上下分栏（P2-2 F17b）：拖拽与按 tab 记忆高度
+const {
+  panelShellRef,
+  isPanelResizing,
+  panelShellStyle,
+  startPanelResize,
+} = usePanelVerticalResize({
+  activeTabId,
+  hasTableTab,
 })
 
-const ensurePanelTopHeight = async (tabId) => {
-  if (!tabId || !hasTableTab.value) return
-  if (Number.isFinite(panelTopHeights.value[tabId])) return
-
-  await nextTick()
-  const containerHeight = panelShellRef.value?.getBoundingClientRect()?.height || 0
-  const expected = containerHeight > 0 ? Math.round(containerHeight * 0.42) : DEFAULT_TOP_HEIGHT
-  const next = clampTopHeight(expected, containerHeight)
-  panelTopHeights.value = {
-    ...panelTopHeights.value,
-    [tabId]: next
-  }
-}
-
-watch(
-  () => [activeTabId.value, hasTableTab.value],
-  ([tabId, enabled]) => {
-    if (!enabled || !tabId) return
-    void ensurePanelTopHeight(tabId)
-  },
-  { immediate: true }
-)
-
-const stopPanelResize = () => {
-  isPanelResizing.value = false
-  if (panelResizeMoveHandler) {
-    window.removeEventListener('mousemove', panelResizeMoveHandler)
-    panelResizeMoveHandler = null
-  }
-  if (panelResizeUpHandler) {
-    window.removeEventListener('mouseup', panelResizeUpHandler)
-    panelResizeUpHandler = null
-  }
-}
-
-const startPanelResize = (event) => {
-  const tabId = activeTabId.value
-  const container = panelShellRef.value
-  if (!tabId || !container) return
-  event.preventDefault()
-
-  const containerRect = container.getBoundingClientRect()
-  const startY = event.clientY
-  const startHeight = getCurrentTopHeight(tabId)
-  isPanelResizing.value = true
-
-  panelResizeMoveHandler = (moveEvent) => {
-    const delta = moveEvent.clientY - startY
-    const next = clampTopHeight(startHeight + delta, containerRect.height)
-    panelTopHeights.value = {
-      ...panelTopHeights.value,
-      [tabId]: next
-    }
-  }
-
-  panelResizeUpHandler = () => {
-    stopPanelResize()
-  }
-
-  window.addEventListener('mousemove', panelResizeMoveHandler)
-  window.addEventListener('mouseup', panelResizeUpHandler)
-}
-
-onBeforeUnmount(() => {
-  stopPanelResize()
-})
 
 const trendDialogTitle = computed(() => {
   const metricName = trendMetric.value === 'dataSize' ? '数据量' : '行数'
