@@ -168,14 +168,18 @@
 - 触及: 新增 `components/TableTrendDialog.vue`(202 行)；`DataStudioRightPanel.vue`(1857 → 1678)。
 - 验证: lint/test/build(31/159) + demo 冒烟(行数链接打开弹窗、ECharts canvas 渲染)。提交 `ec777bc`。
 
-### F17d — RightPanel tab pane 子组件化（未做,留后续）
-- basic/columns/access 三个 tab pane + ~800 行样式随迁,是 RightPanel 压到 <800 行的必经一步；建议与 `dataStudioCtx` 按域收敛一并设计。
+### F17d — RightPanel tab pane 子组件化（已完成）
+- 预备片: 删除血缘区抽取遗留的 ~380 行死样式与死 `sourceTypeLabel` computed（逐选择器核对;`.lineage-panel` 命中子组件根元素保留）。提交 `91c2464`。RightPanel 1679 → 1299。
+- 主片: 抽出 `DataStudioRightPanelBasic.vue`(360,含随迁的 TableTrendDialog 宿主)/`DataStudioRightPanelColumns.vue`(243)/`DataStudioRightPanelAccess.vue`(163);子组件直接 `inject('dataStudioCtx')`,零新增契约;DDL/版本 pane 留父组件。共享脚手架样式在父组件转 `.meta-tabs :deep(...)`(单份作用父子),pane 专属样式随迁;唯一特异性平手选择器 `.section-header.small` 与基类无属性交叠,已核对。
+- 测试: RightPanel 冒烟 spec 增加逐 pane 挂载用例(3 个子组件 × 假 ctx)。
+- 验证: lint/test/build(31 files/160) + demo 冒烟 11 项全过(五个 pane 数据渲染、Basic 内趋势弹窗 canvas、纵向拖拽、`:deep()` 穿透样式 computed-style 校验)。提交 `6d44999`。
+- **RightPanel 1299 → 625 行,<800 目标达成。**
 
 ### 续篇行数汇总
 - `DataStudioNew.vue`: 3553 → **1217** 行
-- `DataStudioRightPanel.vue`: 1985 → **1678** 行
-- 新增: ResultPanel 533、CatalogNode 403、QueryPanel 240、TrendDialog 202、useStudioTabs 467、useTableActions 334、usePanelVerticalResize 117
-- 测试: 121 → **159** 通过(新增 38：useStudioTabs 13、useTableActions 12、tableFormat +6、usePanelVerticalResize 5、RightPanel 冒烟 2)
+- `DataStudioRightPanel.vue`: 1985 → **625** 行(F17a–d,<800 达标)
+- 新增: ResultPanel 533、CatalogNode 403、QueryPanel 240、TrendDialog 202、RightPanelBasic 360、RightPanelColumns 243、RightPanelAccess 163、useStudioTabs 467、useTableActions 334、usePanelVerticalResize 117
+- 测试: 121 → **160** 通过(新增 39：useStudioTabs 13、useTableActions 12、tableFormat +6、usePanelVerticalResize 5、RightPanel 冒烟 3)
 
 ## 回滚策略
 
