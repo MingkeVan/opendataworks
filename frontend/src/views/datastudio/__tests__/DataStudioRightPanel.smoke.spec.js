@@ -23,6 +23,9 @@ vi.mock('@/utils/loadEcharts', () => ({ loadEcharts: vi.fn(() => Promise.resolve
 vi.mock('@/demo/runtime', () => ({ isDemoMode: () => false, showDemoReadonlyMessage: vi.fn() }))
 
 import DataStudioRightPanel from '../components/DataStudioRightPanel.vue'
+import DataStudioRightPanelBasic from '../components/DataStudioRightPanelBasic.vue'
+import DataStudioRightPanelColumns from '../components/DataStudioRightPanelColumns.vue'
+import DataStudioRightPanelAccess from '../components/DataStudioRightPanelAccess.vue'
 
 const buildCtx = () => {
   const activeTab = ref('t1')
@@ -104,6 +107,27 @@ describe('DataStudioRightPanel mount smoke', () => {
     expect(wrapper.find('.panel-shell').exists()).toBe(true)
     expect(wrapper.find('.panel-resizer').exists()).toBe(true)
     wrapper.unmount()
+  })
+
+  it('mounts each pane child with the ctx (P2-2 F17d)', () => {
+    const panes = [
+      [DataStudioRightPanelBasic, '.basic-grid'],
+      [DataStudioRightPanelColumns, '.section-block'],
+      [DataStudioRightPanelAccess, '.section-block'],
+    ]
+    for (const [Pane, marker] of panes) {
+      const wrapper = shallowMount(Pane, {
+        global: {
+          provide: { dataStudioCtx: buildCtx() },
+          stubs: { TableTrendDialog: true, ElScrollbar: { template: '<div><slot /></div>' } },
+          config: { warnHandler: () => {} },
+          directives: { loading: {} },
+        },
+      })
+      expect(wrapper.exists()).toBe(true)
+      expect(wrapper.find(marker).exists()).toBe(true)
+      wrapper.unmount()
+    }
   })
 
   it('renders the empty state for query tabs', () => {
