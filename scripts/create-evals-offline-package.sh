@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # 生成 DataAgent 评测离线附加包。
-# 评测镜像（evals-builtin / evals-deepeval）默认不随服务启动，且 deepeval 依赖很重，
+# 评测镜像（builtin / DeepEval / Opik）默认不随服务启动，且依赖较重，
 # 因此从主离线包拆出，单独打包供需要在线评测的部署按需下载与加载。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,8 +27,9 @@ Environment overrides:
   OPENDATAWORKS_REGISTRY, OPENDATAWORKS_NAMESPACE, OPENDATAWORKS_TAG,
   OPENDATAWORKS_PLATFORM, OPENDATAWORKS_XZ_LEVEL (default: 6)
 
-The add-on package contains the two evaluation images saved into a single
-deduplicated archive plus the eval tooling and a loader script.
+The add-on package contains the three evaluation images and the pinned Opik
+2.1.32 local-platform images in one deduplicated archive, plus tooling and a
+loader script.
 EOF
 }
 
@@ -40,6 +41,8 @@ detect_container_cmd() {
         echo docker
     elif command -v podman >/dev/null 2>&1; then
         echo podman
+    elif [[ -x /opt/podman/bin/podman ]]; then
+        echo /opt/podman/bin/podman
     else
         die "docker or podman is required"
     fi
@@ -90,7 +93,7 @@ if [[ -d "$REPO_ROOT/tools/dataagent-evals" ]]; then
     mkdir -p "$PACKAGED_TOOLS_DIR/dataagent-evals"
     tar -C "$REPO_ROOT/tools/dataagent-evals" -cf - . | tar -C "$PACKAGED_TOOLS_DIR/dataagent-evals" -xf -
 fi
-for f in run-dataagent-evals.sh run-dataagent-evals.py run-dataagent-deepeval-evals.sh load-evals-images.sh; do
+for f in run-dataagent-evals.sh run-dataagent-evals.py run-dataagent-deepeval-evals.sh run-dataagent-opik-evals.sh load-evals-images.sh; do
     [[ -f "$REPO_ROOT/scripts/$f" ]] && cp "$REPO_ROOT/scripts/$f" "$PACKAGED_SCRIPTS_DIR/$f"
 done
 
@@ -102,6 +105,17 @@ declare -a MANIFEST_RAW=()
 EVAL_IMAGES=(
     "${PARSER_REGISTRY}/${PARSER_NAMESPACE}/opendataworks-dataagent-evals-builtin:${OP_TAG}|opendataworks-dataagent-evals-builtin:${OP_TAG}"
     "${PARSER_REGISTRY}/${PARSER_NAMESPACE}/opendataworks-dataagent-evals-deepeval:${OP_TAG}|opendataworks-dataagent-evals-deepeval:${OP_TAG}"
+    "${PARSER_REGISTRY}/${PARSER_NAMESPACE}/opendataworks-dataagent-evals-opik:${OP_TAG}|opendataworks-dataagent-evals-opik:${OP_TAG}"
+    "mysql:8.4.2|mysql:8.4.2"
+    "redis:7.2.4-alpine3.19|redis:7.2.4-alpine3.19"
+    "alpine:3.22.1|alpine:3.22.1"
+    "clickhouse/clickhouse-server:25.8.16.34-alpine|clickhouse/clickhouse-server:25.8.16.34-alpine"
+    "zookeeper:3.9.4|zookeeper:3.9.4"
+    "minio/minio:RELEASE.2025-03-12T18-04-18Z|minio/minio:RELEASE.2025-03-12T18-04-18Z"
+    "minio/mc:RELEASE.2025-03-12T17-29-24Z|minio/mc:RELEASE.2025-03-12T17-29-24Z"
+    "ghcr.io/comet-ml/opik/opik-backend:2.1.32|ghcr.io/comet-ml/opik/opik-backend:2.1.32"
+    "ghcr.io/comet-ml/opik/opik-python-backend:2.1.32|ghcr.io/comet-ml/opik/opik-python-backend:2.1.32"
+    "ghcr.io/comet-ml/opik/opik-frontend:2.1.32|ghcr.io/comet-ml/opik/opik-frontend:2.1.32"
 )
 
 pull_image() {
@@ -167,7 +181,8 @@ cd opendataworks-evals-offline
 scripts/load-evals-images.sh
 ```
 
-加载后，按主仓库 `deploy/README.md` 第 3 节运行 builtin / DeepEval 评测。
+加载后，按主仓库文档运行 builtin / DeepEval / Opik 评测。
+Opik 本地平台使用仓库 `deploy/opik/` 中的固定版本 Compose 资产。
 私有评测集不随包内置，运行时通过 `--dataset` 指定。
 EOF
 

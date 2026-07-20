@@ -1,5 +1,18 @@
 # DataAgent DeepEval Parallel Evaluation Plan
 
+## Evaluation V2 Addendum
+
+- [x] Keep DeepEval fully independent from builtin and Opik runtime modules.
+- [x] Accept V2 datasets only; validate the same external contract independently.
+- [x] Add OAuth administrator preflight and propagate one identity to all DataAgent
+  requests.
+- [x] Extract task, message, and SDK event evidence independently, including real SQL
+  execution, turns, errors, and recovery.
+- [x] Replace misleading data precision/recall names with result consistency and
+  numerator/denominator based business metrics.
+- [x] Write the full V2 artifact set including `run.json` and self-contained HTML.
+- [x] Pass the common golden fixtures without importing another engine.
+
 ## Implementation Tasks
 
 - Add a standalone DeepEval runner under `tools/dataagent-evals/deepeval/` with requirements, Dockerfile, and README.
