@@ -52,29 +52,30 @@ def _install_fake_deepeval(monkeypatch):
 
 def _sample_case():
     return {
+        "schema_version": 2,
         "case_id": "ODW_SAMPLE_001",
+        "case_type": "query",
+        "suite_tags": ["test", "tool-execution"],
         "category": "DataAgent 通用样例",
         "question": "最近 30 天工作流发布次数趋势",
-        "expected_intent": "趋势分析",
-        "expected_ontology_objects": ["workflow_publish_record"],
-        "expected_relations": [],
-        "expected_sql_or_tool_behavior": ["查询工作流发布记录并按日期聚合"],
-        "expected_answer_points": ["说明时间范围和统计口径"],
+        "expected_semantics": {"intent": "趋势分析", "ontology_object_ids": ["workflow_publish_record"], "relation_ids": [], "business_rules": [], "default_environment": "opendataworks", "required_slots": []},
+        "expected_time": {"required": True, "field": "created_at", "range": {"kind": "rolling_days", "value": 30}, "grain": "day", "timezone": "Asia/Shanghai", "snapshot_strategy": "execution_date"},
+        "expected_tools": {"required_steps": ["query_execute"], "allowed_alternative_groups": [["run_sql"]], "ordered": False, "min_calls": 1, "max_calls": 10},
+        "expected_sql": {"execution_required": True, "tables": ["select 1"], "fields": [], "predicates": [], "aggregations": [], "forbidden_patterns": []},
+        "expected_result": {"allow_empty": False, "required_columns": [], "answer_result_fields": []},
+        "expected_answer": {"required_points": ["说明时间范围和统计口径"], "boundary_notes": [], "units": [], "error_expression": []},
+        "limits": {"max_wait_seconds": 900, "max_agent_turns": 20, "max_tool_calls": 10},
         "scoring": {
             "intent": 1,
             "ontology_entity": 1,
             "relation_scope": 1,
             "sql_or_tool_call": 2,
-            "data_accuracy": 2,
+            "result_consistency": 2,
             "reasoning": 2,
             "answer_quality": 1,
             "total_score": 10,
         },
         "veto_rules": ["不要编造"],
-        "max_wait_seconds": 900,
-        "required_sql_fragments": [],
-        "forbidden_sql_patterns": [],
-        "expected_tool_names": [],
         "judge_guidance": "看时间范围和统计口径",
     }
 
@@ -99,7 +100,7 @@ def test_deepeval_case_conversion_uses_expected_fields(monkeypatch):
     assert test_case.actual_output == case_result["final_answer"]
     expected = json.loads(test_case.expected_output)
     assert expected["case_id"] == "ODW_SAMPLE_001"
-    assert expected["expected_ontology_objects"] == ["workflow_publish_record"]
+    assert expected["expected_semantics"]["ontology_object_ids"] == ["workflow_publish_record"]
     context = json.loads(test_case.context[0])
     assert context["case_result"]["tool_names"] == ["run_sql"]
     assert context["case_result"]["auto_rule_check"]["passed"] is True
@@ -176,7 +177,7 @@ def test_deepeval_apply_judges_fails_when_auto_rule_check_fails(monkeypatch):
     runner = _load_runner()
     runner.DataAgentEvaluationMetric.shared_case_judges = {
         "ODW_SAMPLE_001": {
-            "score": 9,
+                "score": 10,
             "dimension_scores": {"intent": 1},
             "hallucination": False,
             "veto_rules_triggered": [],
@@ -199,7 +200,7 @@ def test_deepeval_apply_judges_fails_when_auto_rule_check_fails(monkeypatch):
 
     updated = runner._apply_judges([result], metric)
 
-    assert updated[0]["judge"]["score"] == 9
+    assert updated[0]["judge"]["score"] == 10
     assert "missing_sql_fragment" in updated[0]["judge"]["failure_attribution"]
     assert updated[0]["case_passed"] is False
 
@@ -212,6 +213,22 @@ def test_deepeval_agent_id_can_default_from_environment(monkeypatch):
     args = runner.parse_args(["--dry-run", "--dataset", "cases.jsonl"])
 
     assert args.agent_id == "agent_eval"
+
+
+def test_deepeval_reference_accuracy_matches_any_successful_query_result(monkeypatch):
+    _install_fake_deepeval(monkeypatch)
+    runner = _load_runner()
+    case = _sample_case()
+    case["expected_result"]["reference_query"] = {"sql": "SELECT 2", "comparison_mode": "scalar"}
+
+    result = runner._compare_reference(
+        {"applicable": True, "rows": [{"expected_cnt": 2}]},
+        [[{"diagnostic": 99}], [{"actual_cnt": 2}]],
+        case,
+    )
+
+    assert result["passed"] is True
+    assert result["candidate_result_count"] == 2
 
 
 def test_deepeval_non_dry_run_requires_agent_id(tmp_path, capsys, monkeypatch):
@@ -464,6 +481,8 @@ def test_deepeval_run_case_uses_recovered_task_answer(monkeypatch):
             return {"topic_id": "topic_1", "current_task_id": "task_2", "current_task_status": "finished"}
         if url == "http://dataagent/api/v1/nl2sql/tasks/task_2":
             return {"task_id": "task_2", "topic_id": "topic_1", "task_status": "finished"}
+        if "/sdk-events?" in url:
+            return {"records": [], "has_more": False, "next_after_id": 0}
         if url.startswith("http://dataagent/api/v1/nl2sql/topics/topic_1/messages"):
             return {
                 "items": [
@@ -514,8 +533,8 @@ def test_deepeval_auto_rule_check_fails_missing_sql_or_tool_requirements(monkeyp
     runner = _load_runner()
     case = {
         **_sample_case(),
-        "required_sql_fragments": ["public.dim_tech_env_workflow_df"],
-        "expected_tool_names": ["run_sql"],
+        "expected_sql": {**_sample_case()["expected_sql"], "tables": ["public.dim_tech_env_workflow_df"]},
+        "expected_tools": {**_sample_case()["expected_tools"], "allowed_alternative_groups": [["run_sql"]]},
     }
 
     result = runner.auto_rule_check(
@@ -528,7 +547,7 @@ def test_deepeval_auto_rule_check_fails_missing_sql_or_tool_requirements(monkeyp
 
     assert result["passed"] is False
     assert result["missing_sql_fragments"] == ["public.dim_tech_env_workflow_df"]
-    assert result["missing_tool_names"] == ["run_sql"]
+    assert set(result["missing_tool_names"]) == {"query_execute", "run_sql"}
     assert {"missing_sql_fragment", "missing_tool"}.issubset(set(result["failure_attribution"]))
 
 
@@ -537,8 +556,8 @@ def test_deepeval_auto_rule_check_ignores_tool_doc_text_for_user_visible_regexes
     runner = _load_runner()
     case = {
         **_sample_case(),
-        "required_sql_fragments": ["public.dim_tech_env_workflow_df"],
-        "forbidden_sql_patterns": [r"(?i)select\s+\*"],
+        "expected_sql": {**_sample_case()["expected_sql"], "tables": ["public.dim_tech_env_workflow_df"], "forbidden_patterns": [r"(?i)select\s+\*"]},
+        "expected_time": {**_sample_case()["expected_time"], "required": False},
     }
     blocks = [
         {
@@ -553,7 +572,7 @@ def test_deepeval_auto_rule_check_ignores_tool_doc_text_for_user_visible_regexes
         final_answer="当前 DEV 环境共有 10 个工作流。",
         blocks=blocks,
         sql_outputs=["SELECT count(1) FROM public.dim_tech_env_workflow_df WHERE env_name = 'DEV'"],
-        tool_names=["Read"],
+        tool_names=["Read", "run_sql"],
     )
 
     assert result["passed"] is True
@@ -573,6 +592,8 @@ def test_deepeval_run_case_submits_turns_in_order(monkeypatch):
         "case_id": "ODW_SAMPLE_MULTITURN_001",
         "question": "工作流发布趋势多轮分析",
         "turns": ["最近 30 天工作流发布次数趋势如何？", "其中发布次数最多的是哪一天？"],
+        "expected_sql": {**_sample_case()["expected_sql"], "execution_required": False, "tables": []},
+        "expected_tools": {**_sample_case()["expected_tools"], "required_steps": [], "allowed_alternative_groups": [], "min_calls": 0},
     }
     submitted_contents = []
 
@@ -586,6 +607,8 @@ def test_deepeval_run_case_submits_turns_in_order(monkeypatch):
             return {"task_id": "task_1", "topic_id": "topic_1", "task_status": "finished"}
         if url == "http://dataagent/api/v1/nl2sql/tasks/task_2":
             return {"task_id": "task_2", "topic_id": "topic_1", "task_status": "finished"}
+        if "/sdk-events?" in url:
+            return {"records": [], "has_more": False, "next_after_id": 0}
         if url.startswith("http://dataagent/api/v1/nl2sql/topics/topic_1/messages"):
             return {
                 "items": [
@@ -707,7 +730,7 @@ def test_deepeval_runner_drives_dataagent_and_writes_case_outputs(tmp_path, monk
 
     def fake_judge(config, payload):
         return {
-            "score": 9,
+                "score": 10,
             "dimension_scores": {
                 "intent": 1,
                 "ontology_entity": 1,
@@ -738,10 +761,14 @@ def test_deepeval_runner_drives_dataagent_and_writes_case_outputs(tmp_path, monk
             return
 
         def do_GET(self):
-            if self.path == "/api/v1/nl2sql/health":
+            if self.path == "/api/v1/nl2sql/auth/config":
+                self._json({"auth_enabled": False})
+            elif self.path == "/api/v1/nl2sql/health":
                 self._json({"status": "ok"})
-            elif self.path == "/api/v1/nl2sql-admin/settings":
+            elif self.path == "/api/v1/nl2sql/runtime-config":
                 self._json({"provider_id": "fake", "model": "fake-model"})
+            elif "/sdk-events?" in self.path:
+                self._json({"task_id": "task_1", "task_status": "finished", "after_id": 0, "next_after_id": 1, "has_more": False, "records": [{"seq_id": 1, "turn_index": 1, "record_type": "done", "data": {}}]})
             elif self.path == "/api/v1/nl2sql/tasks/task_1":
                 self._json({"task_id": "task_1", "task_status": "finished"})
             elif self.path.startswith("/api/v1/nl2sql/topics/topic_1/messages"):
@@ -754,7 +781,7 @@ def test_deepeval_runner_drives_dataagent_and_writes_case_outputs(tmp_path, monk
                                 "content": "最近 30 天工作流发布次数按日期聚合如下。",
                                 "usage": {"input_tokens": 1, "output_tokens": 2},
                                 "blocks": [
-                                    {"type": "tool_use", "tool_id": "toolu_1", "tool_name": "run_sql", "input": {"sql": "select 1"}, "output": "ok", "is_error": False},
+                                    {"type": "tool_use", "tool_id": "toolu_1", "tool_name": "run_sql", "input": {"sql": "select 1 WHERE created_at >= CURRENT_DATE - INTERVAL 29 DAY AND created_at < CURRENT_DATE + INTERVAL 1 DAY"}, "output": "ok", "is_error": False},
                                     {"type": "main_text", "text": "最近 30 天工作流发布次数按日期聚合如下。"},
                                 ],
                             }
@@ -807,7 +834,7 @@ def test_deepeval_runner_drives_dataagent_and_writes_case_outputs(tmp_path, monk
     assert summary["passed_cases"] == 1
     result = json.loads((output_dir / "cases.jsonl").read_text(encoding="utf-8").strip())
     assert result["task_status"] == "finished"
-    assert result["judge"]["score"] == 9.0
+    assert result["judge"]["score"] == 10.0
     assert result["case_passed"] is True
 
     # Assert conversations directory and files

@@ -195,7 +195,7 @@ services:
       SKILLS_ROOT_DIR: /app/.claude/skills
       DATAAGENT_SANDBOX_MODE: ${DATAAGENT_SANDBOX_MODE:-}
       DATAAGENT_SANDBOX_RUNNER_URL: http://dataagent-sandbox-runner:8910
-      DATAAGENT_SANDBOX_IMAGE: ${OPENDATAWORKS_DATAAGENT_RUNNER_IMAGE:-mikefan2019/opendataworks-dataagent-runner:1.4.0}
+      DATAAGENT_SANDBOX_IMAGE: ${OPENDATAWORKS_DATAAGENT_RUNNER_IMAGE:-mikefan2019/opendataworks-dataagent-runner:1.3.0}
       DATAAGENT_SANDBOX_BACKEND: ${DATAAGENT_SANDBOX_BACKEND:-docker}
       DATAAGENT_SANDBOX_NETWORK: container:opendataworks-dataagent-sandbox-runner
       # DataAgent 外置配置（认证 + 运行时覆盖，fail-closed，Superset docker/pythonpath_dev 同款模式）：
@@ -231,7 +231,7 @@ services:
 
   # DataAgent 沙箱 Runner（内部服务）
   dataagent-sandbox-runner:
-    image: ${OPENDATAWORKS_DATAAGENT_RUNNER_IMAGE:-mikefan2019/opendataworks-dataagent-runner:1.4.0}
+    image: ${OPENDATAWORKS_DATAAGENT_RUNNER_IMAGE:-mikefan2019/opendataworks-dataagent-runner:1.3.0}
     container_name: opendataworks-dataagent-sandbox-runner
     logging: *default-logging
     restart: always
@@ -243,7 +243,7 @@ services:
       HOME: /dataagent_runtime
       DATAAGENT_HOST_ROOT: ${DATAAGENT_HOST_ROOT:-/dataagent_runtime}
       DATAAGENT_SANDBOX_MODE: ""
-      DATAAGENT_SANDBOX_IMAGE: ${OPENDATAWORKS_DATAAGENT_RUNNER_IMAGE:-mikefan2019/opendataworks-dataagent-runner:1.4.0}
+      DATAAGENT_SANDBOX_IMAGE: ${OPENDATAWORKS_DATAAGENT_RUNNER_IMAGE:-mikefan2019/opendataworks-dataagent-runner:1.3.0}
       DATAAGENT_SANDBOX_BACKEND: ${DATAAGENT_SANDBOX_BACKEND:-docker}
       DATAAGENT_SANDBOX_NETWORK: container:opendataworks-dataagent-sandbox-runner
       DATAAGENT_SANDBOX_REUSE_ENABLED: ${DATAAGENT_SANDBOX_REUSE_ENABLED:-true}
@@ -319,7 +319,7 @@ services:
   # 不收集 mysql/redis 基础设施与两个 nginx 前端；如需可在 .env 用 LOG_COLLECTOR_CONTAINERS 增减。
   # task child 日志由 runner 另行落盘在 <HOST_ROOT>/<topic>/logs/。
   log-collector:
-    image: ${OPENDATAWORKS_DATAAGENT_RUNNER_IMAGE:-mikefan2019/opendataworks-dataagent-runner:1.4.0}
+    image: ${OPENDATAWORKS_DATAAGENT_RUNNER_IMAGE:-mikefan2019/opendataworks-dataagent-runner:1.3.0}
     container_name: opendataworks-log-collector
     logging: *default-logging
     restart: always

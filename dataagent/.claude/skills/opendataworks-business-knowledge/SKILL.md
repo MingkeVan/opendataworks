@@ -33,14 +33,26 @@ OpenDataWorks Business Knowledge Skill。业务知识 Skill。
 - 领域专属术语、本体或指标口径。
 - 本技能未包含的租户私有业务术语。
 
-## 读取顺序
+## 按需读取
 
-1. 读 [`reference/00-knowledge-map.md`](reference/00-knowledge-map.md)，选择语义资产。
-2. 读 [`reference/10-term-index.md`](reference/10-term-index.md)，确认术语、别名、歧义和澄清建议。
-3. 读 [`reference/20-metric-index.md`](reference/20-metric-index.md)，确认指标定义和默认时间字段。
-4. 读 [`reference/30-ontology.md`](reference/30-ontology.md)，确认 OpenDataWorks 平台对象映射和相关表。
-5. 读 [`reference/40-business-rules.md`](reference/40-business-rules.md)，确认业务规则例外。
-6. 只有引用摘要不足时，才查看 `assets/*.json`。
+不要为每个问题顺序读完全部参考文件。重复读取会增加轮次，也容易让已经明确的口径被后续探索稀释。先按问题类型选择最小资料集，拿到足够语义后立即停止读取：
+
+- 不确定问题属于哪类时，先读 [`reference/00-knowledge-map.md`](reference/00-knowledge-map.md)。类型已经明确时跳过它。
+- 术语解释或概念区别：读 [`reference/10-term-index.md`](reference/10-term-index.md)；涉及不能混用的状态或默认过滤时，再读 [`reference/40-business-rules.md`](reference/40-business-rules.md)。
+- 指标问数：读 [`reference/20-metric-index.md`](reference/20-metric-index.md) 和相关的 [`reference/40-business-rules.md`](reference/40-business-rules.md)；只有需要对象关系或关联字段时才读 [`reference/30-ontology.md`](reference/30-ontology.md)。
+- 血缘、任务或平台对象关系：读 [`reference/30-ontology.md`](reference/30-ontology.md) 和相关的 [`reference/10-term-index.md`](reference/10-term-index.md) / [`reference/40-business-rules.md`](reference/40-business-rules.md)。
+- 引用摘要不能回答具体字段或关系时，才查看相关的单个 `assets/*.json`；不要批量读取所有资产。
+
+同一条语义事实已经由参考文件确认后，不再为“验证”它而读取其他文件或查询实时样例。
+
+## 语义收口规则
+
+- 用户只问定义、区别或口径时，直接回答已有语义事实。除非用户明确要求当前取值、数量或样例，否则不要查询实时数据来扩写定义。
+- 将默认过滤和禁止混用规则作为后续问数不可丢失的约束。例如数据表数量和数据层级分布默认排除 `deleted=1`；历史发布结果与当前发布状态不能互换。
+- 表血缘必须先唯一定位目标表。用户只给 `table_name`、未给 `db_name` 时，先只追问 `db_name`，不要先做精确查询、模糊搜索或候选表推荐。
+- 语义和必要槽位已经明确后，立即交回 DataAgent 通用问数流程；不要继续查不影响答案的状态分布、样例记录或旁证。
+- 真实查询返回空结果时，按已确认口径说明“未找到”，不要擅自换表、放宽名称或改过滤条件继续试探。
+- 层级分布使用 `data_table.layer`，默认排除 `deleted=1`，并明确说明层级不是 `business_domain` / `data_domain`。
 
 ## 边界规则
 
@@ -51,6 +63,7 @@ OpenDataWorks Business Knowledge Skill。业务知识 Skill。
 - 不虚构租户专属默认值。
 - 不提供 SQL 执行路径。
 - 不复制通用 SQL 方法。
+- 不用无关的实时查询补充已有定义，也不在缺少唯一定位槽位时提前查询。
 
 ## Assets
 

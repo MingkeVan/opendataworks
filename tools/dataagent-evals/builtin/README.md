@@ -8,7 +8,9 @@ It is intentionally separate from the DataAgent backend runtime. DataAgent is on
 
 Datasets are private deployment assets and are not committed with this tool. Pass the JSONL file explicitly with `--dataset` or set `DATAAGENT_EVAL_DATASET`.
 
-Each case must include either `question` or `turns`. `question` is submitted as a single-turn case. `turns` is a list of user messages submitted sequentially in one topic, and `question` may be kept as a short report title for that multi-turn case.
+Only Evaluation V2 (`schema_version=2`) is executable. See
+`../dataset/README.md` for the structured semantic, time, tool, SQL, result,
+answer, limit, and scoring contract.
 
 Non-dry-run evaluation must also choose the DataAgent profile to execute with. Pass `--agent-id` or set `DATAAGENT_EVAL_AGENT_ID`. The selected agent's `data_scope` is snapshotted on each eval topic and enforces metadata/query access.
 
@@ -41,9 +43,19 @@ DATAAGENT_BUILTIN_RUN_LOCAL=1 bash scripts/run-dataagent-evals.sh --dry-run --da
 
 Dry run validates the dataset and writes `summary.json` / `report.md` without calling DataAgent or the judge model.
 
+For local real-chain smoke, use
+`../dataset/examples/opendataworks-business-knowledge-smoke-v2.jsonl` with
+`--agent-snapshot-path dataagent/.claude/skills/opendataworks-business-knowledge`.
+It does not require the private architecture-ontology data source. When OAuth
+is enabled, pass an administrator JWT only through
+`DATAAGENT_EVAL_AUTH_TOKEN`.
+
 ## Outputs
 
 - `cases.jsonl`
+- `run.json`
 - `summary.json`
 - `report.md`
+- `report.html`
+- `dataset-snapshot.jsonl`
 - `raw/<case_id>.json`

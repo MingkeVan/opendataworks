@@ -12,7 +12,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNNER_PATH = REPO_ROOT / "tools" / "dataagent-evals" / "builtin" / "run.py"
 
-_RUN_SQL = "select count(1) from opendataworks.workflow_publish_record"
+_RUN_SQL = (
+    "select count(1) from opendataworks.workflow_publish_record "
+    "where created_at >= CURRENT_DATE - INTERVAL 29 DAY "
+    "and created_at < CURRENT_DATE + INTERVAL 1 DAY"
+)
 
 
 def _assistant_blocks(answer: str):
@@ -32,26 +36,30 @@ def _assistant_blocks(answer: str):
 
 def _sample_case(case_id: str = "ODW_SAMPLE_001"):
     return {
+        "schema_version": 2,
         "case_id": case_id,
+        "case_type": "query",
+        "suite_tags": ["test", "tool-execution"],
         "category": "DataAgent 通用样例",
         "question": "最近 30 天工作流发布次数趋势",
-        "expected_intent": "趋势分析",
-        "expected_ontology_objects": ["workflow_publish_record"],
-        "expected_relations": [],
-        "expected_sql_or_tool_behavior": ["查询工作流发布记录并按日期聚合"],
-        "expected_answer_points": ["说明时间范围和统计口径"],
+        "expected_semantics": {"intent": "趋势分析", "ontology_object_ids": ["workflow_publish_record"], "relation_ids": [], "business_rules": [], "default_environment": "opendataworks", "required_slots": []},
+        "expected_time": {"required": True, "field": "created_at", "range": {"kind": "rolling_days", "value": 30}, "grain": "day", "timezone": "Asia/Shanghai", "snapshot_strategy": "execution_date"},
+        "expected_tools": {"required_steps": ["query_execute"], "allowed_alternative_groups": [["run_sql"]], "ordered": False, "min_calls": 1, "max_calls": 10},
+        "expected_sql": {"execution_required": True, "tables": ["opendataworks.workflow_publish_record"], "fields": [], "predicates": [], "aggregations": [], "forbidden_patterns": []},
+        "expected_result": {"allow_empty": False, "required_columns": [], "answer_result_fields": []},
+        "expected_answer": {"required_points": ["说明时间范围和统计口径"], "boundary_notes": [], "units": [], "error_expression": []},
+        "limits": {"max_wait_seconds": 900, "max_agent_turns": 20, "max_tool_calls": 10},
         "scoring": {
             "intent": 1,
             "ontology_entity": 1,
             "relation_scope": 1,
             "sql_or_tool_call": 2,
-            "data_accuracy": 2,
+            "result_consistency": 2,
             "reasoning": 2,
             "answer_quality": 1,
             "total_score": 10,
         },
         "veto_rules": ["不要编造"],
-        "max_wait_seconds": 900,
     }
 
 
@@ -214,6 +222,18 @@ def test_default_judge_timeout_is_long_enough_for_slow_judge(monkeypatch):
     assert config.timeout_seconds == 300
 
 
+def test_reference_accuracy_matches_any_successful_query_result():
+    runner = _load_runner()
+    case = _sample_case()
+    case["expected_result"]["reference_query"] = {"sql": "SELECT 2", "comparison_mode": "scalar"}
+    reference = {"applicable": True, "rows": [{"expected_cnt": 2}], "row_count": 1}
+
+    result = runner._compare_reference(reference, [[{"diagnostic": 99}], [{"actual_cnt": 2}]], case)
+
+    assert result["passed"] is True
+    assert result["candidate_result_count"] == 2
+
+
 def test_http_json_wraps_socket_timeout_as_eval_runner_error(monkeypatch):
     runner = _load_runner()
 
@@ -309,8 +329,8 @@ def test_auto_rule_check_fails_missing_sql_or_tool_requirements():
     runner = _load_runner()
     case = {
         **_sample_case(),
-        "required_sql_fragments": ["public.dim_tech_env_workflow_df"],
-        "expected_tool_names": ["run_sql"],
+        "expected_sql": {**_sample_case()["expected_sql"], "tables": ["public.dim_tech_env_workflow_df"]},
+        "expected_tools": {**_sample_case()["expected_tools"], "allowed_alternative_groups": [["run_sql"]]},
     }
 
     result = runner.auto_rule_check(
@@ -323,7 +343,7 @@ def test_auto_rule_check_fails_missing_sql_or_tool_requirements():
 
     assert result["passed"] is False
     assert result["missing_sql_fragments"] == ["public.dim_tech_env_workflow_df"]
-    assert result["missing_tool_names"] == ["run_sql"]
+    assert set(result["missing_tool_names"]) == {"query_execute", "run_sql"}
     assert {"missing_sql_fragment", "missing_tool"}.issubset(set(result["failure_attribution"]))
 
 
@@ -405,8 +425,7 @@ def test_auto_rule_check_ignores_sql_style_forbidden_patterns():
     runner = _load_runner()
     case = {
         **_sample_case(),
-        "required_sql_fragments": ["public.dim_tech_env_workflow_df"],
-        "forbidden_sql_patterns": [r"(?i)select\s+\*"],
+        "expected_sql": {**_sample_case()["expected_sql"], "tables": ["public.dim_tech_env_workflow_df"], "forbidden_patterns": [r"(?i)select\s+\*"]},
     }
     actual_sql = (
         "SELECT * "
@@ -429,9 +448,9 @@ def test_auto_rule_check_ignores_sql_style_forbidden_patterns():
         tool_names=["run_sql"],
     )
 
-    assert result["passed"] is True
-    assert result["forbidden_sql_patterns"] == []
-    assert "forbidden_sql" not in result["failure_attribution"]
+    assert result["passed"] is False
+    assert result["forbidden_sql_patterns"] == [r"(?i)select\s+\*"]
+    assert "forbidden_sql_pattern" in result["failure_attribution"]
     assert "wrong_domain" not in result["failure_attribution"]
 
 
@@ -441,6 +460,8 @@ def test_run_case_submits_turns_in_order(monkeypatch):
         **_sample_case("ODW_SAMPLE_MULTITURN_001"),
         "question": "工作流发布趋势多轮分析",
         "turns": ["最近 30 天工作流发布次数趋势如何？", "其中发布次数最多的是哪一天？"],
+        "expected_sql": {**_sample_case()["expected_sql"], "execution_required": False, "tables": []},
+        "expected_tools": {**_sample_case()["expected_tools"], "required_steps": [], "allowed_alternative_groups": [], "min_calls": 0},
     }
     submitted_contents = []
 
@@ -454,6 +475,8 @@ def test_run_case_submits_turns_in_order(monkeypatch):
             return {"task_id": "task_1", "topic_id": "topic_1", "task_status": "finished"}
         if url == "http://dataagent/api/v1/nl2sql/tasks/task_2":
             return {"task_id": "task_2", "topic_id": "topic_1", "task_status": "finished"}
+        if "/sdk-events?" in url:
+            return {"records": [], "has_more": False, "next_after_id": 0}
         if url.startswith("http://dataagent/api/v1/nl2sql/topics/topic_1/messages"):
             return {
                 "items": [
@@ -500,7 +523,7 @@ def test_run_case_fails_when_auto_rule_check_fails(monkeypatch):
     runner = _load_runner()
     case = {
         **_sample_case(),
-        "required_sql_fragments": ["public.required_table"],
+        "expected_sql": {**_sample_case()["expected_sql"], "tables": ["public.required_table"]},
     }
 
     def fake_http_json(method, url, payload=None, **kwargs):
@@ -510,6 +533,8 @@ def test_run_case_fails_when_auto_rule_check_fails(monkeypatch):
             return {"task_id": "task_1", "accepted": True}
         if url == "http://dataagent/api/v1/nl2sql/tasks/task_1":
             return {"task_id": "task_1", "topic_id": "topic_1", "task_status": "success"}
+        if "/sdk-events?" in url:
+            return {"records": [], "has_more": False, "next_after_id": 0}
         if url.startswith("http://dataagent/api/v1/nl2sql/topics/topic_1/messages"):
             return {
                 "items": [
@@ -557,7 +582,7 @@ def test_judge_payload_removes_sql_style_veto_rules():
             "编造不存在的数据。",
             "SQL 不带 schema 前缀、使用 SELECT * 或明显违反当前 skill SQL 硬规则。",
         ],
-        "forbidden_sql_patterns": [r"(?i)select\s+\*"],
+        "expected_sql": {**_sample_case()["expected_sql"], "forbidden_patterns": [r"(?i)select\s+\*"]},
     }
 
     payload_case = runner._case_for_judge(case)
@@ -684,14 +709,20 @@ class _FakeDataAgentHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):  # noqa: N802
+        if self.path == "/api/v1/nl2sql/auth/config":
+            self._send(200, {"auth_enabled": False})
+            return
         if self.path == "/api/v1/nl2sql/health":
             if self.scenario == "preflight_error":
                 self._send(503, {"status": "down"})
                 return
             self._send(200, {"status": "ok"})
             return
-        if self.path == "/api/v1/nl2sql-admin/settings":
+        if self.path == "/api/v1/nl2sql/runtime-config":
             self._send(200, {"provider_id": "openrouter", "model": "anthropic/claude-sonnet-4.5"})
+            return
+        if "/sdk-events?" in self.path:
+            self._send(200, {"task_id": "task-1", "task_status": "finished", "after_id": 0, "next_after_id": 1, "has_more": False, "records": [{"seq_id": 1, "turn_index": 1, "record_type": "done", "event_type": None, "data": {}}]})
             return
         if self.path == "/api/v1/nl2sql/topics/topic-1":
             self._send(
@@ -883,7 +914,7 @@ class _FakeJudgeHandler(BaseHTTPRequestHandler):
             veto = ["工具失败或数据不足后仍输出确定性结论。"] if self.scenario == "veto" else []
             text = json.dumps(
                 {
-                    "score": 9 if not veto else 8,
+                    "score": 10 if not veto else 9,
                     "dimension_scores": {
                         "intent": 1,
                         "ontology_entity": 1,

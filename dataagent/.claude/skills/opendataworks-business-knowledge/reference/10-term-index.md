@@ -16,7 +16,7 @@
 - 别名：上下游血缘、lineage
 - 解释：血缘关系描述数据表之间的输入输出依赖，平台表 `data_lineage` 记录 `upstream_table_id` 和 `downstream_table_id`。
 - 易混术语：任务依赖、工作流依赖
-- 歧义消解：请提供明确表名；同名表可能存在于多个数据库时，一并提供 `db_name`。
+- 歧义消解：表级血缘以 `db_name + table_name` 唯一定位；只给 `table_name` 时先追问 `db_name`，不要先查询或推荐相似表。
 - 相关指标：血缘关系数
 - 相关表：`data_lineage`、`data_table`
 
