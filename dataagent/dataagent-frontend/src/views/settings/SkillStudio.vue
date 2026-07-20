@@ -89,12 +89,14 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { dataagentApi } from '@/api/dataagent'
 import { useAuthStore } from '@/stores/auth'
+import { withAgentContext } from '@/router/agentContext'
 import { buildSkillItems, sourceLabel } from './skillAdminShared'
 
+const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const canManage = computed(() => authStore.isAdmin)
@@ -156,10 +158,10 @@ const loadDocuments = async () => {
 
 const openSkillDetail = (folder) => {
   if (!folder) return
-  router.push({
+  router.push(withAgentContext({
     name: 'IntelligentQuerySkillDetail',
     params: { folder }
-  })
+  }, route.query))
 }
 
 const setSkillEnabled = async (skill, enabled) => {

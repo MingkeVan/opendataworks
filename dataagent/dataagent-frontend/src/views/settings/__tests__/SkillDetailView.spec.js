@@ -16,7 +16,8 @@ const authState = vi.hoisted(() => ({ isAdmin: true }))
 const routeState = vi.hoisted(() => ({
   params: {
     folder: 'marketing-insights'
-  }
+  },
+  query: {}
 }))
 
 const messageMocks = vi.hoisted(() => ({
@@ -287,7 +288,7 @@ describe('SkillDetailView', () => {
     )
     expect(apiMocks.uninstallSkill).toHaveBeenCalledWith('marketing-insights')
     expect(messageMocks.success).toHaveBeenCalledWith('Skill「marketing-insights」已卸载')
-    expect(routerPush).toHaveBeenCalledWith({ name: 'IntelligentQuerySkills' })
+    expect(routerPush).toHaveBeenCalledWith({ name: 'IntelligentQuerySkills', query: {} })
   })
 
   it('keeps skill content and version comparison read-only for regular users', async () => {

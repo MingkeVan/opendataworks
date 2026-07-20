@@ -69,9 +69,20 @@ export function extractErrorText(error) {
 }
 
 export function normalizeTopic(topic) {
+  const rawAgent = topic?.agent && typeof topic.agent === 'object' ? topic.agent : null
   return {
     topic_id: String(topic?.topic_id || ''),
     title: String(topic?.title || '新话题'),
+    agent_id: String(topic?.agent_id || rawAgent?.agent_id || ''),
+    agent: rawAgent
+      ? {
+          agent_id: String(rawAgent.agent_id || topic?.agent_id || ''),
+          name: String(rawAgent.name || ''),
+          description: String(rawAgent.description || ''),
+          is_default: Boolean(rawAgent.is_default),
+          is_builtin: Boolean(rawAgent.is_builtin),
+        }
+      : null,
     message_count: Number(topic?.message_count || 0),
     last_message_preview: String(topic?.last_message_preview || ''),
     current_task_id: String(topic?.current_task_id || ''),

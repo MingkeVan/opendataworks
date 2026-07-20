@@ -63,6 +63,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Collection, Cpu, MagicStick, Monitor, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { withAgentContext } from '@/router/agentContext'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,8 +71,10 @@ const authStore = useAuthStore()
 
 const handleUserCommand = async (command) => {
   if (command !== 'logout') return
+  const agentId = String(route.query?.agent_id || '').trim()
+  const redirect = route.fullPath || (agentId ? `/chat?agent_id=${encodeURIComponent(agentId)}` : '/chat')
   await authStore.logout()
-  router.push('/login')
+  router.push({ path: '/login', query: { redirect } })
 }
 
 // Each menu entry maps directly to a user-facing page route.
@@ -97,7 +100,7 @@ const handleMenuSelect = (index) => {
   if (route.path === path) {
     return
   }
-  router.push(path)
+  router.push(withAgentContext({ path }, route.query))
 }
 </script>
 

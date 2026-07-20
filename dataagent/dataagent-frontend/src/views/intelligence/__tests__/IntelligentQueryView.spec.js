@@ -94,13 +94,28 @@ describe('IntelligentQueryView', () => {
     const wrapper = mountView()
 
     await wrapper.vm.handleMenuSelect('models')
-    expect(routerPush).toHaveBeenCalledWith('/models')
+    expect(routerPush).toHaveBeenCalledWith({ path: '/models', query: {} })
 
     await wrapper.vm.handleMenuSelect('skills')
-    expect(routerPush).toHaveBeenCalledWith('/skills')
+    expect(routerPush).toHaveBeenCalledWith({ path: '/skills', query: {} })
 
     await wrapper.vm.handleMenuSelect('widget')
-    expect(routerPush).toHaveBeenCalledWith('/widget-access')
+    expect(routerPush).toHaveBeenCalledWith({ path: '/widget-access', query: {} })
+  })
+
+  it('preserves only agent_id when switching page menus', async () => {
+    const wrapper = mountView({
+      path: '/chat',
+      query: { agent_id: 'agent_sales', topic_id: 'topic-1', message_id: 'a1' },
+      meta: { tab: 'chat-v2' }
+    })
+
+    await wrapper.vm.handleMenuSelect('skills')
+
+    expect(routerPush).toHaveBeenCalledWith({
+      path: '/skills',
+      query: { agent_id: 'agent_sales' }
+    })
   })
 
   it('does not navigate when selecting the already active route', async () => {

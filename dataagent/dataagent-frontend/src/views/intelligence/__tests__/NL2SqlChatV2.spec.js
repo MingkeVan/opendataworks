@@ -60,14 +60,19 @@ vi.mock('element-plus', () => ({
   ElDropdownItem: { name: 'ElDropdownItem' },
   ElDropdownMenu: { name: 'ElDropdownMenu' },
   ElMessage: {
-    error: vi.fn()
+    error: vi.fn(),
+    warning: vi.fn()
+  },
+  ElMessageBox: {
+    confirm: vi.fn(async () => true)
   },
   ElOption: { name: 'ElOption' },
   ElPopover: { name: 'ElPopover' },
   ElRadio: { name: 'ElRadio' },
   ElRadioGroup: { name: 'ElRadioGroup' },
   ElScrollbar: { name: 'ElScrollbar' },
-  ElSelect: { name: 'ElSelect' }
+  ElSelect: { name: 'ElSelect' },
+  ElTooltip: { name: 'ElTooltip' }
 }))
 
 import NL2SqlChatV2 from '../NL2SqlChatV2.vue'
@@ -135,7 +140,11 @@ const topicMessages = {
 
 const scrollbarSetScrollTop = vi.fn()
 
-const mountChat = () => mount(NL2SqlChatV2, {
+const mountChat = ({ withAgent = true } = {}) => {
+  if (withAgent && !Object.prototype.hasOwnProperty.call(routeState.query, 'agent_id')) {
+    routeState.query = { ...routeState.query, agent_id: 'agent_default' }
+  }
+  return mount(NL2SqlChatV2, {
   global: {
     plugins: [createPinia()],
     stubs: {
@@ -182,6 +191,9 @@ const mountChat = () => mount(NL2SqlChatV2, {
       ElPopover: {
         template: '<div class="el-popover-stub"><slot name="reference" /><slot /></div>'
       },
+      ElTooltip: {
+        template: '<span class="el-tooltip-stub"><slot /></span>'
+      },
       ElRadioGroup: {
         props: ['modelValue'],
         emits: ['update:modelValue'],
@@ -201,7 +213,8 @@ const mountChat = () => mount(NL2SqlChatV2, {
       }
     }
   }
-})
+  })
+}
 
 describe('NL2SqlChatV2 URL location', () => {
   beforeEach(() => {
@@ -260,6 +273,68 @@ describe('NL2SqlChatV2 URL location', () => {
     }))
     apiMocks.taskApi.getTask.mockResolvedValue({ task_status: 'success' })
     apiMocks.taskApi.cancelTask.mockResolvedValue({ status: 'ok' })
+  })
+
+  it('shows an assistant-only welcome page when agent_id is missing', async () => {
+    const wrapper = mountChat({ withAgent: false })
+
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('.v2-agent-welcome').exists()).toBe(true)
+    expect(wrapper.text()).toContain('欢迎使用 DataAgent')
+    expect(wrapper.text()).toContain('Default agent')
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(wrapper.find('.v2-sidebar').exists()).toBe(false)
+    expect(apiMocks.agentApi.listAgents).toHaveBeenCalledTimes(1)
+    expect(apiMocks.runtimeApi.getConfig).not.toHaveBeenCalled()
+    expect(apiMocks.topicApi.listTopics).not.toHaveBeenCalled()
+  })
+
+  it('enters the workbench only after the user selects an assistant', async () => {
+    apiMocks.agentApi.listAgents.mockResolvedValue([
+      { agent_id: 'agent_default', name: 'Default agent', description: 'General help', is_default: true },
+      { agent_id: 'agent_sales', name: 'Sales agent', description: 'Sales analysis', is_default: false }
+    ])
+    const wrapper = mountChat({ withAgent: false })
+
+    await flushPromises()
+    await nextTick()
+    const salesButton = wrapper.findAll('.agent-selector-pill').find((button) => button.text().includes('Sales agent'))
+    expect(salesButton).toBeTruthy()
+    await salesButton.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(routerReplace).toHaveBeenCalledWith({ path: '/chat', query: { agent_id: 'agent_sales' } })
+    expect(wrapper.find('.v2-workbench').exists()).toBe(true)
+    expect(wrapper.find('textarea').exists()).toBe(true)
+    expect(wrapper.find('.v2-agent-title').text()).toBe('Sales agent')
+    expect(wrapper.find('.v2-agent-select').exists()).toBe(true)
+  })
+
+  it('returns an invalid assistant URL to the welcome page', async () => {
+    routeState.query = { agent_id: 'agent_removed', topic_id: 'topic-1', message_id: 'a1' }
+    const wrapper = mountChat()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('.v2-agent-welcome').exists()).toBe(true)
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(routerReplace).toHaveBeenCalledWith({ path: '/chat', query: {} })
+  })
+
+  it('shows only the static assistant name in the header and keeps switching in the sidebar', async () => {
+    const wrapper = mountChat()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('.v2-agent-title').text()).toBe('Default agent')
+    expect(wrapper.find('.v2-agent-header').exists()).toBe(false)
+    expect(wrapper.find('.v2-topic-title').exists()).toBe(false)
+    expect(wrapper.find('.v2-agent-select').exists()).toBe(true)
   })
 
   it('opens the topic from the URL and scrolls to the target message', async () => {
@@ -442,6 +517,7 @@ describe('NL2SqlChatV2 URL location', () => {
     expect(routerReplace).toHaveBeenLastCalledWith({
       path: '/chat',
       query: {
+        agent_id: 'agent_default',
         topic_id: 'topic-2'
       }
     })
@@ -472,7 +548,7 @@ describe('NL2SqlChatV2 URL location', () => {
     await nextTick()
     expect(wrapper.text()).toContain('first answer')
 
-    await wrapper.find('.v2-agent-select .el-select-stub').setValue('agent_sales')
+    await wrapper.find('.v2-agent-select select').setValue('agent_sales')
     await flushPromises()
     await nextTick()
 
@@ -702,18 +778,32 @@ describe('NL2SqlChatV2 URL location', () => {
     // cue keeps the run visibly active while it continues.
     expect(wrapper.find('.v2-typing-indicator-trailing').exists()).toBe(true)
 
+    // The refresh after a terminal stream observes the persisted terminal row;
+    // otherwise this mock's permanently-running row would correctly trigger a
+    // second resume and keep the indicator visible.
+    apiMocks.topicApi.listTopics.mockResolvedValue({
+      list: [
+        { ...makeTopic('topic-run', 'Running topic'), current_task_id: 'task-run', current_task_status: 'finished' }
+      ]
+    })
     recordSink({ record_type: 'done', data: {} })
     resolveStream()
     await flushPromises()
     await nextTick()
 
     // Completion clears every activity cue.
-    expect(wrapper.find('.v2-typing-indicator-trailing').exists()).toBe(false)
-    expect(wrapper.find('.v2-typing-indicator').exists()).toBe(false)
+    await vi.waitFor(() => {
+      expect(wrapper.find('.v2-typing-indicator-trailing').exists()).toBe(false)
+      expect(wrapper.find('.v2-typing-indicator').exists()).toBe(false)
+    })
   })
 
   it('forwards the selected assistant to the widget topic query', async () => {
     routeState.query = { agent_id: 'agent_sales' }
+    apiMocks.agentApi.listAgents.mockResolvedValue([
+      { agent_id: 'agent_default', name: 'Default agent', is_default: true },
+      { agent_id: 'agent_sales', name: 'Sales agent', is_default: false }
+    ])
     const wrapper = mountChat()
 
     await flushPromises()

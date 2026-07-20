@@ -55,9 +55,10 @@ describe('auth router guard', () => {
 
   it('redirects unauthenticated users to /login with redirect', async () => {
     authState.enabled = true
-    const route = await navigate('/chat')
+    const route = await navigate('/chat?agent_id=agent_sales')
     expect(route.path).toBe('/login')
     expect(route.query.redirect).toContain('/chat')
+    expect(route.query.redirect).toContain('agent_id=agent_sales')
   })
 
   it('lets authenticated users through', async () => {
@@ -73,6 +74,15 @@ describe('auth router guard', () => {
     authState.isAdmin = false
     const route = await navigate('/models')
     expect(route.path).toBe('/chat')
+  })
+
+  it('keeps agent_id when a non-admin user falls back from an admin page', async () => {
+    authState.enabled = true
+    authState.currentUser = { display_name: 'alice', role: 'user' }
+    authState.isAdmin = false
+    const route = await navigate('/models?agent_id=agent_sales')
+    expect(route.path).toBe('/chat')
+    expect(route.query.agent_id).toBe('agent_sales')
   })
 
   it.each(['/skills', '/skills/demo', '/agents', '/agents/agent_1'])(
@@ -107,5 +117,13 @@ describe('auth router guard', () => {
     authState.currentUser = { display_name: 'alice', role: 'user' }
     const route = await navigate('/login')
     expect(route.path).toBe('/chat')
+  })
+
+  it('returns a logged-in user to the full redirect including agent_id', async () => {
+    authState.enabled = true
+    authState.currentUser = { display_name: 'alice', role: 'user' }
+    const route = await navigate('/login?redirect=%2Fskills%3Fagent_id%3Dagent_sales')
+    expect(route.path).toBe('/skills')
+    expect(route.query.agent_id).toBe('agent_sales')
   })
 })

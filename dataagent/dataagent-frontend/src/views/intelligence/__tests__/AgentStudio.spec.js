@@ -10,6 +10,7 @@ const dataagentApi = vi.hoisted(() => ({
 }))
 
 vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
   useRouter: () => ({ push: routerPush })
 }))
 
@@ -84,7 +85,8 @@ describe('AgentStudio', () => {
     expect(dataagentApi.createAgent).toHaveBeenCalledWith(expect.objectContaining({ name: '新智能体' }))
     expect(routerPush).toHaveBeenCalledWith({
       name: 'IntelligentQueryAgentDetail',
-      params: { agentId: 'agent_1' }
+      params: { agentId: 'agent_1' },
+      query: {}
     })
   })
 
