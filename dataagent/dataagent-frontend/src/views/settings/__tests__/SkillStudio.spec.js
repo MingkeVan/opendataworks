@@ -33,6 +33,7 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('vue-router', async (importOriginal) => ({
   ...(await importOriginal()),
+  useRoute: () => ({ query: {} }),
   useRouter: () => ({
     push: routerPush
   })
@@ -175,7 +176,8 @@ describe('SkillStudio', () => {
     wrapper.vm.openSkillDetail('marketing-insights')
     expect(routerPush).toHaveBeenCalledWith({
       name: 'IntelligentQuerySkillDetail',
-      params: { folder: 'marketing-insights' }
+      params: { folder: 'marketing-insights' },
+      query: {}
     })
   })
 

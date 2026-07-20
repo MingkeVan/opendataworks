@@ -54,12 +54,14 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ChatLineRound, Delete, Edit, Plus, View } from '@element-plus/icons-vue'
 import { dataagentApi } from '@/api/dataagent'
 import { useAuthStore } from '@/stores/auth'
+import { withAgentContext } from '@/router/agentContext'
 
+const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const canManage = computed(() => authStore.isAdmin)
@@ -93,27 +95,27 @@ const handleCreate = async () => {
       env_vars: {},
       data_scope: { allowed_scopes: [] }
     })
-    await router.push({
+    await router.push(withAgentContext({
       name: 'IntelligentQueryAgentDetail',
       params: { agentId: created.agent_id }
-    })
+    }, route.query))
   } finally {
     creating.value = false
   }
 }
 
 const handleDetail = (agent) => {
-  router.push({
+  router.push(withAgentContext({
     name: 'IntelligentQueryAgentDetail',
     params: { agentId: agent.agent_id }
-  })
+  }, route.query))
 }
 
 const handleChat = (agent) => {
-  router.push({
+  router.push(withAgentContext({
     path: '/chat',
     query: { agent_id: agent.agent_id }
-  })
+  }, route.query))
 }
 
 const handleDelete = async (agent) => {

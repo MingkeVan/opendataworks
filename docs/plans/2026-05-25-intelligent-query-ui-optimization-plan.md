@@ -136,3 +136,17 @@
   3. `/api/v1/nl2sql/tasks/{task_id}/events/stream` 能消费终态事件。
   4. `/api/v1/nl2sql/topics/{topic_id}/messages` 能看到最终 assistant 消息。
   5. 若后续恢复编辑重发并涉及后端裁剪，刷新页面后消息历史必须与当前 UI 截断结果一致。
+
+---
+
+## 3. 2026-07-20 助手欢迎页与路由上下文实施补充
+
+本节替代 1.1 与 1.8 中旧的普通智能体下拉框任务。
+
+1. 在 `dataagent/dataagent-frontend/src/views/intelligence/` 增加可复用助手选择组件，用于欢迎页胶囊列表，并支持加载、失败、空列表、选中与重试状态。
+2. 重构 `NL2SqlChatV2.vue` 为“助手加载 / 欢迎页 / 有效助手工作台”三态；没有 `agent_id` 时只加载助手目录，选择后才请求模型、话题、消息与 slash commands。
+3. 保留侧栏助手下拉框作为工作台内唯一切换入口；把主区会话标题替换为静态助手名称，不展示描述和切换功能。切换助手时覆盖确认、草稿、附件、运行任务 detach 和话题归属清理。
+4. 增加统一的 `agent_id` 路由上下文辅助函数，并接入主菜单、详情跳转、登录回跳、退出登录和权限回退；只继承 `agent_id`。
+5. 扩展话题前端归一化结果，保留 `agent_id` 与安全 agent 摘要，用于拒绝不匹配的话题深链。
+6. 更新 `NL2SqlChatV2.spec.js`、路由、布局和登录测试，覆盖欢迎页无输入框、延迟初始化、侧栏助手切换、顶栏静态助手名称、无效助手、跨菜单保持和登录回跳。
+7. 执行 `nvm use` 后运行 DataAgent 前端定向 Vitest 与 `npm --prefix dataagent/dataagent-frontend run build`；手工检查桌面端与移动端完整导航流程。

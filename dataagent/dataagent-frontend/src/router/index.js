@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { withAgentContext } from './agentContext'
 
 // Legacy `?tab=` values mapped onto the canonical, user-facing page paths.
 const LEGACY_TAB_TO_PATH = {
@@ -153,7 +154,7 @@ const router = createRouter({
 // 认证守卫：auth 未启用（后端未挂配置）时完全透明，行为与历史版本一致。
 router.beforeEach(async (to) => {
   // 懒加载避免 router → store → api 的启动期循环依赖。
-  const { useAuthStore } = await import('@/stores/auth')
+  const { sanitizeRedirectPath, useAuthStore } = await import('@/stores/auth')
   const authStore = useAuthStore()
   await authStore.bootstrap()
 
@@ -161,7 +162,10 @@ router.beforeEach(async (to) => {
   if (to.meta?.public) {
     // 已登录再访问 /login：直接回应用。
     if (to.name === 'Login' && authStore.currentUser) {
-      return { path: '/chat' }
+      const fallback = withAgentContext({ path: '/chat' }, to.query)
+      return sanitizeRedirectPath(to.query.redirect, fallback.query?.agent_id
+        ? `/chat?agent_id=${encodeURIComponent(fallback.query.agent_id)}`
+        : '/chat')
     }
     return true
   }
@@ -169,7 +173,7 @@ router.beforeEach(async (to) => {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
   if (to.meta?.adminOnly && !authStore.isAdmin) {
-    return { path: '/chat' }
+    return withAgentContext({ path: '/chat' }, to.query)
   }
   return true
 })

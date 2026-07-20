@@ -222,6 +222,7 @@ import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { dataagentApi } from '@/api/dataagent'
 import { useAuthStore } from '@/stores/auth'
+import { withAgentContext } from '@/router/agentContext'
 import TextCodeEditor from '@/components/TextCodeEditor.vue'
 import SkillFileTreeNode from './components/SkillFileTreeNode.vue'
 import {
@@ -302,7 +303,7 @@ const notifyError = (error, fallbackMessage) => {
 }
 
 const goBack = () => {
-  router.push({ name: 'IntelligentQuerySkills' })
+  router.push(withAgentContext({ name: 'IntelligentQuerySkills' }, route.query))
 }
 
 const loadDocument = async (documentId) => {

@@ -172,6 +172,7 @@ import { ElMessage } from 'element-plus'
 import { ArrowLeft, ChatLineRound } from '@element-plus/icons-vue'
 import { dataagentApi } from '@/api/dataagent'
 import { useAuthStore } from '@/stores/auth'
+import { withAgentContext } from '@/router/agentContext'
 
 const route = useRoute()
 const router = useRouter()
@@ -368,11 +369,11 @@ const handleSave = async () => {
 }
 
 const goBack = () => {
-  router.push({ name: 'IntelligentQueryAgents' })
+  router.push(withAgentContext({ name: 'IntelligentQueryAgents' }, route.query))
 }
 
 const openChat = () => {
-  router.push({ path: '/chat', query: { agent_id: form.agent_id } })
+  router.push(withAgentContext({ path: '/chat', query: { agent_id: form.agent_id } }, route.query))
 }
 
 onMounted(loadDetail)

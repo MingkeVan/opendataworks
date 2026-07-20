@@ -1,24 +1,56 @@
 <template>
-  <div class="v2-workbench" :class="{ 'artifacts-open': artifactsPanelOpen && !isWidgetMode }">
-    <!-- Sidebar: topic list + agent selector -->
+  <section v-if="!hasValidAgent" class="v2-agent-welcome">
+    <div class="v2-agent-welcome-inner">
+      <div class="v2-agent-welcome-logo-wrap">
+        <img class="v2-agent-welcome-logo" :src="brandLogo" alt="DataAgent">
+      </div>
+      <h1>欢迎使用 DataAgent</h1>
+      <p>选择适合当前任务的助手，开始数据问答、数据开发或建模工作。</p>
+      <AgentSelector
+        class="v2-agent-welcome-selector"
+        mode="welcome"
+        :agents="sortedAgents"
+        :selected-id="agentSelectValue"
+        :loading="agentLoading"
+        :error="agentLoadError"
+        :busy="agentTransitioning"
+        :busy-id="transitioningAgentId"
+        @select="requestAgentChange"
+        @retry="retryLoadAgents"
+      />
+      <div v-if="!agentLoading && !agentLoadError && sortedAgents.length" class="v2-agent-welcome-hint">
+        <span aria-hidden="true">←</span>
+        选择上方助手开始对话
+      </div>
+    </div>
+  </section>
+
+  <div v-else class="v2-workbench" :class="{ 'artifacts-open': artifactsPanelOpen && !isWidgetMode }">
+    <!-- Sidebar: assistant selector + topic list -->
     <aside class="v2-sidebar">
       <div class="v2-sidebar-head">
         <el-select
-          v-model="agentSelectValue"
+          :model-value="agentSelectValue"
           class="v2-agent-select"
-          :disabled="!agents.length"
-          @change="handleAgentChange"
+          :disabled="!sortedAgents.length || isUploading || agentTransitioning"
+          :title="isUploading ? '文件上传完成后可切换助手' : '切换助手'"
+          @change="requestAgentChange"
         >
           <template #prefix>
-            <svg class="v2-agent-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 2V4" />
-              <rect x="4" y="6" width="16" height="12" rx="2" />
-              <circle cx="9" cy="12" r="1.5" fill="currentColor" stroke="none" />
-              <circle cx="15" cy="12" r="1.5" fill="currentColor" stroke="none" />
-              <path d="M9 16c1.5 1 4.5 1 6 0" />
+            <svg class="v2-agent-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 2v2" />
+              <rect x="4" y="6" width="16" height="12" rx="3" />
+              <circle cx="9" cy="12" r="1.25" fill="currentColor" stroke="none" />
+              <circle cx="15" cy="12" r="1.25" fill="currentColor" stroke="none" />
+              <path d="M9 16h6" />
             </svg>
           </template>
-          <el-option v-for="a in agents" :key="a.agent_id" :label="a.name" :value="a.agent_id" />
+          <el-option
+            v-for="agent in sortedAgents"
+            :key="agent.agent_id"
+            :label="agent.name"
+            :value="agent.agent_id"
+          />
         </el-select>
         <button v-if="!isWidgetMode" class="v2-btn-new" @click="handleNewTopic">新建</button>
       </div>
@@ -155,10 +187,10 @@
 
     <!-- Main chat area -->
     <main class="v2-main">
-      <div v-if="messages.length" class="v2-main-top-bar">
-        <h4 class="v2-topic-title">{{ activeTopic?.title }}</h4>
+      <div class="v2-main-top-bar">
+        <h2 class="v2-agent-title">{{ currentAgentName }}</h2>
         <button
-          v-if="!isWidgetMode"
+          v-if="!isWidgetMode && activeTopicId"
           type="button"
           class="v2-artifacts-toggle"
           :class="{ active: artifactsPanelOpen }"
@@ -633,7 +665,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { createNl2SqlApiClient, DATAAGENT_CLIENT_HEADERS } from '@/api/nl2sql'
 import { dataagentApi } from '@/api/dataagent'
 import { useAuthStore } from '@/stores/auth'
@@ -644,15 +676,17 @@ import QuestionSelectionCard from './QuestionSelectionCard.vue'
 import { blockToToolProp } from './v2StreamParser'
 import { splitChartSpecText, stripChartSpecsFromText } from './chartSpec'
 import { topicStatusKind } from './topicStatus'
-import { hydrateMessageFromApi, isPlainEnterSubmit, renderMarkdown as renderMarkdownBase } from './chatMessage'
+import { hydrateMessageFromApi, isPlainEnterSubmit, normalizeTopic, renderMarkdown as renderMarkdownBase } from './chatMessage'
 import { useNl2SqlChat } from './useNl2SqlChat'
 import { useChatMessageActions } from './useChatMessageActions'
 import SlashCommandMenu from './SlashCommandMenu.vue'
+import AgentSelector from './AgentSelector.vue'
 import { useSlashCommands, buildCommands } from './useSlashCommands'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const brandLogo = `${import.meta.env.BASE_URL}opendataworks-icon.svg`
 
 // SPA 调用点显式携带 dataagent 标记（auth 启用时后端据此消费会话 Cookie），
 // 401 统一跳登录。widget 走自己的入口，不经过这里。
@@ -674,6 +708,11 @@ provide('nl2sqlApi', api)
 const agents = ref([])
 const settings = reactive({ providers: [], default_provider_id: '', default_model: '' })
 const agentSelectValue = ref('')
+const agentLoading = ref(true)
+const agentLoadError = ref('')
+const agentTransitioning = ref(false)
+const transitioningAgentId = ref('')
+const initializedAgentId = ref('')
 // Session permission mode (latest selection). Default per design: 'default'.
 const permissionMode = ref('default')
 const PERMISSION_MODE_OPTIONS = [
@@ -731,11 +770,18 @@ const hasActiveFilters = computed(() =>
   sourceMode.value !== 'portal' || filterStatus.value !== '' || sortOrder.value !== 'updated_desc' || filterUser.value !== ''
 )
 
-const currentAgentName = computed(() => {
-  const currentId = agentSelectValue.value
-  const found = agents.value.find((a) => a.agent_id === currentId)
-  return found?.name || '智能数据助手'
-})
+const sortedAgents = computed(() => [...agents.value].sort((left, right) => {
+  const defaultOrder = Number(Boolean(right?.is_default)) - Number(Boolean(left?.is_default))
+  if (defaultOrder) return defaultOrder
+  return String(left?.name || '').localeCompare(String(right?.name || ''), 'zh-CN')
+}))
+const activeAgent = computed(() => (
+  agents.value.find((agent) => agent.agent_id === agentSelectValue.value) || null
+))
+const hasValidAgent = computed(() => (
+  !agentLoading.value && !agentLoadError.value && Boolean(activeAgent.value)
+))
+const currentAgentName = computed(() => activeAgent.value?.name || '智能数据助手')
 const messagesScrollbarRef = ref(null)
 const textareaRef = ref(null)
 const targetMessageId = ref('')
@@ -914,6 +960,20 @@ function routeMessageId() {
   return normalizeQueryValue(route.query.message_id)
 }
 
+function routeAgentId() {
+  return normalizeQueryValue(route.query.agent_id)
+}
+
+function replaceRouteAgent(agentId) {
+  const query = { ...route.query }
+  const normalizedAgentId = normalizeQueryValue(agentId)
+  if (normalizedAgentId) query.agent_id = normalizedAgentId
+  else delete query.agent_id
+  delete query.topic_id
+  delete query.message_id
+  return router.replace({ path: route.path || '/chat', query })
+}
+
 function replaceRouteTopic(topicId, messageId = '') {
   const query = { ...route.query }
   const normalizedTopicId = normalizeQueryValue(topicId)
@@ -993,27 +1053,40 @@ async function loadSettings() {
 }
 
 async function loadAgents() {
+  agentLoading.value = true
+  agentLoadError.value = ''
   try {
     const list = await agentApi.listAgents()
     const normalized = (Array.isArray(list) ? list : []).map((a) => ({
       agent_id: String(a?.agent_id || ''),
       name: String(a?.name || '默认助手'),
+      description: String(a?.description || ''),
       is_default: Boolean(a?.is_default),
+      is_builtin: Boolean(a?.is_builtin),
       preset_questions: Array.isArray(a?.preset_questions) ? a.preset_questions.filter(Boolean) : [],
     })).filter((a) => a.agent_id)
-    agents.value = normalized.length
-      ? normalized
-      : [{ agent_id: 'agent_default', name: '默认助手', is_default: true }]
-    const routeAgentId = String(route.query.agent_id || '').trim()
-    if (routeAgentId && agents.value.some((a) => a.agent_id === routeAgentId)) {
-      agentSelectValue.value = routeAgentId
-    } else if (!agentSelectValue.value) {
-      const def = agents.value.find((a) => a.is_default) || agents.value[0]
-      agentSelectValue.value = def?.agent_id || ''
+    agents.value = normalized
+    const requestedAgentId = routeAgentId()
+    if (!requestedAgentId) {
+      agentSelectValue.value = ''
+      return
     }
-  } catch {
-    agents.value = [{ agent_id: 'agent_default', name: '默认助手', is_default: true }]
-    agentSelectValue.value = 'agent_default'
+    const matched = agents.value.find((agent) => agent.agent_id === requestedAgentId)
+    if (matched) {
+      agentSelectValue.value = matched.agent_id
+      return
+    }
+    agentSelectValue.value = ''
+    initializedAgentId.value = ''
+    ElMessage.warning('当前助手已不可用，请重新选择')
+    const navigation = replaceRouteAgent('')
+    if (navigation?.catch) navigation.catch(() => {})
+  } catch (error) {
+    agents.value = []
+    agentSelectValue.value = ''
+    agentLoadError.value = String(error?.message || '助手列表加载失败，请稍后重试')
+  } finally {
+    agentLoading.value = false
   }
 }
 
@@ -1022,11 +1095,11 @@ async function loadAgents() {
 // (defaulted in loadAgents) so a fresh entry never lists every assistant's
 // sessions before the route has been seeded.
 function currentAgentFilterId() {
-  return normalizeQueryValue(route.query.agent_id) || String(agentSelectValue.value || '').trim()
+  return String(agentSelectValue.value || '').trim() || normalizeQueryValue(route.query.agent_id)
 }
 
 async function loadTopics(options = {}) {
-  const { selectDefault = true } = options
+  const { selectDefault = true, skipRouteTopic = false } = options
   if (sourceMode.value === 'widget') {
     await loadWidgetTopics()
     return
@@ -1040,16 +1113,41 @@ async function loadTopics(options = {}) {
     const agentId = currentAgentFilterId()
     if (agentId) params.agent_id = agentId
     const data = await topicApi.listTopics(params)
-    topics.value = Array.isArray(data?.list) ? data.list : (Array.isArray(data) ? data : [])
-    const requestedTopicId = routeTopicId()
+    const rawTopics = Array.isArray(data?.list) ? data.list : (Array.isArray(data) ? data : [])
+    topics.value = rawTopics.map(normalizeTopic).filter((topic) => topic.topic_id)
+    const requestedTopicId = skipRouteTopic ? '' : routeTopicId()
     if (requestedTopicId) {
-      await selectTopic(requestedTopicId, { messageId: routeMessageId() })
+      const validTopicId = await validateRequestedTopic(requestedTopicId)
+      if (validTopicId) await selectTopic(validTopicId, { messageId: routeMessageId() })
     } else if (selectDefault && topics.value.length && !activeTopicId.value) {
       await selectTopic(topics.value[0].topic_id)
     }
   } catch {
     // non-fatal
   }
+}
+
+async function validateRequestedTopic(topicId) {
+  const normalizedTopicId = normalizeQueryValue(topicId)
+  if (!normalizedTopicId) return ''
+  let topic = topics.value.find((item) => item.topic_id === normalizedTopicId) || null
+  if (!topic) {
+    try {
+      topic = normalizeTopic(await topicApi.getTopic(normalizedTopicId))
+    } catch {
+      return normalizedTopicId
+    }
+  }
+  const topicAgentId = normalizeQueryValue(topic?.agent_id)
+  if (topicAgentId && topicAgentId !== agentSelectValue.value) {
+    ElMessage.warning('该会话不属于当前助手，已取消会话定位')
+    replaceRouteTopic('')
+    return ''
+  }
+  if (topic?.topic_id && !topics.value.some((item) => item.topic_id === topic.topic_id)) {
+    topics.value.unshift(topic)
+  }
+  return normalizedTopicId
 }
 
 function resetActiveConversationView() {
@@ -1117,7 +1215,7 @@ async function ensureTopicListed(topicId) {
   try {
     const topic = await topicApi.getTopic(normalizedTopicId)
     if (topic?.topic_id) {
-      topics.value.unshift(topic)
+      topics.value.unshift(normalizeTopic(topic))
     }
   } catch {
     // The message list can still load even when the topic summary lookup fails.
@@ -1298,26 +1396,72 @@ async function handleSelectTopic(topicId) {
   if (!isWidgetMode.value) replaceRouteTopic(topicId)
 }
 
-function handleAgentChange(agentId) {
-  agentSelectValue.value = agentId
+async function requestAgentChange(agentId) {
+  const value = normalizeQueryValue(agentId)
+  if (!value || value === agentSelectValue.value || agentTransitioning.value) return
+  if (!agents.value.some((agent) => agent.agent_id === value)) return
+  if (isUploading.value) {
+    ElMessage.warning('文件上传完成后再切换助手')
+    return
+  }
+
+  const needsConfirmation = Boolean(
+    messages.value.length
+    || inputText.value.trim()
+    || pendingAttachments.value.length
+    || activeTaskId.value
+  )
+  if (needsConfirmation) {
+    const attachmentNote = pendingAttachments.value.length
+      ? ' 已上传附件仍保留在原会话，不会带入新会话。'
+      : ''
+    const runningNote = activeTaskId.value
+      ? ' 当前任务会继续在后台运行。'
+      : ''
+    try {
+      await ElMessageBox.confirm(
+        `切换助手将开启新会话，未发送的文字草稿会保留。${attachmentNote}${runningNote}`,
+        '切换助手',
+        { confirmButtonText: '切换并新建会话', cancelButtonText: '取消', type: 'warning' },
+      )
+    } catch {
+      return
+    }
+  }
+
+  agentTransitioning.value = true
+  transitioningAgentId.value = value
+  try {
+    if (isStreaming.value) detach()
+    pendingAttachments.value = []
+    resetActiveConversationView()
+    agentSelectValue.value = value
+    initializedAgentId.value = ''
+    const navigation = replaceRouteAgent(value)
+    if (navigation?.then) await navigation
+    await initializeWorkspace(value, { skipRouteTopic: true })
+  } catch (error) {
+    ElMessage.error(String(error?.message || '切换助手失败，请稍后重试'))
+  } finally {
+    agentTransitioning.value = false
+    transitioningAgentId.value = ''
+  }
+}
+
+async function initializeWorkspace(agentId, options = {}) {
+  const value = normalizeQueryValue(agentId)
+  if (!value || initializedAgentId.value === value) return
+  initializedAgentId.value = value
+  await Promise.all([
+    loadSettings(),
+    loadTopics({ selectDefault: false, skipRouteTopic: Boolean(options.skipRouteTopic) }),
+  ])
   void loadSlashCommands()
-  const value = String(agentId || '').trim()
-  const previousValue = String(route.query.agent_id || '').trim()
-  if (previousValue === value) return
-  if (isStreaming.value) detach()
-  resetActiveConversationView()
-  const query = { ...route.query }
-  if (value) {
-    query.agent_id = value
-  } else {
-    delete query.agent_id
-  }
-  delete query.topic_id
-  delete query.message_id
-  const navigation = router.replace({ path: route.path, query })
-  if (navigation?.catch) {
-    navigation.catch(() => {})
-  }
+}
+
+async function retryLoadAgents() {
+  await loadAgents()
+  if (agentSelectValue.value) await initializeWorkspace(agentSelectValue.value)
 }
 
 function handleModelCommand(command) {
@@ -1689,20 +1833,48 @@ watch(inputText, (value) => {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 onMounted(async () => {
-  await Promise.all([loadSettings(), loadAgents()])
-  await loadTopics()
-  void loadSlashCommands()
+  await loadAgents()
+  if (agentSelectValue.value) await initializeWorkspace(agentSelectValue.value)
 })
 
-watch(() => route.query.agent_id, async () => {
+watch(() => route.query.agent_id, async (rawAgentId) => {
+  if (agentLoading.value) return
+  const nextAgentId = normalizeQueryValue(rawAgentId)
+  if (!nextAgentId) {
+    if (isStreaming.value) detach()
+    agentSelectValue.value = ''
+    initializedAgentId.value = ''
+    pendingAttachments.value = []
+    resetActiveConversationView()
+    return
+  }
+  const matched = agents.value.find((agent) => agent.agent_id === nextAgentId)
+  if (!matched) {
+    if (isStreaming.value) detach()
+    agentSelectValue.value = ''
+    initializedAgentId.value = ''
+    pendingAttachments.value = []
+    resetActiveConversationView()
+    ElMessage.warning('当前助手已不可用，请重新选择')
+    const navigation = replaceRouteAgent('')
+    if (navigation?.catch) navigation.catch(() => {})
+    return
+  }
+  if (agentSelectValue.value !== nextAgentId) {
+    if (isStreaming.value) detach()
+    pendingAttachments.value = []
+    resetActiveConversationView()
+    agentSelectValue.value = nextAgentId
+    initializedAgentId.value = ''
+  }
   // Re-query both sources: widget mode also honors the assistant filter.
-  resetActiveConversationView()
-  await loadTopics({ selectDefault: false })
+  await initializeWorkspace(nextAgentId)
 })
 
 watch(
   () => [route.query.topic_id, route.query.message_id],
   async ([topicId, messageId]) => {
+    if (!hasValidAgent.value) return
     // Widget sessions are not mirrored into the route; ignore route-driven
     // topic selection while viewing them to avoid loading a widget id as portal.
     if (isWidgetMode.value) return
@@ -1712,9 +1884,11 @@ watch(
       targetMessageId.value = ''
       return
     }
-    if (normalizedTopicId !== activeTopicId.value) {
+    const validTopicId = await validateRequestedTopic(normalizedTopicId)
+    if (!validTopicId) return
+    if (validTopicId !== activeTopicId.value) {
       if (isStreaming.value) detach()
-      await selectTopic(normalizedTopicId, { messageId: normalizedMessageId })
+      await selectTopic(validTopicId, { messageId: normalizedMessageId })
       return
     }
     if (normalizedMessageId) {
@@ -1732,6 +1906,74 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* ── Root layout ─────────────────────────────────────────────────────────── */
+.v2-agent-welcome {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: clamp(32px, 7vh, 72px) 24px;
+  border: 1px solid var(--odw-border);
+  border-radius: 18px;
+  background: var(--odw-bg-page);
+  font-family: 'IBM Plex Sans', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+}
+
+.v2-agent-welcome-inner {
+  width: min(900px, 100%);
+  margin: auto;
+  text-align: center;
+}
+
+.v2-agent-welcome-logo-wrap {
+  width: 88px;
+  height: 88px;
+  margin: 0 auto 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 24px;
+  background: linear-gradient(145deg, var(--odw-primary-light), var(--odw-primary-dark));
+  box-shadow: 0 16px 34px rgba(44, 82, 130, 0.2);
+}
+
+.v2-agent-welcome-logo {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 6px rgba(15, 23, 42, 0.18));
+}
+
+.v2-agent-welcome h1 {
+  margin: 0;
+  color: var(--odw-text-primary);
+  font-size: clamp(28px, 3vw, 38px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.v2-agent-welcome p {
+  max-width: 680px;
+  margin: 20px auto 34px;
+  color: var(--odw-text-secondary);
+  font-size: 17px;
+  line-height: 1.8;
+}
+
+.v2-agent-welcome-selector {
+  min-height: 54px;
+}
+
+.v2-agent-welcome-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 28px;
+  color: var(--odw-text-secondary);
+  font-size: 14px;
+}
+
 .v2-workbench {
   height: 100%;
   min-height: 0;
@@ -2144,22 +2386,26 @@ onBeforeUnmount(() => {
 }
 
 .v2-main-top-bar {
+  position: relative;
+  z-index: 11;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 14px 24px 12px;
   border-bottom: 1px solid #eef1f5;
+  background: #ffffff;
   flex-shrink: 0;
 }
-.v2-main-top-bar .v2-topic-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.v2-topic-title {
+.v2-agent-title {
   flex: 1;
+  min-width: 0;
   margin: 0;
+  color: #162131;
   font-size: 15px;
   font-weight: 600;
-  color: #162131;
+  line-height: 34px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2752,6 +2998,19 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 640px) {
+  .v2-agent-welcome {
+    padding: 28px 16px;
+    border-radius: 14px;
+  }
+  .v2-agent-welcome-logo-wrap {
+    width: 72px;
+    height: 72px;
+    margin-bottom: 24px;
+    border-radius: 20px;
+  }
+  .v2-agent-welcome-logo { width: 44px; height: 44px; }
+  .v2-agent-welcome p { margin-block: 14px 28px; font-size: 15px; }
+  .v2-main-top-bar { padding-inline: 16px; }
   .v2-messages-inner { padding-top: 16px; padding-bottom: 160px; padding-inline: 16px; }
   .v2-composer-wrap { padding-block: 10px 14px; padding-inline: 16px; }
   .v2-user-shell { max-width: 90%; }
