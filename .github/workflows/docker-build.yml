@@ -65,6 +65,11 @@ jobs:
             context: .
             dockerfile: ./tools/dataagent-evals/deepeval/Dockerfile
             build_args: ""
+          - name: dataagent-evals-opik
+            image: opendataworks-dataagent-evals-opik
+            context: .
+            dockerfile: ./tools/dataagent-evals/opik/Dockerfile
+            build_args: ""
 
 
     steps:
@@ -197,6 +202,7 @@ jobs:
             echo "- [Portal MCP](https://hub.docker.com/r/${NS}/opendataworks-portal-mcp/tags?name=${VERSION})"
             echo "- [DataAgent Evals Builtin](https://hub.docker.com/r/${NS}/opendataworks-dataagent-evals-builtin/tags?name=${VERSION})"
             echo "- [DataAgent Evals DeepEval](https://hub.docker.com/r/${NS}/opendataworks-dataagent-evals-deepeval/tags?name=${VERSION})"
+            echo "- [DataAgent Evals Opik](https://hub.docker.com/r/${NS}/opendataworks-dataagent-evals-opik/tags?name=${VERSION})"
             echo "- [Opendataagent Server](https://hub.docker.com/r/${NS}/opendataagent-server/tags?name=${VERSION})"
             echo "- [Opendataagent Web](https://hub.docker.com/r/${NS}/opendataagent-web/tags?name=${VERSION})"
             echo ""
@@ -209,6 +215,7 @@ jobs:
             echo "docker pull ${NS}/opendataworks-portal-mcp:${VERSION}"
             echo "docker pull ${NS}/opendataworks-dataagent-evals-builtin:${VERSION}"
             echo "docker pull ${NS}/opendataworks-dataagent-evals-deepeval:${VERSION}"
+            echo "docker pull ${NS}/opendataworks-dataagent-evals-opik:${VERSION}"
             echo "docker pull ${NS}/opendataagent-server:${VERSION}"
             echo "docker pull ${NS}/opendataagent-web:${VERSION}"
             echo '```'
@@ -303,6 +310,7 @@ jobs:
             echo "- [Portal MCP](https://hub.docker.com/r/${NS}/opendataworks-portal-mcp/tags?name=${IMAGE_TAG})"
             echo "- [DataAgent Evals Builtin](https://hub.docker.com/r/${NS}/opendataworks-dataagent-evals-builtin/tags?name=${IMAGE_TAG})"
             echo "- [DataAgent Evals DeepEval](https://hub.docker.com/r/${NS}/opendataworks-dataagent-evals-deepeval/tags?name=${IMAGE_TAG})"
+            echo "- [DataAgent Evals Opik](https://hub.docker.com/r/${NS}/opendataworks-dataagent-evals-opik/tags?name=${IMAGE_TAG})"
             echo "- [Opendataagent Server](https://hub.docker.com/r/${NS}/opendataagent-server/tags?name=${IMAGE_TAG})"
             echo "- [Opendataagent Web](https://hub.docker.com/r/${NS}/opendataagent-web/tags?name=${IMAGE_TAG})"
             echo ""
@@ -315,6 +323,7 @@ jobs:
             echo "docker pull ${NS}/opendataworks-portal-mcp:${IMAGE_TAG}"
             echo "docker pull ${NS}/opendataworks-dataagent-evals-builtin:${IMAGE_TAG}"
             echo "docker pull ${NS}/opendataworks-dataagent-evals-deepeval:${IMAGE_TAG}"
+            echo "docker pull ${NS}/opendataworks-dataagent-evals-opik:${IMAGE_TAG}"
             echo "docker pull ${NS}/opendataagent-server:${IMAGE_TAG}"
             echo "docker pull ${NS}/opendataagent-web:${IMAGE_TAG}"
             echo '```'
@@ -367,6 +376,7 @@ jobs:
           echo "- \`${{ secrets.DOCKER_USERNAME }}/opendataworks-portal-mcp\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`${{ secrets.DOCKER_USERNAME }}/opendataworks-dataagent-evals-builtin\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`${{ secrets.DOCKER_USERNAME }}/opendataworks-dataagent-evals-deepeval\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ secrets.DOCKER_USERNAME }}/opendataworks-dataagent-evals-opik\`" >> $GITHUB_STEP_SUMMARY
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Platforms supported:" >> $GITHUB_STEP_SUMMARY
@@ -383,5 +393,6 @@ jobs:
           echo "docker pull ${{ secrets.DOCKER_USERNAME }}/opendataworks-portal-mcp:latest" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ secrets.DOCKER_USERNAME }}/opendataworks-dataagent-evals-builtin:latest" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ secrets.DOCKER_USERNAME }}/opendataworks-dataagent-evals-deepeval:latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ secrets.DOCKER_USERNAME }}/opendataworks-dataagent-evals-opik:latest" >> $GITHUB_STEP_SUMMARY
 
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
