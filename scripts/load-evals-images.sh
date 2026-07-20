@@ -54,10 +54,8 @@ fi
 IMAGES=(
     "opendataworks-dataagent-evals-builtin:${IMAGE_TAG}"
     "opendataworks-dataagent-evals-deepeval:${IMAGE_TAG}"
-    "opendataworks-dataagent-evals-opik:${IMAGE_TAG}"
     "opendataworks-dataagent-evals-builtin:latest"
     "opendataworks-dataagent-evals-deepeval:latest"
-    "opendataworks-dataagent-evals-opik:latest"
 )
 for image in "${IMAGES[@]}"; do
     localhost_image="localhost/$image"
@@ -72,5 +70,5 @@ echo ""
 echo "📋 已加载评测镜像："
 $CONTAINER_CMD images | grep -E "opendataworks-dataagent-evals" || true
 echo ""
-echo "📝 下一步：运行 builtin / DeepEval / Opik 评测（用 --dataset 指定 V2 评测集）"
+echo "📝 下一步：运行 builtin / DeepEval 评测（用 --dataset 指定 V2 评测集）"
 echo ""
