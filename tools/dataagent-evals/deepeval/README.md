@@ -8,7 +8,10 @@ It is intentionally separate from the DataAgent backend runtime. DataAgent is on
 
 Datasets are private deployment assets and are not committed with this tool. Pass the JSONL file explicitly with `--dataset` or set `DATAAGENT_EVAL_DATASET`. The JSONL schema matches the builtin runner dataset so both engines can be compared case by case.
 
-Each case must include either `question` or `turns`. `question` is submitted as a single-turn case. `turns` is a list of user messages submitted sequentially in one topic, and `question` may be kept as a short report title for that multi-turn case.
+Only Evaluation V2 (`schema_version=2`) is executable. See
+`../dataset/README.md` for the structured contract. Optional reference SQL is
+independently executed for `data_accuracy`; answer/tool consistency remains a
+separate metric.
 
 Non-dry-run evaluation must also choose the DataAgent profile to execute with. Pass `--agent-id` or set `DATAAGENT_EVAL_AGENT_ID`. The selected agent's `data_scope` is snapshotted on each eval topic and enforces metadata/query access.
 
@@ -34,6 +37,11 @@ python3 tools/dataagent-evals/deepeval/run.py --dry-run --dataset /path/to/priva
 ```
 
 Dry run validates the dataset and writes `summary.json` / `report.md` without calling DataAgent or the judge model.
+
+The repository-local real smoke dataset targets
+`opendataworks-business-knowledge` and does not depend on the private
+architecture-ontology data source. OAuth-enabled runs take the administrator
+JWT only from `DATAAGENT_EVAL_AUTH_TOKEN`.
 
 ## Offline / Intranet Operation
 
@@ -65,6 +73,9 @@ service (deepeval.com / Confident AI):
 The output layout matches the builtin evaluation runner:
 
 - `cases.jsonl`
+- `run.json`
 - `summary.json`
 - `report.md`
+- `report.html`
+- `dataset-snapshot.jsonl`
 - `raw/<case_id>.json`

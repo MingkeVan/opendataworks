@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
+import html
 import json
 import os
 import re
@@ -50,16 +52,20 @@ except Exception:  # pragma: no cover
 
 
 REQUIRED_CASE_FIELDS = {
+    "schema_version",
     "case_id",
     "category",
-    "expected_intent",
-    "expected_ontology_objects",
-    "expected_relations",
-    "expected_sql_or_tool_behavior",
-    "expected_answer_points",
+    "case_type",
+    "suite_tags",
+    "expected_semantics",
+    "expected_time",
+    "expected_tools",
+    "expected_sql",
+    "expected_result",
+    "expected_answer",
+    "limits",
     "scoring",
     "veto_rules",
-    "max_wait_seconds",
 }
 TERMINAL_STATUSES = {"success", "finished", "failed", "error", "suspended", "cancelled", "canceled"}
 SUCCESS_STATUSES = {"success", "finished"}
@@ -68,8 +74,8 @@ GATES = {
     "intent_accuracy": 0.90,
     "ontology_accuracy": 0.90,
     "sql_tool_accuracy": 0.85,
-    "data_precision": 0.90,
-    "data_recall": 0.85,
+    "result_consistency_rate": 0.90,
+    "data_accuracy": 0.90,
     "reasoning_average": 4.0,
     "hallucination_rate": 0.05,
 }
@@ -78,16 +84,28 @@ JUDGE_DIMENSIONS = (
     "ontology_entity",
     "relation_scope",
     "sql_or_tool_call",
-    "data_accuracy",
+    "result_consistency",
     "reasoning",
     "answer_quality",
 )
+DIMENSION_MAX = {"intent": 1.0, "ontology_entity": 1.0, "relation_scope": 1.0, "sql_or_tool_call": 2.0, "result_consistency": 2.0, "reasoning": 2.0, "answer_quality": 1.0}
+EVALUATION_ENGINE = "deepeval"
+ENGINE_VERSION = "2.0.0"
+METRIC_SEMANTICS_VERSION = "2.1"
+JUDGE_PROMPT_VERSION = "dataagent-v2-2026-07-20"
+_DATAAGENT_AUTH_TOKEN = ""
 
 
 class EvalRunnerError(Exception):
     def __init__(self, message: str, *, exit_code: int = 2):
         super().__init__(message)
         self.exit_code = exit_code
+
+
+class InfrastructureAbort(EvalRunnerError):
+    def __init__(self, message: str, *, partial_results: list[dict[str, Any]] | None = None):
+        super().__init__(message, exit_code=2)
+        self.partial_results = partial_results or []
 
 
 @dataclass(frozen=True)
@@ -146,6 +164,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--judge-timeout-seconds", type=int, default=int(os.environ.get("DATAAGENT_EVAL_JUDGE_TIMEOUT_SECONDS", "120")), help="Judge request timeout.")
     parser.add_argument("--judge-max-tokens", type=int, default=int(os.environ.get("DATAAGENT_EVAL_JUDGE_MAX_TOKENS", "4096")), help="Judge response max tokens.")
     parser.add_argument("--dry-run", action="store_true", help="Validate dataset and output directory without service calls.")
+    parser.add_argument("--environment-label", default=os.environ.get("DATAAGENT_EVAL_ENVIRONMENT_LABEL", "local"))
+    parser.add_argument("--run-label", default=os.environ.get("DATAAGENT_EVAL_RUN_LABEL", ""))
+    parser.add_argument("--history-root", default=os.environ.get("DATAAGENT_EVAL_HISTORY_ROOT", ""))
+    parser.add_argument("--agent-snapshot-path", default=os.environ.get("DATAAGENT_EVAL_AGENT_SNAPSHOT_PATH", ""))
+    parser.add_argument("--auth-token", default=os.environ.get("DATAAGENT_EVAL_AUTH_TOKEN", ""), help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -172,19 +195,20 @@ def _scoring_total(case: dict[str, Any]) -> float:
     scoring = case.get("scoring")
     if not isinstance(scoring, dict):
         return -1
-    if "total_score" in scoring:
-        try:
-            return float(scoring.get("total_score"))
-        except Exception:
-            return -1
     total = 0.0
-    for key, value in scoring.items():
-        if key == "total_score":
-            continue
+    for key, maximum in DIMENSION_MAX.items():
         try:
-            total += float(value)
+            value = float(scoring.get(key))
         except Exception:
             return -1
+        if value < 0 or value > maximum:
+            return -1
+        total += value
+    try:
+        if abs(float(scoring.get("total_score")) - total) > 0.001:
+            return -1
+    except Exception:
+        return -1
     return total
 
 
@@ -234,6 +258,8 @@ def load_dataset(path: Path, case_ids: list[str] | None = None) -> tuple[list[di
             missing_fields.append({"case_id": case_id, "missing": ["question_or_turns"]})
         if abs(_scoring_total(item) - 10.0) > 0.001:
             invalid_scoring.append(case_id)
+        if item.get("schema_version") != 2:
+            missing_fields.append({"case_id": case_id, "missing": ["schema_version=2"]})
 
     if case_ids:
         requested = set(case_ids)
@@ -246,6 +272,10 @@ def load_dataset(path: Path, case_ids: list[str] | None = None) -> tuple[list[di
     stats = {
         "engine": "deepeval",
         "dataset_path": str(path),
+        "dataset_id": path.stem.removesuffix("-core"),
+        "dataset_hash": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "schema_version": 2,
+        "case_ids": [str(item.get("case_id") or "") for item in cases],
         "total_cases": len(cases),
         "dataset_valid": not missing_fields and not duplicate_ids and not invalid_scoring,
         "unique_case_ids": not duplicate_ids,
@@ -257,6 +287,25 @@ def load_dataset(path: Path, case_ids: list[str] | None = None) -> tuple[list[di
     if not stats["dataset_valid"]:
         raise EvalRunnerError(f"dataset validation failed: {json.dumps(stats, ensure_ascii=False)}")
     return cases, stats
+
+
+def _snapshot_hash(path_text: str) -> str | None:
+    path = Path(str(path_text or "")).expanduser()
+    if not path_text or not path.exists():
+        return None
+    digest = hashlib.sha256()
+    files = [path] if path.is_file() else sorted(item for item in path.rglob("*") if item.is_file() and not item.name.startswith("."))
+    for file in files:
+        digest.update(str(file.relative_to(path) if path.is_dir() else file.name).encode("utf-8"))
+        digest.update(file.read_bytes())
+    return digest.hexdigest()
+
+
+def _write_dataset_snapshot(output_dir: Path, cases: list[dict[str, Any]]) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with (output_dir / "dataset-snapshot.jsonl").open("w", encoding="utf-8") as handle:
+        for case in cases:
+            handle.write(json.dumps(case, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
 
 
 def http_json(method: str, url: str, payload: dict[str, Any] | None = None, *, timeout: int = 30, headers: dict[str, str] | None = None) -> dict[str, Any]:
@@ -281,10 +330,38 @@ def http_json(method: str, url: str, payload: dict[str, Any] | None = None, *, t
         raise EvalRunnerError(f"invalid JSON response from {url}: {exc}", exit_code=2) from exc
 
 
-def preflight(base_url: str) -> dict[str, Any]:
-    health = http_json("GET", f"{base_url}/api/v1/nl2sql/health", timeout=15)
-    settings = http_json("GET", f"{base_url}/api/v1/nl2sql-admin/settings", timeout=15)
-    return {"health": health, "settings": settings}
+def _dataagent_headers() -> dict[str, str]:
+    headers = {"X-ODW-Client": "dataagent"}
+    if _DATAAGENT_AUTH_TOKEN:
+        headers["Authorization"] = f"Bearer {_DATAAGENT_AUTH_TOKEN}"
+    return headers
+
+
+def dataagent_http_json(method: str, url: str, payload: dict[str, Any] | None = None, *, timeout: int = 30) -> dict[str, Any]:
+    try:
+        return http_json(method, url, payload=payload, timeout=timeout, headers=_dataagent_headers())
+    except EvalRunnerError as exc:
+        if re.search(r"HTTP (?:401|403)\b", str(exc)):
+            raise InfrastructureAbort(f"dataagent_auth_failed: {exc}") from exc
+        raise
+
+
+def preflight(base_url: str, auth_token: str = "") -> dict[str, Any]:
+    global _DATAAGENT_AUTH_TOKEN
+    _DATAAGENT_AUTH_TOKEN = str(auth_token or "").strip()
+    auth_config = dataagent_http_json("GET", f"{base_url}/api/v1/nl2sql/auth/config", timeout=15)
+    health = dataagent_http_json("GET", f"{base_url}/api/v1/nl2sql/health", timeout=15)
+    runtime_config = dataagent_http_json("GET", f"{base_url}/api/v1/nl2sql/runtime-config", timeout=15)
+    auth_enabled = bool(auth_config.get("auth_enabled") or auth_config.get("enabled"))
+    identity = None
+    if auth_enabled:
+        if not _DATAAGENT_AUTH_TOKEN:
+            raise InfrastructureAbort("dataagent_auth_token_missing: DATAAGENT_EVAL_AUTH_TOKEN is required")
+        identity = dataagent_http_json("GET", f"{base_url}/api/v1/nl2sql/auth/me", timeout=15)
+        roles = identity.get("roles") if isinstance(identity.get("roles"), list) else []
+        if not (bool(identity.get("is_admin")) or "admin" in {str(role).lower() for role in roles}):
+            raise InfrastructureAbort("dataagent_auth_not_admin: evaluation requires an administrator session")
+    return {"auth": {"auth_enabled": auth_enabled, "identity_role": "admin" if identity else None}, "health": health, "runtime_config": runtime_config}
 
 
 def _flatten_strings(value: Any) -> list[str]:
@@ -315,7 +392,16 @@ def _collect_tool_names(blocks: list[dict[str, Any]]) -> list[str]:
         text = str(block.get("tool_name") or "").strip()
         if text and text not in names:
             names.append(text)
-    return names
+        if text == "Skill":
+            skill_text = "\n".join(_flatten_strings(block.get("input")))
+            if "opendataworks-business-knowledge" in skill_text:
+                names.append("Skill:opendataworks-business-knowledge")
+        if text == "Bash":
+            command_text = "\n".join(_flatten_strings(block.get("input")))
+            for script_name in ("run_sql.py", "lookup_ontology.py", "validate_sql.py", "build_chart_spec.py"):
+                if script_name in command_text:
+                    names.append(f"Bash:{script_name}")
+    return _dedupe(names)
 
 
 def _looks_like_sql(text: str) -> bool:
@@ -380,15 +466,21 @@ def _truncate_for_judge(value: Any, *, max_text: int = 2000, max_rows: int = 20)
     return str(value)
 
 
-def _extract_sql_outputs(blocks: list[dict[str, Any]], final_answer: str) -> list[str]:
+def _is_successful_sql_execution(block: dict[str, Any]) -> bool:
+    if not isinstance(block, dict) or block.get("type") != "tool_use" or bool(block.get("is_error")):
+        return False
+    name = str(block.get("tool_name") or "")
+    inputs = "\n".join(_flatten_strings(block.get("input")))
+    return (name in {"run_sql", "mcp__portal__portal_query_readonly"} or (name == "Bash" and "run_sql.py" in inputs)) and block.get("output") not in (None, "")
+
+
+def _extract_sql_outputs(blocks: list[dict[str, Any]], final_answer: str = "") -> list[str]:
     sqls: list[str] = []
     for block in blocks:
-        if not isinstance(block, dict) or block.get("type") != "tool_use":
+        if not _is_successful_sql_execution(block):
             continue
         sqls.extend(_collect_structured_sql(block.get("input")))
         sqls.extend(_collect_structured_sql(block.get("output")))
-    fenced = re.findall(r"```sql\s*(.*?)```", str(final_answer or ""), flags=re.IGNORECASE | re.DOTALL)
-    sqls.extend(_normalise_sql(item) for item in fenced if _looks_like_sql(item))
     result: list[str] = []
     for text in sqls:
         if text and text not in result:
@@ -455,6 +547,41 @@ def _collect_usage(task: dict[str, Any], message: dict[str, Any]) -> dict[str, A
     return usage
 
 
+def _aggregate_usage(tasks: list[dict[str, Any]], messages: list[dict[str, Any]]) -> dict[str, Any]:
+    """Sum usage once per task across a multi-turn/recovered evaluation case."""
+    task_usage: dict[str, dict[str, Any]] = {}
+    unscoped_usage: list[dict[str, Any]] = []
+    for task in tasks:
+        usage = task.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        task_id = str(task.get("task_id") or "").strip()
+        if task_id:
+            task_usage[task_id] = dict(usage)
+        else:
+            unscoped_usage.append(dict(usage))
+    # A persisted assistant message is another projection of the same task, so
+    # merge it into that task's usage instead of summing it a second time.
+    for message in messages:
+        usage = message.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        task_id = str(message.get("task_id") or "").strip()
+        if task_id:
+            task_usage.setdefault(task_id, {}).update(usage)
+        else:
+            unscoped_usage.append(dict(usage))
+
+    totals: dict[str, Any] = {}
+    for usage in [*task_usage.values(), *unscoped_usage]:
+        for key, value in usage.items():
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)):
+                totals[key] = totals.get(key, 0) + value
+    return totals
+
+
 def _dedupe(values: list[str]) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
@@ -464,6 +591,73 @@ def _dedupe(values: list[str]) -> list[str]:
             result.append(text)
             seen.add(text)
     return result
+
+
+def _normalize_sql_match_text(value: Any) -> str:
+    text = str(value or "").lower().replace("`", "")
+    text = re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s*(>=|<=|<>|!=|=|>|<)\s*", r"\1", text)
+
+
+def _sql_fragment_matches(fragment: Any, sql_text: str, expected_sql: dict[str, Any]) -> bool:
+    raw_fragment = str(fragment or "").strip()
+    if not raw_fragment:
+        return True
+    normalized_fragment = _normalize_sql_match_text(raw_fragment)
+    normalized_sql = _normalize_sql_match_text(sql_text)
+    if normalized_fragment in normalized_sql:
+        return True
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", raw_fragment):
+        base_name = normalized_fragment.rsplit(".", 1)[-1]
+        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(base_name)}(?![A-Za-z0-9_])", normalized_sql):
+            return True
+    aggregations = " ".join(str(item or "") for item in expected_sql.get("aggregations") or [])
+    if normalized_fragment == "id" and re.search(r"\bcount\b", aggregations, re.I):
+        return bool(re.search(r"\bcount\s*\(\s*\*\s*\)", normalized_sql, re.I))
+    return False
+
+
+def _add_months(value: dt.date, offset: int) -> dt.date:
+    month_index = value.year * 12 + value.month - 1 + offset
+    return dt.date(month_index // 12, month_index % 12 + 1, 1)
+
+
+def _time_rule_check(expected_time: dict[str, Any], sql_text: str) -> dict[str, Any]:
+    if not bool(expected_time.get("required")):
+        return {"applicable": False, "passed": True, "reason": None}
+    field = str(expected_time.get("field") or "").strip()
+    normalized_sql = _normalize_sql_match_text(sql_text)
+    field_present = bool(field) and bool(re.search(rf"(?<![A-Za-z0-9_]){re.escape(field.lower())}(?![A-Za-z0-9_])", normalized_sql))
+    range_spec = expected_time.get("range") if isinstance(expected_time.get("range"), dict) else {}
+    kind = str(range_spec.get("kind") or "").strip()
+    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date()
+    range_present = False
+    expected_bounds: list[str] = []
+    if kind == "calendar_month":
+        start = _add_months(today.replace(day=1), int(range_spec.get("offset") or 0))
+        end = _add_months(start, 1)
+        expected_bounds = [start.isoformat(), end.isoformat()]
+        range_present = all(bound in normalized_sql for bound in expected_bounds) or "date_format(current_date" in normalized_sql
+    elif kind == "rolling_days":
+        days = int(range_spec.get("value") or 0)
+        if days > 0:
+            start = today - dt.timedelta(days=days - 1)
+            end = today + dt.timedelta(days=1)
+            expected_bounds = [start.isoformat(), end.isoformat()]
+            range_present = all(bound in normalized_sql for bound in expected_bounds)
+            if not range_present and "current_date" in normalized_sql:
+                range_present = bool(re.search(rf"interval\s+(?:{days}|{max(0, days - 1)})\s+day", normalized_sql))
+    else:
+        range_present = field_present
+    passed = field_present and range_present
+    return {
+        "applicable": True,
+        "passed": passed,
+        "field": field,
+        "range_kind": kind,
+        "expected_bounds": expected_bounds,
+        "reason": None if passed else ("time_field_missing" if not field_present else "time_range_mismatch"),
+    }
 
 
 def _tool_output_text(blocks: list[dict[str, Any]]) -> str:
@@ -512,12 +706,72 @@ def _assessment_evidence(*, final_answer: str, blocks: list[dict[str, Any]], sql
     }
 
 
+def _select_relevant_query_evidence(
+    blocks: list[dict[str, Any]],
+    required_fragments: list[str],
+    *,
+    expected_sql: dict[str, Any] | None = None,
+    preferred_width: int = 0,
+) -> dict[str, Any] | None:
+    candidates: list[dict[str, Any]] = []
+    expected_sql = expected_sql or {}
+    fragments = [str(item or "").strip() for item in required_fragments if str(item or "").strip()]
+    for position, block in enumerate(blocks):
+        if not _is_successful_sql_execution(block):
+            continue
+        sqls = _dedupe(_collect_structured_sql(block.get("input")) + _collect_structured_sql(block.get("output")))
+        if not sqls:
+            continue
+        sql_text = "\n".join(sqls)
+        normalized_sql = _normalize_sql_match_text(sql_text)
+        semantic_matches = sum(1 for fragment in fragments if _sql_fragment_matches(fragment, sql_text, expected_sql))
+        base_matches = sum(1 for fragment in fragments if "." in fragment and _normalize_sql_match_text(fragment).rsplit(".", 1)[-1] in normalized_sql and _normalize_sql_match_text(fragment) not in normalized_sql)
+        rows = _query_rows_from_value(block.get("output"))
+        row_width = max((len(row) for row in rows if isinstance(row, dict)), default=0) if isinstance(rows, list) else 0
+        shape_rank = -abs(row_width - preferred_width) if preferred_width > 0 else 0
+        candidates.append({
+            "sql_text": sql_text,
+            "rows": rows,
+            "output_text": "\n".join(_flatten_strings(block.get("output"))),
+            "rank": (semantic_matches, base_matches, shape_rank, position),
+        })
+    return max(candidates, key=lambda item: item["rank"]) if candidates else None
+
+
+def _answer_references_result_values(rows: Any, fields: list[str], answer: str) -> bool:
+    if not fields:
+        return True
+    if not isinstance(rows, list):
+        return False
+    dict_rows = [row for row in rows if isinstance(row, dict)]
+    if len(dict_rows) != len(rows):
+        return False
+    if all(all(field in row for field in fields) for row in dict_rows):
+        values = [row[field] for row in dict_rows for field in fields]
+    elif fields and all(len(row) == len(fields) for row in dict_rows):
+        values = [value for row in dict_rows for value in row.values()]
+    else:
+        return False
+    answer_text = str(answer or "")
+    for value in values:
+        if value is None:
+            continue
+        rendered = str(value)
+        if isinstance(value, (int, float)):
+            if not re.search(rf"(?<![\d.]){re.escape(rendered)}(?![\d.])", answer_text):
+                return False
+        elif rendered.lower() not in answer_text.lower():
+            return False
+    return True
+
+
 def _auto_failure_attribution(
     evidence: dict[str, str],
     *,
     missing_sql_fragments: list[str],
     forbidden_hits: list[str],
     missing_tool_names: list[str],
+    wrong_domain_applicable: bool,
 ) -> list[str]:
     failures: list[str] = []
     final_answer = evidence.get("final_answer_user_visible", "")
@@ -526,11 +780,11 @@ def _auto_failure_attribution(
     answer_or_sql = "\n".join([final_answer, sql_evidence])
     if re.search(r"请.*执行.*SQL|供.*执行|无法直接执行|未注入.*SQL|没有\s*SQL\s*执行|SQL.*尚未执行", final_answer, re.I | re.S):
         failures.append("sql_only")
-    if re.search(r"OpenDataWorks\s*平台元数据|托管元数据|data_table|data_lineage|data_task|data_workflow|inspect_metadata\.py|get_lineage\.py", answer_or_sql, re.I):
+    if wrong_domain_applicable and re.search(r"OpenDataWorks\s*平台元数据|托管元数据|data_table|data_lineage|data_task|data_workflow|inspect_metadata\.py|get_lineage\.py", answer_or_sql, re.I):
         failures.append("wrong_domain")
     if re.search(r"\{(?:target_date|TARGET_DATE|start_date|START_DATE|end_date|END_DATE|database_name|DATABASE_NAME|database_schema|DATABASE_SCHEMA|table_name|TABLE_NAME|period|PERIOD|timeDim|RULE_KEY)\}|占位符|TODO", answer_or_sql):
         failures.append("placeholder_leak")
-    if re.search(r"超时|timeout", "\n".join([final_answer, tool_evidence]), re.I):
+    if re.search(r"超时|timed?\s*out|timeout(?:_error| error| occurred)", "\n".join([final_answer, tool_evidence]), re.I):
         failures.append("tool_timeout")
     if re.search(r"未找到|没有找到|不存在|无匹配|空结果集|返回空", answer_or_sql):
         failures.append("empty_result")
@@ -545,42 +799,114 @@ def _auto_failure_attribution(
 
 def auto_rule_check(case: dict[str, Any], *, final_answer: str, blocks: list[dict[str, Any]], sql_outputs: list[str], tool_names: list[str]) -> dict[str, Any]:
     evidence = _assessment_evidence(final_answer=final_answer, blocks=blocks, sql_outputs=sql_outputs)
-    assessment_text = "\n".join([evidence["final_answer_user_visible"], evidence["sql_evidence"]])
+    expected_sql = case.get("expected_sql") if isinstance(case.get("expected_sql"), dict) else {}
+    expected_time = case.get("expected_time") if isinstance(case.get("expected_time"), dict) else {}
+    expected_tools = case.get("expected_tools") if isinstance(case.get("expected_tools"), dict) else {}
+    expected_result = case.get("expected_result") if isinstance(case.get("expected_result"), dict) else {}
+    fragments = list(expected_sql.get("tables") or []) + list(expected_sql.get("fields") or []) + list(expected_sql.get("predicates") or []) + list(expected_sql.get("aggregations") or [])
+    preferred_width = len(expected_result.get("required_columns") or expected_result.get("answer_result_fields") or [])
+    relevant_query = _select_relevant_query_evidence(blocks, fragments, expected_sql=expected_sql, preferred_width=preferred_width)
+    assessment_text = str((relevant_query or {}).get("sql_text") or "\n".join(sql_outputs))
+    evidence["sql_evidence"] = assessment_text
+    time_check = (
+        _time_rule_check(expected_time, assessment_text)
+        if bool(expected_sql.get("execution_required")) or bool(sql_outputs)
+        else {"applicable": False, "passed": True, "reason": "judge_only"}
+    )
     missing_sql_fragments = [
-        fragment
-        for fragment in case.get("required_sql_fragments") or []
-        if str(fragment or "").strip() and str(fragment) not in assessment_text
+        fragment for fragment in fragments
+        if str(fragment or "").strip()
+        and not _sql_fragment_matches(fragment, assessment_text, expected_sql)
+        and not (bool(time_check.get("passed")) and "current_date" in str(fragment).lower())
     ]
     forbidden_hits: list[str] = []
-    for pattern in case.get("forbidden_sql_patterns") or []:
+    for pattern in expected_sql.get("forbidden_patterns") or []:
         try:
-            if re.search(str(pattern), evidence["sql_evidence"]):
+            if re.search(str(pattern), evidence["sql_evidence"], re.I):
                 forbidden_hits.append(str(pattern))
         except re.error:
             if str(pattern) in evidence["sql_evidence"]:
                 forbidden_hits.append(str(pattern))
-    missing_tool_names = [
-        name
-        for name in case.get("expected_tool_names") or []
-        if str(name or "").strip() and str(name) not in tool_names
-    ]
+    missing_tool_names: list[str] = []
+    required_steps = list(expected_tools.get("required_steps") or [])
+    if "business_knowledge_skill" in required_steps and "Skill:opendataworks-business-knowledge" not in tool_names:
+        missing_tool_names.append("business_knowledge_skill")
+    if "ontology_lookup" in required_steps and not any(name in tool_names for name in ("Bash:lookup_ontology.py", "Skill")):
+        missing_tool_names.append("ontology_lookup")
+    if ("query_execute" in required_steps or bool(expected_sql.get("execution_required"))) and not sql_outputs:
+        missing_tool_names.append("query_execute")
+    for group in expected_tools.get("allowed_alternative_groups") or []:
+        names = [str(name) for name in group] if isinstance(group, list) else []
+        if names and not any(name in tool_names for name in names):
+            missing_tool_names.append("|".join(names))
+    tool_output_text = str((relevant_query or {}).get("output_text") or "")
+    relevant_rows = (relevant_query or {}).get("rows")
+    empty_result = isinstance(relevant_rows, list) and len(relevant_rows) == 0
+    unexpected_empty = empty_result and not bool(expected_result.get("allow_empty"))
+    result_applicable = bool(sql_outputs) and bool(tool_output_text.strip())
+    required_answer_fields = [str(item) for item in expected_result.get("answer_result_fields") or []]
+    result_passed = _answer_references_result_values(relevant_rows, required_answer_fields, final_answer)
     triggered_veto_rules: list[str] = []
-    if forbidden_hits:
-        triggered_veto_rules.append("SQL 不带 schema 前缀、使用 SELECT * 或明显违反当前 skill SQL 硬规则。")
+    platform_business_case = (
+        str(case.get("category") or "") == "business-knowledge"
+        or "local-smoke" in set(case.get("suite_tags") or [])
+    )
     failure_attribution = _auto_failure_attribution(
         evidence,
         missing_sql_fragments=missing_sql_fragments,
         forbidden_hits=forbidden_hits,
         missing_tool_names=missing_tool_names,
+        wrong_domain_applicable=not platform_business_case,
     )
+    if bool(expected_result.get("allow_empty")):
+        failure_attribution = [item for item in failure_attribution if item != "empty_result"]
+    if bool(time_check.get("applicable")) and not bool(time_check.get("passed")):
+        failure_attribution.append(str(time_check.get("reason") or "time_dimension_mismatch"))
+    if unexpected_empty:
+        failure_attribution.append("unexpected_empty_result")
+    if not result_passed:
+        failure_attribution.append("result_answer_inconsistent")
     return {
-        "passed": not (missing_sql_fragments or forbidden_hits or missing_tool_names),
+        "passed": not (
+            missing_sql_fragments
+            or forbidden_hits
+            or missing_tool_names
+            or unexpected_empty
+            or (bool(time_check.get("applicable")) and not bool(time_check.get("passed")))
+        ) and result_passed,
         "missing_sql_fragments": missing_sql_fragments,
         "forbidden_sql_patterns": forbidden_hits,
         "missing_tool_names": missing_tool_names,
         "triggered_veto_rules": triggered_veto_rules,
-        "failure_attribution": failure_attribution,
+        "failure_attribution": _dedupe(failure_attribution),
+        "hard_gates": {
+            "required_tool_execution": not missing_tool_names,
+            "sql_execution_and_口径": (not bool(expected_sql.get("execution_required")) or bool(sql_outputs)) and not missing_sql_fragments and not forbidden_hits,
+            "non_expected_empty_result": not unexpected_empty,
+            "result_consistency": result_passed,
+            "time_dimension": bool(time_check.get("passed")),
+        },
+        "result_consistency": {"applicable": result_applicable, "passed": result_passed},
+        "time_dimension": time_check,
     }
+
+
+def _apply_runtime_hard_gates(
+    rule_check: dict[str, Any],
+    case: dict[str, Any],
+    *,
+    task_completed: bool,
+    agent_turn_count: int,
+    tool_call_count: int,
+) -> None:
+    gates = rule_check.setdefault("hard_gates", {})
+    gates["task_completed"] = task_completed
+    rule_check["limit_violations"] = []
+    if not task_completed:
+        rule_check.setdefault("failure_attribution", []).append("task_not_completed")
+    rule_check["failure_attribution"] = _dedupe(rule_check.get("failure_attribution") or [])
+    if not task_completed:
+        rule_check["passed"] = False
 
 
 def _build_conversation_log(messages_response: dict[str, Any]) -> list[dict[str, Any]]:
@@ -623,7 +949,7 @@ def _final_assistant_message(messages: dict[str, Any], task_id: str) -> dict[str
 
 
 def _create_topic(base_url: str, case: dict[str, Any], agent_id: str) -> str:
-    topic = http_json(
+    topic = dataagent_http_json(
         "POST",
         f"{base_url}/api/v1/nl2sql/topics",
         {"title": f"DeepEval {case['case_id']}", "agent_id": agent_id},
@@ -645,7 +971,7 @@ def _submit_task(base_url: str, topic_id: str, case: dict[str, Any], args: argpa
         payload["provider_id"] = args.provider_id
     if args.model:
         payload["model"] = args.model
-    submitted = http_json("POST", f"{base_url}/api/v1/nl2sql/tasks/deliver-message", payload)
+    submitted = dataagent_http_json("POST", f"{base_url}/api/v1/nl2sql/tasks/deliver-message", payload)
     task_id = str(submitted.get("task_id") or "").strip()
     if not task_id:
         raise EvalRunnerError("task submission response did not include task_id")
@@ -667,10 +993,7 @@ def _task_id_from_recovery_message(task: dict[str, Any]) -> str:
 def _resolve_recovered_task_id(base_url: str, topic_id: str, task: dict[str, Any]) -> str:
     parent_task_id = str(task.get("task_id") or "").strip()
     if topic_id:
-        try:
-            topic = http_json("GET", f"{base_url}/api/v1/nl2sql/topics/{urllib.parse.quote(topic_id)}", timeout=30)
-        except EvalRunnerError:
-            topic = {}
+        topic = dataagent_http_json("GET", f"{base_url}/api/v1/nl2sql/topics/{urllib.parse.quote(topic_id)}", timeout=30)
         current_task_id = str(topic.get("current_task_id") or "").strip()
         if current_task_id and current_task_id != parent_task_id:
             return current_task_id
@@ -686,6 +1009,7 @@ def _poll_task(
     timeout_seconds: int,
     *,
     topic_id: str = "",
+    task_chain: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Poll task status until terminal, following recovered/replacement tasks.
 
@@ -698,34 +1022,182 @@ def _poll_task(
     errors: list[dict[str, Any]] = []
     last_task: dict[str, Any] = {}
     last_poll_error = ""
+    def record_task(item: dict[str, Any]) -> None:
+        if task_chain is None:
+            return
+        item_id = str(item.get("task_id") or current_task_id).strip()
+        snapshot = dict(item)
+        if item_id and not snapshot.get("task_id"):
+            snapshot["task_id"] = item_id
+        for index, existing in enumerate(task_chain):
+            if str(existing.get("task_id") or "").strip() == item_id:
+                task_chain[index] = snapshot
+                return
+        task_chain.append(snapshot)
+
     while time.time() < deadline:
         try:
-            last_task = http_json("GET", f"{base_url}/api/v1/nl2sql/tasks/{urllib.parse.quote(current_task_id)}", timeout=30)
+            last_task = dataagent_http_json("GET", f"{base_url}/api/v1/nl2sql/tasks/{urllib.parse.quote(current_task_id)}", timeout=30)
+            last_poll_error = ""
+        except InfrastructureAbort:
+            raise
         except EvalRunnerError as exc:
             last_poll_error = str(exc)
             time.sleep(1.0)
             continue
 
+        record_task(last_task)
+
         status = str(last_task.get("task_status") or "").lower()
         if status in TERMINAL_STATUSES:
             if _is_recovered_task(last_task):
-                recovered_task_id = _resolve_recovered_task_id(base_url, topic_id, last_task)
+                try:
+                    recovered_task_id = _resolve_recovered_task_id(base_url, topic_id, last_task)
+                except InfrastructureAbort:
+                    raise
+                except EvalRunnerError as exc:
+                    raise InfrastructureAbort(f"dataagent_transport_failed: {exc}") from exc
                 if recovered_task_id and recovered_task_id not in seen_task_ids:
                     current_task_id = recovered_task_id
                     seen_task_ids.add(recovered_task_id)
                     continue
             return last_task, errors
         time.sleep(0.2)
-    errors.append({"code": "timeout", "message": f"task did not finish within {timeout_seconds}s"})
     if last_poll_error:
-        errors.append({"code": "poll_error", "message": last_poll_error})
+        raise InfrastructureAbort(f"dataagent_transport_failed: {last_poll_error}")
+    errors.append({"code": "timeout", "message": f"task did not finish within {timeout_seconds}s"})
     last_task = dict(last_task or {"task_id": current_task_id})
     last_task["task_status"] = str(last_task.get("task_status") or "timeout")
+    record_task(last_task)
     return last_task, errors
 
 
+def _fetch_sdk_events(base_url: str, task_id: str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    after_id = 0
+    while True:
+        page = dataagent_http_json("GET", f"{base_url}/api/v1/nl2sql/tasks/{urllib.parse.quote(task_id)}/sdk-events?after_id={after_id}&limit=500", timeout=30)
+        batch = [item for item in page.get("records") or [] if isinstance(item, dict)]
+        records.extend(batch)
+        if not page.get("has_more") or not batch:
+            break
+        next_after = int(page.get("next_after_id") or batch[-1].get("seq_id") or after_id)
+        if next_after <= after_id:
+            break
+        after_id = next_after
+    return records
+
+
+def _sdk_metrics(records: list[dict[str, Any]]) -> dict[str, int]:
+    turns = {
+        (str(item.get("_evaluation_task_id") or item.get("task_id") or ""), int(item.get("turn_index") or 0))
+        for item in records
+        if int(item.get("turn_index") or 0) > 0
+    }
+    return {
+        "agent_turn_count": len(turns),
+        "tool_error_count": sum(1 for item in records if item.get("record_type") == "tool_result" and bool((item.get("data") or {}).get("is_error"))),
+        "recovery_count": sum(1 for item in records if "recover" in (str(item.get("record_type") or "") + str(item.get("event_type") or "")).lower()),
+    }
+
+
+def _seconds_between(left: Any, right: Any) -> float | None:
+    try:
+        start = dt.datetime.fromisoformat(str(left).replace("Z", "+00:00"))
+        end = dt.datetime.fromisoformat(str(right).replace("Z", "+00:00"))
+        if start.tzinfo is None: start = start.replace(tzinfo=dt.timezone.utc)
+        if end.tzinfo is None: end = end.replace(tzinfo=dt.timezone.utc)
+        return round(max(0.0, (end - start).total_seconds()), 3)
+    except (TypeError, ValueError):
+        return None
+
+
+def _aggregate_task_timing(tasks: list[dict[str, Any]]) -> dict[str, float | None]:
+    queue_values = [
+        value for value in (_seconds_between(task.get("created_at"), task.get("started_at")) for task in tasks)
+        if value is not None
+    ]
+    execution_values = [
+        value for value in (_seconds_between(task.get("started_at"), task.get("finished_at")) for task in tasks)
+        if value is not None
+    ]
+    return {
+        "queue_wait_seconds": round(sum(queue_values), 3) if queue_values else None,
+        "execution_seconds": round(sum(execution_values), 3) if execution_values else None,
+    }
+
+
+def _query_rows_from_value(value: Any) -> list[dict[str, Any]] | None:
+    for item in _iter_structured_evidence(value):
+        if isinstance(item, dict) and isinstance(item.get("rows"), list) and all(isinstance(row, dict) for row in item.get("rows") or []):
+            return item.get("rows") or []
+    return None
+
+
+def _actual_query_row_sets(blocks: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    row_sets: list[list[dict[str, Any]]] = []
+    for block in blocks:
+        if _is_successful_sql_execution(block):
+            rows = _query_rows_from_value(block.get("output"))
+            if rows is not None:
+                row_sets.append(rows)
+    return row_sets
+
+
+def _execute_reference_query(base_url: str, case: dict[str, Any], topic_id: str) -> dict[str, Any]:
+    expected = case.get("expected_result") if isinstance(case.get("expected_result"), dict) else {}
+    reference = expected.get("reference_query") if isinstance(expected.get("reference_query"), dict) else None
+    if not reference:
+        return {"applicable": False, "passed": None}
+    sql = str(reference.get("sql") or "").strip()
+    if not re.match(r"(?is)^\s*(?:select|with)\b", sql) or re.search(r"(?is)\b(?:insert|update|delete|drop|alter|truncate|create|grant|revoke)\b", sql):
+        raise InfrastructureAbort("reference_sql_invalid: only read-only SELECT/CTE SQL is allowed")
+    timeout = int(reference.get("timeout_seconds") or 60)
+    response = dataagent_http_json("POST", f"{base_url}/api/v1/nl2sql/query/execute", {
+        "sql": sql, "database": str(reference.get("database") or ""), "engine": reference.get("engine"),
+        "limit": int(reference.get("limit") or 1000), "timeout_seconds": timeout, "topic_id": topic_id,
+    }, timeout=timeout + 15)
+    rows = response.get("rows") if isinstance(response.get("rows"), list) else None
+    if rows is None:
+        raise InfrastructureAbort("reference_sql_failed: read-only query did not return rows")
+    return {"applicable": True, "passed": None, "rows": rows, "row_count": len(rows)}
+
+
+def _compare_reference(reference: dict[str, Any], actual_row_sets: list[list[dict[str, Any]]], case: dict[str, Any]) -> dict[str, Any]:
+    if not reference.get("applicable"):
+        return reference
+    query = ((case.get("expected_result") or {}).get("reference_query") or {})
+    mode = str(query.get("comparison_mode") or "unordered_rows")
+    tolerance = float(query.get("numeric_tolerance") or 0)
+    expected = reference.get("rows") or []
+    def matches(actual: list[dict[str, Any]]) -> bool:
+        if mode == "scalar":
+            ev = next(iter(expected[0].values()), None) if expected else None
+            av = next(iter(actual[0].values()), None) if actual else None
+            try:
+                return abs(float(ev) - float(av)) <= tolerance
+            except (TypeError, ValueError):
+                return str(ev) == str(av)
+        if mode == "unordered_values":
+            norm = lambda rows: sorted(json.dumps(sorted(str(value) for value in row.values()), ensure_ascii=False) for row in rows)
+            return norm(expected) == norm(actual)
+        norm = lambda rows: sorted(json.dumps(row, ensure_ascii=False, sort_keys=True, default=str) for row in rows)
+        return norm(expected) == norm(actual)
+
+    matched = next((rows for rows in actual_row_sets if matches(rows)), None)
+    return {
+        "applicable": True,
+        "passed": matched is not None,
+        "row_count": len(expected),
+        "actual_row_count": None if matched is None else len(matched),
+        "comparison_mode": mode,
+        "candidate_result_count": len(actual_row_sets),
+    }
+
+
 def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    started = time.time()
+    e2e_started: float | None = None
+    e2e_seconds: float | None = None
     errors: list[dict[str, Any]] = []
     topic_id = ""
     task_id = ""
@@ -733,37 +1205,104 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace) -> d
     message: dict[str, Any] = {}
     final_answer = ""
     conversation: list[dict[str, Any]] = []
+    sdk_events: list[dict[str, Any]] = []
+    task_ids: list[str] = []
+    task_records: list[dict[str, Any]] = []
+    turn_final_tasks: list[dict[str, Any]] = []
+    assistant_messages: list[dict[str, Any]] = []
+    reference_result: dict[str, Any] = {"applicable": False, "passed": None}
     try:
         topic_id = _create_topic(base_url, case, str(args.agent_id or "").strip())
-        case_timeout = min(max(1, args.timeout_seconds), int(case.get("max_wait_seconds") or args.timeout_seconds or 900))
+        reference_result = _execute_reference_query(base_url, case, topic_id)
+        limits = case.get("limits") if isinstance(case.get("limits"), dict) else {}
+        case_timeout = min(max(1, args.timeout_seconds), int(limits.get("max_wait_seconds") or args.timeout_seconds or 900))
         final_task_id = ""
         for turn in _case_turns(case):
+            if e2e_started is None:
+                # Topic creation and reference-SQL setup are evaluation setup,
+                # not DataAgent end-to-end execution time.
+                e2e_started = time.time()
             task_id = _submit_task(base_url, topic_id, case, args, turn)
-            task, poll_errors = _poll_task(base_url, task_id, case_timeout, topic_id=topic_id)
+            task_ids.append(task_id)
+            task, poll_errors = _poll_task(
+                base_url,
+                task_id,
+                case_timeout,
+                topic_id=topic_id,
+                task_chain=task_records,
+            )
             errors.extend(poll_errors)
+            turn_final_tasks.append(task)
             final_task_id = str(task.get("task_id") or task_id).strip() or task_id
+            for task_record in task_records:
+                record_id = str(task_record.get("task_id") or "").strip()
+                if record_id and record_id not in task_ids:
+                    task_ids.append(record_id)
             status = str(task.get("task_status") or "").lower()
             if status and status not in SUCCESS_STATUSES:
                 errors.append({"code": status, "message": json.dumps(task.get("error") or {}, ensure_ascii=False)})
                 break
-        messages = http_json(
+        messages = dataagent_http_json(
             "GET",
             f"{base_url}/api/v1/nl2sql/topics/{urllib.parse.quote(topic_id)}/messages?page=1&page_size=200&order=asc",
             timeout=30,
         )
+        e2e_seconds = round(time.time() - e2e_started, 3) if e2e_started is not None else None
         message = _final_assistant_message(messages, final_task_id)
+        assistant_messages = [
+            item for item in messages.get("items") or []
+            if isinstance(item, dict) and str(item.get("sender_type") or "") == "assistant"
+        ]
         conversation = _build_conversation_log(messages)
         final_answer = str(message.get("content") or "").strip()
+        for completed_task_id in task_ids:
+            for event in _fetch_sdk_events(base_url, completed_task_id):
+                annotated = dict(event)
+                annotated["_evaluation_task_id"] = completed_task_id
+                sdk_events.append(annotated)
+    except InfrastructureAbort:
+        raise
     except EvalRunnerError as exc:
-        errors.append({"code": "runner_error", "message": str(exc)})
+        raise InfrastructureAbort(f"dataagent_transport_failed: {exc}") from exc
 
-    blocks = message.get("blocks") if isinstance(message.get("blocks"), list) else []
+    blocks = [
+        block
+        for assistant_message in assistant_messages
+        for block in (assistant_message.get("blocks") if isinstance(assistant_message.get("blocks"), list) else [])
+        if isinstance(block, dict)
+    ]
     tool_names = _collect_tool_names(blocks)
     sql_outputs = _extract_sql_outputs(blocks, final_answer)
     chart_outputs = _extract_chart_outputs(blocks)
-    usage = _collect_usage(task, message)
+    usage = _aggregate_usage(task_records, assistant_messages)
+    sdk_counts = _sdk_metrics(sdk_events)
+    sdk_counts["recovery_count"] = max(
+        int(sdk_counts.get("recovery_count") or 0),
+        sum(1 for task_record in task_records if _is_recovered_task(task_record)),
+    )
+    tool_call_count = len([block for block in blocks if isinstance(block, dict) and block.get("type") == "tool_use"])
     rule_check = auto_rule_check(case, final_answer=final_answer, blocks=blocks, sql_outputs=sql_outputs, tool_names=tool_names)
+    _apply_runtime_hard_gates(
+        rule_check,
+        case,
+        task_completed=(
+            len(turn_final_tasks) == len(_case_turns(case))
+            and all(str(item.get("task_status") or "").lower() in SUCCESS_STATUSES for item in turn_final_tasks)
+        ),
+        agent_turn_count=int(sdk_counts.get("agent_turn_count") or 0),
+        tool_call_count=tool_call_count,
+    )
+    reference_result = _compare_reference(reference_result, _actual_query_row_sets(blocks), case)
+    if reference_result.get("applicable") and not reference_result.get("passed"):
+        rule_check["passed"] = False
+        rule_check.setdefault("failure_attribution", []).append("reference_data_mismatch")
+        rule_check.setdefault("hard_gates", {})["reference_data_accuracy"] = False
+    elif reference_result.get("applicable"):
+        rule_check.setdefault("hard_gates", {})["reference_data_accuracy"] = True
+    task_timing = _aggregate_task_timing(task_records)
     return {
+        "evaluation_engine": EVALUATION_ENGINE, "engine_version": ENGINE_VERSION,
+        "metric_semantics_version": METRIC_SEMANTICS_VERSION, "judge_prompt_version": JUDGE_PROMPT_VERSION,
         "case_id": case.get("case_id"),
         "category": case.get("category"),
         "question": _case_question(case),
@@ -771,6 +1310,7 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace) -> d
         "agent_id": str(args.agent_id or "").strip(),
         "topic_id": topic_id,
         "task_id": str(task.get("task_id") or task_id),
+        "task_ids": task_ids,
         "task_status": str(task.get("task_status") or ""),
         "final_answer": final_answer,
         "tool_names": tool_names,
@@ -778,7 +1318,13 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace) -> d
         "chart_outputs": chart_outputs,
         "tool_events": _summarize_tool_events(blocks),
         "usage": usage,
-        "duration_seconds": round(time.time() - started, 3),
+        "duration_seconds": e2e_seconds,
+        "timing": {**task_timing, "e2e_seconds": e2e_seconds, "judge_seconds": None},
+        "user_turn_count": len(_case_turns(case)), **sdk_counts,
+        "tool_call_count": tool_call_count,
+        "sql_execution_count": len([block for block in blocks if _is_successful_sql_execution(block)]),
+        "reference_data_accuracy": {key: value for key, value in reference_result.items() if key != "rows"},
+        "sdk_event_count": len(sdk_events),
         "auto_rule_check": rule_check,
         "judge": {},
         "veto_rules_triggered": list(rule_check.get("triggered_veto_rules") or []),
@@ -790,37 +1336,42 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace) -> d
 
 def _run_cases(base_url: str, cases: list[dict[str, Any]], args: argparse.Namespace) -> list[dict[str, Any]]:
     if args.concurrency <= 1:
-        return [run_case(base_url, case, args) for case in cases]
+        completed: list[dict[str, Any]] = []
+        for case in cases:
+            try:
+                completed.append(run_case(base_url, case, args))
+            except InfrastructureAbort as exc:
+                exc.partial_results = completed
+                raise
+        return completed
 
     results: list[dict[str, Any] | None] = [None] * len(cases)
-    with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
-        future_to_index = {pool.submit(run_case, base_url, case, args): i for i, case in enumerate(cases)}
-        for future in as_completed(future_to_index):
-            index = future_to_index[future]
-            try:
-                results[index] = future.result()
-            except Exception as exc:
-                case = cases[index]
-                results[index] = {
-                    "case_id": case.get("case_id"),
-                    "category": case.get("category"),
-                    "question": _case_question(case),
-                    "turns": _case_turns(case),
-                    "agent_id": str(getattr(args, "agent_id", "") or "").strip(),
-                    "task_status": "runner_error",
-                    "final_answer": "",
-                    "tool_names": [],
-                    "sql_outputs": [],
-                    "chart_outputs": [],
-                    "usage": {},
-                    "duration_seconds": 0,
-                    "auto_rule_check": {"passed": False, "failure_attribution": ["runner_crash"]},
-                    "judge": {},
-                    "veto_rules_triggered": [],
-                    "case_passed": False,
-                    "errors": [{"code": "runner_crash", "message": str(exc)}],
-                }
-            else:
+    for batch_start in range(0, len(cases), args.concurrency):
+        batch = list(enumerate(cases[batch_start : batch_start + args.concurrency], start=batch_start))
+        with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+            future_to_index = {pool.submit(run_case, base_url, case, args): index for index, case in batch}
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                try:
+                    results[index] = future.result()
+                except InfrastructureAbort as exc:
+                    exc.partial_results = [item for item in results if item is not None]
+                    for pending in future_to_index:
+                        pending.cancel()
+                    raise
+                except Exception as exc:
+                    case = cases[index]
+                    results[index] = {
+                        "evaluation_engine": EVALUATION_ENGINE, "engine_version": ENGINE_VERSION,
+                        "case_id": case.get("case_id"), "category": case.get("category"),
+                        "question": _case_question(case), "turns": _case_turns(case),
+                        "agent_id": str(getattr(args, "agent_id", "") or "").strip(),
+                        "task_status": "runner_error", "final_answer": "", "tool_names": [],
+                        "sql_outputs": [], "chart_outputs": [], "usage": {}, "duration_seconds": 0,
+                        "timing": {}, "auto_rule_check": {"passed": False, "failure_attribution": ["runner_crash"]},
+                        "judge": {}, "veto_rules_triggered": [], "case_passed": False,
+                        "errors": [{"code": "runner_crash", "message": str(exc)}],
+                    }
                 result = results[index]
                 case_id = (result or {}).get("case_id") if result else "?"
                 print(f"[{len([r for r in results if r is not None])}/{len(cases)}] {case_id} done", file=sys.stderr)
@@ -837,11 +1388,12 @@ def to_deepeval_test_case(case: dict[str, Any], case_result: dict[str, Any]) -> 
     expected_payload = {
         "case_id": case.get("case_id"),
         "category": case.get("category"),
-        "expected_intent": case.get("expected_intent"),
-        "expected_ontology_objects": case.get("expected_ontology_objects") or [],
-        "expected_relations": case.get("expected_relations") or [],
-        "expected_sql_or_tool_behavior": case.get("expected_sql_or_tool_behavior") or [],
-        "expected_answer_points": case.get("expected_answer_points") or [],
+        "expected_semantics": case.get("expected_semantics") or {},
+        "expected_time": case.get("expected_time") or {},
+        "expected_tools": case.get("expected_tools") or {},
+        "expected_sql": case.get("expected_sql") or {},
+        "expected_result": case.get("expected_result") or {},
+        "expected_answer": case.get("expected_answer") or {},
         "scoring": case.get("scoring") or {},
         "veto_rules": case.get("veto_rules") or [],
         "judge_guidance": case.get("judge_guidance") or "",
@@ -929,15 +1481,25 @@ def normalize_judge_payload(data: dict[str, Any], *, raw_output: str = "") -> di
     raw_dimensions = data.get("dimension_scores")
     if isinstance(raw_dimensions, dict):
         for key in JUDGE_DIMENSIONS:
-            dimensions[key] = _normalize_float(raw_dimensions.get(key), minimum=0, maximum=2)
+            raw_value = raw_dimensions.get(key)
+            if key == "result_consistency" and raw_value is None:
+                raw_value = raw_dimensions.get("data_accuracy")
+            dimensions[key] = _normalize_float(raw_value, minimum=0, maximum=DIMENSION_MAX[key])
+    computed = sum(dimensions.values())
+    raw_score = _normalize_float(data.get("score"), minimum=0, maximum=10)
+    complete_dimensions = isinstance(raw_dimensions, dict) and all(
+        key in raw_dimensions or (key == "result_consistency" and "data_accuracy" in raw_dimensions)
+        for key in JUDGE_DIMENSIONS
+    )
+    inconsistent = complete_dimensions and abs(raw_score - computed) > 0.001
     return {
-        "score": _normalize_float(data.get("score"), minimum=0, maximum=10),
+        "score": computed if complete_dimensions else raw_score,
         "dimension_scores": dimensions,
         "hallucination": _normalize_bool(data.get("hallucination")),
         "veto_rules_triggered": _string_list(data.get("veto_rules_triggered")),
-        "failure_attribution": _string_list(data.get("failure_attribution")),
+        "failure_attribution": _dedupe(_string_list(data.get("failure_attribution")) + (["judge_score_inconsistent"] if inconsistent else [])),
         "comment": str(data.get("comment") or "").strip(),
-        "judge_failed": False,
+        "judge_failed": inconsistent,
         "raw_output": raw_output,
     }
 
@@ -968,7 +1530,8 @@ def _judge_system_prompt() -> str:
         "你是 DataAgent 在线问数评测裁判。只能基于请求中的 case、最终回答、工具事件、SQL/图表输出和自动规则检查打分。"
         "不要调用任何工具，不要编造事实。必须只输出一个 JSON 对象，字段为："
         "score, dimension_scores, hallucination, veto_rules_triggered, failure_attribution, comment。"
-        "score 为 0 到 10；dimension_scores 包含 intent, ontology_entity, relation_scope, sql_or_tool_call, data_accuracy, reasoning, answer_quality。"
+        "score 为维度之和；dimension_scores 包含 intent(1), ontology_entity(1), relation_scope(1), "
+        "sql_or_tool_call(2), result_consistency(2), reasoning(2), answer_quality(1)。"
     )
 
 
@@ -1052,6 +1615,7 @@ def call_judge_model(config: JudgeConfig, payload: dict[str, Any]) -> dict[str, 
 
 class DataAgentEvaluationMetric(BaseMetric):  # type: ignore[misc, valid-type]
     shared_case_judges: dict[str, dict[str, Any]] = {}
+    shared_case_judge_seconds: dict[str, float] = {}
 
     def __init__(self, judge_config: JudgeConfig, threshold: float = 0.8):
         self.judge_config = judge_config
@@ -1064,7 +1628,9 @@ class DataAgentEvaluationMetric(BaseMetric):  # type: ignore[misc, valid-type]
     def measure(self, test_case: Any) -> float:
         payload = self._payload_from_test_case(test_case)
         case_id = str(payload.get("case", {}).get("case_id") or "")
+        judge_started = time.time()
         judge = call_judge_model(self.judge_config, payload)
+        self.__class__.shared_case_judge_seconds[case_id] = round(time.time() - judge_started, 3)
         if not bool(judge.get("judge_failed")):
             judge = normalize_judge_payload(judge, raw_output=str(judge.get("raw_output") or ""))
         self.case_judges[case_id] = judge
@@ -1133,6 +1699,7 @@ def run_deepeval(test_cases: list[Any], metric: DataAgentEvaluationMetric) -> No
     """
     _ensure_deepeval_available()
     DataAgentEvaluationMetric.shared_case_judges = {}
+    DataAgentEvaluationMetric.shared_case_judge_seconds = {}
     for test_case in test_cases:
         case_id = _test_case_case_id(test_case)
         try:
@@ -1158,7 +1725,12 @@ def _apply_judges(results: list[dict[str, Any]], metric: DataAgentEvaluationMetr
         judge = _merge_auto_failure_attribution(judge, item.get("auto_rule_check") or {})
         veto_rules = list(item.get("auto_rule_check", {}).get("triggered_veto_rules") or []) + list(judge.get("veto_rules_triggered") or [])
         item["judge"] = judge
+        item.setdefault("timing", {})["judge_seconds"] = DataAgentEvaluationMetric.shared_case_judge_seconds.get(case_id)
         item["veto_rules_triggered"] = veto_rules
+        item.setdefault("auto_rule_check", {}).setdefault("hard_gates", {})["no_hallucination"] = not bool(judge.get("hallucination"))
+        item.setdefault("auto_rule_check", {}).setdefault("hard_gates", {})["no_veto"] = not bool(veto_rules)
+        if bool(judge.get("hallucination")) or veto_rules:
+            item["auto_rule_check"]["passed"] = False
         item["case_passed"] = (
             not item.get("errors")
             and str(item.get("task_status") or "").lower() in SUCCESS_STATUSES
@@ -1175,42 +1747,110 @@ def _avg(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    pos = (len(ordered) - 1) * percentile
+    low, high = int(pos), min(len(ordered) - 1, int(pos) + 1)
+    return round(ordered[low] + (ordered[high] - ordered[low]) * (pos - low), 4)
+
+
+def _ratio(numerator: float, denominator: float) -> dict[str, Any]:
+    return {"numerator": round(numerator, 4), "denominator": round(denominator, 4), "value": round(numerator / denominator, 4) if denominator else None}
+
+
+def _numeric_usage(result: dict[str, Any], names: tuple[str, ...]) -> float | None:
+    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+    for name in names:
+        if name not in usage or usage.get(name) is None:
+            continue
+        try:
+            return float(usage.get(name))
+        except Exception:
+            continue
+    return None
+
+
 def build_summary(results: list[dict[str, Any]], dataset_stats: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
     if dry_run:
         return {
             **dataset_stats,
+            "evaluation_engine": EVALUATION_ENGINE, "engine_version": ENGINE_VERSION,
+            "metric_semantics_version": METRIC_SEMANTICS_VERSION, "judge_prompt_version": JUDGE_PROMPT_VERSION,
+            "run_status": "dry_run",
             "dry_run": True,
             "passed": True,
             "recommendation": "dry-run",
         }
+    total = len(results)
+    accepted = [item for item in results if item.get("task_id")]
+    completed = [item for item in accepted if str(item.get("task_status") or "").lower() in SUCCESS_STATUSES]
     scores = [float((item.get("judge") or {}).get("score") or 0) for item in results]
-    dimensions = [item.get("judge", {}).get("dimension_scores") or {} for item in results]
-    intent_accuracy = _avg([1.0 if float(dim.get("intent") or 0) >= 1 else 0.0 for dim in dimensions])
-    ontology_accuracy = _avg([1.0 if float(dim.get("ontology_entity") or 0) >= 1 else 0.0 for dim in dimensions])
-    sql_tool_accuracy = _avg([min(1.0, float(dim.get("sql_or_tool_call") or 0) / 2.0) for dim in dimensions])
-    data_accuracy = _avg([min(1.0, float(dim.get("data_accuracy") or 0) / 2.0) for dim in dimensions])
-    reasoning_average = _avg([min(5.0, float(dim.get("reasoning") or 0) * 2.5) for dim in dimensions])
+    dimensions = [item.get("judge", {}).get("dimension_scores") or {} for item in completed]
+    intent = _ratio(sum(float(dim.get("intent") or 0) >= 1 for dim in dimensions), len(dimensions))
+    ontology = _ratio(sum(float(dim.get("ontology_entity") or 0) >= 1 for dim in dimensions), len(dimensions))
+    relation = _ratio(sum(float(dim.get("relation_scope") or 0) >= 1 for dim in dimensions), len(dimensions))
+    tool_sql = _ratio(sum(bool((item.get("auto_rule_check") or {}).get("hard_gates", {}).get("sql_execution_and_口径")) for item in completed), len(completed))
+    time_cases = [item for item in completed if bool((item.get("auto_rule_check") or {}).get("time_dimension", {}).get("applicable"))]
+    time_accuracy = _ratio(sum(bool((item.get("auto_rule_check") or {}).get("time_dimension", {}).get("passed")) for item in time_cases), len(time_cases))
+    answer = _ratio(sum(float(dim.get("answer_quality") or 0) >= 1 for dim in dimensions), len(dimensions))
+    consistency_cases = [item for item in completed if (item.get("auto_rule_check") or {}).get("result_consistency", {}).get("applicable")]
+    consistency = _ratio(sum(bool((item.get("auto_rule_check") or {}).get("result_consistency", {}).get("passed")) for item in consistency_cases), len(consistency_cases))
+    reference_cases = [item for item in completed if (item.get("reference_data_accuracy") or {}).get("applicable")]
+    data_accuracy = _ratio(sum(bool((item.get("reference_data_accuracy") or {}).get("passed")) for item in reference_cases), len(reference_cases))
+    assertion_pass = assertion_total = 0.0
+    for item in completed:
+        dim = (item.get("judge") or {}).get("dimension_scores") or {}
+        checks = {
+            "intent": float(dim.get("intent") or 0) >= 1,
+            "ontology_entity": float(dim.get("ontology_entity") or 0) >= 1,
+            "relation_scope": float(dim.get("relation_scope") or 0) >= 1,
+            "sql_or_tool_call": bool((item.get("auto_rule_check") or {}).get("hard_gates", {}).get("required_tool_execution")),
+            "result_consistency": bool((item.get("reference_data_accuracy") or {}).get("passed")) if (item.get("reference_data_accuracy") or {}).get("applicable") else bool((item.get("auto_rule_check") or {}).get("result_consistency", {}).get("passed")),
+            "reasoning": float(dim.get("reasoning") or 0) >= 2,
+            "answer_quality": float(dim.get("answer_quality") or 0) >= 1,
+        }
+        for key, weight in DIMENSION_MAX.items():
+            assertion_total += weight
+            assertion_pass += weight if checks[key] else 0
     hallucination_rate = _avg([1.0 if bool(item.get("judge", {}).get("hallucination")) else 0.0 for item in results])
     veto_count = sum(len(item.get("veto_rules_triggered") or []) for item in results)
     judge_failed_count = sum(1 for item in results if bool(item.get("judge", {}).get("judge_failed")))
+    timing: dict[str, Any] = {}
+    for name in ("queue_wait_seconds", "execution_seconds", "e2e_seconds", "judge_seconds"):
+        values = [float((item.get("timing") or {}).get(name)) for item in results if isinstance((item.get("timing") or {}).get(name), (int, float))]
+        timing[name] = {"average": round(_avg(values), 4) if values else None, "p50": _percentile(values, .5), "p90": _percentile(values, .9), "p95": _percentile(values, .95)}
+    counts: dict[str, Any] = {}
+    count_sources = {
+        "user_turn_count": lambda item: float(item.get("user_turn_count") or 0),
+        "agent_turn_count": lambda item: float(item.get("agent_turn_count") or 0),
+        "tool_call_count": lambda item: float(item.get("tool_call_count") or 0),
+        "sql_execution_count": lambda item: float(item.get("sql_execution_count") or 0),
+        "input_tokens": lambda item: _numeric_usage(item, ("input_tokens", "inputTokens")),
+        "output_tokens": lambda item: _numeric_usage(item, ("output_tokens", "outputTokens")),
+        "cache_tokens": lambda item: _numeric_usage(item, ("cache_read_input_tokens", "cache_tokens", "cacheTokens")),
+    }
+    for name, getter in count_sources.items():
+        values = [value for item in results if isinstance((value := getter(item)), (int, float))]
+        counts[name] = {"average": round(_avg(values), 4) if values else None, "p95": _percentile(values, .95)}
     metrics = {
         "average_score": round(_avg(scores), 4),
-        "intent_accuracy": round(intent_accuracy, 4),
-        "ontology_accuracy": round(ontology_accuracy, 4),
-        "sql_tool_accuracy": round(sql_tool_accuracy, 4),
-        "data_precision": round(data_accuracy, 4),
-        "data_recall": round(data_accuracy, 4),
-        "reasoning_average": round(reasoning_average, 4),
+        "intent_accuracy": intent["value"], "ontology_accuracy": ontology["value"], "relation_accuracy": relation["value"],
+        "completion_rate": _ratio(len(completed), len(accepted)),
+        "business_accuracy": _ratio(assertion_pass, assertion_total),
+        "effective_pass_rate": _ratio(sum(bool(item.get("case_passed")) for item in results), total),
+        "semantic_accuracy": _ratio(intent["numerator"] + ontology["numerator"] + relation["numerator"], intent["denominator"] + ontology["denominator"] + relation["denominator"]),
+        "tool_sql_accuracy": tool_sql, "answer_accuracy": answer,
+        "result_consistency_rate": consistency, "data_accuracy": data_accuracy,
+        "time_accuracy": time_accuracy,
         "hallucination_rate": round(hallucination_rate, 4),
+        "timing": timing, "counts": counts,
     }
     gates_passed = (
-        metrics["average_score"] >= GATES["average_score"]
-        and metrics["intent_accuracy"] >= GATES["intent_accuracy"]
-        and metrics["ontology_accuracy"] >= GATES["ontology_accuracy"]
-        and metrics["sql_tool_accuracy"] >= GATES["sql_tool_accuracy"]
-        and metrics["data_precision"] >= GATES["data_precision"]
-        and metrics["data_recall"] >= GATES["data_recall"]
-        and metrics["reasoning_average"] >= GATES["reasoning_average"]
+        bool(results)
+        and metrics["completion_rate"]["value"] == 1.0
+        and metrics["effective_pass_rate"]["value"] == 1.0
         and metrics["hallucination_rate"] <= GATES["hallucination_rate"]
         and veto_count == 0
         and judge_failed_count == 0
@@ -1218,6 +1858,9 @@ def build_summary(results: list[dict[str, Any]], dataset_stats: dict[str, Any], 
     )
     return {
         **dataset_stats,
+        "evaluation_engine": EVALUATION_ENGINE, "engine_version": ENGINE_VERSION,
+        "metric_semantics_version": METRIC_SEMANTICS_VERSION, "judge_prompt_version": JUDGE_PROMPT_VERSION,
+        "run_status": "completed",
         "dry_run": False,
         "total_cases": len(results),
         "passed_cases": sum(1 for item in results if bool(item.get("case_passed"))),
@@ -1255,20 +1898,24 @@ def render_report(summary: dict[str, Any], results: list[dict[str, Any]]) -> str
         )
         return "\n".join(lines)
     metrics = summary.get("metrics") or {}
+    def ratio_text(name: str) -> str:
+        metric = metrics.get(name) if isinstance(metrics.get(name), dict) else {}
+        value = metric.get("value")
+        shown = "N/A" if value is None else f"{float(value):.2%}"
+        return f"{shown} ({metric.get('numerator', 0)}/{metric.get('denominator', 0)})"
     lines.extend(
         [
             "## 核心指标",
             "",
-            "| 指标 | 结果 | 目标 |",
-            "|---|---:|---:|",
-            f"| 平均分 | {metrics.get('average_score', 0):.2f} | >= 8.0 |",
-            f"| 意图识别准确率 | {metrics.get('intent_accuracy', 0):.2%} | >= 90% |",
-            f"| 本体识别准确率 | {metrics.get('ontology_accuracy', 0):.2%} | >= 90% |",
-            f"| SQL / 工具调用准确率 | {metrics.get('sql_tool_accuracy', 0):.2%} | >= 85% |",
-            f"| 数据结果 Precision | {metrics.get('data_precision', 0):.2%} | >= 90% |",
-            f"| 数据结果 Recall | {metrics.get('data_recall', 0):.2%} | >= 85% |",
-            f"| 推理平均分 | {metrics.get('reasoning_average', 0):.2f} | >= 4/5 |",
-            f"| 幻觉率 | {metrics.get('hallucination_rate', 0):.2%} | <= 5% |",
+            "| 指标 | 结果 |",
+            "|---|---:|",
+            f"| 完成率 | {ratio_text('completion_rate')} |",
+            f"| 业务断言准确率 | {ratio_text('business_accuracy')} |",
+            f"| 有效通过率 | {ratio_text('effective_pass_rate')} |",
+            f"| 结果一致性 | {ratio_text('result_consistency_rate')} |",
+            f"| 时间口径准确率 | {ratio_text('time_accuracy')} |",
+            f"| 参考 SQL 数据准确率 | {ratio_text('data_accuracy')} |",
+            f"| 幻觉率 | {float(metrics.get('hallucination_rate') or 0):.2%} |",
             "",
             "## 用例明细",
             "",
@@ -1323,6 +1970,11 @@ def write_outputs(output_dir: Path, results: list[dict[str, Any]], summary: dict
             )
     (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     (output_dir / "report.md").write_text(render_report(summary, results), encoding="utf-8")
+    run_payload = {key: summary.get(key) for key in ("evaluation_engine", "engine_version", "metric_semantics_version", "judge_prompt_version", "run_status", "run_label", "environment_label", "dataset_id", "dataset_hash", "schema_version", "case_ids", "agent_id", "agent_snapshot_hash", "model", "judge_model", "concurrency", "auth_enabled")}
+    (output_dir / "run.json").write_text(json.dumps(run_payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    rows = "".join(f"<tr><td>{html.escape(str(item.get('case_id') or ''))}</td><td>{float((item.get('judge') or {}).get('score') or 0):.2f}</td><td>{'PASS' if item.get('case_passed') else 'FAIL'}</td></tr>" for item in results)
+    document = f"""<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>DeepEval V2</title><style>body{{font:14px system-ui;margin:32px}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #ddd;padding:8px}}pre{{background:#f6f8fa;padding:16px;overflow:auto}}</style><h1>DataAgent DeepEval V2</h1><table><tr><th>case_id</th><th>score</th><th>gate</th></tr>{rows}</table><pre>{html.escape(json.dumps(summary, ensure_ascii=False, indent=2))}</pre></html>"""
+    (output_dir / "report.html").write_text(document, encoding="utf-8")
 
 
 def _judge_config_from_args(args: argparse.Namespace) -> JudgeConfig:
@@ -1361,6 +2013,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         cases, dataset_stats = load_dataset(dataset_path, args.case_ids)
+        dataset_stats.update({"run_label": str(args.run_label or "") or _timestamp(), "environment_label": str(args.environment_label or "local"), "agent_snapshot_hash": _snapshot_hash(str(args.agent_snapshot_path or "")), "agent_id": str(args.agent_id or "").strip(), "model": str(args.model or ""), "judge_model": str(args.judge_model or ""), "concurrency": int(args.concurrency)})
+        _write_dataset_snapshot(output_dir, cases)
         if args.dry_run:
             summary = build_summary([], dataset_stats, dry_run=True)
             write_outputs(output_dir, [], summary)
@@ -1370,10 +2024,18 @@ def main(argv: list[str] | None = None) -> int:
         _ensure_deepeval_available()
         judge_config = _judge_config_from_args(args)
         base_url = str(args.base_url or "").rstrip("/")
-        preflight_payload = preflight(base_url)
+        preflight_payload = preflight(base_url, str(args.auth_token or ""))
         dataset_stats["preflight"] = preflight_payload
-        dataset_stats["agent_id"] = str(args.agent_id or "").strip()
-        results = _run_cases(base_url, cases, args)
+        dataset_stats["auth_enabled"] = bool((preflight_payload.get("auth") or {}).get("auth_enabled"))
+        try:
+            results = _run_cases(base_url, cases, args)
+        except InfrastructureAbort as exc:
+            results = exc.partial_results
+            summary = build_summary(results, dataset_stats) if results else build_summary([], dataset_stats, dry_run=True)
+            summary.update({"dry_run": False, "run_status": "infra_failed", "passed": False, "recommendation": "基础设施失败", "infrastructure_error": str(exc)})
+            write_outputs(output_dir, results, summary)
+            print(str(exc), file=sys.stderr)
+            return 2
         try:
             metric = DataAgentEvaluationMetric(judge_config)
             test_cases = [to_deepeval_test_case(case, result) for case, result in zip(cases, results)]
@@ -1396,6 +2058,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"eval outputs written to: {output_dir}")
         return 0 if summary.get("passed") else 1
     except EvalRunnerError as exc:
+        write_outputs(output_dir, [], {"evaluation_engine": EVALUATION_ENGINE, "engine_version": ENGINE_VERSION, "metric_semantics_version": METRIC_SEMANTICS_VERSION, "judge_prompt_version": JUDGE_PROMPT_VERSION, "run_status": "infra_failed", "passed": False, "recommendation": "基础设施失败", "infrastructure_error": str(exc)})
         print(str(exc), file=sys.stderr)
         return exc.exit_code
 

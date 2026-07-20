@@ -9,56 +9,15 @@ if [[ ! -x "$DEFAULT_PYTHON" ]]; then
     DEFAULT_PYTHON=python3
 fi
 EVAL_PYTHON="${DATAAGENT_EVAL_PYTHON_BIN:-$DEFAULT_PYTHON}"
-
-IMAGE="${OPENDATAWORKS_DATAAGENT_EVALS_DEEPEVAL_IMAGE:-opendataworks-dataagent-evals-deepeval:latest}"
-
-usage() {
-    cat <<'EOF'
-Usage: scripts/run-dataagent-deepeval-evals.sh [options]
-
-Runs the DeepEval-based DataAgent evaluation module.
-
-Common options are passed through to the container:
-  --base-url <url>
-  --dataset <path>       Required private JSONL dataset path
-  --output-dir <path>
-  --case <case_id>
-  --agent-id <agent_id> Required for non-dry-run evaluation
-  --provider-id <provider_id>
-  --model <model>
-  --timeout-seconds <seconds>
-  --judge-base-url <url>
-  --judge-token <token>
-  --judge-model <model>
-  --dry-run
-
-Default output:
-  reports/dataagent-evals/deepeval-<timestamp>/ under the package/workspace directory.
-
-Environment:
-  OPENDATAWORKS_DATAAGENT_EVALS_DEEPEVAL_IMAGE
-  DATAAGENT_EVAL_JUDGE_BASE_URL
-  DATAAGENT_EVAL_JUDGE_TOKEN
-  DATAAGENT_EVAL_JUDGE_MODEL
-  DATAAGENT_EVAL_JUDGE_MAX_TOKENS
-  DATAAGENT_EVAL_DATASET
-  DATAAGENT_EVAL_AGENT_ID
-  DATAAGENT_EVAL_AUTH_TOKEN
-  DATAAGENT_EVAL_ENVIRONMENT_LABEL
-  DATAAGENT_EVAL_RUN_LABEL
-  DATAAGENT_EVAL_HISTORY_ROOT
-  DATAAGENT_EVAL_AGENT_SNAPSHOT_PATH
-  DATAAGENT_DEEPEVAL_RUN_LOCAL=1  Run local Python instead of Docker/Podman.
-EOF
-}
+IMAGE="${OPENDATAWORKS_DATAAGENT_EVALS_OPIK_IMAGE:-opendataworks-dataagent-evals-opik:2.1.32}"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-    usage
+    "$EVAL_PYTHON" "$REPO_ROOT/tools/dataagent-evals/opik/run.py" --help
     exit 0
 fi
 
-if [[ "${DATAAGENT_DEEPEVAL_RUN_LOCAL:-}" == "1" ]]; then
-    exec "$EVAL_PYTHON" "$REPO_ROOT/tools/dataagent-evals/deepeval/run.py" "$@"
+if [[ "${DATAAGENT_OPIK_RUN_LOCAL:-}" == "1" ]]; then
+    exec "$EVAL_PYTHON" "$REPO_ROOT/tools/dataagent-evals/opik/run.py" "$@"
 fi
 
 if command -v docker >/dev/null 2>&1; then
@@ -68,7 +27,7 @@ elif command -v podman >/dev/null 2>&1; then
 elif [[ -x /opt/podman/bin/podman ]]; then
     CONTAINER_CMD=/opt/podman/bin/podman
 else
-    echo "docker or podman is required; set DATAAGENT_DEEPEVAL_RUN_LOCAL=1 for local Python dry-run" >&2
+    echo "docker or podman is required; set DATAAGENT_OPIK_RUN_LOCAL=1 for local Python" >&2
     exit 2
 fi
 
@@ -114,7 +73,7 @@ exec "$CONTAINER_CMD" run --rm \
     -e DATAAGENT_EVAL_JUDGE_BASE_URL="${DATAAGENT_EVAL_JUDGE_BASE_URL:-}" \
     -e DATAAGENT_EVAL_JUDGE_TOKEN \
     -e DATAAGENT_EVAL_JUDGE_MODEL="${DATAAGENT_EVAL_JUDGE_MODEL:-}" \
-    -e DATAAGENT_EVAL_JUDGE_TIMEOUT_SECONDS="${DATAAGENT_EVAL_JUDGE_TIMEOUT_SECONDS:-120}" \
+    -e DATAAGENT_EVAL_JUDGE_TIMEOUT_SECONDS="${DATAAGENT_EVAL_JUDGE_TIMEOUT_SECONDS:-300}" \
     -e DATAAGENT_EVAL_JUDGE_MAX_TOKENS="${DATAAGENT_EVAL_JUDGE_MAX_TOKENS:-4096}" \
     -e DATAAGENT_EVAL_DATASET="${DATAAGENT_EVAL_DATASET:-}" \
     -e DATAAGENT_EVAL_AGENT_ID="${DATAAGENT_EVAL_AGENT_ID:-}" \
@@ -122,6 +81,8 @@ exec "$CONTAINER_CMD" run --rm \
     -e DATAAGENT_EVAL_RUN_LABEL="${DATAAGENT_EVAL_RUN_LABEL:-}" \
     -e DATAAGENT_EVAL_HISTORY_ROOT="${DATAAGENT_EVAL_HISTORY_ROOT:-}" \
     -e DATAAGENT_EVAL_AGENT_SNAPSHOT_PATH="${DATAAGENT_EVAL_AGENT_SNAPSHOT_PATH:-}" \
+    -e OPIK_BASE_URL="${OPIK_BASE_URL:-http://127.0.0.1:5173/api}" \
+    -e OPIK_PROJECT_NAME="${OPIK_PROJECT_NAME:-dataagent-evals}" \
     "${VOLUMES[@]}" \
     -w /workspace \
     "$IMAGE" "$@"

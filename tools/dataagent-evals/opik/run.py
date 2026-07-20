@@ -13,9 +13,24 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from threading import Lock
 from typing import Any
+
+try:
+    import opik
+    from opik import Opik
+    from opik.evaluation import evaluate as opik_evaluate
+    from opik.evaluation.metrics import BaseMetric as OpikBaseMetric
+    from opik.evaluation.metrics import ScoreResult
+except Exception:  # pragma: no cover - dry-run works without the optional SDK
+    opik = None  # type: ignore[assignment]
+    Opik = None  # type: ignore[assignment]
+    opik_evaluate = None  # type: ignore[assignment]
+    OpikBaseMetric = object  # type: ignore[assignment]
+    ScoreResult = None  # type: ignore[assignment]
 
 
 REQUIRED_CASE_FIELDS = {
@@ -70,11 +85,12 @@ DIMENSION_MAX = {
     "reasoning": 2.0,
     "answer_quality": 1.0,
 }
-EVALUATION_ENGINE = "builtin"
-ENGINE_VERSION = "2.0.0"
+EVALUATION_ENGINE = "opik"
+ENGINE_VERSION = "2.1.32"
 METRIC_SEMANTICS_VERSION = "2.1"
 JUDGE_PROMPT_VERSION = "dataagent-v2-2026-07-20"
 _DATAAGENT_AUTH_TOKEN = ""
+_OPIK_PROJECT_NAME = ""
 
 
 class EvalRunnerError(Exception):
@@ -133,7 +149,7 @@ def default_output_dir(root: Path) -> Path:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     root = _repo_or_package_root()
-    parser = argparse.ArgumentParser(description="Run DataAgent online evaluations.")
+    parser = argparse.ArgumentParser(description="Run independent DataAgent Opik V2 evaluations.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8900", help="DataAgent backend base URL.")
     parser.add_argument(
         "--dataset",
@@ -168,6 +184,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--history-root", default=os.environ.get("DATAAGENT_EVAL_HISTORY_ROOT", ""))
     parser.add_argument("--agent-snapshot-path", default=os.environ.get("DATAAGENT_EVAL_AGENT_SNAPSHOT_PATH", ""))
     parser.add_argument("--auth-token", default=os.environ.get("DATAAGENT_EVAL_AUTH_TOKEN", ""), help=argparse.SUPPRESS)
+    parser.add_argument("--opik-base-url", default=os.environ.get("OPIK_BASE_URL", "http://127.0.0.1:5173/api"))
+    parser.add_argument("--opik-project-name", default=os.environ.get("OPIK_PROJECT_NAME", "dataagent-evals"))
+    parser.add_argument("--opik-dataset-name", default=os.environ.get("OPIK_DATASET_NAME", ""))
+    parser.add_argument("--opik-experiment-name", default=os.environ.get("OPIK_EXPERIMENT_NAME", ""))
     return parser.parse_args(argv)
 
 
@@ -313,6 +333,17 @@ def _dataagent_headers() -> dict[str, str]:
     return headers
 
 
+def _opik_span(name: str, *, span_type: str = "tool", metadata: dict[str, Any] | None = None) -> Any:
+    if opik is None or not _OPIK_PROJECT_NAME:
+        return nullcontext()
+    return opik.start_as_current_span(
+        name=name,
+        type=span_type,
+        metadata=metadata or {},
+        project_name=_OPIK_PROJECT_NAME,
+    )
+
+
 def dataagent_http_json(
     method: str,
     url: str,
@@ -321,7 +352,12 @@ def dataagent_http_json(
     timeout: int = 30,
 ) -> dict[str, Any]:
     try:
-        return http_json(method, url, payload=payload, timeout=timeout, headers=_dataagent_headers())
+        endpoint = urllib.parse.urlparse(url).path
+        with _opik_span(
+            f"dataagent.{method.lower()}.{endpoint.rsplit('/', 1)[-1] or 'root'}",
+            metadata={"method": method, "endpoint": endpoint},
+        ):
+            return http_json(method, url, payload=payload, timeout=timeout, headers=_dataagent_headers())
     except EvalRunnerError as exc:
         if re.search(r"HTTP (?:401|403)\b", str(exc)):
             raise InfrastructureAbort(f"dataagent_auth_failed: {exc}") from exc
@@ -648,12 +684,10 @@ def _sql_fragment_matches(fragment: Any, sql_text: str, expected_sql: dict[str, 
     normalized_sql = _normalize_sql_match_text(sql_text)
     if normalized_fragment in normalized_sql:
         return True
-
     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", raw_fragment):
         base_name = normalized_fragment.rsplit(".", 1)[-1]
         if re.search(rf"(?<![A-Za-z0-9_]){re.escape(base_name)}(?![A-Za-z0-9_])", normalized_sql):
             return True
-
     aggregations = " ".join(str(item or "") for item in expected_sql.get("aggregations") or [])
     if normalized_fragment == "id" and re.search(r"\bcount\b", aggregations, re.I):
         return bool(re.search(r"\bcount\s*\(\s*\*\s*\)", normalized_sql, re.I))
@@ -666,46 +700,40 @@ def _add_months(value: dt.date, offset: int) -> dt.date:
 
 
 def _time_rule_check(expected_time: dict[str, Any], sql_text: str) -> dict[str, Any]:
-    required = bool(expected_time.get("required"))
-    if not required:
+    if not bool(expected_time.get("required")):
         return {"applicable": False, "passed": True, "reason": None}
     field = str(expected_time.get("field") or "").strip()
     normalized_sql = _normalize_sql_match_text(sql_text)
-    field_present = bool(field) and bool(
-        re.search(rf"(?<![A-Za-z0-9_]){re.escape(field.lower())}(?![A-Za-z0-9_])", normalized_sql)
-    )
+    field_present = bool(field) and bool(re.search(rf"(?<![A-Za-z0-9_]){re.escape(field.lower())}(?![A-Za-z0-9_])", normalized_sql))
     range_spec = expected_time.get("range") if isinstance(expected_time.get("range"), dict) else {}
     kind = str(range_spec.get("kind") or "").strip()
-    shanghai_today = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date()
+    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date()
     range_present = False
     expected_bounds: list[str] = []
     if kind == "calendar_month":
-        start = _add_months(shanghai_today.replace(day=1), int(range_spec.get("offset") or 0))
+        start = _add_months(today.replace(day=1), int(range_spec.get("offset") or 0))
         end = _add_months(start, 1)
         expected_bounds = [start.isoformat(), end.isoformat()]
-        range_present = all(bound in normalized_sql for bound in expected_bounds)
-        if not range_present and "date_format(current_date" in normalized_sql:
-            range_present = True
+        range_present = all(bound in normalized_sql for bound in expected_bounds) or "date_format(current_date" in normalized_sql
     elif kind == "rolling_days":
         days = int(range_spec.get("value") or 0)
         if days > 0:
-            start = shanghai_today - dt.timedelta(days=days - 1)
-            end = shanghai_today + dt.timedelta(days=1)
+            start = today - dt.timedelta(days=days - 1)
+            end = today + dt.timedelta(days=1)
             expected_bounds = [start.isoformat(), end.isoformat()]
             range_present = all(bound in normalized_sql for bound in expected_bounds)
             if not range_present and "current_date" in normalized_sql:
                 range_present = bool(re.search(rf"interval\s+(?:{days}|{max(0, days - 1)})\s+day", normalized_sql))
     else:
-        range_present = bool(field_present)
+        range_present = field_present
     passed = field_present and range_present
-    reason = None if passed else ("time_field_missing" if not field_present else "time_range_mismatch")
     return {
         "applicable": True,
         "passed": passed,
         "field": field,
         "range_kind": kind,
         "expected_bounds": expected_bounds,
-        "reason": reason,
+        "reason": None if passed else ("time_field_missing" if not field_present else "time_range_mismatch"),
     }
 
 
@@ -716,44 +744,28 @@ def _select_relevant_query_evidence(
     expected_sql: dict[str, Any] | None = None,
     preferred_width: int = 0,
 ) -> dict[str, Any] | None:
-    """Select the successful query that best matches the case's target SQL.
-
-    Exploratory queries are valid evidence, but an empty exploratory result must
-    not be mistaken for an empty result from the target query.
-    """
     candidates: list[dict[str, Any]] = []
     expected_sql = expected_sql or {}
-    normalized_fragments = [str(item or "").strip() for item in required_fragments if str(item or "").strip()]
+    fragments = [str(item or "").strip() for item in required_fragments if str(item or "").strip()]
     for position, block in enumerate(blocks):
         if not _is_successful_sql_execution(block):
             continue
-        sqls = _dedupe(
-            _collect_structured_sql(block.get("input"))
-            + _collect_structured_sql(block.get("output"))
-        )
+        sqls = _dedupe(_collect_structured_sql(block.get("input")) + _collect_structured_sql(block.get("output")))
         if not sqls:
             continue
         sql_text = "\n".join(sqls)
         normalized_sql = _normalize_sql_match_text(sql_text)
-        semantic_matches = sum(1 for fragment in normalized_fragments if _sql_fragment_matches(fragment, sql_text, expected_sql))
-        base_matches = sum(
-            1
-            for fragment in normalized_fragments
-            if "." in fragment
-            and _normalize_sql_match_text(fragment).rsplit(".", 1)[-1] in normalized_sql
-            and _normalize_sql_match_text(fragment) not in normalized_sql
-        )
+        semantic_matches = sum(1 for fragment in fragments if _sql_fragment_matches(fragment, sql_text, expected_sql))
+        base_matches = sum(1 for fragment in fragments if "." in fragment and _normalize_sql_match_text(fragment).rsplit(".", 1)[-1] in normalized_sql and _normalize_sql_match_text(fragment) not in normalized_sql)
         rows = _query_rows_from_value(block.get("output"))
         row_width = max((len(row) for row in rows if isinstance(row, dict)), default=0) if isinstance(rows, list) else 0
         shape_rank = -abs(row_width - preferred_width) if preferred_width > 0 else 0
-        candidates.append(
-            {
-                "sql_text": sql_text,
-                "rows": rows,
-                "output_text": "\n".join(_flatten_strings(block.get("output"))),
-                "rank": (semantic_matches, base_matches, shape_rank, position),
-            }
-        )
+        candidates.append({
+            "sql_text": sql_text,
+            "rows": rows,
+            "output_text": "\n".join(_flatten_strings(block.get("output"))),
+            "rank": (semantic_matches, base_matches, shape_rank, position),
+        })
     return max(candidates, key=lambda item: item["rank"]) if candidates else None
 
 
@@ -768,8 +780,6 @@ def _answer_references_result_values(rows: Any, fields: list[str], answer: str) 
     if all(all(field in row for field in fields) for row in dict_rows):
         values = [row[field] for row in dict_rows for field in fields]
     elif fields and all(len(row) == len(fields) for row in dict_rows):
-        # SQL aliases are presentation details. When the result shape matches the
-        # expected contract, compare the actual ordered values instead.
         values = [value for row in dict_rows for value in row.values()]
     else:
         return False
@@ -823,12 +833,7 @@ def auto_rule_check(case: dict[str, Any], *, final_answer: str, blocks: list[dic
         + list(expected_sql.get("aggregations") or [])
     )
     preferred_width = len(expected_result.get("required_columns") or expected_result.get("answer_result_fields") or [])
-    relevant_query = _select_relevant_query_evidence(
-        blocks,
-        required_fragments,
-        expected_sql=expected_sql,
-        preferred_width=preferred_width,
-    )
+    relevant_query = _select_relevant_query_evidence(blocks, required_fragments, expected_sql=expected_sql, preferred_width=preferred_width)
     assessment_text = str((relevant_query or {}).get("sql_text") or "\n".join(sql_outputs))
     time_check = (
         _time_rule_check(expected_time, assessment_text)
@@ -840,10 +845,7 @@ def auto_rule_check(case: dict[str, Any], *, final_answer: str, blocks: list[dic
         for fragment in required_fragments
         if str(fragment or "").strip()
         and not _sql_fragment_matches(fragment, assessment_text, expected_sql)
-        and not (
-            bool(time_check.get("passed"))
-            and "current_date" in str(fragment).lower()
-        )
+        and not (bool(time_check.get("passed")) and "current_date" in str(fragment).lower())
     ]
     required_steps = list(expected_tools.get("required_steps") or [])
     groups = expected_tools.get("allowed_alternative_groups") or []
@@ -930,11 +932,8 @@ def _apply_runtime_hard_gates(
     agent_turn_count: int,
     tool_call_count: int,
 ) -> None:
-    hard_gates = rule_check.setdefault("hard_gates", {})
-    hard_gates["task_completed"] = task_completed
-    # Agent turns and tool calls are efficiency metrics. The runtime already
-    # enforces its own safety limits, so evaluation must not fail business
-    # quality gates merely because these counts are high.
+    gates = rule_check.setdefault("hard_gates", {})
+    gates["task_completed"] = task_completed
     rule_check["limit_violations"] = []
     if not task_completed:
         rule_check.setdefault("failure_attribution", []).append("task_not_completed")
@@ -1345,7 +1344,12 @@ def call_judge_model(config: JudgeConfig, payload: dict[str, Any]) -> dict[str, 
 
 
 def _judge_case(judge_config: JudgeConfig, case: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    judge = call_judge_model(judge_config, payload)
+    with _opik_span(
+        "dataagent.judge",
+        span_type="llm",
+        metadata={"case_id": case.get("case_id"), "judge_prompt_version": JUDGE_PROMPT_VERSION},
+    ):
+        judge = call_judge_model(judge_config, payload)
     judge["case_id"] = case.get("case_id")
     return judge
 
@@ -1675,6 +1679,173 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace, judg
     }
 
 
+class DataAgentOpikMetric(OpikBaseMetric):  # type: ignore[misc, valid-type]
+    """Expose the V2 dimensions as native Opik Experiment feedback scores."""
+
+    def __init__(self) -> None:
+        super().__init__(name="dataagent_v2", track=False)
+
+    @staticmethod
+    def _result(case_result: Any = None, output: Any = None, **kwargs: Any) -> dict[str, Any]:
+        for candidate in (case_result, kwargs.get("case_result"), output, kwargs.get("output")):
+            if isinstance(candidate, dict) and isinstance(candidate.get("case_result"), dict):
+                return candidate["case_result"]
+            if isinstance(candidate, dict) and "case_id" in candidate and "judge" in candidate:
+                return candidate
+        return {}
+
+    def score(self, case_result: Any = None, output: Any = None, **kwargs: Any) -> list[Any]:
+        if ScoreResult is None:
+            raise EvalRunnerError("opik==2.1.32 is required")
+        result = self._result(case_result, output, **kwargs)
+        judge = result.get("judge") if isinstance(result.get("judge"), dict) else {}
+        dimensions = judge.get("dimension_scores") if isinstance(judge.get("dimension_scores"), dict) else {}
+        scores = [
+            ScoreResult(
+                name=f"v2.{name}",
+                value=float(dimensions.get(name) or 0),
+                reason=str(judge.get("comment") or ""),
+            )
+            for name in JUDGE_DIMENSIONS
+        ]
+        reference = result.get("reference_data_accuracy") if isinstance(result.get("reference_data_accuracy"), dict) else {}
+        consistency = (result.get("auto_rule_check") or {}).get("result_consistency") or {}
+        scores.extend(
+            [
+                ScoreResult(name="v2.total", value=float(judge.get("score") or 0)),
+                ScoreResult(name="v2.hard_gate", value=1.0 if result.get("case_passed") else 0.0),
+                ScoreResult(
+                    name="v2.result_consistency",
+                    value=1.0 if consistency.get("passed") else 0.0,
+                    reason="N/A" if not consistency.get("applicable") else "final answer vs Agent query result",
+                ),
+            ]
+        )
+        if reference.get("applicable"):
+            scores.append(
+                ScoreResult(
+                    name="v2.data_accuracy",
+                    value=1.0 if reference.get("passed") else 0.0,
+                    reason="independent read-only reference SQL comparison",
+                )
+            )
+        return scores
+
+
+def _ensure_opik_available() -> None:
+    if opik is None or Opik is None or opik_evaluate is None or ScoreResult is None:
+        raise EvalRunnerError("Opik runner requires opik==2.1.32; install tools/dataagent-evals/opik/requirements.txt")
+    installed = str(getattr(opik, "__version__", ""))
+    if installed and installed != "2.1.32":
+        raise EvalRunnerError(f"Opik SDK version mismatch: expected 2.1.32, got {installed}")
+
+
+def _opik_dataset_items(cases: list[dict[str, Any]], dataset_hash: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "case_id": str(case.get("case_id") or ""),
+            "category": str(case.get("category") or ""),
+            "suite_tags": list(case.get("suite_tags") or []),
+            "source_file_hash": dataset_hash,
+            "case": case,
+        }
+        for case in cases
+    ]
+
+
+def _run_opik_experiment(
+    base_url: str,
+    cases: list[dict[str, Any]],
+    args: argparse.Namespace,
+    judge_config: JudgeConfig,
+    dataset_stats: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    global _OPIK_PROJECT_NAME
+    _ensure_opik_available()
+    _OPIK_PROJECT_NAME = str(args.opik_project_name or "dataagent-evals").strip()
+    dataset_hash = str(dataset_stats.get("dataset_hash") or "")
+    dataset_id = str(dataset_stats.get("dataset_id") or "dataset")
+    dataset_name = str(args.opik_dataset_name or "").strip() or f"{dataset_id}-{dataset_hash[:12]}"
+    experiment_name = str(args.opik_experiment_name or "").strip() or (
+        f"{str(args.run_label or 'run')}-{str(args.model or 'default')}-{_timestamp()}"
+    )
+    try:
+        client = Opik(host=str(args.opik_base_url or "").rstrip("/"), project_name=_OPIK_PROJECT_NAME)
+        dataset = client.get_or_create_dataset(
+            name=dataset_name,
+            description=f"DataAgent V2 dataset sha256={dataset_hash}",
+        )
+        dataset.insert(_opik_dataset_items(cases, dataset_hash))
+    except Exception as exc:
+        raise InfrastructureAbort(f"opik_dataset_write_failed: {exc}") from exc
+
+    results_by_case: dict[str, dict[str, Any]] = {}
+    results_lock = Lock()
+    infrastructure_errors: list[str] = []
+
+    def evaluation_task(case: dict[str, Any], case_id: str = "", **_: Any) -> dict[str, Any]:
+        resolved_case_id = str(case.get("case_id") or case_id)
+        try:
+            with _opik_span(
+                "dataagent.evaluation.case",
+                span_type="general",
+                metadata={
+                    "case_id": resolved_case_id,
+                    "metric_semantics_version": METRIC_SEMANTICS_VERSION,
+                    "judge_prompt_version": JUDGE_PROMPT_VERSION,
+                },
+            ):
+                result = run_case(base_url, case, args, judge_config)
+            with results_lock:
+                results_by_case[resolved_case_id] = result
+            return {"output": str(result.get("final_answer") or ""), "case_result": result}
+        except InfrastructureAbort as exc:
+            with results_lock:
+                infrastructure_errors.append(str(exc))
+            raise
+
+    tracked_task = opik.track(
+        name="dataagent-evaluation-case",
+        project_name=_OPIK_PROJECT_NAME,
+    )(evaluation_task)
+    experiment_config = {
+        "evaluation_engine": EVALUATION_ENGINE,
+        "engine_version": ENGINE_VERSION,
+        "metric_semantics_version": METRIC_SEMANTICS_VERSION,
+        "judge_prompt_version": JUDGE_PROMPT_VERSION,
+        "dataset_hash": dataset_hash,
+        "dataset_version": dataset_stats.get("schema_version"),
+        "skill_snapshot_hash": dataset_stats.get("agent_snapshot_hash"),
+        "model": str(args.model or ""),
+        "judge_model": str(args.judge_model or ""),
+        "concurrency": int(args.concurrency),
+        "environment_label": str(args.environment_label or "local"),
+        "auth_enabled": bool(dataset_stats.get("auth_enabled")),
+    }
+    try:
+        opik_evaluate(
+            dataset=dataset,
+            task=tracked_task,
+            scoring_metrics=[DataAgentOpikMetric()],
+            experiment_name=experiment_name,
+            project_name=_OPIK_PROJECT_NAME,
+            experiment_config=experiment_config,
+            task_threads=int(args.concurrency),
+        )
+        if hasattr(client, "flush"):
+            client.flush()
+    except Exception as exc:
+        partial = [results_by_case[str(case.get("case_id") or "")] for case in cases if str(case.get("case_id") or "") in results_by_case]
+        reason = infrastructure_errors[0] if infrastructure_errors else f"opik_experiment_failed: {exc}"
+        raise InfrastructureAbort(reason, partial_results=partial) from exc
+    missing = [str(case.get("case_id") or "") for case in cases if str(case.get("case_id") or "") not in results_by_case]
+    if missing:
+        partial = [results_by_case[str(case.get("case_id") or "")] for case in cases if str(case.get("case_id") or "") in results_by_case]
+        raise InfrastructureAbort(f"opik_experiment_missing_results: {','.join(missing)}", partial_results=partial)
+    ordered = [results_by_case[str(case.get("case_id") or "")] for case in cases]
+    return ordered, {"opik_project_name": _OPIK_PROJECT_NAME, "opik_dataset_name": dataset_name, "opik_experiment_name": experiment_name}
+
+
 def _run_cases(base_url: str, cases: list[dict[str, Any]], args: argparse.Namespace, judge_config: JudgeConfig) -> list[dict[str, Any]]:
     if args.concurrency <= 1:
         completed: list[dict[str, Any]] = []
@@ -1783,10 +1954,7 @@ def build_summary(results: list[dict[str, Any]], dataset_stats: dict[str, Any], 
     relation = _ratio(sum(1 for dim in dimensions if float(dim.get("relation_scope") or 0) >= 1), len(dimensions))
     tool_sql = _ratio(sum(1 for item in completed if bool((item.get("auto_rule_check") or {}).get("hard_gates", {}).get("sql_execution_and_口径"))), len(completed))
     time_cases = [item for item in completed if bool((item.get("auto_rule_check") or {}).get("time_dimension", {}).get("applicable"))]
-    time_accuracy = _ratio(
-        sum(1 for item in time_cases if bool((item.get("auto_rule_check") or {}).get("time_dimension", {}).get("passed"))),
-        len(time_cases),
-    )
+    time_accuracy = _ratio(sum(1 for item in time_cases if bool((item.get("auto_rule_check") or {}).get("time_dimension", {}).get("passed"))), len(time_cases))
     answer = _ratio(sum(1 for dim in dimensions if float(dim.get("answer_quality") or 0) >= 1), len(dimensions))
     result_cases = [item for item in completed if bool((item.get("auto_rule_check") or {}).get("result_consistency", {}).get("applicable"))]
     result_consistency = _ratio(sum(1 for item in result_cases if bool((item.get("auto_rule_check") or {}).get("result_consistency", {}).get("passed"))), len(result_cases))
@@ -1835,10 +2003,10 @@ def build_summary(results: list[dict[str, Any]], dataset_stats: dict[str, Any], 
         "effective_pass_rate": _ratio(len(effective), total),
         "semantic_accuracy": _ratio(intent["numerator"] + ontology["numerator"] + relation["numerator"], intent["denominator"] + ontology["denominator"] + relation["denominator"]),
         "tool_sql_accuracy": tool_sql,
-        "time_accuracy": time_accuracy,
         "answer_accuracy": answer,
         "result_consistency_rate": result_consistency,
         "data_accuracy": data_accuracy,
+        "time_accuracy": time_accuracy,
     }
     metrics = {
         "average_score": round(_avg(scores), 4),
@@ -1919,6 +2087,7 @@ def write_outputs(output_dir: Path, results: list[dict[str, Any]], summary: dict
             "evaluation_engine", "engine_version", "metric_semantics_version", "judge_prompt_version",
             "run_status", "run_label", "environment_label", "dataset_id", "dataset_hash", "schema_version",
             "case_ids", "agent_id", "agent_snapshot_hash", "model", "judge_model", "concurrency", "auth_enabled",
+            "opik_project_name", "opik_dataset_name", "opik_experiment_name",
         )
     }
     (output_dir / "run.json").write_text(json.dumps(run_payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
@@ -2056,7 +2225,8 @@ def main(argv: list[str] | None = None) -> int:
         dataset_stats["preflight"] = preflight_payload
         dataset_stats["auth_enabled"] = bool((preflight_payload.get("auth") or {}).get("auth_enabled"))
         try:
-            results = _run_cases(base_url, cases, args, judge_config)
+            results, opik_metadata = _run_opik_experiment(base_url, cases, args, judge_config, dataset_stats)
+            dataset_stats.update(opik_metadata)
         except InfrastructureAbort as exc:
             results = exc.partial_results
             summary = build_summary(results, dataset_stats) if results else build_summary([], dataset_stats, dry_run=True)

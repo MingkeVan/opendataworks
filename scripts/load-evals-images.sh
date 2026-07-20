@@ -20,6 +20,9 @@ if command -v docker &> /dev/null; then
 elif command -v podman &> /dev/null; then
     CONTAINER_CMD="podman"
     echo "✓ 检测到 Podman"
+elif [[ -x /opt/podman/bin/podman ]]; then
+    CONTAINER_CMD="/opt/podman/bin/podman"
+    echo "✓ 检测到 Podman (/opt/podman/bin/podman)"
 else
     echo "❌ 错误: 未找到 Docker 或 Podman"
     exit 1
@@ -51,8 +54,10 @@ fi
 IMAGES=(
     "opendataworks-dataagent-evals-builtin:${IMAGE_TAG}"
     "opendataworks-dataagent-evals-deepeval:${IMAGE_TAG}"
+    "opendataworks-dataagent-evals-opik:${IMAGE_TAG}"
     "opendataworks-dataagent-evals-builtin:latest"
     "opendataworks-dataagent-evals-deepeval:latest"
+    "opendataworks-dataagent-evals-opik:latest"
 )
 for image in "${IMAGES[@]}"; do
     localhost_image="localhost/$image"
@@ -67,5 +72,5 @@ echo ""
 echo "📋 已加载评测镜像："
 $CONTAINER_CMD images | grep -E "opendataworks-dataagent-evals" || true
 echo ""
-echo "📝 下一步：按 deploy/README.md 第 3 节运行 builtin / DeepEval 评测（用 --dataset 指定私有评测集）"
+echo "📝 下一步：运行 builtin / DeepEval / Opik 评测（用 --dataset 指定 V2 评测集）"
 echo ""

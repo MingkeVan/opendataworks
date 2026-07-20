@@ -1,5 +1,40 @@
 # DataAgent Online Evaluation Implementation Plan
 
+> **V2 supersession (2026-07-20):** The completed V1 tasks below are retained as
+> history. New work follows the Evaluation V2 checklist in this section. The
+> builtin implementation must remain independent from DeepEval and Opik.
+
+## Evaluation V2 Checklist
+
+- [x] Accept only the generic V2 dataset contract and keep all private
+  architecture-governance cases outside this repository.
+- [x] Add OAuth-aware preflight, administrator validation, consistent Bearer
+  identity propagation, and `X-ODW-Client: dataagent` on business requests.
+- [x] Read persisted SDK events and independently extract turns, Skill calls,
+  ontology lookup, SQL validation, successful SQL execution, errors, and
+  recovery evidence.
+- [x] Implement deterministic hard gates plus the fixed judge rubric without
+  importing code from either of the other engines.
+- [x] Split queue, execution, end-to-end, and judge timing; aggregate percentage
+  numerators/denominators, percentiles, turns, tools, and token usage.
+- [x] Write `run.json`, `summary.json`, `cases.jsonl`, `report.md`, self-contained
+  `report.html`, and raw case evidence with secrets redacted.
+- [x] Preserve exit codes 0/1/2 and write a partial `infra_failed` report when
+  authentication fails after submissions have started.
+- [x] Pass the shared golden conformance fixtures while loading only builtin
+  implementation code.
+
+## V2 Verification
+
+- [x] Run the existing builtin regression suite and the new V2 contract tests.
+- [x] Dry-run the private 33-case V2 dataset and all generated subsets.
+- [ ] Run the repository-local five-case authenticated smoke set against
+  `opendataworks-business-knowledge` when the local runtime and
+  credentials are available; record exact skipped external dependencies.
+
+The private 33-case `arch-ontology-semantics` suite is schema/dry-run input only
+in this local environment. Real smoke must not depend on its unavailable data.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a manually-triggered online DataAgent evaluation module for externally supplied private business-domain cases.

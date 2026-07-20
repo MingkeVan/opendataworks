@@ -183,6 +183,21 @@ def test_business_knowledge_skill_contains_semantics_without_execution_scripts()
     assert "validate_sql.py" not in snapshot
 
 
+def test_business_knowledge_skill_routes_minimal_evidence_and_stops_on_ambiguity():
+    snapshot = _skill_text_snapshot(BUSINESS_SKILL_ROOT)
+
+    required_tokens = [
+        "不要为每个问题顺序读完全部参考文件",
+        "拿到足够语义后立即停止读取",
+        "默认排除 `deleted=1`",
+        "先只追问 `db_name`",
+        "不要先做精确查询、模糊搜索或候选表推荐",
+        "真实查询返回空结果时",
+    ]
+    for token in required_tokens:
+        assert token in snapshot
+
+
 def test_business_ontology_supports_platform_table_troubleshooting():
     ontology = json.loads((BUSINESS_SKILL_ROOT / "assets" / "ontology.json").read_text(encoding="utf-8"))
 
