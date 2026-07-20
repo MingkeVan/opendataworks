@@ -148,6 +148,48 @@
               </div>
             </section>
 
+            <!-- 可见范围 -->
+            <section v-else-if="activeTab === 'visibility'" key="visibility" class="agent-panel-section">
+              <h3>可见范围</h3>
+              <p class="agent-panel-desc">
+                控制哪些用户可以在助手列表中看到并使用该智能体，由后端强制校验。管理员始终可见；已有会话不受变更影响。
+              </p>
+              <el-form-item label="可见性">
+                <el-radio-group v-model="form.visibility.mode" :disabled="!canManage">
+                  <el-radio value="all">全部用户（含匿名嵌入）</el-radio>
+                  <el-radio value="authenticated">仅登录用户</el-radio>
+                  <el-radio value="selected">指定用户</el-radio>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item v-if="form.visibility.mode === 'selected'" label="允许的用户">
+                <el-select
+                  v-model="form.visibility.allowed_users"
+                  multiple
+                  filterable
+                  remote
+                  allow-create
+                  default-first-option
+                  collapse-tags
+                  collapse-tags-tooltip
+                  :remote-method="searchAuthUsers"
+                  :loading="authUserLoading"
+                  :disabled="!canManage"
+                  placeholder="搜索或输入稳定用户 ID"
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="option in authUserOptions"
+                    :key="option.user_id"
+                    :label="authUserLabel(option)"
+                    :value="option.user_id"
+                  />
+                </el-select>
+                <p class="agent-panel-desc" style="margin: 8px 0 0">
+                  用户 ID 为登录身份的稳定标识，如 SSO:1024、local:alice；可搜索已使用过系统的用户，也可直接输入。
+                </p>
+              </el-form-item>
+            </section>
+
             <!-- 高级设置 -->
             <section v-else-if="activeTab === 'advanced'" key="advanced" class="agent-panel-section">
               <h3>高级设置</h3>
@@ -185,15 +227,17 @@ const dataScopeOptions = ref([])
 const scopeSelection = ref([])
 const activeTab = ref('basic')
 
-const tabs = [
+// 可见范围配置（含 allow-list 名单）仅 admin 可读写，非管理员不渲染该 tab。
+const tabs = computed(() => [
   { key: 'basic', label: '基础信息' },
   { key: 'prompt', label: '提示词设置' },
   { key: 'questions', label: '预设问题' },
   { key: 'tools', label: '工具' },
   { key: 'skills', label: 'Skills' },
   { key: 'scope', label: '数据范围' },
+  ...(canManage.value ? [{ key: 'visibility', label: '可见范围' }] : []),
   { key: 'advanced', label: '高级设置' }
-]
+])
 
 const capabilities = reactive({
   tools: [],
@@ -226,8 +270,42 @@ const form = reactive({
   max_turns: 0,
   env_vars: {},
   data_scope: { allowed_scopes: [] },
+  visibility: { mode: 'all', allowed_users: [], allowed_groups: [] },
   preset_questions: ['', '', ''],
   is_default: false
+})
+
+const authUserOptions = ref([])
+const authUserLoading = ref(false)
+
+const authUserLabel = (option) => {
+  const displayName = String(option?.display_name || '').trim()
+  return displayName ? `${displayName}（${option.user_id}）` : String(option?.user_id || '')
+}
+
+const searchAuthUsers = async (keyword = '') => {
+  if (!canManage.value) return
+  authUserLoading.value = true
+  try {
+    const result = await dataagentApi.listAuthUsers({ keyword: String(keyword || '').trim(), limit: 50 })
+    const fetched = Array.isArray(result?.items) ? result.items : []
+    // 已选但未出现在搜索结果中的 ID（历史配置或手输）保留为占位选项，避免标签退化为裸值。
+    const known = new Set(fetched.map((item) => item.user_id))
+    const placeholders = (form.visibility.allowed_users || [])
+      .filter((userId) => userId && !known.has(userId))
+      .map((userId) => ({ user_id: userId, display_name: '' }))
+    authUserOptions.value = [...fetched, ...placeholders]
+  } catch (_error) {
+    authUserOptions.value = (form.visibility.allowed_users || []).map((userId) => ({ user_id: userId, display_name: '' }))
+  } finally {
+    authUserLoading.value = false
+  }
+}
+
+const normalizeVisibility = (visibility) => ({
+  mode: ['all', 'authenticated', 'selected'].includes(visibility?.mode) ? visibility.mode : 'all',
+  allowed_users: Array.isArray(visibility?.allowed_users) ? visibility.allowed_users.filter(Boolean) : [],
+  allowed_groups: Array.isArray(visibility?.allowed_groups) ? visibility.allowed_groups.filter(Boolean) : []
 })
 
 const agentId = computed(() => String(route.params.agentId || ''))
@@ -282,6 +360,7 @@ const applyAgent = (agent) => {
     data_scope: agent?.data_scope && typeof agent.data_scope === 'object'
       ? { allowed_scopes: Array.isArray(agent.data_scope.allowed_scopes) ? [...agent.data_scope.allowed_scopes] : [] }
       : { allowed_scopes: [] },
+    visibility: normalizeVisibility(agent?.visibility),
     is_default: Boolean(agent?.is_default),
     preset_questions: (() => {
       const q = Array.isArray(agent?.preset_questions) ? agent.preset_questions.filter(Boolean) : []
@@ -309,6 +388,8 @@ const loadDetail = async () => {
         skills: caps?.skills || []
       })
       dataScopeOptions.value = Array.isArray(scopeOptions) ? scopeOptions : []
+      // 预取可选用户，失败不阻塞详情加载（选择器仍支持远程搜索与手输）。
+      searchAuthUsers('')
     } else {
       agent = await dataagentApi.getAgentProfile(agentId.value)
       dataScopeOptions.value = Array.isArray(agent?.data_scope?.allowed_scopes)
@@ -349,6 +430,11 @@ const buildPayload = () => {
           source_type: scope.source_type || '',
           database: scope.database || ''
         }))
+    },
+    visibility: {
+      mode: form.visibility.mode,
+      allowed_users: (form.visibility.allowed_users || []).map((id) => String(id || '').trim()).filter(Boolean),
+      allowed_groups: [...(form.visibility.allowed_groups || [])]
     },
     preset_questions: form.preset_questions.map((q) => String(q || '').trim()).filter(Boolean)
   }

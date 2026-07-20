@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 
-from core.auth import require_admin, require_user
+from core.auth import AuthIdentity, is_auth_enabled, require_admin, require_user, resolve_identity
+from core.agent_visibility import agent_visible_to, filter_visible_agent_profiles
 from core.agent_profile_service import (
     agent_capabilities,
     create_agent_profile,
@@ -33,6 +34,8 @@ from core.skill_discovery import resolve_skills_root_dir
 from core.slash_command_cache import get_agent_slash_commands
 from core.topic_task_store import get_topic_task_store
 from models.schemas import (
+    AdminAuthUser,
+    AdminAuthUserList,
     AdminSettingsResponse,
     AdminSettingsUpdateRequest,
     AdminWidgetTopicPage,
@@ -71,6 +74,27 @@ skills_router = APIRouter(prefix="/api/v1/dataagent", dependencies=[Depends(requ
 user_router = APIRouter(prefix="/api/v1/dataagent", dependencies=[Depends(require_user)])
 # 聊天页与 widget 依赖的三个只读 agents 端点必须保持公开（匿名嵌入场景）。
 agents_public_router = APIRouter(prefix="/api/v1/dataagent")
+
+
+def _catalog_identity(request: Request) -> AuthIdentity | None:
+    """公开 agents 目录端点的机会性身份解析。
+
+    遵循三分支客户端语义（docs/design/2026-07-01-dataagent-auth-design.md 3.2）：
+    仅 dataagent 独立 SPA 标记消费会话 Cookie/Bearer，widget 与门户嵌入页保持
+    匿名。无效会话降级为匿名而非 401 —— 公开端点保持公开，强制点在可见性过滤。
+    """
+    if not is_auth_enabled():
+        return None
+    client = str(request.headers.get("X-ODW-Client") or "").strip().lower()
+    if client != "dataagent":
+        return None
+    return resolve_identity(request)
+
+
+def _readable_agent_payload(profile: dict) -> dict:
+    """登录用户读侧只暴露 visibility 的 mode 摘要，allow-list 名单仅 admin 可见。"""
+    visibility = profile.get("visibility") or {}
+    return {**profile, "visibility_mode": str(visibility.get("mode") or "all")}
 
 
 def _provider_catalog() -> list[ProviderConfig]:
@@ -220,6 +244,18 @@ async def admin_list_widget_users(
     return AdminWidgetUserList(items=[AdminWidgetUser.model_validate(row) for row in rows])
 
 
+@settings_router.get("/auth-users", response_model=AdminAuthUserList)
+async def admin_list_auth_users(
+    keyword: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """Distinct authenticated users (derived from topic ownership) powering
+    the agent visibility allow-list picker. Supports server-side keyword
+    search over the stable user id and display name."""
+    rows = get_topic_task_store().admin_list_auth_users(keyword=keyword, limit=limit)
+    return AdminAuthUserList(items=[AdminAuthUser.model_validate(row) for row in rows])
+
+
 @settings_router.get("/widget-topics/{topic_id}/messages", response_model=TopicMessagePageResponse)
 async def admin_list_widget_topic_messages(
     topic_id: str,
@@ -255,13 +291,15 @@ async def get_data_scope_options():
 
 
 @agents_public_router.get("/agents", response_model=list[AgentCatalogProfile])
-async def get_agents():
-    return [AgentCatalogProfile.model_validate(item) for item in list_agent_profiles()]
+async def get_agents(request: Request):
+    profiles = filter_visible_agent_profiles(list_agent_profiles(), _catalog_identity(request))
+    return [AgentCatalogProfile.model_validate(item) for item in profiles]
 
 
 @user_router.get("/agents/profiles", response_model=list[AgentReadableProfile])
-async def get_readable_agent_profiles():
-    return [AgentReadableProfile.model_validate(item) for item in list_agent_profiles()]
+async def get_readable_agent_profiles(identity: AuthIdentity | None = Depends(require_user)):
+    profiles = filter_visible_agent_profiles(list_agent_profiles(), identity)
+    return [AgentReadableProfile.model_validate(_readable_agent_payload(item)) for item in profiles]
 
 
 @skills_router.post("/agents", response_model=AgentProfile)
@@ -277,19 +315,20 @@ async def create_agent(request: AgentProfileCreateRequest):
 
 
 @agents_public_router.get("/agents/{agent_id}", response_model=AgentCatalogProfile)
-async def get_agent(agent_id: str):
+async def get_agent(agent_id: str, request: Request):
     profile = get_agent_profile(agent_id)
-    if not profile:
+    # 不可见与不存在返回完全一致的 404，防助手存在性探测。
+    if not profile or not agent_visible_to(profile, _catalog_identity(request)):
         raise HTTPException(status_code=404, detail="agent not found")
     return AgentCatalogProfile.model_validate(profile)
 
 
 @user_router.get("/agents/{agent_id}/profile", response_model=AgentReadableProfile)
-async def get_readable_agent_profile(agent_id: str):
+async def get_readable_agent_profile(agent_id: str, identity: AuthIdentity | None = Depends(require_user)):
     profile = get_agent_profile(agent_id)
-    if not profile:
+    if not profile or not agent_visible_to(profile, identity):
         raise HTTPException(status_code=404, detail="agent not found")
-    return AgentReadableProfile.model_validate(profile)
+    return AgentReadableProfile.model_validate(_readable_agent_payload(profile))
 
 
 @skills_router.get("/agents/{agent_id}/configuration", response_model=AgentProfile)
@@ -301,16 +340,18 @@ async def get_agent_configuration(agent_id: str):
 
 
 @agents_public_router.get("/agents/{agent_id}/slash-commands", response_model=AgentSlashCommandsResponse)
-async def get_agent_slash_commands_endpoint(agent_id: str):
+async def get_agent_slash_commands_endpoint(agent_id: str, request: Request):
+    # Visibility must be enforced before consulting the slash-command cache,
+    # otherwise a cache hit would leak data about a hidden agent.
+    profile = get_agent_profile(agent_id)
+    if not profile or not agent_visible_to(profile, _catalog_identity(request)):
+        raise HTTPException(status_code=404, detail="agent not found")
     # Prefer the authoritative list captured from a real run's system/init message.
     cached = get_agent_slash_commands(agent_id)
     if cached is not None:
         return AgentSlashCommandsResponse(slash_commands=cached, source="sdk")
     # Cold start (no run has reported yet): fall back to the agent's enabled skill
     # folders, which the SDK also exposes as /<folder> commands.
-    profile = get_agent_profile(agent_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="agent not found")
     raw = profile.get("skill_folders")
     folders = [str(item).strip() for item in raw if str(item or "").strip()] if isinstance(raw, list) else []
     return AgentSlashCommandsResponse(slash_commands=folders, source="fallback")

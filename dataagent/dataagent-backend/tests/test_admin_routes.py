@@ -684,3 +684,129 @@ def test_admin_all_topics_forwards_filters(monkeypatch, tmp_path):
         assert bad_source.status_code == 422
     finally:
         auth.reset_auth_for_tests()
+
+
+def test_agent_visibility_scope_enforced_across_read_tiers(monkeypatch, tmp_path):
+    """可见范围矩阵：匿名只见 all 档；登录用户按 authenticated/selected 过滤；
+    admin 全量；不可见详情与 slash-commands 返回与不存在一致的 404。"""
+    auth = _enable_auth(monkeypatch, tmp_path)
+    try:
+        profiles = [
+            {"agent_id": "agent_open", "name": "开放", "skill_folders": ["demo"]},
+            {
+                "agent_id": "agent_auth",
+                "name": "仅登录",
+                "visibility": {"mode": "authenticated", "allowed_users": [], "allowed_groups": []},
+            },
+            {
+                "agent_id": "agent_sel",
+                "name": "指定用户",
+                "visibility": {"mode": "selected", "allowed_users": ["local:user"], "allowed_groups": []},
+            },
+            {
+                "agent_id": "agent_sel_other",
+                "name": "指定他人",
+                "visibility": {"mode": "selected", "allowed_users": ["SSO:someone-else"], "allowed_groups": []},
+            },
+        ]
+        by_id = {item["agent_id"]: item for item in profiles}
+        monkeypatch.setattr(admin_routes, "list_agent_profiles", lambda: list(profiles))
+        monkeypatch.setattr(admin_routes, "get_agent_profile", lambda agent_id: by_id.get(agent_id))
+        client = TestClient(app)
+
+        spa = {"X-ODW-Client": "dataagent"}
+        user_headers = {**_bearer(auth, role="user"), **spa}
+        admin_headers = {**_bearer(auth, role="admin"), **spa}
+
+        # 匿名（widget/门户嵌入，无 SPA 标记）：仅 mode=all 可见。
+        anonymous = client.get("/api/v1/dataagent/agents")
+        assert anonymous.status_code == 200
+        assert [item["agent_id"] for item in anonymous.json()] == ["agent_open"]
+        assert client.get("/api/v1/dataagent/agents/agent_auth").status_code == 404
+        assert client.get("/api/v1/dataagent/agents/agent_sel/slash-commands").status_code == 404
+
+        # 携带会话但无 dataagent SPA 标记：公开端点遵循三分支语义，保持匿名。
+        marked_less = client.get("/api/v1/dataagent/agents", headers=_bearer(auth, role="user"))
+        assert [item["agent_id"] for item in marked_less.json()] == ["agent_open"]
+
+        # 登录普通用户（SPA 标记 + 会话）：all + authenticated + selected 命中。
+        listed = client.get("/api/v1/dataagent/agents", headers=user_headers)
+        assert [item["agent_id"] for item in listed.json()] == ["agent_open", "agent_auth", "agent_sel"]
+        assert client.get("/api/v1/dataagent/agents/agent_sel", headers=user_headers).status_code == 200
+        assert client.get("/api/v1/dataagent/agents/agent_sel_other", headers=user_headers).status_code == 404
+        assert (
+            client.get("/api/v1/dataagent/agents/agent_sel_other/slash-commands", headers=user_headers).status_code
+            == 404
+        )
+
+        # 登录用户读侧只暴露 visibility_mode 摘要，不泄露 allowed_users 名单。
+        readable_list = client.get("/api/v1/dataagent/agents/profiles", headers=_bearer(auth, role="user"))
+        assert readable_list.status_code == 200
+        readable_ids = {item["agent_id"]: item for item in readable_list.json()}
+        assert set(readable_ids) == {"agent_open", "agent_auth", "agent_sel"}
+        assert readable_ids["agent_sel"]["visibility_mode"] == "selected"
+        assert "visibility" not in readable_ids["agent_sel"]
+        assert (
+            client.get("/api/v1/dataagent/agents/agent_sel_other/profile", headers=_bearer(auth, role="user")).status_code
+            == 404
+        )
+
+        # 目录 DTO 不因可见性新增泄露字段。
+        assert set(listed.json()[0]) == {
+            "agent_id", "name", "description", "is_default", "is_builtin", "preset_questions"
+        }
+
+        # admin：列表全量，configuration 返回完整 visibility 配置。
+        admin_listed = client.get("/api/v1/dataagent/agents", headers=admin_headers)
+        assert len(admin_listed.json()) == 4
+        configuration = client.get(
+            "/api/v1/dataagent/agents/agent_sel_other/configuration", headers=admin_headers
+        )
+        assert configuration.status_code == 200
+        assert configuration.json()["visibility"]["allowed_users"] == ["SSO:someone-else"]
+    finally:
+        auth.reset_auth_for_tests()
+
+
+def test_admin_auth_users_route_contract(monkeypatch, tmp_path):
+    auth = _enable_auth(monkeypatch, tmp_path)
+    try:
+        calls = []
+
+        class _FakeAuthUserStore:
+            def admin_list_auth_users(self, *, keyword=None, limit=100):
+                calls.append({"keyword": keyword, "limit": limit})
+                return [
+                    {
+                        "user_id": "SSO:42",
+                        "display_name": "alice",
+                        "topic_count": 3,
+                        "last_active_at": "2026-07-19T10:00:00",
+                    }
+                ]
+
+        monkeypatch.setattr(admin_routes, "get_topic_task_store", lambda: _FakeAuthUserStore())
+        client = TestClient(app)
+
+        assert client.get("/api/v1/nl2sql-admin/auth-users").status_code == 401
+        assert (
+            client.get("/api/v1/nl2sql-admin/auth-users", headers=_bearer(auth, role="user")).status_code == 403
+        )
+
+        response = client.get(
+            "/api/v1/nl2sql-admin/auth-users",
+            params={"keyword": "ali", "limit": 20},
+            headers=_bearer(auth, role="admin"),
+        )
+        assert response.status_code == 200
+        assert response.json()["items"] == [
+            {
+                "user_id": "SSO:42",
+                "display_name": "alice",
+                "topic_count": 3,
+                "last_active_at": "2026-07-19T10:00:00",
+            }
+        ]
+        assert calls == [{"keyword": "ali", "limit": 20}]
+    finally:
+        auth.reset_auth_for_tests()

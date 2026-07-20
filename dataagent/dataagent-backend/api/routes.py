@@ -12,7 +12,8 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from config import get_settings
 from core.agent_profile_service import DEFAULT_AGENT_ID, build_agent_snapshot, get_agent_profile
-from core.auth import is_auth_enabled, resolve_identity
+from core.agent_visibility import agent_visible_to
+from core.auth import AuthIdentity, is_auth_enabled, resolve_identity
 from core.followup_suggestions import generate_followup_suggestions
 from core.readonly_query_proxy import (
     QueryProxyConfigError,
@@ -284,7 +285,7 @@ async def api_create_topic(http_request: Request, request: CreateTopicRequest | 
     payload = request or CreateTopicRequest()
     if context.get("source") == "widget" and not str(payload.agent_id or "").strip():
         raise HTTPException(status_code=400, detail="agent_id is required for widget requests")
-    profile = _require_agent_profile(payload.agent_id)
+    profile = _require_agent_profile(payload.agent_id, context=context)
     topic = store.create_topic(
         title=str(payload.title or "").strip() or "新话题",
         agent_snapshot=build_agent_snapshot(profile),
@@ -1021,8 +1022,27 @@ def _require_topic(topic_id: str, context: dict[str, str] | None = None) -> dict
     return topic
 
 
-def _require_agent_profile(agent_id: str | None = None) -> dict:
+def _context_identity(context: dict | None) -> AuthIdentity | None:
+    """从 ``_request_context`` 结果还原认证身份。
+
+    仅 dataagent 独立 SPA 分支携带 ``auth_user_id``/``auth_role``；widget 与
+    门户嵌入的匿名上下文返回 None。
+    """
+    auth_user_id = str((context or {}).get("auth_user_id") or "").strip()
+    if not auth_user_id:
+        return None
+    return AuthIdentity(
+        user_id=auth_user_id,
+        display_name=str((context or {}).get("auth_display_name") or ""),
+        role=str((context or {}).get("auth_role") or "user"),
+        provider="",
+    )
+
+
+def _require_agent_profile(agent_id: str | None = None, context: dict | None = None) -> dict:
     profile = get_agent_profile(str(agent_id or "").strip() or DEFAULT_AGENT_ID)
-    if not profile:
+    # 可见范围在话题创建时强制（快照冻结点）；不可见与不存在返回同一文案，
+    # 防助手存在性探测。已有话题按快照继续，不追溯拦截。
+    if not profile or not agent_visible_to(profile, _context_identity(context)):
         raise HTTPException(status_code=400, detail="agent not found")
     return profile

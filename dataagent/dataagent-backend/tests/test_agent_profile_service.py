@@ -116,6 +116,73 @@ def test_normalize_agent_profile_payload_rejects_reserved_environment_keys():
         )
 
 
+def test_normalize_agent_profile_payload_defaults_visibility_to_all():
+    payload = agent_profile_service.normalize_agent_profile_payload(
+        {"name": "默认可见性智能体"},
+        available_skill_folders=set(),
+        available_mcp_server_ids=set(),
+    )
+
+    assert payload["visibility"] == {"mode": "all", "allowed_users": [], "allowed_groups": []}
+
+
+def test_normalize_agent_profile_payload_accepts_visibility_scope():
+    payload = agent_profile_service.normalize_agent_profile_payload(
+        {
+            "name": "受限智能体",
+            "visibility": {
+                "mode": "selected",
+                "allowed_users": ["SSO:42", "SSO:42", " local:alice "],
+            },
+        },
+        available_skill_folders=set(),
+        available_mcp_server_ids=set(),
+    )
+
+    assert payload["visibility"] == {
+        "mode": "selected",
+        "allowed_users": ["SSO:42", "local:alice"],
+        "allowed_groups": [],
+    }
+
+
+def test_normalize_agent_profile_payload_preserves_existing_visibility_on_partial_update():
+    existing = {
+        "name": "受限智能体",
+        "visibility": {"mode": "authenticated", "allowed_users": [], "allowed_groups": []},
+    }
+    payload = agent_profile_service.normalize_agent_profile_payload(
+        {"description": "只改描述"},
+        existing=existing,
+        available_skill_folders=set(),
+        available_mcp_server_ids=set(),
+    )
+
+    assert payload["visibility"]["mode"] == "authenticated"
+
+
+def test_normalize_agent_profile_payload_rejects_invalid_visibility_mode():
+    with pytest.raises(ValueError, match="invalid visibility mode"):
+        agent_profile_service.normalize_agent_profile_payload(
+            {"name": "非法可见性", "visibility": {"mode": "vip-only"}},
+            available_skill_folders=set(),
+            available_mcp_server_ids=set(),
+        )
+
+
+def test_build_agent_snapshot_excludes_visibility():
+    snapshot = agent_profile_service.build_agent_snapshot(
+        {
+            "agent_id": "agent_scoped",
+            "name": "受限智能体",
+            "visibility": {"mode": "selected", "allowed_users": ["SSO:42"], "allowed_groups": []},
+        }
+    )
+
+    # 快照供运行时消费，可见性只在实时 profile 上强制，避免话题携带过期副本。
+    assert "visibility" not in snapshot
+
+
 def test_build_agent_snapshot_keeps_runtime_fields_without_timestamps():
     snapshot = agent_profile_service.build_agent_snapshot(
         {

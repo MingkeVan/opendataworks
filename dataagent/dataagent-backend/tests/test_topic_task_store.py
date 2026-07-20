@@ -544,3 +544,54 @@ def test_create_topic_writes_auth_owner(monkeypatch):
     store.create_topic(title="匿名会话", context={"source": "portal"})
     _, params = conn.executed[0]
     assert params[-2:] == ["", ""]
+
+
+def test_admin_list_auth_users_groups_by_stable_id_and_forwards_keyword(monkeypatch):
+    class FakeCursor:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params):
+            self.conn.executed.append((sql, list(params)))
+
+        def fetchall(self):
+            return [
+                {"user_id": "SSO:42", "display_name": "alice", "topic_count": 3, "last_active_at": None},
+                {"user_id": "", "display_name": "", "topic_count": 1, "last_active_at": None},
+            ]
+
+    class FakeConnection:
+        def __init__(self):
+            self.executed = []
+
+        def cursor(self):
+            return FakeCursor(self)
+
+        def close(self):
+            return None
+
+    store = TopicTaskStore()
+    conn = FakeConnection()
+    monkeypatch.setattr(store, "_ensure_ready", lambda: None)
+    monkeypatch.setattr(store, "_connect", lambda database: conn)
+
+    users = store.admin_list_auth_users(keyword="ali", limit=50)
+
+    # 无 user_id 的行被丢弃；计数强制为 int；时间转 ISO 字符串。
+    assert users == [
+        {"user_id": "SSO:42", "display_name": "alice", "topic_count": 3, "last_active_at": ""}
+    ]
+
+    sql, params = conn.executed[0]
+    assert "GROUP BY t.auth_user_id" in sql
+    assert "NULLIF(t.auth_user_id, '') IS NOT NULL" in sql
+    # keyword 同时匹配稳定 ID 与展示名（LIKE 两次）+ limit。
+    assert params == ["%ali%", "%ali%", 50]
+    # 管理侧查询不得复用按用户隔离谓词。
+    assert "COALESCE(t.source" not in sql
