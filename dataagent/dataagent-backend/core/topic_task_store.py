@@ -759,6 +759,66 @@ class TopicTaskStore:
             )
         return users
 
+    def admin_list_auth_users(
+        self,
+        *,
+        keyword: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Distinct authenticated users derived from topic ownership
+        (``auth_user_id`` / ``auth_username``), powering the agent visibility
+        allow-list picker. Supports server-side keyword search over both the
+        stable id and the display name, most recently active first."""
+        self._ensure_ready()
+        filters: list[str] = ["NULLIF(t.auth_user_id, '') IS NOT NULL"]
+        params: list[Any] = []
+
+        safe_keyword = str(keyword or "").strip()
+        if safe_keyword:
+            filters.append("(t.auth_user_id LIKE %s OR t.auth_username LIKE %s)")
+            params.append(f"%{safe_keyword}%")
+            params.append(f"%{safe_keyword}%")
+
+        where_sql = " AND ".join(filters)
+        safe_limit = max(1, min(500, int(limit or 100)))
+
+        conn = self._connect(database=self._schema_name())
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT
+                        t.auth_user_id AS user_id,
+                        MAX(NULLIF(t.auth_username, '')) AS display_name,
+                        COUNT(*) AS topic_count,
+                        MAX(t.updated_at) AS last_active_at
+                    FROM da_agent_topic t
+                    WHERE {where_sql}
+                    GROUP BY t.auth_user_id
+                    ORDER BY last_active_at DESC, topic_count DESC
+                    LIMIT %s
+                    """,
+                    [*params, safe_limit],
+                )
+                rows = cur.fetchall() or []
+        finally:
+            conn.close()
+
+        users: list[dict[str, Any]] = []
+        for row in rows:
+            user_id = str(row.get("user_id") or "").strip()
+            if not user_id:
+                continue
+            users.append(
+                {
+                    "user_id": user_id,
+                    "display_name": str(row.get("display_name") or ""),
+                    "topic_count": int(row.get("topic_count") or 0),
+                    "last_active_at": _to_iso(row.get("last_active_at")),
+                }
+            )
+        return users
+
     def get_topic(self, topic_id: str, context: dict[str, Any] | None = None) -> dict[str, Any] | None:
         self._ensure_ready()
         context_sql, context_params = self._topic_context_predicate(context, alias="t")

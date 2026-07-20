@@ -1212,3 +1212,65 @@ def test_message_queue_and_schedule_routes(monkeypatch):
         assert logs.json()["list"][0]["task_id"] == "task-from-schedule"
 
         assert client.delete(f"/api/v1/nl2sql/message-schedule/{schedule_id}").status_code == 200
+
+
+def test_create_topic_enforces_agent_visibility_for_anonymous(monkeypatch):
+    """话题创建是可见范围的强制点：匿名 portal 上下文只能使用 mode=all 的助手，
+    不可见与不存在返回同一 400 文案。已有话题按快照继续（不在本用例范围）。"""
+    client, store, coordinator, submit_calls = _build_client(monkeypatch)
+    # 仅打开可见性判定的 auth 开关；routes 侧 auth 仍关闭 → 请求走匿名 portal 上下文。
+    monkeypatch.setattr("core.agent_visibility.is_auth_enabled", lambda: True)
+
+    open_agent = {**DEFAULT_AGENT, "agent_id": "agent_open", "is_default": False}
+    restricted = {
+        **DEFAULT_AGENT,
+        "agent_id": "agent_restricted",
+        "is_default": False,
+        "visibility": {"mode": "authenticated", "allowed_users": [], "allowed_groups": []},
+    }
+    by_id = {"agent_open": open_agent, "agent_restricted": restricted}
+    monkeypatch.setattr(routes, "get_agent_profile", lambda agent_id: by_id.get(agent_id))
+
+    with client:
+        allowed = client.post("/api/v1/nl2sql/topics", json={"agent_id": "agent_open"})
+        assert allowed.status_code == 200
+
+        blocked = client.post("/api/v1/nl2sql/topics", json={"agent_id": "agent_restricted"})
+        assert blocked.status_code == 400
+        assert blocked.json()["detail"] == "agent not found"
+
+        missing = client.post("/api/v1/nl2sql/topics", json={"agent_id": "agent_ghost"})
+        assert missing.status_code == 400
+        assert missing.json()["detail"] == blocked.json()["detail"]
+
+
+def test_require_agent_profile_visibility_matrix_by_context(monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr("core.agent_visibility.is_auth_enabled", lambda: True)
+    selected = {
+        **DEFAULT_AGENT,
+        "agent_id": "agent_selected",
+        "is_default": False,
+        "visibility": {"mode": "selected", "allowed_users": ["SSO:42"], "allowed_groups": []},
+    }
+    monkeypatch.setattr(
+        routes, "get_agent_profile", lambda agent_id: selected if agent_id == "agent_selected" else None
+    )
+
+    member_context = {"auth_user_id": "SSO:42", "auth_display_name": "alice", "auth_role": "user"}
+    assert routes._require_agent_profile("agent_selected", context=member_context)["agent_id"] == "agent_selected"
+
+    admin_context = {"auth_user_id": "local:admin", "auth_display_name": "admin", "auth_role": "admin"}
+    assert routes._require_agent_profile("agent_selected", context=admin_context)["agent_id"] == "agent_selected"
+
+    outsider_context = {"auth_user_id": "SSO:99", "auth_display_name": "bob", "auth_role": "user"}
+    with pytest.raises(HTTPException) as excinfo:
+        routes._require_agent_profile("agent_selected", context=outsider_context)
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "agent not found"
+
+    # widget/门户匿名上下文（无 auth_user_id）→ 不可见。
+    with pytest.raises(HTTPException):
+        routes._require_agent_profile("agent_selected", context={"source": "widget"})

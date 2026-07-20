@@ -424,6 +424,7 @@ class AgentProfileBase(BaseModel):
     max_turns: Optional[int] = None
     env_vars: Optional[Dict[str, str]] = None
     data_scope: Optional[Dict[str, Any]] = None
+    visibility: Optional[Dict[str, Any]] = None
     preset_questions: Optional[List[str]] = None
 
 
@@ -472,13 +473,18 @@ class AgentProfile(BaseModel):
     max_turns: int = 0
     env_vars: Dict[str, str] = Field(default_factory=dict)
     data_scope: Dict[str, Any] = Field(default_factory=lambda: {"allowed_scopes": []})
+    visibility: Dict[str, Any] = Field(
+        default_factory=lambda: {"mode": "all", "allowed_users": [], "allowed_groups": []}
+    )
     preset_questions: List[str] = Field(default_factory=list)
     is_default: bool = False
     is_builtin: bool = False
 
 
 class AgentReadableProfile(BaseModel):
-    """Authenticated read-only profile. Environment variables stay admin-only."""
+    """Authenticated read-only profile. Environment variables stay admin-only;
+    the visibility allow-list is admin-only too — non-admin readers only get
+    the ``visibility_mode`` summary."""
 
     agent_id: str
     name: str
@@ -489,6 +495,7 @@ class AgentReadableProfile(BaseModel):
     skill_folders: List[str] = Field(default_factory=list)
     max_turns: int = 0
     data_scope: Dict[str, Any] = Field(default_factory=lambda: {"allowed_scopes": []})
+    visibility_mode: str = "all"
     preset_questions: List[str] = Field(default_factory=list)
     is_default: bool = False
     is_builtin: bool = False
@@ -615,6 +622,20 @@ class AdminWidgetUser(BaseModel):
 
 class AdminWidgetUserList(BaseModel):
     items: List[AdminWidgetUser] = Field(default_factory=list)
+
+
+class AdminAuthUser(BaseModel):
+    """A distinct authenticated user (namespaced stable id from topic
+    ownership) for the agent visibility allow-list picker."""
+
+    user_id: str = ""
+    display_name: str = ""
+    topic_count: int = 0
+    last_active_at: str = ""
+
+
+class AdminAuthUserList(BaseModel):
+    items: List[AdminAuthUser] = Field(default_factory=list)
 
 
 class UpdateMessageFeedbackRequest(BaseModel):

@@ -10,6 +10,7 @@ from typing import Any
 import pymysql
 
 from config import get_settings
+from core.agent_visibility import normalize_agent_visibility
 from core.data_scope import normalize_data_scope
 
 DEFAULT_AGENT_ID = "agent_default"
@@ -223,6 +224,9 @@ def normalize_agent_profile_payload(
     max_turns = _validate_max_turns(data.get("max_turns", base.get("max_turns") or 0))
     env_vars = _validate_env_vars(data.get("env_vars", base.get("env_vars") or {}))
     data_scope = normalize_data_scope(data.get("data_scope", base.get("data_scope") or {}))
+    visibility = normalize_agent_visibility(
+        data.get("visibility", base.get("visibility") or {}), strict=True
+    )
     raw_questions = data.get("preset_questions", base.get("preset_questions") or [])
     preset_questions = _validate_preset_questions(raw_questions)
 
@@ -236,6 +240,7 @@ def normalize_agent_profile_payload(
         "max_turns": max_turns,
         "env_vars": env_vars,
         "data_scope": data_scope,
+        "visibility": visibility,
         "preset_questions": preset_questions,
     }
 
@@ -399,6 +404,7 @@ class AgentProfileStore:
             "max_turns": int(row.get("max_turns") or 0),
             "env_vars": _validate_env_vars(_safe_json_load(row.get("env_vars_json"), {})),
             "data_scope": normalize_data_scope(_safe_json_load(row.get("data_scope_json"), {})),
+            "visibility": normalize_agent_visibility(_safe_json_load(row.get("visibility_json"), {})),
             "preset_questions": _validate_preset_questions(_safe_json_load(row.get("preset_questions_json"), [])),
             "is_default": bool(row.get("is_default")),
             "is_builtin": bool(row.get("is_builtin")),
@@ -416,7 +422,8 @@ class AgentProfileStore:
                     """
                     SELECT agent_id, name, description, system_prompt,
                            allowed_tools_json, mcp_server_ids_json, skill_folders_json,
-                           max_turns, env_vars_json, data_scope_json, preset_questions_json,
+                           max_turns, env_vars_json, data_scope_json, visibility_json,
+                           preset_questions_json,
                            is_default, is_builtin, created_at, updated_at
                     FROM da_agent_profile
                     ORDER BY is_builtin DESC, is_default DESC, updated_at DESC, created_at DESC
@@ -436,7 +443,8 @@ class AgentProfileStore:
                     """
                     SELECT agent_id, name, description, system_prompt,
                            allowed_tools_json, mcp_server_ids_json, skill_folders_json,
-                           max_turns, env_vars_json, data_scope_json, preset_questions_json,
+                           max_turns, env_vars_json, data_scope_json, visibility_json,
+                           preset_questions_json,
                            is_default, is_builtin, created_at, updated_at
                     FROM da_agent_profile
                     WHERE agent_id = %s
@@ -464,9 +472,10 @@ class AgentProfileStore:
                     INSERT INTO da_agent_profile (
                         agent_id, name, description, system_prompt,
                         allowed_tools_json, mcp_server_ids_json, skill_folders_json,
-                        max_turns, env_vars_json, data_scope_json, preset_questions_json,
+                        max_turns, env_vars_json, data_scope_json, visibility_json,
+                        preset_questions_json,
                         is_default, is_builtin
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         name = VALUES(name),
                         description = VALUES(description),
@@ -477,6 +486,7 @@ class AgentProfileStore:
                         max_turns = VALUES(max_turns),
                         env_vars_json = VALUES(env_vars_json),
                         data_scope_json = VALUES(data_scope_json),
+                        visibility_json = VALUES(visibility_json),
                         preset_questions_json = VALUES(preset_questions_json),
                         is_default = VALUES(is_default),
                         is_builtin = VALUES(is_builtin),
@@ -493,6 +503,7 @@ class AgentProfileStore:
                         int(profile.get("max_turns") or 0),
                         _json_dump(_validate_env_vars(profile.get("env_vars") or {})),
                         _json_dump(normalize_data_scope(profile.get("data_scope") or {})),
+                        _json_dump(normalize_agent_visibility(profile.get("visibility") or {})),
                         _json_dump(_validate_preset_questions(profile.get("preset_questions") or [])),
                         1 if is_default else 0,
                         1 if is_builtin else 0,

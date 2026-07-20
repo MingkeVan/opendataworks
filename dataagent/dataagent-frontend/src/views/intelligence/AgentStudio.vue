@@ -22,6 +22,7 @@
             <div class="agent-card-tags">
               <el-tag v-if="agent.is_default" size="small" type="info">默认</el-tag>
               <span v-if="agent.is_default || agent.is_builtin" class="agent-built-in-tag">内置</span>
+              <el-tag v-if="visibilityTag(agent)" size="small" type="warning">{{ visibilityTag(agent) }}</el-tag>
             </div>
           </div>
           <p>{{ agent.description || '未配置描述' }}</p>
@@ -70,6 +71,10 @@ const loading = ref(false)
 const creating = ref(false)
 
 const isBuiltinAgent = (agent) => Boolean(agent?.is_builtin || agent?.is_default)
+
+// 全部可见（默认）不加标签，仅受限模式提示可见范围。
+const VISIBILITY_TAG_LABELS = { authenticated: '仅登录用户', selected: '指定用户' }
+const visibilityTag = (agent) => VISIBILITY_TAG_LABELS[String(agent?.visibility_mode || '')] || ''
 
 const loadAgents = async () => {
   loading.value = true
