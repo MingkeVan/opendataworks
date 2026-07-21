@@ -236,7 +236,21 @@
               <div class="query-config-empty-title">还没有可用的模型</div>
               <div class="query-config-empty-text">请先完成模型配置。</div>
             </div>
-            <div class="query-landing-greeting">您好，我是{{ agentName }}。</div>
+            <div class="query-landing-greeting">您好，我是<span class="query-landing-agent-name">{{ agentName }}</span>。</div>
+
+            <div class="query-landing-suggestions-title">您可以问我以下问题</div>
+            <div class="query-suggestions">
+              <button
+                v-for="suggestion in suggestions"
+                :key="suggestion"
+                class="query-suggestion-pill"
+                type="button"
+                :disabled="isBusy"
+                @click="handleSuggestion(suggestion)"
+              >
+                {{ suggestion }}
+              </button>
+            </div>
           </template>
 
           <!-- Input pill -->
@@ -330,21 +344,6 @@
             </div>
           </div>
 
-          <template v-if="!messages.length">
-            <div class="query-landing-suggestions-title">您可以问我以下问题</div>
-            <div class="query-suggestions">
-              <button
-                v-for="suggestion in suggestions"
-                :key="suggestion"
-                class="query-suggestion"
-                type="button"
-                :disabled="isBusy"
-                @click="handleSuggestion(suggestion)"
-              >
-                {{ suggestion }}
-              </button>
-            </div>
-          </template>
         </div>
       </form>
     </main>

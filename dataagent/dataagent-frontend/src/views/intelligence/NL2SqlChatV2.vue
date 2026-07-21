@@ -52,7 +52,10 @@
             :value="agent.agent_id"
           />
         </el-select>
-        <button v-if="!isWidgetMode" class="v2-btn-new" @click="handleNewTopic">新建</button>
+        <button v-if="!isWidgetMode" class="v2-btn-new" @click="handleNewTopic">
+          <svg class="v2-btn-new-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+          新建会话
+        </button>
       </div>
 
       <div class="v2-sidebar-toolbar">
@@ -417,7 +420,18 @@
               <div class="v2-config-empty-title">还没有可用的模型</div>
               <div class="v2-config-empty-text">请先完成模型配置。</div>
             </div>
-            <div class="v2-landing-greeting">您好，我是{{ currentAgentName }}。</div>
+            <div class="v2-landing-greeting">您好，我是<span class="v2-landing-agent-name">{{ currentAgentName }}</span>。</div>
+
+            <div class="v2-landing-suggestions-title">您可以问我以下问题</div>
+            <div class="v2-landing-suggestions">
+              <button
+                v-for="s in suggestions"
+                :key="s"
+                class="v2-suggestion-pill"
+                :disabled="isStreaming"
+                @click="handleSuggestion(s)"
+              >{{ s }}</button>
+            </div>
           </template>
 
           <!-- Attachment chips -->
@@ -534,18 +548,6 @@
             </div>
           </div>
 
-          <template v-if="!messages.length">
-            <div class="v2-landing-suggestions-title">您可以问我以下问题</div>
-            <div class="v2-landing-suggestions">
-              <button
-                v-for="s in suggestions"
-                :key="s"
-                class="v2-suggestion-card"
-                :disabled="isStreaming"
-                @click="handleSuggestion(s)"
-              >{{ s }}</button>
-            </div>
-          </template>
         </div>
       </div>
     </main>
@@ -2139,14 +2141,13 @@ onBeforeUnmount(() => {
 
 .v2-sidebar-head {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
   padding: 4px 8px 16px;
 }
 
 .v2-agent-select {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
 }
 
 .v2-agent-icon {
@@ -2155,18 +2156,26 @@ onBeforeUnmount(() => {
 }
 
 .v2-btn-new {
-  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
   padding: 6px 12px;
   border: none;
   border-radius: 6px;
-  background: var(--odw-primary);
+  background: #409EFF;
   color: #fff;
   font-size: 13px;
   cursor: pointer;
   transition: background var(--odw-transition);
 }
 
-.v2-btn-new:hover { background: var(--odw-primary-light); }
+.v2-btn-new-icon {
+  flex-shrink: 0;
+}
+
+.v2-btn-new:hover { background: #66b1ff; }
 
 /* ── Source tabs + filter ────────────────────────────────────────────────── */
 .v2-sidebar-toolbar {
@@ -2410,24 +2419,58 @@ onBeforeUnmount(() => {
   color: #1e293b;
   text-align: center;
   letter-spacing: -0.2px;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
+}
+
+.v2-landing-agent-name {
+  color: #409EFF;
 }
 
 .v2-landing-suggestions-title {
   text-align: center;
   color: #64748b;
   font-size: 13px;
-  margin-top: 24px;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
+  margin-top: 0;
 }
 
 .v2-landing-suggestions {
   width: 100%;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 10px;
+  margin-bottom: 28px;
 }
 
+.v2-suggestion-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 14px;
+  border: 1px solid #409EFF;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #409EFF;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+}
+
+.v2-suggestion-pill:hover:not(:disabled) {
+  background: #409EFF;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.25);
+}
+
+.v2-suggestion-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* kept for backwards compatibility */
 .v2-suggestion-card {
   text-align: left;
   padding: 14px 16px;
