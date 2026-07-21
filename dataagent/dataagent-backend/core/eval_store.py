@@ -428,10 +428,28 @@ class EvalStore:
                 metrics = {}
             row["intent_accuracy"] = _ratio_value(metrics, "intent_accuracy")
             row["ontology_accuracy"] = _ratio_value(metrics, "ontology_accuracy")
+            row["relation_accuracy"] = _ratio_value(metrics, "relation_accuracy")
             row["hallucination_rate"] = float(metrics.get("hallucination_rate") or 0)
             row["result_consistency_rate"] = _ratio_value(metrics, "result_consistency_rate")
             row["data_accuracy"] = _ratio_value(metrics, "data_accuracy")
             row["effective_pass_rate"] = _ratio_value(metrics, "effective_pass_rate")
+            row["completion_rate"] = _ratio_value(metrics, "completion_rate")
+            row["time_accuracy"] = _ratio_value(metrics, "time_accuracy")
+            row["answer_accuracy"] = _ratio_value(metrics, "answer_accuracy")
+            row["tool_sql_accuracy"] = _ratio_value(metrics, "tool_sql_accuracy")
+            timing = metrics.get("timing") if isinstance(metrics.get("timing"), dict) else {}
+            row["avg_e2e_seconds"] = _nested_value(timing, "e2e_seconds", "average")
+            row["p90_e2e_seconds"] = _nested_value(timing, "e2e_seconds", "p90")
+            row["avg_execution_seconds"] = _nested_value(timing, "execution_seconds", "average")
+            row["avg_judge_seconds"] = _nested_value(timing, "judge_seconds", "average")
+            counts = metrics.get("counts") if isinstance(metrics.get("counts"), dict) else {}
+            row["avg_agent_turns"] = _nested_value(counts, "agent_turn_count", "average")
+            row["avg_user_turns"] = _nested_value(counts, "user_turn_count", "average")
+            row["avg_tool_calls"] = _nested_value(counts, "tool_call_count", "average")
+            row["avg_sql_executions"] = _nested_value(counts, "sql_execution_count", "average")
+            row["avg_input_tokens"] = _nested_value(counts, "input_tokens", "average")
+            row["avg_output_tokens"] = _nested_value(counts, "output_tokens", "average")
+            row["avg_cache_tokens"] = _nested_value(counts, "cache_tokens", "average")
             row["time"] = str(row.get("started_at") or row.get("ingested_at") or "")
         return rows
 
@@ -444,6 +462,14 @@ def _ratio_value(metrics: dict, key: str) -> float | None:
         v = raw.get("value")
         return float(v) if v is not None else None
     return float(raw)
+
+
+def _nested_value(group: dict, key: str, stat: str) -> float | None:
+    entry = group.get(key)
+    if not isinstance(entry, dict):
+        return None
+    value = entry.get(stat)
+    return float(value) if isinstance(value, (int, float)) else None
 
 
 _instance: EvalStore | None = None
