@@ -125,6 +125,30 @@ export const routes = [
         name: 'IntelligentQueryWidget',
         component: () => import('@/views/settings/WidgetAccessConfig.vue'),
         meta: { tab: 'widget', title: 'Widget 接入', adminOnly: true }
+      },
+      {
+        path: 'evaluations',
+        name: 'EvaluationSets',
+        component: () => import('@/views/evaluation/EvaluationSetsView.vue'),
+        meta: { tab: 'evaluations', title: '评测集', adminOnly: true }
+      },
+      {
+        path: 'evaluations/:datasetId',
+        name: 'EvaluationSetDetail',
+        component: () => import('@/views/evaluation/EvaluationSetDetailView.vue'),
+        meta: { tab: 'evaluations', title: '评测集详情', adminOnly: true }
+      },
+      {
+        path: 'evaluation-results',
+        name: 'EvaluationResults',
+        component: () => import('@/views/evaluation/EvaluationResultsView.vue'),
+        meta: { tab: 'eval-results', title: '评测结果', adminOnly: true }
+      },
+      {
+        path: 'evaluation-results/:runId',
+        name: 'EvaluationRunDetail',
+        component: () => import('@/views/evaluation/EvaluationRunDetailView.vue'),
+        meta: { tab: 'eval-results', title: '评测运行详情', adminOnly: true }
       }
     ]
   },

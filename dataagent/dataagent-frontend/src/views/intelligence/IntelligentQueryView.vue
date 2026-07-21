@@ -35,6 +35,14 @@
             <el-icon><Monitor /></el-icon>
             <span>Widget 接入</span>
           </el-menu-item>
+          <el-menu-item index="evaluations">
+            <el-icon><DataBoard /></el-icon>
+            <span>评测集</span>
+          </el-menu-item>
+          <el-menu-item index="eval-results">
+            <el-icon><TrendCharts /></el-icon>
+            <span>评测结果</span>
+          </el-menu-item>
         </template>
       </el-menu>
       <div v-if="authStore.enabled && authStore.currentUser" class="intelligent-query-user">
@@ -61,7 +69,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Collection, Cpu, MagicStick, Monitor, User } from '@element-plus/icons-vue'
+import { Collection, Cpu, DataBoard, MagicStick, Monitor, TrendCharts, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { withAgentContext } from '@/router/agentContext'
 
@@ -83,7 +91,9 @@ const MENU_TO_PATH = {
   skills: '/skills',
   agents: '/agents',
   models: '/models',
-  widget: '/widget-access'
+  widget: '/widget-access',
+  evaluations: '/evaluations',
+  'eval-results': '/evaluation-results'
 }
 
 const brandLogo = `${import.meta.env.BASE_URL}opendataworks-icon.svg`

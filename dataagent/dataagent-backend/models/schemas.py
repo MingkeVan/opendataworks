@@ -791,3 +791,176 @@ class WidgetEventIngestResponse(BaseModel):
 
 
 TableMeta.model_rebuild()
+
+
+# ---- Evaluation ----
+
+class EvalDatasetSummary(BaseModel):
+    dataset_id: str
+    name: str
+    description: str = ""
+    category: str = ""
+    suite_tags: Any = Field(default_factory=list)
+    case_count: int = 0
+    dataset_hash: str = ""
+    status: str = "active"
+    created_by: str = ""
+    created_at: Any = None
+    updated_at: Any = None
+
+
+class EvalDatasetCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    category: str = ""
+    suite_tags: List[str] = Field(default_factory=list)
+
+
+class EvalDatasetUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    suite_tags: Optional[List[str]] = None
+    status: Optional[str] = None
+
+
+class EvalCaseSummary(BaseModel):
+    id: int = 0
+    dataset_id: str = ""
+    case_id: str = ""
+    case_type: str = ""
+    category: str = ""
+    suite_tags: Any = Field(default_factory=list)
+    question: str = ""
+    updated_at: Any = None
+
+
+class EvalCaseDetail(BaseModel):
+    id: int = 0
+    dataset_id: str = ""
+    case_id: str = ""
+    case_type: str = ""
+    category: str = ""
+    suite_tags: Any = Field(default_factory=list)
+    question: str = ""
+    turns: Any = None
+    case_json: Any = None
+    updated_at: Any = None
+
+
+class EvalCaseUpsertRequest(BaseModel):
+    case_json: Dict[str, Any]
+
+
+class EvalCasesReplaceRequest(BaseModel):
+    cases: List[Dict[str, Any]]
+
+
+class EvalImportResponse(BaseModel):
+    dataset_id: str
+    name: str
+    case_count: int = 0
+    dataset_hash: str = ""
+    errors: List[str] = Field(default_factory=list)
+
+
+class EvalRunSummary(BaseModel):
+    run_id: str
+    dataset_id: str = ""
+    dataset_hash: str = ""
+    run_label: str = ""
+    environment_label: str = ""
+    evaluation_engine: str = ""
+    engine_version: str = ""
+    model: str = ""
+    judge_model: str = ""
+    run_status: str = ""
+    passed: bool = False
+    recommendation: str = ""
+    total_cases: int = 0
+    passed_cases: int = 0
+    failed_cases: int = 0
+    average_score: float = 0.0
+    started_at: Any = None
+    ingested_at: Any = None
+
+
+class EvalRunDetail(BaseModel):
+    run_id: str
+    dataset_id: str = ""
+    dataset_hash: str = ""
+    run_label: str = ""
+    environment_label: str = ""
+    evaluation_engine: str = ""
+    engine_version: str = ""
+    model: str = ""
+    judge_model: str = ""
+    judge_prompt_version: str = ""
+    metric_semantics_version: str = ""
+    concurrency: int = 1
+    run_status: str = ""
+    passed: bool = False
+    recommendation: str = ""
+    total_cases: int = 0
+    passed_cases: int = 0
+    failed_cases: int = 0
+    veto_count: int = 0
+    judge_failed_count: int = 0
+    average_score: float = 0.0
+    metrics_json: Any = None
+    summary_json: Any = None
+    started_at: Any = None
+    ingested_at: Any = None
+
+
+class EvalRunIngestRequest(BaseModel):
+    run_id: Optional[str] = None
+    started_at: Optional[str] = None
+    summary: Dict[str, Any]
+    cases: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class EvalRunCaseSummary(BaseModel):
+    id: int = 0
+    run_id: str = ""
+    case_id: str = ""
+    category: str = ""
+    score: float = 0.0
+    case_passed: bool = False
+    task_status: str = ""
+    hallucination: bool = False
+    dimension_scores_json: Any = None
+
+
+class EvalRunCaseDetail(BaseModel):
+    id: int = 0
+    run_id: str = ""
+    case_id: str = ""
+    category: str = ""
+    score: float = 0.0
+    case_passed: bool = False
+    task_status: str = ""
+    hallucination: bool = False
+    dimension_scores_json: Any = None
+    case_json: Any = None
+
+
+class EvalTrendPoint(BaseModel):
+    run_id: str = ""
+    run_label: str = ""
+    evaluation_engine: str = ""
+    model: str = ""
+    average_score: float = 0.0
+    passed: bool = False
+    total_cases: int = 0
+    passed_cases: int = 0
+    failed_cases: int = 0
+    intent_accuracy: Optional[float] = None
+    ontology_accuracy: Optional[float] = None
+    hallucination_rate: float = 0.0
+    result_consistency_rate: Optional[float] = None
+    data_accuracy: Optional[float] = None
+    effective_pass_rate: Optional[float] = None
+    time: str = ""
+    started_at: Any = None
+    ingested_at: Any = None

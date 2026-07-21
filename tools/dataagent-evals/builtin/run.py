@@ -168,6 +168,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--history-root", default=os.environ.get("DATAAGENT_EVAL_HISTORY_ROOT", ""))
     parser.add_argument("--agent-snapshot-path", default=os.environ.get("DATAAGENT_EVAL_AGENT_SNAPSHOT_PATH", ""))
     parser.add_argument("--auth-token", default=os.environ.get("DATAAGENT_EVAL_AUTH_TOKEN", ""), help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--report-endpoint",
+        default=os.environ.get("DATAAGENT_EVAL_REPORT_ENDPOINT", ""),
+        help="Optional URL to POST summary+cases for DB ingestion (e.g. http://host:8900/api/v1/nl2sql-eval/runs).",
+    )
     return parser.parse_args(argv)
 
 
@@ -371,8 +376,11 @@ def preflight(base_url: str, auth_token: str = "") -> dict[str, Any]:
         if not _DATAAGENT_AUTH_TOKEN:
             raise InfrastructureAbort("dataagent_auth_token_missing: DATAAGENT_EVAL_AUTH_TOKEN is required")
         identity = dataagent_http_json("GET", f"{base_url}/api/v1/nl2sql/auth/me", timeout=15)
+        if isinstance(identity.get("data"), dict):
+            identity = identity["data"]
+        role = str(identity.get("role") or "").lower()
         roles = identity.get("roles") if isinstance(identity.get("roles"), list) else []
-        is_admin = bool(identity.get("is_admin")) or "admin" in {str(role).lower() for role in roles}
+        is_admin = role == "admin" or bool(identity.get("is_admin")) or "admin" in {str(r).lower() for r in roles}
         if not is_admin:
             raise InfrastructureAbort("dataagent_auth_not_admin: evaluation requires an administrator session")
     return {"auth": {"auth_enabled": auth_enabled, "identity_role": "admin" if identity else None}, "health": health, "runtime_config": runtime_config}
@@ -2013,6 +2021,31 @@ def render_report(summary: dict[str, Any], results: list[dict[str, Any]]) -> str
     return "\n".join(lines)
 
 
+def _report_to_endpoint(endpoint: str, summary: dict[str, Any], results: list[dict[str, Any]],
+                        started_at: str = "") -> None:
+    """Best-effort POST of run results to the eval ingestion API."""
+    if not endpoint:
+        return
+    payload = json.dumps({
+        "summary": summary,
+        "cases": results,
+        "started_at": started_at,
+    }, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    if _DATAAGENT_AUTH_TOKEN:
+        req.add_header("Authorization", f"Bearer {_DATAAGENT_AUTH_TOKEN}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            print(f"report uploaded to {endpoint}: {resp.status}")
+    except Exception as exc:
+        print(f"WARNING: report upload to {endpoint} failed: {exc}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.concurrency < 1:
@@ -2032,8 +2065,11 @@ def main(argv: list[str] | None = None) -> int:
     if not output_dir.is_absolute():
         output_dir = root / output_dir
 
+    report_endpoint = str(getattr(args, "report_endpoint", "") or "").strip()
+
     try:
         cases, dataset_stats = load_dataset(dataset_path, args.case_ids)
+        run_started_at = dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         dataset_stats.update({
             "run_label": str(args.run_label or "") or _timestamp(),
             "environment_label": str(args.environment_label or "local"),
@@ -2062,10 +2098,12 @@ def main(argv: list[str] | None = None) -> int:
             summary = build_summary(results, dataset_stats) if results else build_summary([], dataset_stats, dry_run=True)
             summary.update({"dry_run": False, "run_status": "infra_failed", "passed": False, "recommendation": "基础设施失败", "infrastructure_error": str(exc)})
             write_outputs(output_dir, results, summary)
+            _report_to_endpoint(report_endpoint, summary, results, started_at=run_started_at)
             print(str(exc), file=sys.stderr)
             return 2
         summary = build_summary(results, dataset_stats)
         write_outputs(output_dir, results, summary)
+        _report_to_endpoint(report_endpoint, summary, results, started_at=run_started_at)
         print(f"eval outputs written to: {output_dir}")
         return 0 if summary.get("passed") else 1
     except EvalRunnerError as exc:

@@ -144,5 +144,95 @@ export const dataagentApi = {
 
   getWidgetTopicMessages(topicId, params = {}) {
     return dataagentRequest.get(`/v1/nl2sql-admin/widget-topics/${encodeURIComponent(topicId)}/messages`, { params })
+  },
+
+  // ---- Evaluation datasets ----
+
+  listEvalDatasets(params = {}) {
+    return dataagentRequest.get('/v1/nl2sql-eval/datasets', { params })
+  },
+
+  getEvalDataset(datasetId) {
+    return dataagentRequest.get(`/v1/nl2sql-eval/datasets/${encodeURIComponent(datasetId)}`)
+  },
+
+  createEvalDataset(data) {
+    return dataagentRequest.post('/v1/nl2sql-eval/datasets', data)
+  },
+
+  updateEvalDataset(datasetId, data) {
+    return dataagentRequest.put(`/v1/nl2sql-eval/datasets/${encodeURIComponent(datasetId)}`, data)
+  },
+
+  deleteEvalDataset(datasetId) {
+    return dataagentRequest.delete(`/v1/nl2sql-eval/datasets/${encodeURIComponent(datasetId)}`)
+  },
+
+  importEvalDataset(file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return dataagentRequest.post('/v1/nl2sql-eval/datasets/imports', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000
+    })
+  },
+
+  exportEvalDataset(datasetId) {
+    return dataagentRequest.get(`/v1/nl2sql-eval/datasets/${encodeURIComponent(datasetId)}/export`, {
+      responseType: 'blob'
+    })
+  },
+
+  // ---- Evaluation cases ----
+
+  listEvalCases(datasetId) {
+    return dataagentRequest.get(`/v1/nl2sql-eval/datasets/${encodeURIComponent(datasetId)}/cases`)
+  },
+
+  getEvalCase(datasetId, caseId) {
+    return dataagentRequest.get(`/v1/nl2sql-eval/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}`)
+  },
+
+  upsertEvalCase(datasetId, caseId, caseJson) {
+    return dataagentRequest.put(
+      `/v1/nl2sql-eval/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}`,
+      { case_json: caseJson }
+    )
+  },
+
+  deleteEvalCase(datasetId, caseId) {
+    return dataagentRequest.delete(`/v1/nl2sql-eval/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}`)
+  },
+
+  replaceEvalCases(datasetId, cases) {
+    return dataagentRequest.put(`/v1/nl2sql-eval/datasets/${encodeURIComponent(datasetId)}/cases`, { cases })
+  },
+
+  // ---- Evaluation runs ----
+
+  listEvalRuns(params = {}) {
+    return dataagentRequest.get('/v1/nl2sql-eval/runs', { params })
+  },
+
+  getEvalRun(runId) {
+    return dataagentRequest.get(`/v1/nl2sql-eval/runs/${encodeURIComponent(runId)}`)
+  },
+
+  listEvalRunCases(runId) {
+    return dataagentRequest.get(`/v1/nl2sql-eval/runs/${encodeURIComponent(runId)}/cases`)
+  },
+
+  getEvalRunCase(runId, caseId) {
+    return dataagentRequest.get(`/v1/nl2sql-eval/runs/${encodeURIComponent(runId)}/cases/${encodeURIComponent(caseId)}`)
+  },
+
+  ingestEvalRun(data) {
+    return dataagentRequest.post('/v1/nl2sql-eval/runs', data)
+  },
+
+  // ---- Evaluation trends ----
+
+  getEvalTrends(params = {}) {
+    return dataagentRequest.get('/v1/nl2sql-eval/trends', { params })
   }
 }
