@@ -376,8 +376,11 @@ def preflight(base_url: str, auth_token: str = "") -> dict[str, Any]:
         if not _DATAAGENT_AUTH_TOKEN:
             raise InfrastructureAbort("dataagent_auth_token_missing: DATAAGENT_EVAL_AUTH_TOKEN is required")
         identity = dataagent_http_json("GET", f"{base_url}/api/v1/nl2sql/auth/me", timeout=15)
+        if isinstance(identity.get("data"), dict):
+            identity = identity["data"]
+        role = str(identity.get("role") or "").lower()
         roles = identity.get("roles") if isinstance(identity.get("roles"), list) else []
-        is_admin = bool(identity.get("is_admin")) or "admin" in {str(role).lower() for role in roles}
+        is_admin = role == "admin" or bool(identity.get("is_admin")) or "admin" in {str(r).lower() for r in roles}
         if not is_admin:
             raise InfrastructureAbort("dataagent_auth_not_admin: evaluation requires an administrator session")
     return {"auth": {"auth_enabled": auth_enabled, "identity_role": "admin" if identity else None}, "health": health, "runtime_config": runtime_config}
