@@ -78,7 +78,7 @@ Runners produce `summary.json` + `cases.jsonl`. The `POST /runs` endpoint accept
 Four new views under `src/views/evaluation/`:
 - **EvaluationSetsView**: Dataset table with CRUD, search, JSONL import (el-upload), export (blob download).
 - **EvaluationSetDetailView**: Case list with search, inline JSON editor (CodeMirror via TextCodeEditor) for creating/editing V2 cases.
-- **EvaluationResultsView**: Run list with filters (dataset, engine) + ECharts trend line chart (average_score, accuracies, hallucination_rate over time).
+- **EvaluationResultsView**: Run list with filters (dataset, engine) + a grid of per-dimension ECharts trend charts. Charts are split by dimension instead of one combined chart: average score (0-10), accuracy rates, pass/completion/hallucination rates, latency (e2e/execution/judge seconds, avg + p90), turn/tool-call counts, and token usage. Each chart is its own ECharts instance; charts with no data are hidden. Trend fields are extracted server-side in `trend_series` from `metrics_json` (including nested `timing.*.average/p90` and `counts.*.average`) and exposed as flat optional fields on `EvalTrendPoint`.
 - **EvaluationRunDetailView**: Summary metric cards, detailed descriptions table, metrics tree, per-case results table with expandable 7-dimension scores and full JSON viewer.
 
 All routes are `adminOnly`, consistent with existing admin pages.
