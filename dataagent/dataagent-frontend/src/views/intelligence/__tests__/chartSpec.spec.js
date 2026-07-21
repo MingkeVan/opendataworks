@@ -312,6 +312,77 @@ describe('chartSpec', () => {
     expect(stripChartSpecsFromText(message)).toContain('"foo":"bar"')
   })
 
+  it('drops a chart_spec tag pair whose body is malformed instead of leaking it as text', () => {
+    const message = `结论如下：发布次数整体上升。
+<chart_spec>
+{'kind': 'chart_spec', 'chart_type': 'line', 'dataset': [
+</chart_spec>
+以上为本次结论。`
+
+    const stripped = stripChartSpecsFromText(message)
+
+    expect(extractChartSpecsFromText(message)).toHaveLength(0)
+    expect(stripped).toContain('结论如下：发布次数整体上升。')
+    expect(stripped).toContain('以上为本次结论。')
+    expect(stripped).not.toContain('<chart_spec>')
+    expect(stripped).not.toContain("'kind'")
+  })
+
+  it('drops a chart_spec tag pair whose body is not the contract shape', () => {
+    const message = '结论：\n<chart_spec>\n{"xAxis":{"type":"category"},"series":[{"type":"bar","data":[1,2]}]}\n</chart_spec>\n完。'
+
+    const stripped = stripChartSpecsFromText(message)
+
+    expect(extractChartSpecsFromText(message)).toHaveLength(0)
+    expect(stripped).toContain('结论：')
+    expect(stripped).toContain('完。')
+    expect(stripped).not.toContain('chart_spec')
+    expect(stripped).not.toContain('xAxis')
+  })
+
+  it('renders a chart from a tag with attributes when the body is a valid spec', () => {
+    const message = '结论：\n<chart_spec type="line">\n{"kind":"chart_spec","version":1,"chart_type":"line","title":"趋势","x_field":"stat_day","series":[{"name":"次数","field":"cnt","type":"line"}],"dataset":[{"stat_day":"2026-03-10","cnt":3}],"error":null}\n</chart_spec>'
+
+    const specs = extractChartSpecsFromText(message)
+
+    expect(specs).toHaveLength(1)
+    expect(specs[0].chart_type).toBe('line')
+    expect(stripChartSpecsFromText(message)).not.toContain('<chart_spec')
+  })
+
+  it('drops an empty chart_spec tag pair', () => {
+    const message = '结论如下。\n<chart_spec></chart_spec>\n完。'
+
+    const segments = splitChartSpecText(message)
+
+    expect(segments.every((seg) => seg.type === 'text')).toBe(true)
+    expect(stripChartSpecsFromText(message)).not.toContain('chart_spec')
+    expect(stripChartSpecsFromText(message)).toContain('结论如下。')
+    expect(stripChartSpecsFromText(message)).toContain('完。')
+  })
+
+  it('drops an orphan chart_spec tag token without claiming surrounding prose', () => {
+    const message = '前文保留。</chart_spec>后文也保留。'
+
+    const stripped = stripChartSpecsFromText(message)
+
+    expect(stripped).toContain('前文保留。')
+    expect(stripped).toContain('后文也保留。')
+    expect(stripped).not.toContain('chart_spec')
+  })
+
+  it('drops an unclosed opening tag token while streaming and promotes the JSON once balanced', () => {
+    const streaming = '结论：\n<chart_spec>\n{"kind":"chart_spec","version":1,"chart_type":"line","dataset":[{"stat_day":"2026-03-10"'
+    expect(extractChartSpecsFromText(streaming)).toHaveLength(0)
+    expect(stripChartSpecsFromText(streaming)).not.toContain('<chart_spec>')
+
+    const balanced = '结论：\n<chart_spec>\n{"kind":"chart_spec","version":1,"chart_type":"line","title":"趋势","x_field":"stat_day","series":[{"name":"次数","field":"cnt","type":"line"}],"dataset":[{"stat_day":"2026-03-10","cnt":3}],"error":null}'
+    const specs = extractChartSpecsFromText(balanced)
+    expect(specs).toHaveLength(1)
+    expect(specs[0].chart_type).toBe('line')
+    expect(stripChartSpecsFromText(balanced)).not.toContain('<chart_spec>')
+  })
+
   it('builds an area chart with filled line series', () => {
     const renderModel = buildChartRenderModel({
       kind: 'chart_spec',

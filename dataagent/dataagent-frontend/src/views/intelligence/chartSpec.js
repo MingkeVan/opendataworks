@@ -535,9 +535,18 @@ export const buildChartOption = (specInput) => {
 // ({ "kind": "chart_spec", ... } written inline without any wrapper) is handled
 // separately via brace scanning below.
 const CHART_SPEC_FENCE_PATTERNS = [
-  /```(?:chart|json)?\s*([\s\S]*?)```/gi,
-  /<chart_spec>\s*([\s\S]*?)<\/chart_spec>/gi
+  /```(?:chart|json)?\s*([\s\S]*?)```/gi
 ]
+
+// A hand-written <chart_spec> pair is claimed whether or not its body parses:
+// a model bypassing build_chart_spec.py often writes malformed or non-contract
+// JSON, and leaving the raw tag in place would leak it to the user as literal
+// text. Attributes on the opening tag and whitespace in the close are tolerated.
+const CHART_SPEC_TAG_PATTERN = /<chart_spec\b[^>]*>\s*([\s\S]*?)<\/chart_spec\s*>/gi
+
+// A lone opening/closing tag with no matching pair is dropped as a bare token,
+// never claiming the prose around it.
+const CHART_SPEC_ORPHAN_TAG_PATTERN = /<\/?chart_spec\b[^>]*>/gi
 
 // A model sometimes hallucinates a chart as a markdown image/link pointing at a
 // fake `chart_spec://` URL (full-width colon included), which marked turns into a
@@ -608,6 +617,19 @@ const collectChartSpecRanges = (source) => {
     })
   }
 
+  // Tag pairs always claim their span: a parse failure (empty body, malformed or
+  // non-contract JSON) yields spec === null so the splitter drops the whole range
+  // instead of leaking the literal tag + JSON into the rendered answer.
+  CHART_SPEC_TAG_PATTERN.lastIndex = 0
+  let tagMatch
+  while ((tagMatch = CHART_SPEC_TAG_PATTERN.exec(source)) !== null) {
+    ranges.push({
+      start: tagMatch.index,
+      end: tagMatch.index + tagMatch[0].length,
+      spec: parseChartSpec(tagMatch[1])
+    })
+  }
+
   for (const pattern of CHART_SPEC_FENCE_PATTERNS) {
     pattern.lastIndex = 0
     let match
@@ -636,6 +658,16 @@ const collectChartSpecRanges = (source) => {
       }
     }
     searchFrom = hit + marker.length
+  }
+
+  // Orphan open/close tags left over after pair/JSON claiming (an unclosed tag
+  // ahead of streaming JSON, or a stray </chart_spec>) are dropped as bare
+  // tokens so they never show as literal text.
+  CHART_SPEC_ORPHAN_TAG_PATTERN.lastIndex = 0
+  let orphanMatch
+  while ((orphanMatch = CHART_SPEC_ORPHAN_TAG_PATTERN.exec(source)) !== null) {
+    if (isClaimed(orphanMatch.index)) continue
+    ranges.push({ start: orphanMatch.index, end: orphanMatch.index + orphanMatch[0].length, spec: null })
   }
 
   const sorted = ranges.sort((a, b) => a.start - b.start || b.end - a.end)

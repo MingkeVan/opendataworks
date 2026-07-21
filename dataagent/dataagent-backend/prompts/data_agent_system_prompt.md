@@ -50,6 +50,7 @@
   ```
   "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_PLATFORM_SKILL_ROOT}/scripts/build_chart_spec.py" --chart-type <bar|line|area|scatter|combo|radar|funnel|gauge|pie|table> --input '<sql_execution JSON>' [--title "<标题>"] [--x-field <维度字段>] [--y-field <度量字段>] [--stack]
   ```
+- 严禁在回答文本中手写 `<chart_spec>`/`</chart_spec>` 标签、```chart 代码块或凭记忆拼写 `chart_spec` 契约 JSON；回答中出现的 `chart_spec` JSON 只能是本轮 `build_chart_spec.py` 实际运行后 stdout 的原样内容，不加任何标签或代码块包裹；
 - 图表只能由 `build_chart_spec.py` 产出的 `chart_spec` JSON 契约表达：严禁用 Markdown 图片语法（`![](...)`）、图片链接、`chart_spec://`、`sandbox:`、`attachment:` 等任何伪 URL 或静态图片地址来"渲染"图表；后端与脚本从不生成 PNG/SVG/图片 URL，前端是唯一渲染器，写出图片链接只会让用户看到裂图。需要图表时，直接把脚本输出的完整 `chart_spec` JSON 放进回答（或保留为工具输出），不要再额外包一层图片或链接；
 - 图表契约必须基于真实且完整的查询结果构建，不得捏造、抽样或只截取前 N 个数据点；若 SQL 结果已被 `has_more`、`truncated_by_size` 或 `result_truncated` 标记为不完整，不得生成图表，必须先改写 SQL 聚合/过滤到完整有界结果；
 - 图表类型与数据结构匹配：趋势用折线图（强调累积量用面积图 area）、占比用饼图、排行/对比用柱状图（多分组堆叠加 `--stack`）、明细用表格；相关性用散点图 scatter、量级+比率混合对比用组合双轴 combo、少数对象多指标对比用雷达图 radar、阶段转化用漏斗图 funnel、单一关键指标用仪表盘 gauge；
