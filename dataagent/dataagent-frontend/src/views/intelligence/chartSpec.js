@@ -534,9 +534,21 @@ export const buildChartOption = (specInput) => {
 // a ```chart / ```json fence, or an <chart_spec> tag. The raw-object form
 // ({ "kind": "chart_spec", ... } written inline without any wrapper) is handled
 // separately via brace scanning below.
-const CHART_SPEC_FENCE_PATTERNS = [
-  /```(?:chart|json)?\s*([\s\S]*?)```/gi
-]
+const CHART_SPEC_FENCE_PATTERN = /```([^\n`]*)\n?([\s\S]*?)```/g
+
+// A hand-rolled chart config line (`type=bar`, `"chart_type": "line"`, ...)
+// marks a fence as chart-intended even when its body is not contract JSON.
+const CHART_FENCE_TYPE_LINE = /^\s*["']?(?:chart[_-]?type|type)["']?\s*[:=]\s*["']?(?:bar|line|pie|area|scatter|combo|radar|funnel|gauge|table)\b/im
+
+// Chart-intended fences are claimed even when their body fails to parse, so a
+// bypassing model's made-up chart block is dropped instead of leaking as a code
+// block. Other fences (sql, plain json examples) are claimed only on a
+// successful parse, as before.
+const fenceLooksChartIntended = (info, body) => (
+  /^chart/i.test(String(info || '').trim()) ||
+  `${info}\n${body}`.includes('chart_spec') ||
+  CHART_FENCE_TYPE_LINE.test(String(body || ''))
+)
 
 // A hand-written <chart_spec> pair is claimed whether or not its body parses:
 // a model bypassing build_chart_spec.py often writes malformed or non-contract
@@ -630,12 +642,16 @@ const collectChartSpecRanges = (source) => {
     })
   }
 
-  for (const pattern of CHART_SPEC_FENCE_PATTERNS) {
-    pattern.lastIndex = 0
-    let match
-    while ((match = pattern.exec(source)) !== null) {
-      const spec = parseChartSpec(match[1])
-      if (spec) ranges.push({ start: match.index, end: match.index + match[0].length, spec })
+  CHART_SPEC_FENCE_PATTERN.lastIndex = 0
+  let fenceMatch
+  while ((fenceMatch = CHART_SPEC_FENCE_PATTERN.exec(source)) !== null) {
+    const infoText = fenceMatch[1] || ''
+    const bodyText = fenceMatch[2] || ''
+    // The info fallback keeps single-line fences (```{...}```) parseable, where
+    // the whole body lands in the info capture.
+    const spec = parseChartSpec(bodyText) || parseChartSpec(infoText)
+    if (spec || fenceLooksChartIntended(infoText, bodyText)) {
+      ranges.push({ start: fenceMatch.index, end: fenceMatch.index + fenceMatch[0].length, spec })
     }
   }
 

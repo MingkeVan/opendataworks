@@ -312,6 +312,41 @@ describe('chartSpec', () => {
     expect(stripChartSpecsFromText(message)).toContain('"foo":"bar"')
   })
 
+  it('drops a chart fence with a hand-rolled type=bar config instead of leaking it as a code block', () => {
+    const message = '结论如下。\n```chart\ntype=bar\nx=layer\ny=table_cnt\n```\n完。'
+
+    const stripped = stripChartSpecsFromText(message)
+
+    expect(extractChartSpecsFromText(message)).toHaveLength(0)
+    expect(stripped).toContain('结论如下。')
+    expect(stripped).toContain('完。')
+    expect(stripped).not.toContain('type=bar')
+    expect(stripped).not.toContain('```')
+  })
+
+  it('drops a json fence carrying a non-contract chart config with "type": "bar"', () => {
+    const message = '结论：\n```json\n{\n  "type": "bar",\n  "data": [1, 2]\n}\n```\n完。'
+
+    const stripped = stripChartSpecsFromText(message)
+
+    expect(extractChartSpecsFromText(message)).toHaveLength(0)
+    expect(stripped).toContain('结论：')
+    expect(stripped).toContain('完。')
+    expect(stripped).not.toContain('"type"')
+  })
+
+  it('renders a chart from a fence wrapping an attributed tag pair without leftover fence markers', () => {
+    const message = '结论：\n```xml\n<chart_spec type="line">\n{"kind":"chart_spec","version":1,"chart_type":"line","title":"趋势","x_field":"stat_day","series":[{"name":"次数","field":"cnt","type":"line"}],"dataset":[{"stat_day":"2026-03-10","cnt":3}],"error":null}\n</chart_spec>\n```'
+
+    const specs = extractChartSpecsFromText(message)
+    const stripped = stripChartSpecsFromText(message)
+
+    expect(specs).toHaveLength(1)
+    expect(specs[0].chart_type).toBe('line')
+    expect(stripped).not.toContain('```')
+    expect(stripped).not.toContain('chart_spec')
+  })
+
   it('drops a chart_spec tag pair whose body is malformed instead of leaking it as text', () => {
     const message = `结论如下：发布次数整体上升。
 <chart_spec>
