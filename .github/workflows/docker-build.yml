@@ -153,11 +153,6 @@ jobs:
             --output "opendataworks-evals-offline-${VERSION}.tar.xz" \
             --platform linux/amd64
           echo "EVALS_PACKAGE_PATH=opendataworks-evals-offline-${VERSION}.tar.xz" >> $GITHUB_ENV
-          chmod +x opendataagent/scripts/create-offline-package.sh
-          opendataagent/scripts/create-offline-package.sh \
-            --tag "$VERSION" \
-            --output "opendataagent-deployment-${VERSION}.tar.gz"
-          echo "ODA_PACKAGE_PATH=opendataagent-deployment-${VERSION}.tar.gz" >> $GITHUB_ENV
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
       - name: Generate checksum
@@ -166,8 +161,6 @@ jobs:
           echo "PACKAGE_SHA=${PACKAGE_PATH}.sha256" >> $GITHUB_ENV
           sha256sum "$EVALS_PACKAGE_PATH" > "${EVALS_PACKAGE_PATH}.sha256"
           echo "EVALS_PACKAGE_SHA=${EVALS_PACKAGE_PATH}.sha256" >> $GITHUB_ENV
-          sha256sum "$ODA_PACKAGE_PATH" > "${ODA_PACKAGE_PATH}.sha256"
-          echo "ODA_PACKAGE_SHA=${ODA_PACKAGE_PATH}.sha256" >> $GITHUB_ENV
 
       - name: Create Release Body
         run: |
@@ -185,9 +178,6 @@ jobs:
             echo "- 校验和: \`opendataworks-deployment-${VERSION}.tar.xz.sha256\`"
             echo "- **[opendataworks-evals-offline-${VERSION}.tar.xz](https://github.com/${REPO}/releases/download/${TAG}/opendataworks-evals-offline-${VERSION}.tar.xz)** - 可选评测附加包（仅在需要在线评测时下载）"
             echo "- 校验和: \`opendataworks-evals-offline-${VERSION}.tar.xz.sha256\`"
-            echo "- **[opendataagent-deployment-${VERSION}.tar.gz](https://github.com/${REPO}/releases/download/${TAG}/opendataagent-deployment-${VERSION}.tar.gz)** - 独立 `opendataagent` 离线部署包"
-            echo "- 校验和: \`opendataagent-deployment-${VERSION}.tar.gz.sha256\`"
-            echo ""
             echo "### Docker 镜像 (Docker Images)"
             echo "- [Frontend](https://hub.docker.com/r/${NS}/opendataworks-frontend/tags?name=${VERSION})"
             echo "- [Backend](https://hub.docker.com/r/${NS}/opendataworks-backend/tags?name=${VERSION})"
@@ -225,8 +215,6 @@ jobs:
             ${{ env.PACKAGE_SHA }}
             ${{ env.EVALS_PACKAGE_PATH }}
             ${{ env.EVALS_PACKAGE_SHA }}
-            ${{ env.ODA_PACKAGE_PATH }}
-            ${{ env.ODA_PACKAGE_SHA }}
 
   create-latest-release:
     needs: build-and-push
@@ -259,11 +247,6 @@ jobs:
             --output "opendataworks-evals-offline-${RELEASE_TAG}.tar.xz" \
             --platform linux/amd64
           echo "EVALS_PACKAGE_PATH=opendataworks-evals-offline-${RELEASE_TAG}.tar.xz" >> $GITHUB_ENV
-          chmod +x opendataagent/scripts/create-offline-package.sh
-          opendataagent/scripts/create-offline-package.sh \
-            --tag "${IMAGE_TAG}" \
-            --output "opendataagent-deployment-${RELEASE_TAG}.tar.gz"
-          echo "ODA_PACKAGE_PATH=opendataagent-deployment-${RELEASE_TAG}.tar.gz" >> $GITHUB_ENV
 
       - name: Generate checksum
         run: |
@@ -271,8 +254,6 @@ jobs:
           echo "PACKAGE_SHA=${PACKAGE_PATH}.sha256" >> $GITHUB_ENV
           sha256sum "$EVALS_PACKAGE_PATH" > "${EVALS_PACKAGE_PATH}.sha256"
           echo "EVALS_PACKAGE_SHA=${EVALS_PACKAGE_PATH}.sha256" >> $GITHUB_ENV
-          sha256sum "$ODA_PACKAGE_PATH" > "${ODA_PACKAGE_PATH}.sha256"
-          echo "ODA_PACKAGE_SHA=${ODA_PACKAGE_PATH}.sha256" >> $GITHUB_ENV
 
       - name: Create latest release body
         run: |
@@ -291,9 +272,6 @@ jobs:
             echo "- 校验和: \`${PACKAGE_PATH}.sha256\`"
             echo "- **[${EVALS_PACKAGE_PATH}](https://github.com/${REPO}/releases/download/${TAG}/${EVALS_PACKAGE_PATH})** - 可选评测附加包"
             echo "- 校验和: \`${EVALS_PACKAGE_PATH}.sha256\`"
-            echo "- **[${ODA_PACKAGE_PATH}](https://github.com/${REPO}/releases/download/${TAG}/${ODA_PACKAGE_PATH})**"
-            echo "- 校验和: \`${ODA_PACKAGE_PATH}.sha256\`"
-            echo ""
             echo "### Docker 镜像 (Docker Images)"
             echo "- [Frontend](https://hub.docker.com/r/${NS}/opendataworks-frontend/tags?name=${IMAGE_TAG})"
             echo "- [Backend](https://hub.docker.com/r/${NS}/opendataworks-backend/tags?name=${IMAGE_TAG})"
@@ -346,8 +324,6 @@ jobs:
             ${{ env.PACKAGE_SHA }}
             ${{ env.EVALS_PACKAGE_PATH }}
             ${{ env.EVALS_PACKAGE_SHA }}
-            ${{ env.ODA_PACKAGE_PATH }}
-            ${{ env.ODA_PACKAGE_SHA }}
 
   summary:
     needs: build-and-push
