@@ -534,10 +534,36 @@ export const buildChartOption = (specInput) => {
 // a ```chart / ```json fence, or an <chart_spec> tag. The raw-object form
 // ({ "kind": "chart_spec", ... } written inline without any wrapper) is handled
 // separately via brace scanning below.
-const CHART_SPEC_FENCE_PATTERNS = [
-  /```(?:chart|json)?\s*([\s\S]*?)```/gi,
-  /<chart_spec>\s*([\s\S]*?)<\/chart_spec>/gi
-]
+const CHART_SPEC_FENCE_PATTERN = /```([^\n`]*)\n?([\s\S]*?)```/g
+
+// The contract-JSON marker, stricter than a bare `chart_spec` mention so a
+// fence that merely talks about the contract (e.g. a build_chart_spec.py
+// command template) is never claimed.
+const CHART_SPEC_KIND_MARK = /"kind"\s*[:：]\s*"chart_spec"/
+
+// Chart-intended fences are claimed even when their body fails to parse, so a
+// bypassing model's made-up chart block is dropped instead of leaking as a code
+// block. Intent requires an explicit signal — a chart* info string, an embedded
+// <chart_spec> tag, or the contract kind marker; anything less keeps the fence
+// untouched (false negatives are preferred over eating legit code blocks).
+const fenceLooksChartIntended = (info, body) => {
+  const text = `${info}\n${body}`
+  return (
+    /^chart/i.test(String(info || '').trim()) ||
+    text.includes('<chart_spec') ||
+    CHART_SPEC_KIND_MARK.test(text)
+  )
+}
+
+// A hand-written <chart_spec> pair is claimed whether or not its body parses:
+// a model bypassing build_chart_spec.py often writes malformed or non-contract
+// JSON, and leaving the raw tag in place would leak it to the user as literal
+// text. Attributes on the opening tag and whitespace in the close are tolerated.
+const CHART_SPEC_TAG_PATTERN = /<chart_spec\b[^>]*>\s*([\s\S]*?)<\/chart_spec\s*>/gi
+
+// A lone opening/closing tag with no matching pair is dropped as a bare token,
+// never claiming the prose around it.
+const CHART_SPEC_ORPHAN_TAG_PATTERN = /<\/?chart_spec\b[^>]*>/gi
 
 // A model sometimes hallucinates a chart as a markdown image/link pointing at a
 // fake `chart_spec://` URL (full-width colon included), which marked turns into a
@@ -608,12 +634,29 @@ const collectChartSpecRanges = (source) => {
     })
   }
 
-  for (const pattern of CHART_SPEC_FENCE_PATTERNS) {
-    pattern.lastIndex = 0
-    let match
-    while ((match = pattern.exec(source)) !== null) {
-      const spec = parseChartSpec(match[1])
-      if (spec) ranges.push({ start: match.index, end: match.index + match[0].length, spec })
+  // Tag pairs always claim their span: a parse failure (empty body, malformed or
+  // non-contract JSON) yields spec === null so the splitter drops the whole range
+  // instead of leaking the literal tag + JSON into the rendered answer.
+  CHART_SPEC_TAG_PATTERN.lastIndex = 0
+  let tagMatch
+  while ((tagMatch = CHART_SPEC_TAG_PATTERN.exec(source)) !== null) {
+    ranges.push({
+      start: tagMatch.index,
+      end: tagMatch.index + tagMatch[0].length,
+      spec: parseChartSpec(tagMatch[1])
+    })
+  }
+
+  CHART_SPEC_FENCE_PATTERN.lastIndex = 0
+  let fenceMatch
+  while ((fenceMatch = CHART_SPEC_FENCE_PATTERN.exec(source)) !== null) {
+    const infoText = fenceMatch[1] || ''
+    const bodyText = fenceMatch[2] || ''
+    // The info fallback keeps single-line fences (```{...}```) parseable, where
+    // the whole body lands in the info capture.
+    const spec = parseChartSpec(bodyText) || parseChartSpec(infoText)
+    if (spec || fenceLooksChartIntended(infoText, bodyText)) {
+      ranges.push({ start: fenceMatch.index, end: fenceMatch.index + fenceMatch[0].length, spec })
     }
   }
 
@@ -636,6 +679,16 @@ const collectChartSpecRanges = (source) => {
       }
     }
     searchFrom = hit + marker.length
+  }
+
+  // Orphan open/close tags left over after pair/JSON claiming (an unclosed tag
+  // ahead of streaming JSON, or a stray </chart_spec>) are dropped as bare
+  // tokens so they never show as literal text.
+  CHART_SPEC_ORPHAN_TAG_PATTERN.lastIndex = 0
+  let orphanMatch
+  while ((orphanMatch = CHART_SPEC_ORPHAN_TAG_PATTERN.exec(source)) !== null) {
+    if (isClaimed(orphanMatch.index)) continue
+    ranges.push({ start: orphanMatch.index, end: orphanMatch.index + orphanMatch[0].length, spec: null })
   }
 
   const sorted = ranges.sort((a, b) => a.start - b.start || b.end - a.end)
