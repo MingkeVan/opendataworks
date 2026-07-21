@@ -536,19 +536,24 @@ export const buildChartOption = (specInput) => {
 // separately via brace scanning below.
 const CHART_SPEC_FENCE_PATTERN = /```([^\n`]*)\n?([\s\S]*?)```/g
 
-// A hand-rolled chart config line (`type=bar`, `"chart_type": "line"`, ...)
-// marks a fence as chart-intended even when its body is not contract JSON.
-const CHART_FENCE_TYPE_LINE = /^\s*["']?(?:chart[_-]?type|type)["']?\s*[:=]\s*["']?(?:bar|line|pie|area|scatter|combo|radar|funnel|gauge|table)\b/im
+// The contract-JSON marker, stricter than a bare `chart_spec` mention so a
+// fence that merely talks about the contract (e.g. a build_chart_spec.py
+// command template) is never claimed.
+const CHART_SPEC_KIND_MARK = /"kind"\s*[:：]\s*"chart_spec"/
 
 // Chart-intended fences are claimed even when their body fails to parse, so a
 // bypassing model's made-up chart block is dropped instead of leaking as a code
-// block. Other fences (sql, plain json examples) are claimed only on a
-// successful parse, as before.
-const fenceLooksChartIntended = (info, body) => (
-  /^chart/i.test(String(info || '').trim()) ||
-  `${info}\n${body}`.includes('chart_spec') ||
-  CHART_FENCE_TYPE_LINE.test(String(body || ''))
-)
+// block. Intent requires an explicit signal — a chart* info string, an embedded
+// <chart_spec> tag, or the contract kind marker; anything less keeps the fence
+// untouched (false negatives are preferred over eating legit code blocks).
+const fenceLooksChartIntended = (info, body) => {
+  const text = `${info}\n${body}`
+  return (
+    /^chart/i.test(String(info || '').trim()) ||
+    text.includes('<chart_spec') ||
+    CHART_SPEC_KIND_MARK.test(text)
+  )
+}
 
 // A hand-written <chart_spec> pair is claimed whether or not its body parses:
 // a model bypassing build_chart_spec.py often writes malformed or non-contract

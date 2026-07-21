@@ -324,15 +324,28 @@ describe('chartSpec', () => {
     expect(stripped).not.toContain('```')
   })
 
-  it('drops a json fence carrying a non-contract chart config with "type": "bar"', () => {
+  it('keeps a json fence without explicit chart_spec markers untouched even when it looks chart-ish', () => {
     const message = '结论：\n```json\n{\n  "type": "bar",\n  "data": [1, 2]\n}\n```\n完。'
+
+    expect(extractChartSpecsFromText(message)).toHaveLength(0)
+    expect(stripChartSpecsFromText(message)).toContain('"type": "bar"')
+  })
+
+  it('keeps a fence that merely mentions the chart script command untouched', () => {
+    const message = '需要图表时执行：\n```bash\n"$DATAAGENT_PYTHON_BIN" "${DATAAGENT_PLATFORM_SKILL_ROOT}/scripts/build_chart_spec.py" --chart-type bar --input \'...\'\n```\n以上。'
 
     const stripped = stripChartSpecsFromText(message)
 
     expect(extractChartSpecsFromText(message)).toHaveLength(0)
-    expect(stripped).toContain('结论：')
-    expect(stripped).toContain('完。')
-    expect(stripped).not.toContain('"type"')
+    expect(stripped).toContain('build_chart_spec.py')
+    expect(stripped).toContain('以上。')
+  })
+
+  it('keeps a config-style fence with a type=line entry untouched', () => {
+    const message = '配置示例：\n```ini\n[render]\ntype=line\nwidth=800\n```'
+
+    expect(extractChartSpecsFromText(message)).toHaveLength(0)
+    expect(stripChartSpecsFromText(message)).toContain('type=line')
   })
 
   it('renders a chart from a fence wrapping an attributed tag pair without leftover fence markers', () => {
