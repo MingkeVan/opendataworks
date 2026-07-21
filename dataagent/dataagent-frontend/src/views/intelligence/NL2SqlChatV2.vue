@@ -2164,7 +2164,7 @@ onBeforeUnmount(() => {
   padding: 6px 12px;
   border: none;
   border-radius: 6px;
-  background: #409EFF;
+  background: var(--odw-primary);
   color: #fff;
   font-size: 13px;
   cursor: pointer;
@@ -2175,7 +2175,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.v2-btn-new:hover { background: #66b1ff; }
+.v2-btn-new:hover { background: var(--odw-primary-light); }
 
 /* ── Source tabs + filter ────────────────────────────────────────────────── */
 .v2-sidebar-toolbar {
@@ -2423,7 +2423,7 @@ onBeforeUnmount(() => {
 }
 
 .v2-landing-agent-name {
-  color: #409EFF;
+  color: var(--odw-primary);
 }
 
 .v2-landing-suggestions-title {
@@ -2447,10 +2447,10 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   padding: 5px 14px;
-  border: 1px solid #409EFF;
+  border: 1px solid var(--odw-primary);
   border-radius: 999px;
   background: #ffffff;
-  color: #409EFF;
+  color: var(--odw-primary);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.4;
@@ -2460,7 +2460,7 @@ onBeforeUnmount(() => {
 }
 
 .v2-suggestion-pill:hover:not(:disabled) {
-  background: #409EFF;
+  background: var(--odw-primary);
   color: #ffffff;
   box-shadow: 0 2px 8px rgba(64, 158, 255, 0.25);
 }

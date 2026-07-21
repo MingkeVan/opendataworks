@@ -655,7 +655,7 @@ export const WIDGET_STYLES = `
 }
 
 .query-landing-agent-name {
-  color: #409EFF;
+  color: var(--accent);
 }
 
 .query-workbench.is-floating .query-landing-greeting {
@@ -687,10 +687,10 @@ export const WIDGET_STYLES = `
   display: inline-flex;
   align-items: center;
   padding: 5px 14px;
-  border: 1px solid #409EFF;
+  border: 1px solid var(--accent);
   border-radius: 999px;
   background: #fff;
-  color: #409EFF;
+  color: var(--accent);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.4;
@@ -701,9 +701,9 @@ export const WIDGET_STYLES = `
 }
 
 .query-suggestion-pill:hover:not(:disabled) {
-  background: #409EFF;
+  background: var(--accent);
   color: #fff;
-  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.25);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 .query-suggestion-pill:disabled {

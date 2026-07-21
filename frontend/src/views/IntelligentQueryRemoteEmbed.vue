@@ -23,7 +23,7 @@ const installInlineWidget = async () => {
       displayMode: 'inline',
       containerId: INLINE_CONTAINER_ID,
       projectName: '智能问数',
-      projectColor: '#2c5282',
+      projectColor: '#409EFF',
       agentId: 'agent_opendataworks',
       apiBaseUrl: '',
     })
