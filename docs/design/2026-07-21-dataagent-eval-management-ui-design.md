@@ -108,9 +108,18 @@ All routes are `adminOnly`, consistent with existing admin pages.
 
 Any case mutation (upsert, delete, replace) triggers `canonical_bytes` recomputation of `dataset_hash` and `case_count` on `eval_dataset`, keeping metadata consistent with actual content.
 
+### Dataset ID Resolution on Ingestion
+
+Runner `summary.dataset_id` is the JSONL **filename stem** (e.g. `opendataworks-business-knowledge-smoke-v2`), not a UI-generated `ds-*` UUID. On ingestion, if the submitted `dataset_id` does not match any `eval_dataset.dataset_id`, the system performs a reverse lookup by `dataset_hash`: when the runner's `dataset_hash` matches an existing dataset's hash, `dataset_id` is overwritten with the UI dataset's ID. This enables "filter runs by dataset" to work across both UI-managed and CLI-managed datasets. When no hash match is found, the original `dataset_id` is preserved as-is (soft association).
+
+### Case Upsert Validation
+
+Single-case upsert (`PUT /datasets/{id}/cases/{case_id}`) runs the full V2 `validate()` on the merged case list before persisting, consistent with bulk `replace_cases`. This prevents invalid cases from entering the database via the primary UI editing path. The merged list preserves the original insertion order (in-place replacement) so that `dataset_hash` matches the export order (`ORDER BY id`).
+
 ## Tradeoffs
 
-1. **Contract duplication vs runtime import**: Duplication adds maintenance cost but avoids Docker build complexity and keeps the runner independent. Regression test mitigates drift risk.
+1. **Contract duplication vs runtime import**: Duplication adds maintenance cost but avoids Docker build complexity and keeps the runner independent. Regression test (`tests/test_eval_contract.py`) mitigates drift risk.
 2. **Storing full case_json in DB**: Increases storage but enables lossless JSONL export round-trips without lossy reconstruction from normalized columns.
 3. **Ingestion API vs direct DB writes from runners**: Keeps runners stateless and deployment-agnostic; adds an HTTP call but preserves the "three engines are independent" philosophy.
 4. **No UI-triggered evaluation**: Keeps MVP scope manageable; runners remain CLI tools with their own configuration and credentials.
+5. **No explicit request body size limit on ingestion**: The `POST /runs` endpoint does not enforce an application-level body size limit. Large runs (many cases) are bounded by the upstream reverse proxy and uvicorn's default limits. This is acceptable for the current single-tenant deployment; a future multi-tenant scenario may need explicit limits.

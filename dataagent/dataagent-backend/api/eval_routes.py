@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import json
+import uuid
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
 from core.auth import require_admin
 from core.eval_contract import canonical_bytes, dataset_hash, parse_jsonl, validate
-from core.eval_dataset_service import export_dataset, import_dataset, refresh_dataset_hash
+from core.eval_dataset_service import export_dataset, import_dataset
 from core.eval_store import get_eval_store
 from models.schemas import (
     EvalCaseDetail,
@@ -40,7 +42,6 @@ async def list_datasets(status: str = Query("", description="Filter by status"))
 @router.post("/datasets", response_model=EvalDatasetSummary, status_code=201)
 async def create_dataset(request: EvalDatasetCreateRequest):
     store = get_eval_store()
-    import uuid
     dataset_id = f"ds-{uuid.uuid4().hex[:12]}"
     return store.create_dataset(
         dataset_id=dataset_id,
@@ -98,10 +99,12 @@ async def export_dataset_jsonl(dataset_id: str):
         filename, data = export_dataset(dataset_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    ascii_name = filename.encode("ascii", "replace").decode("ascii")
+    disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
     return Response(
         content=data,
         media_type="application/x-ndjson",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": disposition},
     )
 
 
@@ -151,8 +154,19 @@ async def upsert_case(dataset_id: str, case_id: str, request: EvalCaseUpsertRequ
     if str(case.get("case_id") or "") != case_id:
         raise HTTPException(status_code=400, detail="case_id in path and body must match")
     all_cases = store.get_case_full_json(dataset_id)
-    existing_ids = {str(c.get("case_id") or "") for c in all_cases}
-    merged = [c for c in all_cases if str(c.get("case_id") or "") != case_id] + [case]
+    replaced = False
+    merged = []
+    for c in all_cases:
+        if str(c.get("case_id") or "") == case_id:
+            merged.append(case)
+            replaced = True
+        else:
+            merged.append(c)
+    if not replaced:
+        merged.append(case)
+    validation = validate(merged)
+    if not validation["valid"]:
+        raise HTTPException(status_code=400, detail="; ".join(validation["errors"][:20]))
     h = dataset_hash(merged)
     result = store.upsert_case(dataset_id, case, h, len(merged))
     if isinstance(result.get("case_json"), str):

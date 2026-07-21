@@ -114,6 +114,16 @@ class EvalStore:
                 cur.execute("DELETE FROM eval_dataset WHERE dataset_id = %s", (dataset_id,))
                 return cur.rowcount > 0
 
+    def _find_dataset_by_hash(self, ds_hash: str) -> str | None:
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT dataset_id FROM eval_dataset WHERE dataset_hash = %s LIMIT 1",
+                    (ds_hash,),
+                )
+                row = cur.fetchone()
+                return row["dataset_id"] if row else None
+
     def _refresh_dataset_stats(self, conn, dataset_id: str, dataset_hash: str, case_count: int) -> None:
         with conn.cursor() as cur:
             cur.execute(
@@ -253,6 +263,14 @@ class EvalStore:
         if existing:
             return existing
 
+        raw_dataset_id = str(summary.get("dataset_id") or "")
+        if raw_dataset_id and not self.get_dataset(raw_dataset_id):
+            ds_hash = str(summary.get("dataset_hash") or "")
+            if ds_hash:
+                matched = self._find_dataset_by_hash(ds_hash)
+                if matched:
+                    raw_dataset_id = matched
+
         metrics = summary.get("metrics") or {}
         avg_score = 0.0
         raw_avg = metrics.get("average_score")
@@ -285,7 +303,7 @@ class EvalStore:
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (
                         run_id,
-                        str(summary.get("dataset_id") or ""),
+                        raw_dataset_id,
                         str(summary.get("dataset_hash") or ""),
                         str(summary.get("run_label") or ""),
                         str(summary.get("environment_label") or ""),

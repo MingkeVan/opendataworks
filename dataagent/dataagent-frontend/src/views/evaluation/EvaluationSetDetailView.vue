@@ -195,7 +195,24 @@ const openCaseEditor = async (caseRow) => {
       question: '',
       category: '',
       suite_tags: [],
-      expected: {}
+      expected_semantics: { intent: '', entities: [], conditions: [] },
+      expected_time: { range: '', granularity: '' },
+      expected_tools: { min_calls: 1, max_calls: 3 },
+      expected_sql: { keywords: [], tables: [] },
+      expected_result: { row_count: null, columns: [] },
+      expected_answer: { must_contain: [], must_not_contain: [] },
+      limits: { max_turns: 5, timeout_seconds: 120 },
+      scoring: {
+        intent: 1,
+        ontology_entity: 1,
+        relation_scope: 1,
+        sql_or_tool_call: 2,
+        result_consistency: 2,
+        reasoning: 2,
+        answer_quality: 1,
+        total_score: 10
+      },
+      veto_rules: { hallucination_fails: true }
     }, null, 2)
   }
   editorVisible.value = true
