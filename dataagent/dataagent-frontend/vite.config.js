@@ -106,6 +106,10 @@ export default defineConfig(() => {
         '/api/v1/nl2sql': {
           target: 'http://localhost:8900',
           changeOrigin: true
+        },
+        '/api/v1/nl2sql-eval': {
+          target: 'http://localhost:8900',
+          changeOrigin: true
         }
       }
     }
