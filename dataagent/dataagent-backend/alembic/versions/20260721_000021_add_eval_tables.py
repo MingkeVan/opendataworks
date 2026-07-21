@@ -27,7 +27,7 @@ def upgrade() -> None:
             CREATE TABLE eval_dataset (
                 dataset_id VARCHAR(128) NOT NULL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
-                description TEXT NOT NULL DEFAULT '',
+                description TEXT NULL,
                 category VARCHAR(128) NOT NULL DEFAULT '',
                 suite_tags JSON NULL,
                 case_count INT NOT NULL DEFAULT 0,
@@ -52,7 +52,7 @@ def upgrade() -> None:
                 case_type VARCHAR(64) NOT NULL DEFAULT '',
                 category VARCHAR(128) NOT NULL DEFAULT '',
                 suite_tags JSON NULL,
-                question TEXT NOT NULL DEFAULT '',
+                question TEXT NULL,
                 turns JSON NULL,
                 case_json LONGTEXT NOT NULL,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
