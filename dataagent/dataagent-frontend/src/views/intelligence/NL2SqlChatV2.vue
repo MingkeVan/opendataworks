@@ -665,7 +665,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { createNl2SqlApiClient, DATAAGENT_CLIENT_HEADERS } from '@/api/nl2sql'
 import { dataagentApi } from '@/api/dataagent'
 import { useAuthStore } from '@/stores/auth'
@@ -1403,30 +1403,6 @@ async function requestAgentChange(agentId) {
   if (isUploading.value) {
     ElMessage.warning('文件上传完成后再切换助手')
     return
-  }
-
-  const needsConfirmation = Boolean(
-    messages.value.length
-    || inputText.value.trim()
-    || pendingAttachments.value.length
-    || activeTaskId.value
-  )
-  if (needsConfirmation) {
-    const attachmentNote = pendingAttachments.value.length
-      ? ' 已上传附件仍保留在原会话，不会带入新会话。'
-      : ''
-    const runningNote = activeTaskId.value
-      ? ' 当前任务会继续在后台运行。'
-      : ''
-    try {
-      await ElMessageBox.confirm(
-        `切换助手将开启新会话，未发送的文字草稿会保留。${attachmentNote}${runningNote}`,
-        '切换助手',
-        { confirmButtonText: '切换并新建会话', cancelButtonText: '取消', type: 'warning' },
-      )
-    } catch {
-      return
-    }
   }
 
   agentTransitioning.value = true
