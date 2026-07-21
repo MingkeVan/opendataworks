@@ -4,9 +4,9 @@
 
 :root {
   /* ---- 主色调（商务蓝） ---- */
-  --odw-primary:          #409EFF;   /* Element Plus 主色 */
-  --odw-primary-dark:     #3a8ae6;   /* 渐变深色端 */
-  --odw-primary-light:    #66b1ff;   /* 悬浮/激活底色 */
+  --odw-primary:          #3B82F6;   /* 主色 */
+  --odw-primary-dark:     #2563EB;   /* 渐变深色端 */
+  --odw-primary-light:    #60A5FA;   /* 悬浮/激活底色 */
 
   /* ---- 强调色（清爽蓝） ---- */
   --odw-accent:           #63b3ed;   /* 浅蓝高亮，与浅色页面协调 */
@@ -24,7 +24,7 @@
 
   /* ---- 边框 / 阴影 ---- */
   --odw-border:           #e2e8f0;
-  --odw-shadow-nav:       0 1px 4px rgba(64, 158, 255, 0.15);
+  --odw-shadow-nav:       0 1px 4px rgba(59, 130, 246, 0.15);
 
   /* ---- 导航栏 ---- */
   --odw-nav-height:       60px;

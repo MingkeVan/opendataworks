@@ -219,7 +219,7 @@ const installFloatingWidget = async () => {
       displayMode: 'floating',
       position: 'bottom-right',
       projectName: '智能助手',
-      projectColor: '#409EFF',
+      projectColor: '#3B82F6',
       agentId: 'agent_opendataworks',
       apiBaseUrl: '',
     })
