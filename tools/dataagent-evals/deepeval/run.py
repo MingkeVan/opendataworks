@@ -1158,7 +1158,7 @@ def _execute_reference_query(base_url: str, case: dict[str, Any], topic_id: str)
         "limit": int(reference.get("limit") or 1000), "timeout_seconds": timeout, "topic_id": topic_id,
     }, timeout=timeout + 15)
     rows = response.get("rows") if isinstance(response.get("rows"), list) else None
-    if rows is None:
+    if rows is None or str(response.get("result_state") or "success").lower() not in {"success", "empty", "empty_result"}:
         raise InfrastructureAbort("reference_sql_failed: read-only query did not return rows")
     return {"applicable": True, "passed": None, "rows": rows, "row_count": len(rows)}
 

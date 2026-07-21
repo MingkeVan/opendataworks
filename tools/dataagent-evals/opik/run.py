@@ -1472,7 +1472,7 @@ def _execute_reference_query(base_url: str, case: dict[str, Any], topic_id: str)
     }
     response = dataagent_http_json("POST", f"{base_url}/api/v1/nl2sql/query/execute", payload, timeout=payload["timeout_seconds"] + 15)
     rows = response.get("rows") if isinstance(response.get("rows"), list) else None
-    if rows is None or str(response.get("result_state") or "success").lower() not in {"success", "empty"}:
+    if rows is None or str(response.get("result_state") or "success").lower() not in {"success", "empty", "empty_result"}:
         raise InfrastructureAbort("reference_sql_failed: read-only query did not return a result set")
     return {"applicable": True, "passed": None, "rows": rows, "row_count": len(rows), "database": payload["database"]}
 
