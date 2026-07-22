@@ -79,3 +79,7 @@ The output layout matches the builtin evaluation runner:
 - `report.html`
 - `dataset-snapshot.jsonl`
 - `raw/<case_id>.json`
+
+Reference-SQL infrastructure failures include the failing `case_id`, database,
+engine, SQL hash, full SQL, and backend cause in both the terminal message and
+`summary.json.infrastructure_details`.

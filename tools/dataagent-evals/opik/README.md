@@ -41,3 +41,7 @@ The runner also writes the standard `run.json`, `summary.json`, `cases.jsonl`,
 `report.md`, `report.html`, raw evidence, and dataset snapshot. Exit codes are
 0 for passing, 1 for quality-gate failure, and 2 for authentication, Opik, or
 other evaluation-infrastructure failure.
+
+For reference-SQL failures, the terminal error and local
+`summary.json.infrastructure_details` identify the failing `case_id`, database,
+engine, SQL hash, full SQL, and backend cause before the runner exits 2.

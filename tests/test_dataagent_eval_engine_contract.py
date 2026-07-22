@@ -357,3 +357,46 @@ def test_three_engines_derive_expected_empty_from_reference_truth():
 
         nonempty_reference = {"applicable": True, "rows": [{"table_name": "orders"}], "row_count": 1}
         assert module._case_with_reference_empty_policy(case, nonempty_reference) is case, engine
+
+
+def test_three_engines_report_reference_sql_case_and_statement_on_backend_failure(monkeypatch):
+    modules = {name: _load(name, path) for name, path in RUNNERS.items()}
+    sql = "SELECT cmp_name, system_name FROM public.dim_tech_public_env_cmp_df"
+    case = {
+        "case_id": "ARCH_DIAGNOSTIC_001",
+        "expected_result": {
+            "reference_query": {
+                "sql": sql,
+                "database": "public",
+                "engine": "doris",
+                "limit": 100,
+            }
+        },
+    }
+
+    for engine, module in modules.items():
+        monkeypatch.setattr(
+            module,
+            "dataagent_http_json",
+            lambda *_args, **_kwargs: {
+                "rows": [],
+                "result_state": "failed",
+                "error": "Unknown column 'system_name'",
+            },
+        )
+        try:
+            module._execute_reference_query("http://dataagent", case, "topic_1")
+        except module.InfrastructureAbort as exc:
+            message = str(exc)
+            assert message.startswith("reference_sql_failed:"), engine
+            assert "case_id=ARCH_DIAGNOSTIC_001" in message, engine
+            assert "database=public" in message, engine
+            assert "engine=doris" in message, engine
+            assert f'sql={json.dumps(sql, ensure_ascii=False)}' in message, engine
+            assert "Unknown column 'system_name'" in message, engine
+            assert exc.details["error_code"] == "reference_sql_failed", engine
+            assert exc.details["case_id"] == "ARCH_DIAGNOSTIC_001", engine
+            assert exc.details["sql"] == sql, engine
+            assert exc.details["cause"].endswith("Unknown column 'system_name'"), engine
+        else:
+            raise AssertionError(f"{engine}: failed reference SQL must abort with diagnostics")
