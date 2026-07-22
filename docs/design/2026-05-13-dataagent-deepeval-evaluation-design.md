@@ -54,7 +54,9 @@ Outputs match the builtin runner:
 Optional `expected_result.reference_query` SQL is independently executed through
 the read-only DataAgent query proxy. DeepEval reports reference-SQL
 `data_accuracy` separately from answer/tool `result_consistency`; missing
-reference SQL remains `N/A`.
+reference SQL remains `N/A`. A successful zero-row reference result dynamically
+marks a matching zero-row Agent result as expected; SQL, transport, and
+authorization failures remain infrastructure failures rather than empty data.
 
 ## Tradeoffs
 
