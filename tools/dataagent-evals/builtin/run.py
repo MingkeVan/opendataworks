@@ -1558,7 +1558,7 @@ def _execute_reference_query(base_url: str, case: dict[str, Any], topic_id: str)
             error_code="reference_sql_failed",
             cause=f"result_state={result_state}, rows_present={rows is not None}{suffix}",
         )
-    return {"applicable": True, "passed": None, "rows": rows, "row_count": len(rows), "database": payload["database"]}
+    return {"applicable": True, "passed": None, "rows": rows, "row_count": len(rows), "database": payload["database"], "sql": sql}
 
 
 def _compare_reference(reference: dict[str, Any], actual_row_sets: list[list[dict[str, Any]]], case: dict[str, Any]) -> dict[str, Any]:
@@ -1583,12 +1583,20 @@ def _compare_reference(reference: dict[str, Any], actual_row_sets: list[list[dic
         return _canonical_rows(expected_rows, tolerance=tolerance) == _canonical_rows(actual_rows, tolerance=tolerance)
 
     matched_rows = next((rows for rows in actual_row_sets if matches(rows)), None)
+    sample_limit = 20
+    if matched_rows is not None:
+        actual_samples = [matched_rows[:sample_limit]]
+    else:
+        actual_samples = [rows[:sample_limit] for rows in actual_row_sets[:3]]
     return {
         **reference,
         "passed": matched_rows is not None,
         "comparison_mode": mode,
         "actual_row_count": None if matched_rows is None else len(matched_rows),
         "candidate_result_count": len(actual_row_sets),
+        "expected_row_count": len(expected_rows),
+        "expected_sample": expected_rows[:sample_limit],
+        "actual_samples": actual_samples,
     }
 
 
@@ -1751,6 +1759,7 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace, judg
         "category": case.get("category"),
         "question": _case_question(case),
         "turns": _case_turns(case),
+        "case_definition": case,
         "agent_id": str(args.agent_id or "").strip(),
         "topic_id": topic_id,
         "task_id": str(task.get("task_id") or task_id),

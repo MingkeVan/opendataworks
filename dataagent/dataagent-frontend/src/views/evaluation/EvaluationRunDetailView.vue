@@ -207,8 +207,8 @@
               </template>
             </el-table-column>
           </el-table>
-          <div v-if="!expectedCaseDef" class="case-detail-dialog__muted case-detail-dialog__note">
-            未能关联到评测集用例定义（运行未关联数据集或用例已删除），预期列仅显示运行内可得信息。
+          <div v-if="!expCase" class="case-detail-dialog__muted case-detail-dialog__note">
+            该运行结果未内嵌用例定义，且未能从评测集反查到（评测集未导入或用例已删除）。用新版 runner 重新评测，或在「评测集管理」导入对应 JSONL 后即可看到完整预期。
           </div>
         </div>
 
@@ -491,16 +491,25 @@ const ruleChecks = computed(() => {
 
 const expectedCaseDef = ref(null)
 
+// 优先使用 run 结果内嵌的原始用例定义；旧 run 没有时回退到按数据集反查的定义。
+const expCase = computed(() => {
+  const embedded = caseJson.value?.case_definition
+  if (embedded && typeof embedded === 'object') return embedded
+  return expectedCaseDef.value
+})
+
 const joinList = (v, sep = '、') => (Array.isArray(v) && v.length ? v.map(String).join(sep) : '')
 const truncate = (s, n) => {
   const text = String(s || '')
   return text.length > n ? `${text.slice(0, n)}…` : text
 }
+const fmtRows = (rows) =>
+  Array.isArray(rows) && rows.length ? rows.map((r) => JSON.stringify(r)).join('\n') : ''
 
 const comparisonRows = computed(() => {
   const cj = caseJson.value
   if (!cj) return []
-  const exp = expectedCaseDef.value || {}
+  const exp = expCase.value || {}
   const gates = ruleCheckInfo.value.hard_gates || {}
   const dims = judgeInfo.value.dimension_scores || {}
   const rows = []
@@ -560,18 +569,44 @@ const comparisonRows = computed(() => {
   const result = exp.expected_result || {}
   const refQuery = result.reference_query || {}
   const refActual = cj.reference_data_accuracy || {}
+  const refSql = refQuery.sql || refActual.sql || ''
+  const expectedSample = fmtRows(refActual.expected_sample)
   const resultExpected = [
     joinList(result.required_columns) ? `必需列: ${joinList(result.required_columns)}` : '',
-    refQuery.sql ? `参考 SQL: ${truncate(refQuery.sql, 200)}` : '',
+    refSql ? `参考 SQL: ${truncate(refSql, 300)}` : '',
+    refActual.expected_row_count !== undefined ? `参考结果 ${refActual.expected_row_count} 行` : '',
+    expectedSample ? `参考结果:\n${truncate(expectedSample, 500)}` : '',
     result.allow_empty !== undefined ? `允许空结果: ${result.allow_empty ? '是' : '否'}` : ''
   ].filter(Boolean).join('\n')
   if (resultExpected || refActual.applicable) {
+    const actualSamples = Array.isArray(refActual.actual_samples) ? refActual.actual_samples : []
+    const actualSampleText = actualSamples
+      .map((sampleRows, i) => {
+        const body = fmtRows(sampleRows) || '(空结果)'
+        return actualSamples.length > 1 ? `候选结果 ${i + 1}:\n${body}` : body
+      })
+      .join('\n')
+    const actualParts = []
+    if (refActual.applicable) {
+      actualParts.push(
+        `参考数据对比: ${refActual.passed ? '一致' : '不一致'}`
+        + (refActual.comparison_mode ? `（模式: ${refActual.comparison_mode}）` : '')
+      )
+      if (refActual.passed === false && refActual.candidate_result_count !== undefined) {
+        actualParts.push(`Agent 共产生 ${refActual.candidate_result_count} 个查询结果集，均不匹配参考结果`)
+      }
+      if (actualSampleText) {
+        actualParts.push(`实际结果:\n${truncate(actualSampleText, 600)}`)
+      } else if (refActual.candidate_result_count === 0) {
+        actualParts.push('Agent 未产生可对比的查询结果')
+      }
+    } else {
+      actualParts.push('无参考数据对比')
+    }
     rows.push({
       group: '数据结果',
       expected: resultExpected,
-      actual: refActual.applicable
-        ? `参考数据对比: ${refActual.passed ? '一致' : '不一致'}${refActual.reason ? `（${refActual.reason}）` : ''}`
-        : '无参考数据对比',
+      actual: actualParts.join('\n'),
       ok: refActual.applicable ? Boolean(refActual.passed) : null
     })
   }
