@@ -382,11 +382,26 @@ class EvalStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """SELECT id, run_id, case_id, category, score, case_passed,
-                              task_status, hallucination, dimension_scores_json
+                              task_status, hallucination, dimension_scores_json, case_json
                        FROM eval_run_case WHERE run_id = %s ORDER BY id""",
                     (run_id,),
                 )
-                return cur.fetchall()
+                rows = cur.fetchall()
+        for row in rows:
+            raw = row.pop("case_json", None)
+            attribution: list[str] = []
+            comment = ""
+            if raw:
+                try:
+                    payload = json.loads(raw)
+                    judge = payload.get("judge") if isinstance(payload.get("judge"), dict) else {}
+                    attribution = [str(v) for v in (judge.get("failure_attribution") or []) if str(v or "").strip()]
+                    comment = str(judge.get("comment") or "").strip()
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            row["failure_attribution"] = attribution
+            row["judge_comment"] = comment
+        return rows
 
     def get_run_case_detail(self, run_id: str, case_id: str) -> dict[str, Any] | None:
         with self._conn() as conn:
