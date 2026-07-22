@@ -73,7 +73,7 @@ DIMENSION_MAX = {
 EVALUATION_ENGINE = "builtin"
 ENGINE_VERSION = "2.0.0"
 METRIC_SEMANTICS_VERSION = "2.1"
-JUDGE_PROMPT_VERSION = "dataagent-v2-2026-07-20"
+JUDGE_PROMPT_VERSION = "dataagent-v2-2026-07-22"
 _DATAAGENT_AUTH_TOKEN = ""
 
 
@@ -1218,9 +1218,16 @@ def _normalize_judge_payload(data: dict[str, Any], *, raw_output: str = "") -> d
         for key in JUDGE_DIMENSIONS
     )
     inconsistent = complete_dimensions and abs(raw_score - computed_score) > 0.001
+    raw_rationales = data.get("dimension_rationales")
+    rationales = {
+        key: str(raw_rationales[key]).strip()
+        for key in JUDGE_DIMENSIONS
+        if isinstance(raw_rationales, dict) and str(raw_rationales.get(key) or "").strip()
+    }
     return {
         "score": computed_score if complete_dimensions else raw_score,
         "dimension_scores": dimensions,
+        "dimension_rationales": rationales,
         "hallucination": _normalize_bool(data.get("hallucination")),
         "veto_rules_triggered": _string_list(data.get("veto_rules_triggered")),
         "failure_attribution": _dedupe(_string_list(data.get("failure_attribution")) + (["judge_score_inconsistent"] if inconsistent else [])),
@@ -1267,9 +1274,11 @@ def _judge_system_prompt() -> str:
         "你是 DataAgent 在线问数评测裁判。只能基于请求中的 case、最终回答、工具事件、SQL/图表输出和自动规则检查打分。"
         "不要基于 SELECT *、schema 前缀或 SQL 风格合规性扣分；除非 SQL 风格直接导致未查到数据或结果错误。"
         "不要调用任何工具，不要编造事实。必须只输出一个 JSON 对象，字段为："
-        "score, dimension_scores, hallucination, veto_rules_triggered, failure_attribution, comment。"
+        "score, dimension_scores, dimension_rationales, hallucination, veto_rules_triggered, failure_attribution, comment。"
         "score 为各维度之和且范围 0 到 10；dimension_scores 包含 intent(1), ontology_entity(1), "
         "relation_scope(1), sql_or_tool_call(2), result_consistency(2), reasoning(2), answer_quality(1)。"
+        "dimension_rationales 为对象，键与 dimension_scores 相同，值为一句话中文说明该维度给分或扣分的具体依据；"
+        "comment 为整体评语，说明通过或不通过的关键原因。"
     )
 
 

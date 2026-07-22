@@ -105,7 +105,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="七维分" min-width="260">
+        <el-table-column label="七维分" min-width="220">
           <template #default="{ row }">
             <template v-if="row.dimension_scores_json">
               <span
@@ -119,6 +119,24 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
+        <el-table-column label="失败归因" min-width="180">
+          <template #default="{ row }">
+            <template v-if="(row.failure_attribution || []).length">
+              <el-tag
+                v-for="tag in row.failure_attribution"
+                :key="tag"
+                size="small"
+                type="danger"
+                effect="plain"
+                class="run-detail__attr-tag"
+              >
+                {{ tag }}
+              </el-tag>
+            </template>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="judge_comment" label="评判意见" min-width="220" show-overflow-tooltip />
         <el-table-column label="操作" width="80" fixed="right">
           <template #default="{ row }">
             <el-button text type="primary" @click="openCaseDetail(row)">详情</el-button>
@@ -148,14 +166,138 @@
           <el-descriptions-item label="类别">{{ caseDetail.category || '-' }}</el-descriptions-item>
         </el-descriptions>
 
-        <div v-if="caseDetail.dimension_scores_json" class="case-detail-dialog__dims">
-          <div class="run-detail__section-title">维度评分</div>
-          <el-table :data="dimensionList(caseDetail.dimension_scores_json)" size="small" stripe>
-            <el-table-column prop="name" label="维度" />
-            <el-table-column prop="score" label="得分" width="80" align="center" />
-            <el-table-column prop="weight" label="权重" width="80" align="center" />
-            <el-table-column prop="rationale" label="理由" min-width="300" show-overflow-tooltip />
+        <div class="case-detail-dialog__section">
+          <div class="run-detail__section-title">通过判定</div>
+          <div class="case-detail-dialog__checks">
+            <el-tag
+              v-for="check in passChecks"
+              :key="check.label"
+              size="default"
+              :type="check.ok ? 'success' : 'danger'"
+              effect="plain"
+            >
+              {{ check.ok ? '✓' : '✗' }} {{ check.label }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div v-if="comparisonRows.length" class="case-detail-dialog__section">
+          <div class="run-detail__section-title">预期 vs 实际</div>
+          <div v-if="caseQuestion" class="case-detail-dialog__qa">
+            <div class="case-detail-dialog__qa-label">问题</div>
+            <div class="case-detail-dialog__text">{{ caseQuestion }}</div>
+          </div>
+          <el-table :data="comparisonRows" size="small" stripe>
+            <el-table-column prop="group" label="对照项" width="110" />
+            <el-table-column label="预期" min-width="260">
+              <template #default="{ row }">
+                <div class="case-detail-dialog__cell">{{ row.expected || '-' }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="实际" min-width="260">
+              <template #default="{ row }">
+                <div class="case-detail-dialog__cell">{{ row.actual || '-' }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="结果" width="90" align="center">
+              <template #default="{ row }">
+                <el-tag v-if="row.ok === true" size="small" type="success">符合</el-tag>
+                <el-tag v-else-if="row.ok === false" size="small" type="danger">不符合</el-tag>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
           </el-table>
+          <div v-if="!expectedCaseDef" class="case-detail-dialog__muted case-detail-dialog__note">
+            未能关联到评测集用例定义（运行未关联数据集或用例已删除），预期列仅显示运行内可得信息。
+          </div>
+        </div>
+
+        <div v-if="judgeInfo.comment" class="case-detail-dialog__section">
+          <div class="run-detail__section-title">评判意见</div>
+          <div class="case-detail-dialog__text">{{ judgeInfo.comment }}</div>
+        </div>
+
+        <div v-if="failureTags.length || vetoTags.length" class="case-detail-dialog__section">
+          <div class="run-detail__section-title">失败归因</div>
+          <div class="case-detail-dialog__checks">
+            <el-tag
+              v-for="tag in failureTags"
+              :key="`attr-${tag}`"
+              size="small"
+              type="danger"
+              effect="plain"
+            >
+              {{ tag }}
+            </el-tag>
+            <el-tag
+              v-for="tag in vetoTags"
+              :key="`veto-${tag}`"
+              size="small"
+              type="danger"
+            >
+              一票否决: {{ tag }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div v-if="caseFinalAnswer" class="case-detail-dialog__section">
+          <div class="run-detail__section-title">最终回答（全文）</div>
+          <div class="case-detail-dialog__text case-detail-dialog__text--scroll">{{ caseFinalAnswer }}</div>
+        </div>
+
+        <div v-if="caseDetail.dimension_scores_json" class="case-detail-dialog__section">
+          <div class="run-detail__section-title">维度评分</div>
+          <el-table :data="dimensionList(caseDetail.dimension_scores_json, judgeInfo.dimension_rationales)" size="small" stripe>
+            <el-table-column prop="name" label="维度" width="120" />
+            <el-table-column prop="score" label="得分" width="70" align="center" />
+            <el-table-column prop="weight" label="满分" width="70" align="center" />
+            <el-table-column prop="rationale" label="理由" min-width="320">
+              <template #default="{ row }">
+                <span v-if="row.rationale">{{ row.rationale }}</span>
+                <span v-else class="case-detail-dialog__muted">-（本次运行的评判版本未输出维度理由）</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <div v-if="hardGates.length" class="case-detail-dialog__section">
+          <div class="run-detail__section-title">硬门槛检查</div>
+          <div class="case-detail-dialog__checks">
+            <el-tag
+              v-for="gate in hardGates"
+              :key="gate.key"
+              size="small"
+              :type="gate.ok ? 'success' : 'danger'"
+              effect="plain"
+            >
+              {{ gate.ok ? '✓' : '✗' }} {{ gate.label }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div v-if="ruleChecks.length" class="case-detail-dialog__section">
+          <div class="run-detail__section-title">自动规则检查</div>
+          <el-table :data="ruleChecks" size="small" stripe>
+            <el-table-column prop="name" label="检查项" width="140" />
+            <el-table-column label="结果" width="90" align="center">
+              <template #default="{ row }">
+                <el-tag v-if="!row.applicable" size="small" type="info">不适用</el-tag>
+                <el-tag v-else size="small" :type="row.passed ? 'success' : 'danger'">
+                  {{ row.passed ? '通过' : '未通过' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="reason" label="原因" min-width="240">
+              <template #default="{ row }">{{ row.reason || '-' }}</template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <div v-if="caseErrors.length" class="case-detail-dialog__section">
+          <div class="run-detail__section-title">运行错误</div>
+          <div class="case-detail-dialog__text case-detail-dialog__text--error">
+            <div v-for="(err, idx) in caseErrors" :key="idx">{{ err }}</div>
+          </div>
         </div>
 
         <div v-if="caseDetail.case_json" class="case-detail-dialog__json">
@@ -243,15 +385,229 @@ const DIMENSION_NAMES = {
   answer_quality: '回答质量'
 }
 
-const dimensionList = (dimJson) => {
+const DIMENSION_WEIGHTS = {
+  intent: 1,
+  ontology_entity: 1,
+  relation_scope: 1,
+  sql_or_tool_call: 2,
+  result_consistency: 2,
+  reasoning: 2,
+  answer_quality: 1
+}
+
+const dimensionList = (dimJson, rationales) => {
   if (!dimJson || typeof dimJson !== 'object') return []
   return Object.entries(dimJson).map(([key, val]) => ({
     name: DIMENSION_NAMES[key] || key,
     score: typeof val === 'object' ? (val.score ?? '-') : val,
-    weight: typeof val === 'object' ? (val.weight ?? '-') : '-',
-    rationale: typeof val === 'object' ? (val.rationale || '') : ''
+    weight: DIMENSION_WEIGHTS[key] ?? (typeof val === 'object' ? (val.weight ?? '-') : '-'),
+    rationale: (rationales && typeof rationales === 'object' && rationales[key])
+      || (typeof val === 'object' ? (val.rationale || '') : '')
   }))
 }
+
+const caseJson = computed(() => {
+  const cj = caseDetail.value?.case_json
+  if (!cj) return null
+  if (typeof cj === 'string') {
+    try { return JSON.parse(cj) } catch { return null }
+  }
+  return typeof cj === 'object' ? cj : null
+})
+
+const judgeInfo = computed(() => {
+  const j = caseJson.value?.judge
+  return j && typeof j === 'object' ? j : {}
+})
+
+const ruleCheckInfo = computed(() => {
+  const r = caseJson.value?.auto_rule_check
+  return r && typeof r === 'object' ? r : {}
+})
+
+const caseQuestion = computed(() => String(caseJson.value?.question || ''))
+const caseFinalAnswer = computed(() => String(caseJson.value?.final_answer || ''))
+const caseErrors = computed(() => (Array.isArray(caseJson.value?.errors) ? caseJson.value.errors.map(String) : []))
+const vetoTags = computed(() => (Array.isArray(caseJson.value?.veto_rules_triggered) ? caseJson.value.veto_rules_triggered.map(String) : []))
+const failureTags = computed(() => (Array.isArray(judgeInfo.value.failure_attribution) ? judgeInfo.value.failure_attribution.map(String) : []))
+
+const SUCCESS_STATUSES = ['success', 'completed']
+
+const passChecks = computed(() => {
+  if (!caseJson.value) return []
+  const cj = caseJson.value
+  const judge = judgeInfo.value
+  const score = Number(judge.score ?? cj.judge?.score ?? 0)
+  return [
+    { label: '任务执行成功', ok: SUCCESS_STATUSES.includes(String(cj.task_status || '').toLowerCase()) },
+    { label: '无运行错误', ok: !(Array.isArray(cj.errors) && cj.errors.length) },
+    { label: '自动规则检查通过', ok: ruleCheckInfo.value.passed !== false },
+    { label: '评分 ≥ 8', ok: score >= 8 },
+    { label: '评判有效', ok: !judge.judge_failed },
+    { label: '无幻觉', ok: !judge.hallucination },
+    { label: '无一票否决', ok: !vetoTags.value.length }
+  ]
+})
+
+const HARD_GATE_LABELS = {
+  'sql_execution_and_口径': 'SQL 执行与口径',
+  required_tool_execution: '必需工具执行',
+  no_hallucination: '无幻觉',
+  no_veto: '无一票否决',
+  reference_data_accuracy: '参考数据准确',
+  task_completed: '任务完成'
+}
+
+const hardGates = computed(() => {
+  const gates = ruleCheckInfo.value.hard_gates
+  if (!gates || typeof gates !== 'object') return []
+  return Object.entries(gates).map(([key, val]) => ({
+    key,
+    label: HARD_GATE_LABELS[key] || key,
+    ok: Boolean(val)
+  }))
+})
+
+const ruleChecks = computed(() => {
+  if (!caseJson.value) return []
+  const rows = []
+  const sources = [
+    { name: '时间维度', data: ruleCheckInfo.value.time_dimension },
+    { name: '结果一致性', data: ruleCheckInfo.value.result_consistency },
+    { name: '参考数据准确性', data: caseJson.value.reference_data_accuracy }
+  ]
+  for (const { name, data } of sources) {
+    if (data && typeof data === 'object') {
+      rows.push({
+        name,
+        applicable: Boolean(data.applicable),
+        passed: Boolean(data.passed),
+        reason: String(data.reason || data.detail || '')
+      })
+    }
+  }
+  return rows
+})
+
+const expectedCaseDef = ref(null)
+
+const joinList = (v, sep = '、') => (Array.isArray(v) && v.length ? v.map(String).join(sep) : '')
+const truncate = (s, n) => {
+  const text = String(s || '')
+  return text.length > n ? `${text.slice(0, n)}…` : text
+}
+
+const comparisonRows = computed(() => {
+  const cj = caseJson.value
+  if (!cj) return []
+  const exp = expectedCaseDef.value || {}
+  const gates = ruleCheckInfo.value.hard_gates || {}
+  const dims = judgeInfo.value.dimension_scores || {}
+  const rows = []
+
+  const sem = exp.expected_semantics || {}
+  const semExpected = [
+    sem.intent ? `意图: ${sem.intent}` : '',
+    joinList(sem.ontology_object_ids) ? `本体对象: ${joinList(sem.ontology_object_ids)}` : '',
+    joinList(sem.business_rules, '\n') ? `业务规则:\n${joinList(sem.business_rules, '\n')}` : ''
+  ].filter(Boolean).join('\n')
+  if (semExpected || dims.intent !== undefined) {
+    rows.push({
+      group: '语义/意图',
+      expected: semExpected,
+      actual: `意图 ${dims.intent ?? '-'}/1，实体 ${dims.ontology_entity ?? '-'}/1，关系 ${dims.relation_scope ?? '-'}/1`,
+      ok: dims.intent !== undefined
+        ? Number(dims.intent) >= 1 && Number(dims.ontology_entity) >= 1
+        : null
+    })
+  }
+
+  const tools = exp.expected_tools || {}
+  const toolExpected = [
+    joinList(tools.required_steps, ' → ') ? `必需步骤: ${joinList(tools.required_steps, ' → ')}` : '',
+    tools.min_calls !== undefined ? `调用次数: ${tools.min_calls ?? 0} - ${tools.max_calls ?? '?'}` : ''
+  ].filter(Boolean).join('\n')
+  const toolActual = [
+    joinList(cj.tool_names) ? `工具: ${joinList(cj.tool_names)}` : '未调用工具',
+    `调用 ${cj.tool_call_count ?? 0} 次`
+  ].join('\n')
+  rows.push({
+    group: '工具调用',
+    expected: toolExpected,
+    actual: toolActual,
+    ok: 'required_tool_execution' in gates ? Boolean(gates.required_tool_execution) : null
+  })
+
+  const sql = exp.expected_sql || {}
+  const sqlExpected = [
+    sql.execution_required !== undefined ? `必须执行 SQL: ${sql.execution_required ? '是' : '否'}` : '',
+    joinList(sql.tables) ? `表: ${joinList(sql.tables)}` : '',
+    joinList(sql.predicates, '；') ? `条件: ${joinList(sql.predicates, '；')}` : '',
+    joinList(sql.aggregations) ? `聚合: ${joinList(sql.aggregations)}` : ''
+  ].filter(Boolean).join('\n')
+  const sqlOutputs = Array.isArray(cj.sql_outputs) ? cj.sql_outputs : []
+  const sqlActual = [
+    `执行 ${cj.sql_execution_count ?? 0} 条 SQL`,
+    sqlOutputs.length ? truncate(sqlOutputs.map((s) => String(s)).join('\n---\n'), 600) : ''
+  ].filter(Boolean).join('\n')
+  rows.push({
+    group: 'SQL 执行',
+    expected: sqlExpected,
+    actual: sqlActual,
+    ok: 'sql_execution_and_口径' in gates ? Boolean(gates['sql_execution_and_口径']) : null
+  })
+
+  const result = exp.expected_result || {}
+  const refQuery = result.reference_query || {}
+  const refActual = cj.reference_data_accuracy || {}
+  const resultExpected = [
+    joinList(result.required_columns) ? `必需列: ${joinList(result.required_columns)}` : '',
+    refQuery.sql ? `参考 SQL: ${truncate(refQuery.sql, 200)}` : '',
+    result.allow_empty !== undefined ? `允许空结果: ${result.allow_empty ? '是' : '否'}` : ''
+  ].filter(Boolean).join('\n')
+  if (resultExpected || refActual.applicable) {
+    rows.push({
+      group: '数据结果',
+      expected: resultExpected,
+      actual: refActual.applicable
+        ? `参考数据对比: ${refActual.passed ? '一致' : '不一致'}${refActual.reason ? `（${refActual.reason}）` : ''}`
+        : '无参考数据对比',
+      ok: refActual.applicable ? Boolean(refActual.passed) : null
+    })
+  }
+
+  const time = exp.expected_time || {}
+  const timeCheck = ruleCheckInfo.value.time_dimension || {}
+  if (time.required || timeCheck.applicable) {
+    rows.push({
+      group: '时间口径',
+      expected: [
+        time.field ? `字段: ${time.field}` : '',
+        time.grain ? `粒度: ${time.grain}` : '',
+        time.range && Object.keys(time.range).length ? `范围: ${JSON.stringify(time.range)}` : ''
+      ].filter(Boolean).join('\n'),
+      actual: timeCheck.applicable
+        ? `时间维度检查: ${timeCheck.passed ? '通过' : '未通过'}${timeCheck.reason ? `（${timeCheck.reason}）` : ''}`
+        : '不适用',
+      ok: timeCheck.applicable ? Boolean(timeCheck.passed) : null
+    })
+  }
+
+  const answer = exp.expected_answer || {}
+  const answerExpected = [
+    joinList(answer.required_points, '\n') ? `必答要点:\n${joinList(answer.required_points, '\n')}` : '',
+    joinList(answer.boundary_notes, '\n') ? `边界说明:\n${joinList(answer.boundary_notes, '\n')}` : '',
+    joinList(answer.units) ? `单位: ${joinList(answer.units)}` : ''
+  ].filter(Boolean).join('\n')
+  rows.push({
+    group: '回答要点',
+    expected: answerExpected,
+    actual: truncate(caseFinalAnswer.value, 600) || '无最终回答',
+    ok: dims.answer_quality !== undefined ? Number(dims.answer_quality) >= 1 : null
+  })
+
+  return rows.filter((r) => r.expected || r.actual)
+})
 
 const filteredCases = computed(() => {
   const kw = String(caseSearch.value || '').trim().toLowerCase()
@@ -282,7 +638,17 @@ const loadRunCases = async () => {
 
 const openCaseDetail = async (row) => {
   try {
-    caseDetail.value = await dataagentApi.getEvalRunCase(runId.value, row.case_id)
+    expectedCaseDef.value = null
+    const detailPromise = dataagentApi.getEvalRunCase(runId.value, row.case_id)
+    if (run.value?.dataset_id) {
+      dataagentApi.getEvalCase(run.value.dataset_id, row.case_id)
+        .then((def) => {
+          const json = typeof def.case_json === 'string' ? JSON.parse(def.case_json) : def.case_json
+          if (json && typeof json === 'object') expectedCaseDef.value = json
+        })
+        .catch(() => { /* run 未关联数据集或用例已删除时静默降级 */ })
+    }
+    caseDetail.value = await detailPromise
     caseDialogVisible.value = true
   } catch (e) {
     notifyError(e, '加载用例详情失败')
@@ -445,12 +811,75 @@ onMounted(() => {
   gap: 16px;
 }
 
-.case-detail-dialog__dims {
+.case-detail-dialog__section {
+  margin-top: 4px;
+}
+
+.case-detail-dialog__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.case-detail-dialog__text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f8fafc;
+  border: 1px solid #eef2f6;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.case-detail-dialog__text--scroll {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.case-detail-dialog__text--error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.case-detail-dialog__qa {
+  margin-bottom: 10px;
+}
+
+.case-detail-dialog__qa-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.case-detail-dialog__muted {
+  color: #94a3b8;
+}
+
+.case-detail-dialog__cell {
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.case-detail-dialog__note {
   margin-top: 8px;
+  font-size: 12px;
 }
 
 .case-detail-dialog__json {
   margin-top: 8px;
+}
+
+.run-detail__attr-tag {
+  margin-right: 4px;
+  margin-bottom: 2px;
 }
 
 .case-detail-dialog__editor {

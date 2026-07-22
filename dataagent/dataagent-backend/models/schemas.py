@@ -930,6 +930,8 @@ class EvalRunCaseSummary(BaseModel):
     task_status: str = ""
     hallucination: bool = False
     dimension_scores_json: Any = None
+    failure_attribution: List[str] = []
+    judge_comment: str = ""
 
 
 class EvalRunCaseDetail(BaseModel):
