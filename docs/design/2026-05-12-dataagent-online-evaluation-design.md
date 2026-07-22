@@ -75,6 +75,11 @@ suite tags, `expected_semantics`, `expected_time`, `expected_tools`,
 `question` is submitted as a single-turn case. `turns` is a list of user messages submitted sequentially in one topic for real multi-turn evaluation; when `turns` is present, `question` may remain as a short report title instead of the submitted prompt text.
 
 `expected_result.reference_query` and `judge_guidance` are optional extensions.
+When a successfully executed reference query returns zero rows, zero rows become
+the runtime truth for that case even if the static `allow_empty` default is
+false. A matching empty Agent result therefore passes; an empty Agent result
+still fails when the reference query contains rows. Reference-query execution
+errors remain infrastructure failures and are never converted into empty truth.
 
 The source document's scoring model is normalized to a 10-point rubric:
 

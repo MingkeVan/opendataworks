@@ -250,3 +250,110 @@ def test_business_knowledge_allowed_empty_language_is_not_a_failure_code():
         )
         assert "empty_result" not in checked["failure_attribution"], engine
         assert checked["passed"] is True, engine
+
+
+def test_three_engines_accept_expected_empty_reference_sql(monkeypatch):
+    modules = {name: _load(name, path) for name, path in RUNNERS.items()}
+    local_cases = [json.loads(line) for line in LOCAL_DATASET.read_text(encoding="utf-8").splitlines() if line.strip()]
+    case = next(item for item in local_cases if item["case_id"] == "ODW_BK_006")
+    sql = case["expected_result"]["reference_query"]["sql"]
+    blocks = [
+        {
+            "type": "tool_use",
+            "tool_name": "Skill",
+            "input": {"skill": "opendataworks-business-knowledge"},
+            "output": "Launching skill: opendataworks-business-knowledge",
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "input": {"command": f'"$DATAAGENT_PYTHON_BIN" "$DATAAGENT_PLATFORM_SKILL_ROOT/scripts/run_sql.py" --sql "{sql}"'},
+            "output": {
+                "kind": "sql_execution",
+                "sql": sql,
+                "rows": [],
+                "row_count": 0,
+                "result_state": "empty_result",
+            },
+        },
+    ]
+    answer = "已按 table_name 查询，未找到 __odw_eval_missing_table_006__，因此不提供数据库、负责人或状态。"
+
+    for engine, module in modules.items():
+        monkeypatch.setattr(
+            module,
+            "dataagent_http_json",
+            lambda *_args, **_kwargs: {"rows": [], "row_count": 0, "result_state": "empty_result"},
+        )
+        reference = module._execute_reference_query("http://dataagent", case, "topic_1")
+        assert reference["rows"] == [], engine
+        assert reference["row_count"] == 0, engine
+
+        actual_rows = module._actual_query_row_sets(blocks)
+        assert actual_rows == [[]], engine
+        compared = module._compare_reference(reference, actual_rows, case)
+        assert compared["passed"] is True, engine
+
+        tools = module._collect_tool_names(blocks)
+        sql_outputs = module._extract_sql_outputs(blocks, answer)
+        checked = module.auto_rule_check(
+            case,
+            final_answer=answer,
+            blocks=blocks,
+            sql_outputs=sql_outputs,
+            tool_names=tools,
+        )
+        assert checked["passed"] is True, engine
+        assert checked["hard_gates"]["non_expected_empty_result"] is True, engine
+        assert "empty_result" not in checked["failure_attribution"], engine
+
+
+def test_three_engines_derive_expected_empty_from_reference_truth():
+    modules = {name: _load(name, path) for name, path in RUNNERS.items()}
+    local_cases = [json.loads(line) for line in LOCAL_DATASET.read_text(encoding="utf-8").splitlines() if line.strip()]
+    source_case = next(item for item in local_cases if item["case_id"] == "ODW_BK_006")
+    case = {
+        **source_case,
+        "expected_result": {**source_case["expected_result"], "allow_empty": False},
+    }
+    sql = case["expected_result"]["reference_query"]["sql"]
+    blocks = [
+        {
+            "type": "tool_use",
+            "tool_name": "Skill",
+            "input": {"skill": "opendataworks-business-knowledge"},
+            "output": "Launching skill: opendataworks-business-knowledge",
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "input": {"command": f'run_sql.py --sql "{sql}"'},
+            "output": {
+                "kind": "sql_execution",
+                "sql": sql,
+                "rows": [],
+                "row_count": 0,
+                "result_state": "empty_result",
+            },
+        },
+    ]
+    answer = "未找到 __odw_eval_missing_table_006__，没有编造数据库、负责人或状态。"
+
+    for engine, module in modules.items():
+        reference = {"applicable": True, "passed": None, "rows": [], "row_count": 0}
+        rule_case = module._case_with_reference_empty_policy(case, reference)
+        assert case["expected_result"]["allow_empty"] is False, engine
+        assert rule_case["expected_result"]["allow_empty"] is True, engine
+        checked = module.auto_rule_check(
+            rule_case,
+            final_answer=answer,
+            blocks=blocks,
+            sql_outputs=module._extract_sql_outputs(blocks, answer),
+            tool_names=module._collect_tool_names(blocks),
+        )
+        assert checked["passed"] is True, engine
+        assert checked["hard_gates"]["non_expected_empty_result"] is True, engine
+        assert "empty_result" not in checked["failure_attribution"], engine
+
+        nonempty_reference = {"applicable": True, "rows": [{"table_name": "orders"}], "row_count": 1}
+        assert module._case_with_reference_empty_policy(case, nonempty_reference) is case, engine

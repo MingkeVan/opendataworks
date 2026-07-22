@@ -27,6 +27,9 @@ making it a dependency or shared runtime for the existing engines.
   preserve a partial report, and exit 2.
 - Independently execute optional read-only reference SQL and report data
   accuracy separately from final-answer/result consistency.
+- Treat a successful zero-row reference result as expected empty truth for that
+  run; never turn reference SQL, transport, or authorization failures into an
+  empty business result.
 
 ## Interfaces
 
@@ -51,7 +54,7 @@ production exposure requires an existing gateway and unified authentication and
 is outside this change.
 
 Local real-chain acceptance uses the repository's
-`opendataworks-business-knowledge` Skill and its five-case smoke dataset. The
+`opendataworks-business-knowledge` Skill and its six-case smoke dataset. The
 private architecture-ontology suite remains external and is not a prerequisite
 for local execution.
 

@@ -464,11 +464,13 @@ def test_run_case_submits_turns_in_order(monkeypatch):
         "expected_tools": {**_sample_case()["expected_tools"], "required_steps": [], "allowed_alternative_groups": [], "min_calls": 0},
     }
     submitted_contents = []
+    execution_order = []
 
     def fake_http_json(method, url, payload=None, **kwargs):
         if url.endswith("/api/v1/nl2sql/topics") and method == "POST":
             return {"topic_id": "topic_1"}
         if url.endswith("/api/v1/nl2sql/tasks/deliver-message"):
+            execution_order.append("submit")
             submitted_contents.append(payload["content"])
             return {"task_id": f"task_{len(submitted_contents)}", "accepted": True}
         if url == "http://dataagent/api/v1/nl2sql/tasks/task_1":
@@ -478,6 +480,7 @@ def test_run_case_submits_turns_in_order(monkeypatch):
         if "/sdk-events?" in url:
             return {"records": [], "has_more": False, "next_after_id": 0}
         if url.startswith("http://dataagent/api/v1/nl2sql/topics/topic_1/messages"):
+            execution_order.append("messages")
             return {
                 "items": [
                     {"sender_type": "user", "content": submitted_contents[0]},
@@ -503,6 +506,11 @@ def test_run_case_submits_turns_in_order(monkeypatch):
 
     monkeypatch.setattr(runner, "http_json", fake_http_json)
     monkeypatch.setattr(runner, "_judge_case", fake_judge_case)
+    monkeypatch.setattr(
+        runner,
+        "_execute_reference_query",
+        lambda *_args: execution_order.append("reference") or {"applicable": False, "passed": None, "rows": None},
+    )
 
     result = runner.run_case(
         "http://dataagent",
@@ -512,11 +520,35 @@ def test_run_case_submits_turns_in_order(monkeypatch):
     )
 
     assert submitted_contents == case["turns"]
+    assert execution_order == ["submit", "submit", "messages", "reference"]
     assert result["task_id"] == "task_2"
     assert result["final_answer"] == "第二轮答案"
     assert result["turns"] == case["turns"]
     assert result["case_passed"] is True
     assert result["errors"] == []
+
+
+def test_reference_query_transport_failure_has_specific_reason(monkeypatch):
+    runner = _load_runner()
+    case = _sample_case()
+    case["expected_result"]["reference_query"] = {
+        "sql": "SELECT 1",
+        "database": "opendataworks",
+        "engine": "mysql",
+    }
+
+    def fail_query(*_args, **_kwargs):
+        raise runner.EvalRunnerError("HTTP 503 query/execute: SQL execution channel is not configured", exit_code=2)
+
+    monkeypatch.setattr(runner, "dataagent_http_json", fail_query)
+
+    try:
+        runner._execute_reference_query("http://dataagent", case, "topic_1")
+    except runner.InfrastructureAbort as exc:
+        assert str(exc).startswith("reference_sql_failed:")
+        assert "HTTP 503" in str(exc)
+    else:
+        raise AssertionError("reference query transport failure must abort evaluation infrastructure")
 
 
 def test_run_case_fails_when_auto_rule_check_fails(monkeypatch):

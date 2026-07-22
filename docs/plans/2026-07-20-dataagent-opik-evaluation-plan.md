@@ -13,6 +13,8 @@
   version locks, loopback overlay, and non-destructive lifecycle scripts.
 - [x] Extend offline packaging with the Opik runner and an explicit inventory of
   pinned local-platform images.
+- [x] Derive expected-empty behavior from successful zero-row reference SQL
+  without weakening infrastructure failure handling.
 
 ## Verification
 
@@ -20,7 +22,7 @@
   mapping, custom metrics, report parity, and failure handling.
 - [ ] Start the pinned local Compose stack externally; verify health, loopback
   binding, persistence across restart, and server/SDK version compatibility.
-- [ ] Run the repository-local five-case `opendataworks-business-knowledge`
+- [ ] Run the repository-local six-case `opendataworks-business-knowledge`
   smoke suite when provider, administrator token, and runtime services are
   available. Do not depend on private architecture-ontology data for this test.
 - [x] Generate engine comparison output only for compatibility-key-equivalent runs.

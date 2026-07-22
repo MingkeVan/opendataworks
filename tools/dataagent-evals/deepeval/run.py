@@ -1153,13 +1153,23 @@ def _execute_reference_query(base_url: str, case: dict[str, Any], topic_id: str)
     if not re.match(r"(?is)^\s*(?:select|with)\b", sql) or re.search(r"(?is)\b(?:insert|update|delete|drop|alter|truncate|create|grant|revoke)\b", sql):
         raise InfrastructureAbort("reference_sql_invalid: only read-only SELECT/CTE SQL is allowed")
     timeout = int(reference.get("timeout_seconds") or 60)
-    response = dataagent_http_json("POST", f"{base_url}/api/v1/nl2sql/query/execute", {
-        "sql": sql, "database": str(reference.get("database") or ""), "engine": reference.get("engine"),
-        "limit": int(reference.get("limit") or 1000), "timeout_seconds": timeout, "topic_id": topic_id,
-    }, timeout=timeout + 15)
+    try:
+        response = dataagent_http_json("POST", f"{base_url}/api/v1/nl2sql/query/execute", {
+            "sql": sql, "database": str(reference.get("database") or ""), "engine": reference.get("engine"),
+            "limit": int(reference.get("limit") or 1000), "timeout_seconds": timeout, "topic_id": topic_id,
+        }, timeout=timeout + 15)
+    except InfrastructureAbort:
+        raise
+    except EvalRunnerError as exc:
+        raise InfrastructureAbort(f"reference_sql_failed: {exc}") from exc
     rows = response.get("rows") if isinstance(response.get("rows"), list) else None
-    if rows is None or str(response.get("result_state") or "success").lower() not in {"success", "empty", "empty_result"}:
-        raise InfrastructureAbort("reference_sql_failed: read-only query did not return rows")
+    result_state = str(response.get("result_state") or "success").lower()
+    if rows is None or result_state not in {"success", "empty", "empty_result"}:
+        detail = str(response.get("error") or response.get("message") or "").strip()
+        suffix = f", detail={detail}" if detail else ""
+        raise InfrastructureAbort(
+            f"reference_sql_failed: result_state={result_state}, rows_present={rows is not None}{suffix}"
+        )
     return {"applicable": True, "passed": None, "rows": rows, "row_count": len(rows)}
 
 
@@ -1195,6 +1205,14 @@ def _compare_reference(reference: dict[str, Any], actual_row_sets: list[list[dic
     }
 
 
+def _case_with_reference_empty_policy(case: dict[str, Any], reference: dict[str, Any]) -> dict[str, Any]:
+    """Treat a successfully established empty truth set as an expected result."""
+    if not reference.get("applicable") or int(reference.get("row_count") or 0) != 0:
+        return case
+    expected_result = case.get("expected_result") if isinstance(case.get("expected_result"), dict) else {}
+    return {**case, "expected_result": {**expected_result, "allow_empty": True}}
+
+
 def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     e2e_started: float | None = None
     e2e_seconds: float | None = None
@@ -1213,7 +1231,6 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace) -> d
     reference_result: dict[str, Any] = {"applicable": False, "passed": None}
     try:
         topic_id = _create_topic(base_url, case, str(args.agent_id or "").strip())
-        reference_result = _execute_reference_query(base_url, case, topic_id)
         limits = case.get("limits") if isinstance(case.get("limits"), dict) else {}
         case_timeout = min(max(1, args.timeout_seconds), int(limits.get("max_wait_seconds") or args.timeout_seconds or 900))
         final_task_id = ""
@@ -1260,6 +1277,9 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace) -> d
                 annotated = dict(event)
                 annotated["_evaluation_task_id"] = completed_task_id
                 sdk_events.append(annotated)
+        # Do not let reference-query infrastructure prevent the actual Agent
+        # task from being submitted and persisted in the platform history.
+        reference_result = _execute_reference_query(base_url, case, topic_id)
     except InfrastructureAbort:
         raise
     except EvalRunnerError as exc:
@@ -1281,7 +1301,8 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace) -> d
         sum(1 for task_record in task_records if _is_recovered_task(task_record)),
     )
     tool_call_count = len([block for block in blocks if isinstance(block, dict) and block.get("type") == "tool_use"])
-    rule_check = auto_rule_check(case, final_answer=final_answer, blocks=blocks, sql_outputs=sql_outputs, tool_names=tool_names)
+    rule_case = _case_with_reference_empty_policy(case, reference_result)
+    rule_check = auto_rule_check(rule_case, final_answer=final_answer, blocks=blocks, sql_outputs=sql_outputs, tool_names=tool_names)
     _apply_runtime_hard_gates(
         rule_check,
         case,

@@ -23,12 +23,15 @@
   authentication fails after submissions have started.
 - [x] Pass the shared golden conformance fixtures while loading only builtin
   implementation code.
+- [x] Derive expected-empty behavior from a successfully executed zero-row
+  reference query while keeping reference failures as exit-code-2 infrastructure
+  failures.
 
 ## V2 Verification
 
 - [x] Run the existing builtin regression suite and the new V2 contract tests.
 - [x] Dry-run the private 33-case V2 dataset and all generated subsets.
-- [ ] Run the repository-local five-case authenticated smoke set against
+- [ ] Run the repository-local six-case authenticated smoke set against
   `opendataworks-business-knowledge` when the local runtime and
   credentials are available; record exact skipped external dependencies.
 

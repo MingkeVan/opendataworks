@@ -12,6 +12,8 @@
   numerator/denominator based business metrics.
 - [x] Write the full V2 artifact set including `run.json` and self-contained HTML.
 - [x] Pass the common golden fixtures without importing another engine.
+- [x] Accept a matching empty Agent result when the independently executed
+  reference query establishes an empty truth set.
 
 ## Implementation Tasks
 

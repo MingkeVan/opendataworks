@@ -1470,10 +1470,25 @@ def _execute_reference_query(base_url: str, case: dict[str, Any], topic_id: str)
         "timeout_seconds": int(reference.get("timeout_seconds") or 60),
         "topic_id": topic_id,
     }
-    response = dataagent_http_json("POST", f"{base_url}/api/v1/nl2sql/query/execute", payload, timeout=payload["timeout_seconds"] + 15)
+    try:
+        response = dataagent_http_json(
+            "POST",
+            f"{base_url}/api/v1/nl2sql/query/execute",
+            payload,
+            timeout=payload["timeout_seconds"] + 15,
+        )
+    except InfrastructureAbort:
+        raise
+    except EvalRunnerError as exc:
+        raise InfrastructureAbort(f"reference_sql_failed: {exc}") from exc
     rows = response.get("rows") if isinstance(response.get("rows"), list) else None
-    if rows is None or str(response.get("result_state") or "success").lower() not in {"success", "empty", "empty_result"}:
-        raise InfrastructureAbort("reference_sql_failed: read-only query did not return a result set")
+    result_state = str(response.get("result_state") or "success").lower()
+    if rows is None or result_state not in {"success", "empty", "empty_result"}:
+        detail = str(response.get("error") or response.get("message") or "").strip()
+        suffix = f", detail={detail}" if detail else ""
+        raise InfrastructureAbort(
+            f"reference_sql_failed: result_state={result_state}, rows_present={rows is not None}{suffix}"
+        )
     return {"applicable": True, "passed": None, "rows": rows, "row_count": len(rows), "database": payload["database"]}
 
 
@@ -1508,8 +1523,17 @@ def _compare_reference(reference: dict[str, Any], actual_row_sets: list[list[dic
     }
 
 
+def _case_with_reference_empty_policy(case: dict[str, Any], reference: dict[str, Any]) -> dict[str, Any]:
+    """Treat a successfully established empty truth set as an expected result."""
+    if not reference.get("applicable") or int(reference.get("row_count") or 0) != 0:
+        return case
+    expected_result = case.get("expected_result") if isinstance(case.get("expected_result"), dict) else {}
+    return {**case, "expected_result": {**expected_result, "allow_empty": True}}
+
+
 def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace, judge_config: JudgeConfig) -> dict[str, Any]:
     submitted_clock: float | None = None
+    e2e_seconds = 0.0
     errors: list[dict[str, Any]] = []
     topic_id = ""
     task_id = ""
@@ -1525,7 +1549,6 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace, judg
     reference_result: dict[str, Any] = {"applicable": False, "passed": None, "rows": None}
     try:
         topic_id = _create_topic(base_url, case, str(args.agent_id or "").strip())
-        reference_result = _execute_reference_query(base_url, case, topic_id)
         limits = case.get("limits") if isinstance(case.get("limits"), dict) else {}
         case_timeout = min(max(1, args.timeout_seconds), int(limits.get("max_wait_seconds") or args.timeout_seconds or 900))
         final_task_id = ""
@@ -1563,12 +1586,13 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace, judg
         message = _final_assistant_message(messages, final_task_id)
         conversation = _build_conversation_log(messages)
         final_answer = str(message.get("content") or "").strip()
+        e2e_seconds = round(time.time() - submitted_clock, 3) if submitted_clock is not None else 0.0
+        reference_result = _execute_reference_query(base_url, case, topic_id)
     except InfrastructureAbort:
         raise
     except EvalRunnerError as exc:
         raise InfrastructureAbort(f"dataagent_run_failed: {exc}") from exc
 
-    e2e_seconds = round(time.time() - submitted_clock, 3) if submitted_clock is not None else 0.0
     blocks = [
         block
         for topic_message in message_items
@@ -1586,7 +1610,8 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace, judg
         len(completed_tasks) == expected_turn_count
         and all(str(item.get("task_status") or "").lower() in SUCCESS_STATUSES for item in completed_tasks)
     )
-    rule_check = auto_rule_check(case, final_answer=final_answer, blocks=blocks, sql_outputs=sql_outputs, tool_names=tool_names)
+    rule_case = _case_with_reference_empty_policy(case, reference_result)
+    rule_check = auto_rule_check(rule_case, final_answer=final_answer, blocks=blocks, sql_outputs=sql_outputs, tool_names=tool_names)
     _apply_runtime_hard_gates(
         rule_check,
         case,
