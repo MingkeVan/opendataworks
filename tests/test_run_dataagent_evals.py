@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import threading
@@ -546,9 +547,65 @@ def test_reference_query_transport_failure_has_specific_reason(monkeypatch):
         runner._execute_reference_query("http://dataagent", case, "topic_1")
     except runner.InfrastructureAbort as exc:
         assert str(exc).startswith("reference_sql_failed:")
+        assert "case_id=ODW_SAMPLE_001" in str(exc)
+        assert "database=opendataworks" in str(exc)
+        assert "engine=mysql" in str(exc)
+        assert 'sql="SELECT 1"' in str(exc)
         assert "HTTP 503" in str(exc)
+        assert exc.details == {
+            "error_code": "reference_sql_failed",
+            "case_id": "ODW_SAMPLE_001",
+            "database": "opendataworks",
+            "engine": "mysql",
+            "sql": "SELECT 1",
+            "sql_sha256": hashlib.sha256(b"SELECT 1").hexdigest(),
+            "cause": "HTTP 503 query/execute: SQL execution channel is not configured",
+        }
     else:
         raise AssertionError("reference query transport failure must abort evaluation infrastructure")
+
+
+def test_reference_query_failure_is_persisted_with_structured_context(tmp_path, monkeypatch):
+    runner = _load_runner()
+    dataset = _write_dataset(tmp_path / "cases.jsonl")
+    sql = "SELECT system_name FROM public.dim_tech_public_env_cmp_df"
+    details = {
+        "error_code": "reference_sql_failed",
+        "case_id": "ODW_SAMPLE_001",
+        "database": "public",
+        "engine": "doris",
+        "sql": sql,
+        "sql_sha256": hashlib.sha256(sql.encode("utf-8")).hexdigest(),
+        "cause": "Unknown column 'system_name'",
+    }
+
+    monkeypatch.setattr(runner, "preflight", lambda *_args, **_kwargs: {"auth": {"auth_enabled": False}})
+
+    def fail_cases(*_args, **_kwargs):
+        raise runner.InfrastructureAbort(
+            "reference_sql_failed: case_id=ODW_SAMPLE_001; cause=Unknown column 'system_name'",
+            details=details,
+        )
+
+    monkeypatch.setattr(runner, "_run_cases", fail_cases)
+    code = runner.main(
+        [
+            "--base-url", "http://dataagent",
+            "--dataset", str(dataset),
+            "--output-dir", str(tmp_path / "report"),
+            "--agent-id", "agent_eval",
+            "--judge-base-url", "http://judge",
+            "--judge-token", "judge-token",
+            "--judge-model", "judge-model",
+        ]
+    )
+
+    assert code == 2
+    summary = json.loads((tmp_path / "report" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["run_status"] == "infra_failed"
+    assert summary["infrastructure_details"] == details
+    assert "case_id=ODW_SAMPLE_001" in summary["infrastructure_error"]
+    assert sql == summary["infrastructure_details"]["sql"]
 
 
 def test_run_case_fails_when_auto_rule_check_fails(monkeypatch):

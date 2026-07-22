@@ -84,9 +84,16 @@ class EvalRunnerError(Exception):
 
 
 class InfrastructureAbort(EvalRunnerError):
-    def __init__(self, message: str, *, partial_results: list[dict[str, Any]] | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        partial_results: list[dict[str, Any]] | None = None,
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(message, exit_code=2)
         self.partial_results = partial_results or []
+        self.details = details or {}
 
 
 class JudgeConfig:
@@ -1467,6 +1474,32 @@ def _canonical_rows(rows: list[dict[str, Any]], *, tolerance: float = 0.0) -> li
     return sorted(normalized)
 
 
+def _reference_sql_failure(
+    case: dict[str, Any],
+    reference: dict[str, Any],
+    sql: str,
+    *,
+    error_code: str,
+    cause: str,
+    partial_results: list[dict[str, Any]] | None = None,
+) -> InfrastructureAbort:
+    details = {
+        "error_code": error_code,
+        "case_id": str(case.get("case_id") or "unknown"),
+        "database": str(reference.get("database") or ""),
+        "engine": str(reference.get("engine") or ""),
+        "sql": sql,
+        "sql_sha256": hashlib.sha256(sql.encode("utf-8")).hexdigest(),
+        "cause": str(cause or "unknown reference SQL failure"),
+    }
+    message = (
+        f"{error_code}: case_id={details['case_id']}, database={details['database'] or 'N/A'}, "
+        f"engine={details['engine'] or 'N/A'}, sql_sha256={details['sql_sha256']}, "
+        f"sql={json.dumps(sql, ensure_ascii=False)}; cause={details['cause']}"
+    )
+    return InfrastructureAbort(message, partial_results=partial_results, details=details)
+
+
 def _execute_reference_query(base_url: str, case: dict[str, Any], topic_id: str) -> dict[str, Any]:
     expected_result = case.get("expected_result") if isinstance(case.get("expected_result"), dict) else {}
     reference = expected_result.get("reference_query") if isinstance(expected_result.get("reference_query"), dict) else None
@@ -1474,7 +1507,13 @@ def _execute_reference_query(base_url: str, case: dict[str, Any], topic_id: str)
         return {"applicable": False, "passed": None, "rows": None}
     sql = str(reference.get("sql") or "").strip()
     if not re.match(r"(?is)^\s*(?:select|with)\b", sql) or re.search(r"(?is)\b(?:insert|update|delete|drop|alter|truncate|create|grant|revoke)\b", sql):
-        raise InfrastructureAbort("reference_sql_invalid: only read-only SELECT/CTE SQL is allowed")
+        raise _reference_sql_failure(
+            case,
+            reference,
+            sql,
+            error_code="reference_sql_invalid",
+            cause="only read-only SELECT/CTE SQL is allowed",
+        )
     payload = {
         "sql": sql,
         "database": str(reference.get("database") or "").strip(),
@@ -1490,17 +1529,34 @@ def _execute_reference_query(base_url: str, case: dict[str, Any], topic_id: str)
             payload,
             timeout=payload["timeout_seconds"] + 15,
         )
-    except InfrastructureAbort:
-        raise
+    except InfrastructureAbort as exc:
+        raise _reference_sql_failure(
+            case,
+            reference,
+            sql,
+            error_code="reference_sql_failed",
+            cause=str(exc),
+            partial_results=exc.partial_results,
+        ) from exc
     except EvalRunnerError as exc:
-        raise InfrastructureAbort(f"reference_sql_failed: {exc}") from exc
+        raise _reference_sql_failure(
+            case,
+            reference,
+            sql,
+            error_code="reference_sql_failed",
+            cause=str(exc),
+        ) from exc
     rows = response.get("rows") if isinstance(response.get("rows"), list) else None
     result_state = str(response.get("result_state") or "success").lower()
     if rows is None or result_state not in {"success", "empty", "empty_result"}:
         detail = str(response.get("error") or response.get("message") or "").strip()
         suffix = f", detail={detail}" if detail else ""
-        raise InfrastructureAbort(
-            f"reference_sql_failed: result_state={result_state}, rows_present={rows is not None}{suffix}"
+        raise _reference_sql_failure(
+            case,
+            reference,
+            sql,
+            error_code="reference_sql_failed",
+            cause=f"result_state={result_state}, rows_present={rows is not None}{suffix}",
         )
     return {"applicable": True, "passed": None, "rows": rows, "row_count": len(rows), "database": payload["database"]}
 
@@ -2134,7 +2190,14 @@ def main(argv: list[str] | None = None) -> int:
         except InfrastructureAbort as exc:
             results = exc.partial_results
             summary = build_summary(results, dataset_stats) if results else build_summary([], dataset_stats, dry_run=True)
-            summary.update({"dry_run": False, "run_status": "infra_failed", "passed": False, "recommendation": "基础设施失败", "infrastructure_error": str(exc)})
+            summary.update({
+                "dry_run": False,
+                "run_status": "infra_failed",
+                "passed": False,
+                "recommendation": "基础设施失败",
+                "infrastructure_error": str(exc),
+                "infrastructure_details": exc.details or None,
+            })
             write_outputs(output_dir, results, summary)
             _report_to_endpoint(report_endpoint, summary, results, started_at=run_started_at)
             print(str(exc), file=sys.stderr)

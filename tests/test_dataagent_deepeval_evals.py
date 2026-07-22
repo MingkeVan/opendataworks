@@ -663,7 +663,17 @@ def test_deepeval_reference_query_transport_failure_has_specific_reason(monkeypa
         runner._execute_reference_query("http://dataagent", case, "topic_1")
     except runner.InfrastructureAbort as exc:
         assert str(exc).startswith("reference_sql_failed:")
+        assert "case_id=ODW_SAMPLE_001" in str(exc)
+        assert "database=opendataworks" in str(exc)
+        assert "engine=mysql" in str(exc)
+        assert 'sql="SELECT 1"' in str(exc)
         assert "HTTP 503" in str(exc)
+        assert exc.details["error_code"] == "reference_sql_failed"
+        assert exc.details["case_id"] == "ODW_SAMPLE_001"
+        assert exc.details["database"] == "opendataworks"
+        assert exc.details["engine"] == "mysql"
+        assert exc.details["sql"] == "SELECT 1"
+        assert exc.details["cause"] == "HTTP 503 query/execute: SQL execution channel is not configured"
     else:
         raise AssertionError("reference query transport failure must abort evaluation infrastructure")
 
