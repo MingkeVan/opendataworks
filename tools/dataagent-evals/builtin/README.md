@@ -59,3 +59,9 @@ is enabled, pass an administrator JWT only through
 - `report.html`
 - `dataset-snapshot.jsonl`
 - `raw/<case_id>.json`
+
+When reference SQL fails, exit code 2 is preserved and the terminal error names
+the `case_id`, database, engine, SQL hash, full SQL, and backend cause.
+`summary.json.infrastructure_details` exposes the same fields as structured
+data: `error_code`, `case_id`, `database`, `engine`, `sql`, `sql_sha256`, and
+`cause`.
