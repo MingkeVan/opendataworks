@@ -523,9 +523,11 @@ def test_deepeval_auto_rule_check_adds_generic_failure_attribution(monkeypatch):
         tool_names=[],
     )
 
-    assert {"sql_only", "wrong_domain", "placeholder_leak", "empty_result"}.issubset(
+    assert {"sql_only", "placeholder_leak"}.issubset(
         set(result["failure_attribution"])
     )
+    assert "wrong_domain" not in result["failure_attribution"]
+    assert "empty_result" not in result["failure_attribution"]
 
 
 def test_deepeval_auto_rule_check_fails_missing_sql_or_tool_requirements(monkeypatch):

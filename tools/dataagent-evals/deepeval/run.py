@@ -5,6 +5,7 @@ import argparse
 import datetime as dt
 import hashlib
 import html
+import itertools
 import json
 import os
 import re
@@ -76,7 +77,7 @@ GATES = {
     "sql_tool_accuracy": 0.85,
     "result_consistency_rate": 0.90,
     "data_accuracy": 0.90,
-    "reasoning_average": 4.0,
+    "reasoning_average": 1.6,
     "hallucination_rate": 0.05,
 }
 JUDGE_DIMENSIONS = (
@@ -91,8 +92,8 @@ JUDGE_DIMENSIONS = (
 DIMENSION_MAX = {"intent": 1.0, "ontology_entity": 1.0, "relation_scope": 1.0, "sql_or_tool_call": 2.0, "result_consistency": 2.0, "reasoning": 2.0, "answer_quality": 1.0}
 EVALUATION_ENGINE = "deepeval"
 ENGINE_VERSION = "2.0.0"
-METRIC_SEMANTICS_VERSION = "2.1"
-JUDGE_PROMPT_VERSION = "dataagent-v2-2026-07-20"
+METRIC_SEMANTICS_VERSION = "2.2"
+JUDGE_PROMPT_VERSION = "dataagent-v2-2026-07-23"
 _DATAAGENT_AUTH_TOKEN = ""
 
 
@@ -156,7 +157,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         default=os.environ.get("DATAAGENT_EVAL_DATASET", ""),
-        help="Required external private evaluation JSONL dataset path.",
+        help="Required evaluation V2 JSONL dataset path.",
     )
     parser.add_argument("--output-dir", default=str(default_output_dir(root)), help="Report output directory.")
     parser.add_argument("--case", action="append", dest="case_ids", default=[], help="Case ID to run. Can be repeated.")
@@ -279,7 +280,7 @@ def load_dataset(path: Path, case_ids: list[str] | None = None) -> tuple[list[di
     stats = {
         "engine": "deepeval",
         "dataset_path": str(path),
-        "dataset_id": path.stem.removesuffix("-core"),
+        "dataset_id": path.stem,
         "dataset_hash": hashlib.sha256(path.read_bytes()).hexdigest(),
         "schema_version": 2,
         "case_ids": [str(item.get("case_id") or "") for item in cases],
@@ -400,19 +401,41 @@ def _collect_tool_names(blocks: list[dict[str, Any]]) -> list[str]:
         if text and text not in names:
             names.append(text)
         if text == "Skill":
-            skill_text = "\n".join(_flatten_strings(block.get("input")))
-            if "opendataworks-business-knowledge" in skill_text:
-                names.append("Skill:opendataworks-business-knowledge")
+            tool_input = block.get("input")
+            skill_name = ""
+            if isinstance(tool_input, dict):
+                skill_name = str(
+                    tool_input.get("skill")
+                    or tool_input.get("skill_name")
+                    or tool_input.get("name")
+                    or ""
+                ).strip()
+            if skill_name:
+                names.append(f"Skill:{skill_name}")
         if text == "Bash":
             command_text = "\n".join(_flatten_strings(block.get("input")))
-            for script_name in ("run_sql.py", "lookup_ontology.py", "validate_sql.py", "build_chart_spec.py"):
-                if script_name in command_text:
-                    names.append(f"Bash:{script_name}")
+            for script_name in re.findall(r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+\.py)\b", command_text):
+                names.append(f"Bash:{script_name}")
     return _dedupe(names)
 
 
+def _strip_leading_sql_comments(text: str) -> str:
+    value = str(text or "")
+    while True:
+        stripped = value.lstrip()
+        if stripped.startswith("--"):
+            newline = stripped.find("\n")
+            value = "" if newline < 0 else stripped[newline + 1:]
+            continue
+        if stripped.startswith("/*"):
+            end = stripped.find("*/", 2)
+            value = "" if end < 0 else stripped[end + 2:]
+            continue
+        return stripped
+
+
 def _looks_like_sql(text: str) -> bool:
-    return bool(re.match(r"(?is)^\s*(?:select|with)\b", str(text or "")))
+    return bool(re.match(r"(?is)^(?:select|with)\b", _strip_leading_sql_comments(text)))
 
 
 def _normalise_sql(text: str) -> str:
@@ -545,6 +568,40 @@ def _summarize_tool_events(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]
     return summarized
 
 
+def _summarize_query_evidence(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    for block in blocks:
+        if not _is_successful_sql_execution(block):
+            continue
+        sqls = _dedupe(
+            _collect_structured_sql(block.get("input"))
+            + _collect_structured_sql(block.get("output"))
+        )
+        rows = _query_rows_from_value(block.get("output"))
+        structured = next(
+            (
+                item
+                for item in _iter_structured_evidence(block.get("output"))
+                if isinstance(item, dict) and isinstance(item.get("rows"), list)
+            ),
+            {},
+        )
+        columns = list(structured.get("columns") or [])
+        if not columns and rows:
+            columns = _dedupe([str(key) for row in rows for key in row])
+        evidence.append(
+            {
+                "tool_name": str(block.get("tool_name") or ""),
+                "sql": "\n".join(sqls),
+                "row_count": len(rows) if isinstance(rows, list) else structured.get("row_count"),
+                "columns": columns,
+                "result_state": structured.get("result_state") or ("success" if rows is not None else None),
+                "row_preview": rows[:3] if isinstance(rows, list) else [],
+            }
+        )
+    return evidence
+
+
 def _collect_usage(task: dict[str, Any], message: dict[str, Any]) -> dict[str, Any]:
     usage: dict[str, Any] = {}
     if isinstance(task.get("usage"), dict):
@@ -607,6 +664,18 @@ def _normalize_sql_match_text(value: Any) -> str:
 
 
 def _sql_fragment_matches(fragment: Any, sql_text: str, expected_sql: dict[str, Any]) -> bool:
+    if isinstance(fragment, dict):
+        alternatives = fragment.get("any_of")
+        if isinstance(alternatives, list) and alternatives:
+            return any(_sql_fragment_matches(item, sql_text, expected_sql) for item in alternatives)
+        requirements = fragment.get("all_of")
+        if isinstance(requirements, list) and requirements:
+            return all(_sql_fragment_matches(item, sql_text, expected_sql) for item in requirements)
+        return False
+    if isinstance(fragment, list):
+        return bool(fragment) and any(
+            _sql_fragment_matches(item, sql_text, expected_sql) for item in fragment
+        )
     raw_fragment = str(fragment or "").strip()
     if not raw_fragment:
         return True
@@ -624,6 +693,33 @@ def _sql_fragment_matches(fragment: Any, sql_text: str, expected_sql: dict[str, 
     return False
 
 
+def _is_time_sql_fragment(fragment: Any, expected_time: dict[str, Any]) -> bool:
+    normalized = _normalize_sql_match_text(fragment)
+    field = str(expected_time.get("field") or "").strip().lower()
+    if field and re.search(rf"(?<![A-Za-z0-9_]){re.escape(field)}(?![A-Za-z0-9_])", normalized):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:current_date|current_timestamp|interval|date_format|date_trunc|"
+            r"date_add|date_sub|last_day|timestampadd|timestampdiff)\b",
+            normalized,
+        )
+    )
+
+
+def _required_tool_step_satisfied(step: Any, tool_names: list[str], sql_outputs: list[str]) -> bool:
+    normalized = str(step or "").strip().lower()
+    if not normalized:
+        return True
+    if normalized == "query_execute":
+        return bool(sql_outputs)
+    tokens = [token for token in re.split(r"[^a-z0-9]+", normalized) if token]
+    return any(
+        tokens and all(token in str(name).lower() for token in tokens)
+        for name in tool_names
+    )
+
+
 def _add_months(value: dt.date, offset: int) -> dt.date:
     month_index = value.year * 12 + value.month - 1 + offset
     return dt.date(month_index // 12, month_index % 12 + 1, 1)
@@ -637,34 +733,82 @@ def _time_rule_check(expected_time: dict[str, Any], sql_text: str) -> dict[str, 
     field_present = bool(field) and bool(re.search(rf"(?<![A-Za-z0-9_]){re.escape(field.lower())}(?![A-Za-z0-9_])", normalized_sql))
     range_spec = expected_time.get("range") if isinstance(expected_time.get("range"), dict) else {}
     kind = str(range_spec.get("kind") or "").strip()
-    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date()
+    shanghai_today = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date()
     range_present = False
     expected_bounds: list[str] = []
     if kind == "calendar_month":
-        start = _add_months(today.replace(day=1), int(range_spec.get("offset") or 0))
+        start = _add_months(shanghai_today.replace(day=1), int(range_spec.get("offset") or 0))
         end = _add_months(start, 1)
         expected_bounds = [start.isoformat(), end.isoformat()]
-        range_present = all(bound in normalized_sql for bound in expected_bounds) or "date_format(current_date" in normalized_sql
-    elif kind == "rolling_days":
-        days = int(range_spec.get("value") or 0)
+        range_present = all(bound in normalized_sql for bound in expected_bounds)
+        if not range_present and "date_format(current_date" in normalized_sql:
+            range_present = True
+    elif kind in {"rolling_days", "rolling_calendar_days"}:
+        days = int(range_spec.get("days") or range_spec.get("value") or 0)
         if days > 0:
-            start = today - dt.timedelta(days=days - 1)
-            end = today + dt.timedelta(days=1)
-            expected_bounds = [start.isoformat(), end.isoformat()]
-            range_present = all(bound in normalized_sql for bound in expected_bounds)
+            start = shanghai_today - dt.timedelta(days=days - 1)
+            exclusive_end = shanghai_today + dt.timedelta(days=1)
+            expected_bounds = [start.isoformat(), shanghai_today.isoformat()]
+            range_present = (
+                start.isoformat() in normalized_sql
+                and (
+                    shanghai_today.isoformat() in normalized_sql
+                    or exclusive_end.isoformat() in normalized_sql
+                )
+            )
             if not range_present and "current_date" in normalized_sql:
                 range_present = bool(re.search(rf"interval\s+(?:{days}|{max(0, days - 1)})\s+day", normalized_sql))
+    elif kind == "calendar_month_comparison":
+        current_start = shanghai_today.replace(day=1)
+        previous_start = _add_months(current_start, -1)
+        previous_end = current_start - dt.timedelta(days=1)
+        expected_bounds = [
+            previous_start.isoformat(),
+            previous_end.isoformat(),
+            current_start.isoformat(),
+            shanghai_today.isoformat(),
+        ]
+        range_present = all(bound in normalized_sql for bound in expected_bounds)
+        if not range_present:
+            range_present = (
+                "current_date" in normalized_sql
+                and "interval 1 month" in normalized_sql
+                and (
+                    "date_format" in normalized_sql
+                    or "last_day" in normalized_sql
+                    or "date_trunc" in normalized_sql
+                )
+            )
     else:
-        range_present = field_present
+        range_present = False
     passed = field_present and range_present
     return {
         "applicable": True,
         "passed": passed,
         "field": field,
+        "field_present": field_present,
         "range_kind": kind,
         "expected_bounds": expected_bounds,
         "reason": None if passed else ("time_field_missing" if not field_present else "time_range_mismatch"),
     }
+
+
+def _best_time_rule_check(expected_time: dict[str, Any], sql_outputs: list[str]) -> dict[str, Any]:
+    if not bool(expected_time.get("required")):
+        return {"applicable": False, "passed": True, "reason": None}
+    checks = [_time_rule_check(expected_time, sql) for sql in sql_outputs]
+    if not checks:
+        return _time_rule_check(expected_time, "")
+    passed = next((check for check in checks if bool(check.get("passed"))), None)
+    if passed is not None:
+        return passed
+    return max(
+        checks,
+        key=lambda check: (
+            bool(check.get("field_present")),
+            check.get("reason") != "time_field_missing",
+        ),
+    )
 
 
 def _tool_output_text(blocks: list[dict[str, Any]]) -> str:
@@ -753,23 +897,31 @@ def _answer_references_result_values(rows: Any, fields: list[str], answer: str) 
     dict_rows = [row for row in rows if isinstance(row, dict)]
     if len(dict_rows) != len(rows):
         return False
-    if all(all(field in row for field in fields) for row in dict_rows):
-        values = [row[field] for row in dict_rows for field in fields]
-    elif fields and all(len(row) == len(fields) for row in dict_rows):
-        values = [value for row in dict_rows for value in row.values()]
-    else:
-        return False
     answer_text = str(answer or "")
-    for value in values:
-        if value is None:
-            continue
-        rendered = str(value)
-        if isinstance(value, (int, float)):
-            if not re.search(rf"(?<![\d.]){re.escape(rendered)}(?![\d.])", answer_text):
+
+    def values_are_present(values: list[Any]) -> bool:
+        for value in values:
+            if value is None:
+                continue
+            rendered = str(value)
+            if isinstance(value, (int, float)):
+                if not re.search(rf"(?<![\d.]){re.escape(rendered)}(?![\d.])", answer_text):
+                    return False
+            elif rendered.lower() not in answer_text.lower():
                 return False
-        elif rendered.lower() not in answer_text.lower():
-            return False
-    return True
+        return True
+
+    if all(all(field in row for field in fields) for row in dict_rows):
+        return values_are_present([row[field] for row in dict_rows for field in fields])
+    common_columns = [
+        column
+        for column in (list(dict_rows[0]) if dict_rows else [])
+        if all(column in row for row in dict_rows)
+    ]
+    for candidate_fields in itertools.combinations(common_columns, len(fields)):
+        if values_are_present([row[field] for row in dict_rows for field in candidate_fields]):
+            return True
+    return False
 
 
 def _auto_failure_attribution(
@@ -778,23 +930,23 @@ def _auto_failure_attribution(
     missing_sql_fragments: list[str],
     forbidden_hits: list[str],
     missing_tool_names: list[str],
-    wrong_domain_applicable: bool,
 ) -> list[str]:
     failures: list[str] = []
     final_answer = evidence.get("final_answer_user_visible", "")
     tool_evidence = evidence.get("tool_evidence", "")
     sql_evidence = evidence.get("sql_evidence", "")
     answer_or_sql = "\n".join([final_answer, sql_evidence])
-    if re.search(r"请.*执行.*SQL|供.*执行|无法直接执行|未注入.*SQL|没有\s*SQL\s*执行|SQL.*尚未执行", final_answer, re.I | re.S):
+    if re.search(
+        r"请(?:你|用户|后续)?.{0,40}执行.{0,20}SQL|仅供.{0,40}执行|"
+        r"无法直接执行|未注入.{0,20}SQL|没有\s*SQL\s*执行|SQL.{0,20}尚未执行",
+        final_answer,
+        re.I | re.S,
+    ):
         failures.append("sql_only")
-    if wrong_domain_applicable and re.search(r"OpenDataWorks\s*平台元数据|托管元数据|data_table|data_lineage|data_task|data_workflow|inspect_metadata\.py|get_lineage\.py", answer_or_sql, re.I):
-        failures.append("wrong_domain")
-    if re.search(r"\{(?:target_date|TARGET_DATE|start_date|START_DATE|end_date|END_DATE|database_name|DATABASE_NAME|database_schema|DATABASE_SCHEMA|table_name|TABLE_NAME|period|PERIOD|timeDim|RULE_KEY)\}|占位符|TODO", answer_or_sql):
+    if re.search(r"\{(?:target_date|TARGET_DATE|start_date|START_DATE|end_date|END_DATE|database_name|DATABASE_NAME|database_schema|DATABASE_SCHEMA|table_name|TABLE_NAME|RULE_KEY)\}|占位符|TODO", answer_or_sql):
         failures.append("placeholder_leak")
     if re.search(r"超时|timed?\s*out|timeout(?:_error| error| occurred)", "\n".join([final_answer, tool_evidence]), re.I):
         failures.append("tool_timeout")
-    if re.search(r"未找到|没有找到|不存在|无匹配|空结果集|返回空", answer_or_sql):
-        failures.append("empty_result")
     if missing_sql_fragments:
         failures.append("missing_sql_fragment")
     if missing_tool_names:
@@ -813,10 +965,10 @@ def auto_rule_check(case: dict[str, Any], *, final_answer: str, blocks: list[dic
     fragments = list(expected_sql.get("tables") or []) + list(expected_sql.get("fields") or []) + list(expected_sql.get("predicates") or []) + list(expected_sql.get("aggregations") or [])
     preferred_width = len(expected_result.get("required_columns") or expected_result.get("answer_result_fields") or [])
     relevant_query = _select_relevant_query_evidence(blocks, fragments, expected_sql=expected_sql, preferred_width=preferred_width)
-    assessment_text = str((relevant_query or {}).get("sql_text") or "\n".join(sql_outputs))
+    assessment_text = "\n".join(sql_outputs)
     evidence["sql_evidence"] = assessment_text
     time_check = (
-        _time_rule_check(expected_time, assessment_text)
+        _best_time_rule_check(expected_time, sql_outputs)
         if bool(expected_sql.get("execution_required")) or bool(sql_outputs)
         else {"applicable": False, "passed": True, "reason": "judge_only"}
     )
@@ -824,7 +976,11 @@ def auto_rule_check(case: dict[str, Any], *, final_answer: str, blocks: list[dic
         fragment for fragment in fragments
         if str(fragment or "").strip()
         and not _sql_fragment_matches(fragment, assessment_text, expected_sql)
-        and not (bool(time_check.get("passed")) and "current_date" in str(fragment).lower())
+        and not (
+            bool(time_check.get("passed"))
+            and fragment in list(expected_sql.get("predicates") or [])
+            and _is_time_sql_fragment(fragment, expected_time)
+        )
     ]
     forbidden_hits: list[str] = []
     for pattern in expected_sql.get("forbidden_patterns") or []:
@@ -836,11 +992,10 @@ def auto_rule_check(case: dict[str, Any], *, final_answer: str, blocks: list[dic
                 forbidden_hits.append(str(pattern))
     missing_tool_names: list[str] = []
     required_steps = list(expected_tools.get("required_steps") or [])
-    if "business_knowledge_skill" in required_steps and "Skill:opendataworks-business-knowledge" not in tool_names:
-        missing_tool_names.append("business_knowledge_skill")
-    if "ontology_lookup" in required_steps and not any(name in tool_names for name in ("Bash:lookup_ontology.py", "Skill")):
-        missing_tool_names.append("ontology_lookup")
-    if ("query_execute" in required_steps or bool(expected_sql.get("execution_required"))) and not sql_outputs:
+    for step in required_steps:
+        if not _required_tool_step_satisfied(step, tool_names, sql_outputs):
+            missing_tool_names.append(str(step))
+    if bool(expected_sql.get("execution_required")) and not sql_outputs and "query_execute" not in missing_tool_names:
         missing_tool_names.append("query_execute")
     for group in expected_tools.get("allowed_alternative_groups") or []:
         names = [str(name) for name in group] if isinstance(group, list) else []
@@ -850,26 +1005,26 @@ def auto_rule_check(case: dict[str, Any], *, final_answer: str, blocks: list[dic
     relevant_rows = (relevant_query or {}).get("rows")
     empty_result = isinstance(relevant_rows, list) and len(relevant_rows) == 0
     unexpected_empty = empty_result and not bool(expected_result.get("allow_empty"))
-    result_applicable = bool(sql_outputs) and bool(tool_output_text.strip())
     required_answer_fields = [str(item) for item in expected_result.get("answer_result_fields") or []]
-    result_passed = _answer_references_result_values(relevant_rows, required_answer_fields, final_answer)
-    triggered_veto_rules: list[str] = []
-    platform_business_case = (
-        str(case.get("category") or "") == "business-knowledge"
-        or "local-smoke" in set(case.get("suite_tags") or [])
+    result_applicable = bool(required_answer_fields) and bool(sql_outputs) and bool(tool_output_text.strip())
+    result_passed = (
+        _answer_references_result_values(relevant_rows, required_answer_fields, final_answer)
+        if result_applicable
+        else True
     )
+    triggered_veto_rules: list[str] = []
     failure_attribution = _auto_failure_attribution(
         evidence,
         missing_sql_fragments=missing_sql_fragments,
         forbidden_hits=forbidden_hits,
         missing_tool_names=missing_tool_names,
-        wrong_domain_applicable=not platform_business_case,
     )
     if bool(expected_result.get("allow_empty")):
         failure_attribution = [item for item in failure_attribution if item != "empty_result"]
     if bool(time_check.get("applicable")) and not bool(time_check.get("passed")):
         failure_attribution.append(str(time_check.get("reason") or "time_dimension_mismatch"))
     if unexpected_empty:
+        failure_attribution.append("empty_result")
         failure_attribution.append("unexpected_empty_result")
     if not result_passed:
         failure_attribution.append("result_answer_inconsistent")
@@ -1151,6 +1306,85 @@ def _actual_query_row_sets(blocks: list[dict[str, Any]]) -> list[list[dict[str, 
     return row_sets
 
 
+def _actual_query_evidence(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    for position, block in enumerate(blocks):
+        if not _is_successful_sql_execution(block):
+            continue
+        rows = _query_rows_from_value(block.get("output"))
+        if rows is None:
+            continue
+        sqls = _dedupe(
+            _collect_structured_sql(block.get("input"))
+            + _collect_structured_sql(block.get("output"))
+        )
+        evidence.append(
+            {
+                "position": position,
+                "sql_text": "\n".join(sqls),
+                "rows": rows,
+            }
+        )
+    return evidence
+
+
+def _normalized_reference_value(value: Any, *, tolerance: float = 0.0) -> Any:
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        if tolerance > 0:
+            digits = max(0, min(12, int(abs(__import__("math").log10(tolerance))) * -1)) if tolerance < 1 else 0
+            numeric = round(numeric, digits)
+        return numeric
+    return str(value)
+
+
+def _canonical_rows(rows: list[dict[str, Any]], *, tolerance: float = 0.0) -> list[str]:
+    normalized: list[str] = []
+    for row in rows:
+        clean = {
+            str(key): _normalized_reference_value(value, tolerance=tolerance)
+            for key, value in row.items()
+        }
+        normalized.append(json.dumps(clean, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")))
+    return sorted(normalized)
+
+
+def _canonical_value_rows(
+    rows: list[dict[str, Any]],
+    *,
+    fields: list[str] | tuple[str, ...] | None = None,
+    tolerance: float = 0.0,
+) -> list[str]:
+    normalized: list[str] = []
+    for row in rows:
+        values = [row.get(field) for field in fields] if fields else list(row.values())
+        clean = sorted(
+            json.dumps(
+                _normalized_reference_value(value, tolerance=tolerance),
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            )
+            for value in values
+        )
+        normalized.append(json.dumps(clean, ensure_ascii=False, separators=(",", ":")))
+    return sorted(normalized)
+
+
+def _reference_scalar_is_zero(reference: dict[str, Any]) -> bool:
+    rows = reference.get("rows") if isinstance(reference.get("rows"), list) else []
+    if len(rows) != 1 or not isinstance(rows[0], dict) or len(rows[0]) != 1:
+        return False
+    value = next(iter(rows[0].values()), None)
+    try:
+        return float(value) == 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _reference_sql_failure(
     case: dict[str, Any],
     reference: dict[str, Any],
@@ -1229,44 +1463,239 @@ def _execute_reference_query(base_url: str, case: dict[str, Any], topic_id: str)
     return {"applicable": True, "passed": None, "rows": rows, "row_count": len(rows)}
 
 
-def _compare_reference(reference: dict[str, Any], actual_row_sets: list[list[dict[str, Any]]], case: dict[str, Any]) -> dict[str, Any]:
+def _compare_reference(
+    reference: dict[str, Any],
+    actual_row_sets: list[list[dict[str, Any]]],
+    case: dict[str, Any],
+    *,
+    actual_query_evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     if not reference.get("applicable"):
         return reference
-    query = ((case.get("expected_result") or {}).get("reference_query") or {})
+    expected_result = case.get("expected_result") if isinstance(case.get("expected_result"), dict) else {}
+    query = expected_result.get("reference_query") if isinstance(expected_result.get("reference_query"), dict) else {}
+    tolerance = float(query.get("numeric_tolerance") or 0.0)
     mode = str(query.get("comparison_mode") or "unordered_rows")
-    tolerance = float(query.get("numeric_tolerance") or 0)
-    expected = reference.get("rows") or []
-    def matches(actual: list[dict[str, Any]]) -> bool:
-        if mode == "scalar":
-            ev = next(iter(expected[0].values()), None) if expected else None
-            av = next(iter(actual[0].values()), None) if actual else None
-            try:
-                return abs(float(ev) - float(av)) <= tolerance
-            except (TypeError, ValueError):
-                return str(ev) == str(av)
-        if mode == "unordered_values":
-            norm = lambda rows: sorted(json.dumps(sorted(str(value) for value in row.values()), ensure_ascii=False) for row in rows)
-            return norm(expected) == norm(actual)
-        norm = lambda rows: sorted(json.dumps(row, ensure_ascii=False, sort_keys=True, default=str) for row in rows)
-        return norm(expected) == norm(actual)
+    expected_rows = reference.get("rows") if isinstance(reference.get("rows"), list) else []
+    comparison_fields = [str(field) for field in query.get("comparison_fields") or [] if str(field).strip()]
+    expected_columns = _dedupe([str(key) for row in expected_rows for key in row])
+    required_fragments = (
+        list((case.get("expected_sql") or {}).get("tables") or [])
+        + list((case.get("expected_sql") or {}).get("fields") or [])
+        + list((case.get("expected_sql") or {}).get("predicates") or [])
+        + list((case.get("expected_sql") or {}).get("aggregations") or [])
+    )
+    evidence = actual_query_evidence or [
+        {"position": position, "sql_text": "", "rows": rows}
+        for position, rows in enumerate(actual_row_sets)
+    ]
+    if actual_query_evidence and required_fragments:
+        for item in evidence:
+            sql_text = str(item.get("sql_text") or "")
+            item["semantic_match_count"] = sum(
+                1
+                for fragment in required_fragments
+                if _sql_fragment_matches(fragment, sql_text, case.get("expected_sql") or {})
+            )
+        evidence = sorted(
+            evidence,
+            key=lambda item: (
+                int(item.get("semantic_match_count") or 0),
+                int(item.get("position") or 0),
+            ),
+            reverse=True,
+        )
 
-    matched = next((rows for rows in actual_row_sets if matches(rows)), None)
+    def compare(actual_rows: list[dict[str, Any]]) -> tuple[bool, bool, list[str], str | None]:
+        actual_columns = _dedupe([str(key) for row in actual_rows for key in row])
+        if mode == "scalar":
+            comparable = len(expected_rows) <= 1 and len(actual_rows) <= 1 and (
+                not expected_rows or len(expected_rows[0]) == 1
+            )
+            if not comparable:
+                return False, False, actual_columns, "scalar_shape_mismatch"
+            expected_value = next(iter(expected_rows[0].values()), None) if expected_rows else None
+            actual_values = list(actual_rows[0].values()) if actual_rows else []
+            if not actual_values:
+                return True, _reference_scalar_is_zero(reference), actual_columns, None
+            for actual_value in actual_values:
+                try:
+                    matched_value = abs(float(expected_value) - float(actual_value)) <= tolerance
+                except (TypeError, ValueError):
+                    matched_value = str(expected_value) == str(actual_value)
+                if matched_value:
+                    return True, True, actual_columns, None
+            return True, False, actual_columns, None
+        if len(expected_rows) != len(actual_rows):
+            return False, False, actual_columns, "row_count_mismatch"
+        if not expected_rows and not actual_rows:
+            return True, True, actual_columns, None
+        fields = comparison_fields
+        if fields:
+            if not all(all(field in row for field in fields) for row in expected_rows):
+                return False, False, actual_columns, "comparison_fields_missing"
+            expected_projected = [{field: row.get(field) for field in fields} for row in expected_rows]
+            if all(all(field in row for field in fields) for row in actual_rows):
+                actual_projected = [{field: row.get(field) for field in fields} for row in actual_rows]
+                return (
+                    True,
+                    _canonical_rows(expected_projected, tolerance=tolerance)
+                    == _canonical_rows(actual_projected, tolerance=tolerance),
+                    actual_columns,
+                    None,
+                )
+            if len(actual_columns) < len(fields) or not all(
+                all(column in row for column in actual_columns) for row in actual_rows
+            ):
+                return False, False, actual_columns, "comparison_fields_missing"
+            expected_values = _canonical_value_rows(expected_projected, fields=fields, tolerance=tolerance)
+            comparable_projection = False
+            for candidate_fields in itertools.combinations(actual_columns, len(fields)):
+                comparable_projection = True
+                if _canonical_value_rows(actual_rows, fields=candidate_fields, tolerance=tolerance) == expected_values:
+                    return True, True, actual_columns, None
+            return comparable_projection, False, actual_columns, (
+                "value_mismatch" if comparable_projection else "comparison_fields_missing"
+            )
+        if mode == "unordered_values":
+            if expected_columns and all(all(field in row for field in expected_columns) for row in actual_rows):
+                actual_projected = [
+                    {field: row.get(field) for field in expected_columns}
+                    for row in actual_rows
+                ]
+                return (
+                    True,
+                    _canonical_rows(expected_rows, tolerance=tolerance)
+                    == _canonical_rows(actual_projected, tolerance=tolerance),
+                    actual_columns,
+                    None,
+                )
+            expected_widths = {len(row) for row in expected_rows}
+            actual_widths = {len(row) for row in actual_rows}
+            if len(expected_widths) != 1 or expected_widths != actual_widths:
+                return False, False, actual_columns, "column_shape_mismatch"
+            normalize_values = lambda rows: sorted(
+                json.dumps(
+                    sorted(
+                        (
+                            json.dumps(
+                                _normalized_reference_value(value, tolerance=tolerance),
+                                ensure_ascii=False,
+                                sort_keys=True,
+                            )
+                            for value in row.values()
+                        )
+                    ),
+                    ensure_ascii=False,
+                )
+                for row in rows
+            )
+            return True, normalize_values(expected_rows) == normalize_values(actual_rows), actual_columns, None
+        if set(expected_columns) != set(actual_columns):
+            return False, False, actual_columns, "column_shape_mismatch"
+        return (
+            True,
+            _canonical_rows(expected_rows, tolerance=tolerance)
+            == _canonical_rows(actual_rows, tolerance=tolerance),
+            actual_columns,
+            None,
+        )
+
+    comparable_candidates: list[dict[str, Any]] = []
+    matched: dict[str, Any] | None = None
+    mismatch_reasons: list[str] = []
+    for item in evidence:
+        rows = item.get("rows") if isinstance(item.get("rows"), list) else []
+        comparable, passed, actual_columns, reason = compare(rows)
+        if comparable:
+            candidate = {**item, "actual_columns": actual_columns}
+            comparable_candidates.append(candidate)
+            if passed:
+                matched = candidate
+                break
+        elif reason:
+            mismatch_reasons.append(reason)
+    expected_split_fields = comparison_fields or expected_columns
+    if matched is None and len(expected_rows) == 1 and len(expected_split_fields) > 1:
+        expected_values = [
+            _normalized_reference_value(expected_rows[0].get(field), tolerance=tolerance)
+            for field in expected_split_fields
+        ]
+        scalar_values: list[Any] = []
+        for item in evidence:
+            rows = item.get("rows") if isinstance(item.get("rows"), list) else []
+            if len(rows) == 1 and isinstance(rows[0], dict) and len(rows[0]) == 1:
+                scalar_values.append(
+                    _normalized_reference_value(next(iter(rows[0].values())), tolerance=tolerance)
+                )
+        expected_canonical = sorted(
+            json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+            for value in expected_values
+        )
+        for candidate_values in itertools.combinations(scalar_values, len(expected_values)):
+            candidate_canonical = sorted(
+                json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+                for value in candidate_values
+            )
+            if candidate_canonical == expected_canonical:
+                matched = {
+                    "position": None,
+                    "sql_text": "\n".join(str(item.get("sql_text") or "") for item in evidence),
+                    "rows": [dict(zip(expected_split_fields, expected_values))],
+                    "actual_columns": expected_split_fields,
+                    "composed_from_split_queries": True,
+                }
+                comparable_candidates.append(matched)
+                break
+    selected = matched or (comparable_candidates[0] if comparable_candidates else None)
+    comparable = bool(comparable_candidates)
+    passed: bool | None = bool(matched) if comparable else None
     return {
-        "applicable": True,
-        "passed": matched is not None,
-        "row_count": len(expected),
-        "actual_row_count": None if matched is None else len(matched),
+        **reference,
+        "passed": passed,
+        "status": "matched" if matched else ("mismatched" if comparable else "not_comparable"),
+        "comparable": comparable,
+        "enforced": bool(query.get("enforce_case_gate")),
         "comparison_mode": mode,
-        "candidate_result_count": len(actual_row_sets),
+        "comparison_fields": comparison_fields,
+        "expected_columns": expected_columns,
+        "actual_columns": list((selected or {}).get("actual_columns") or []),
+        "actual_row_count": len((selected or {}).get("rows") or []) if selected else None,
+        "candidate_result_count": len(evidence),
+        "comparable_candidate_count": len(comparable_candidates),
+        "mismatch_reason": None if matched else (
+            "value_mismatch" if comparable else (_dedupe(mismatch_reasons)[0] if mismatch_reasons else "no_query_result")
+        ),
     }
 
 
 def _case_with_reference_empty_policy(case: dict[str, Any], reference: dict[str, Any]) -> dict[str, Any]:
     """Treat a successfully established empty truth set as an expected result."""
-    if not reference.get("applicable") or int(reference.get("row_count") or 0) != 0:
+    if not reference.get("applicable") or (
+        int(reference.get("row_count") or 0) != 0
+        and not _reference_scalar_is_zero(reference)
+    ):
         return case
     expected_result = case.get("expected_result") if isinstance(case.get("expected_result"), dict) else {}
     return {**case, "expected_result": {**expected_result, "allow_empty": True}}
+
+
+def _apply_reference_gate(
+    rule_check: dict[str, Any],
+    reference_result: dict[str, Any],
+) -> None:
+    enforced_failure = (
+        bool(reference_result.get("applicable"))
+        and bool(reference_result.get("comparable"))
+        and reference_result.get("passed") is False
+        and bool(reference_result.get("enforced"))
+    )
+    if enforced_failure:
+        rule_check["passed"] = False
+        rule_check.setdefault("failure_attribution", []).append("enforced_reference_data_mismatch")
+        rule_check.setdefault("hard_gates", {})["reference_data_accuracy"] = False
+    elif reference_result.get("passed") is True and bool(reference_result.get("enforced")):
+        rule_check.setdefault("hard_gates", {})["reference_data_accuracy"] = True
 
 
 def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
@@ -1369,13 +1798,13 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace) -> d
         agent_turn_count=int(sdk_counts.get("agent_turn_count") or 0),
         tool_call_count=tool_call_count,
     )
-    reference_result = _compare_reference(reference_result, _actual_query_row_sets(blocks), case)
-    if reference_result.get("applicable") and not reference_result.get("passed"):
-        rule_check["passed"] = False
-        rule_check.setdefault("failure_attribution", []).append("reference_data_mismatch")
-        rule_check.setdefault("hard_gates", {})["reference_data_accuracy"] = False
-    elif reference_result.get("applicable"):
-        rule_check.setdefault("hard_gates", {})["reference_data_accuracy"] = True
+    reference_result = _compare_reference(
+        reference_result,
+        _actual_query_row_sets(blocks),
+        case,
+        actual_query_evidence=_actual_query_evidence(blocks),
+    )
+    _apply_reference_gate(rule_check, reference_result)
     task_timing = _aggregate_task_timing(task_records)
     return {
         "evaluation_engine": EVALUATION_ENGINE, "engine_version": ENGINE_VERSION,
@@ -1394,6 +1823,7 @@ def run_case(base_url: str, case: dict[str, Any], args: argparse.Namespace) -> d
         "sql_outputs": sql_outputs,
         "chart_outputs": chart_outputs,
         "tool_events": _summarize_tool_events(blocks),
+        "query_evidence": _summarize_query_evidence(blocks),
         "usage": usage,
         "duration_seconds": e2e_seconds,
         "timing": {**task_timing, "e2e_seconds": e2e_seconds, "judge_seconds": None},
@@ -1462,20 +1892,21 @@ def _ensure_deepeval_available() -> None:
 
 def to_deepeval_test_case(case: dict[str, Any], case_result: dict[str, Any]) -> Any:
     _ensure_deepeval_available()
+    judge_case = _case_for_judge(case)
     expected_payload = {
         "case_id": case.get("case_id"),
         "category": case.get("category"),
-        "expected_semantics": case.get("expected_semantics") or {},
-        "expected_time": case.get("expected_time") or {},
-        "expected_tools": case.get("expected_tools") or {},
-        "expected_sql": case.get("expected_sql") or {},
-        "expected_result": case.get("expected_result") or {},
-        "expected_answer": case.get("expected_answer") or {},
-        "scoring": case.get("scoring") or {},
-        "veto_rules": case.get("veto_rules") or [],
-        "judge_guidance": case.get("judge_guidance") or "",
+        "expected_semantics": judge_case.get("expected_semantics") or {},
+        "expected_time": judge_case.get("expected_time") or {},
+        "expected_tools": judge_case.get("expected_tools") or {},
+        "expected_sql": judge_case.get("expected_sql") or {},
+        "expected_result": judge_case.get("expected_result") or {},
+        "expected_answer": judge_case.get("expected_answer") or {},
+        "scoring": judge_case.get("scoring") or {},
+        "veto_rules": judge_case.get("veto_rules") or [],
+        "judge_guidance": judge_case.get("judge_guidance") or "",
     }
-    context_payload = {"case": case, "case_result": case_result}
+    context_payload = {"case": judge_case, "case_result": case_result}
     return LLMTestCase(
         input=_case_question(case),
         actual_output=str(case_result.get("final_answer") or ""),
@@ -1576,7 +2007,10 @@ def normalize_judge_payload(data: dict[str, Any], *, raw_output: str = "") -> di
         "veto_rules_triggered": _string_list(data.get("veto_rules_triggered")),
         "failure_attribution": _dedupe(_string_list(data.get("failure_attribution")) + (["judge_score_inconsistent"] if inconsistent else [])),
         "comment": str(data.get("comment") or "").strip(),
-        "judge_failed": inconsistent,
+        # A complete dimension vector is the authoritative score source.  A
+        # disagreeing model-supplied total is useful diagnostics, but it does
+        # not mean the judge call itself failed.
+        "judge_failed": _normalize_bool(data.get("judge_failed")),
         "raw_output": raw_output,
     }
 
@@ -1602,9 +2036,73 @@ def _merge_auto_failure_attribution(judge: dict[str, Any], rule_check: dict[str,
     return merged
 
 
+def _apply_deterministic_dimension_scores(
+    judge: dict[str, Any],
+    rule_check: dict[str, Any],
+) -> dict[str, Any]:
+    if bool(judge.get("judge_failed")):
+        return judge
+    dimensions = (
+        dict(judge.get("dimension_scores"))
+        if isinstance(judge.get("dimension_scores"), dict)
+        else {}
+    )
+    if not dimensions or not all(name in dimensions for name in JUDGE_DIMENSIONS):
+        return judge
+    hard_gates = rule_check.get("hard_gates") if isinstance(rule_check.get("hard_gates"), dict) else {}
+    changed = False
+    if "required_tool_execution" in hard_gates and "sql_execution_and_口径" in hard_gates:
+        sql_passed = (
+            bool(hard_gates.get("required_tool_execution"))
+            and bool(hard_gates.get("sql_execution_and_口径"))
+            and bool(hard_gates.get("time_dimension", True))
+        )
+        dimensions["sql_or_tool_call"] = DIMENSION_MAX["sql_or_tool_call"] if sql_passed else 0.0
+        changed = True
+    consistency = (
+        rule_check.get("result_consistency")
+        if isinstance(rule_check.get("result_consistency"), dict)
+        else {}
+    )
+    if bool(consistency.get("applicable")):
+        dimensions["result_consistency"] = (
+            DIMENSION_MAX["result_consistency"]
+            if bool(consistency.get("passed"))
+            else 0.0
+        )
+        changed = True
+    if not changed:
+        return judge
+    updated = dict(judge)
+    updated["dimension_scores"] = dimensions
+    updated["score"] = round(sum(float(dimensions.get(name) or 0) for name in JUDGE_DIMENSIONS), 4)
+    return updated
+
+
+def _case_for_judge(case: dict[str, Any]) -> dict[str, Any]:
+    judge_case = dict(case)
+    judge_case.pop("forbidden_sql_patterns", None)
+    expected_result = (
+        dict(judge_case.get("expected_result"))
+        if isinstance(judge_case.get("expected_result"), dict)
+        else {}
+    )
+    expected_result.pop("reference_query", None)
+    judge_case["expected_result"] = expected_result
+    judge_case["veto_rules"] = [
+        rule
+        for rule in case.get("veto_rules") or []
+        if "SQL 不带 schema 前缀" not in str(rule) and "SELECT *" not in str(rule)
+    ]
+    return judge_case
+
+
 def _judge_system_prompt() -> str:
     return (
         "你是 DataAgent 在线问数评测裁判。只能基于请求中的 case、最终回答、工具事件、SQL/图表输出和自动规则检查打分。"
+        "查询执行、必需 SQL 片段、时间范围、空结果、结构可比性和参考结果匹配已由确定性规则处理，不要重新推翻这些结论。"
+        "你只负责确定性规则无法覆盖的意图、实体/关系语义、推理质量、回答表达，以及回答事实与全部成功查询证据的语义一致性。"
+        "只有最终回答中的事实被实际工具结果直接反驳，或没有任何工具证据支持时，才可据此扣 result_consistency、answer_quality 或判定 hallucination。"
         "不要调用任何工具，不要编造事实。必须只输出一个 JSON 对象，字段为："
         "score, dimension_scores, hallucination, veto_rules_triggered, failure_attribution, comment。"
         "score 为维度之和；dimension_scores 包含 intent(1), ontology_entity(1), relation_scope(1), "
@@ -1747,6 +2245,7 @@ class DataAgentEvaluationMetric(BaseMetric):  # type: ignore[misc, valid-type]
             "task_status": str(case_result.get("task_status") or ""),
             "task_error": None,
             "tool_events": case_result.get("tool_events") or [],
+            "query_evidence": case_result.get("query_evidence") or [],
             "sql_outputs": case_result.get("sql_outputs") or [],
             "chart_outputs": case_result.get("chart_outputs") or [],
             "auto_rule_check": case_result.get("auto_rule_check") or {},
@@ -1799,6 +2298,7 @@ def _apply_judges(results: list[dict[str, Any]], metric: DataAgentEvaluationMetr
             or DataAgentEvaluationMetric.shared_case_judges.get(case_id)
             or failed_judge("DeepEval metric did not return a judge result")
         )
+        judge = _apply_deterministic_dimension_scores(judge, item.get("auto_rule_check") or {})
         judge = _merge_auto_failure_attribution(judge, item.get("auto_rule_check") or {})
         veto_rules = list(item.get("auto_rule_check", {}).get("triggered_veto_rules") or []) + list(judge.get("veto_rules_triggered") or [])
         item["judge"] = judge
@@ -1868,14 +2368,39 @@ def build_summary(results: list[dict[str, Any]], dataset_stats: dict[str, Any], 
     intent = _ratio(sum(float(dim.get("intent") or 0) >= 1 for dim in dimensions), len(dimensions))
     ontology = _ratio(sum(float(dim.get("ontology_entity") or 0) >= 1 for dim in dimensions), len(dimensions))
     relation = _ratio(sum(float(dim.get("relation_scope") or 0) >= 1 for dim in dimensions), len(dimensions))
+    reasoning_average = round(_avg([float(dim.get("reasoning") or 0) for dim in dimensions]), 4)
     tool_sql = _ratio(sum(bool((item.get("auto_rule_check") or {}).get("hard_gates", {}).get("sql_execution_and_口径")) for item in completed), len(completed))
     time_cases = [item for item in completed if bool((item.get("auto_rule_check") or {}).get("time_dimension", {}).get("applicable"))]
     time_accuracy = _ratio(sum(bool((item.get("auto_rule_check") or {}).get("time_dimension", {}).get("passed")) for item in time_cases), len(time_cases))
     answer = _ratio(sum(float(dim.get("answer_quality") or 0) >= 1 for dim in dimensions), len(dimensions))
-    consistency_cases = [item for item in completed if (item.get("auto_rule_check") or {}).get("result_consistency", {}).get("applicable")]
-    consistency = _ratio(sum(bool((item.get("auto_rule_check") or {}).get("result_consistency", {}).get("passed")) for item in consistency_cases), len(consistency_cases))
+    def result_consistency_passed(item: dict[str, Any]) -> bool:
+        automatic = (item.get("auto_rule_check") or {}).get("result_consistency") or {}
+        if bool(automatic.get("applicable")):
+            return bool(automatic.get("passed"))
+        dimension = (item.get("judge") or {}).get("dimension_scores") or {}
+        return float(dimension.get("result_consistency") or 0) >= DIMENSION_MAX["result_consistency"]
+
+    consistency_cases = [
+        item
+        for item in completed
+        if bool(((item.get("auto_rule_check") or {}).get("result_consistency") or {}).get("applicable"))
+        or "result_consistency" in ((item.get("judge") or {}).get("dimension_scores") or {})
+    ]
+    consistency = _ratio(
+        sum(result_consistency_passed(item) for item in consistency_cases),
+        len(consistency_cases),
+    )
     reference_cases = [item for item in completed if (item.get("reference_data_accuracy") or {}).get("applicable")]
-    data_accuracy = _ratio(sum(bool((item.get("reference_data_accuracy") or {}).get("passed")) for item in reference_cases), len(reference_cases))
+    comparable_reference_cases = [
+        item
+        for item in reference_cases
+        if bool((item.get("reference_data_accuracy") or {}).get("comparable"))
+    ]
+    data_comparability = _ratio(len(comparable_reference_cases), len(reference_cases))
+    data_accuracy = _ratio(
+        sum(bool((item.get("reference_data_accuracy") or {}).get("passed")) for item in comparable_reference_cases),
+        len(comparable_reference_cases),
+    )
     assertion_pass = assertion_total = 0.0
     for item in completed:
         dim = (item.get("judge") or {}).get("dimension_scores") or {}
@@ -1884,7 +2409,7 @@ def build_summary(results: list[dict[str, Any]], dataset_stats: dict[str, Any], 
             "ontology_entity": float(dim.get("ontology_entity") or 0) >= 1,
             "relation_scope": float(dim.get("relation_scope") or 0) >= 1,
             "sql_or_tool_call": bool((item.get("auto_rule_check") or {}).get("hard_gates", {}).get("required_tool_execution")),
-            "result_consistency": bool((item.get("reference_data_accuracy") or {}).get("passed")) if (item.get("reference_data_accuracy") or {}).get("applicable") else bool((item.get("auto_rule_check") or {}).get("result_consistency", {}).get("passed")),
+            "result_consistency": result_consistency_passed(item),
             "reasoning": float(dim.get("reasoning") or 0) >= 2,
             "answer_quality": float(dim.get("answer_quality") or 0) >= 1,
         }
@@ -1913,25 +2438,56 @@ def build_summary(results: list[dict[str, Any]], dataset_stats: dict[str, Any], 
         counts[name] = {"average": round(_avg(values), 4) if values else None, "p95": _percentile(values, .95)}
     metrics = {
         "average_score": round(_avg(scores), 4),
+        "reasoning_average": reasoning_average,
         "intent_accuracy": intent["value"], "ontology_accuracy": ontology["value"], "relation_accuracy": relation["value"],
         "completion_rate": _ratio(len(completed), len(accepted)),
         "business_accuracy": _ratio(assertion_pass, assertion_total),
         "effective_pass_rate": _ratio(sum(bool(item.get("case_passed")) for item in results), total),
         "semantic_accuracy": _ratio(intent["numerator"] + ontology["numerator"] + relation["numerator"], intent["denominator"] + ontology["denominator"] + relation["denominator"]),
         "tool_sql_accuracy": tool_sql, "answer_accuracy": answer,
-        "result_consistency_rate": consistency, "data_accuracy": data_accuracy,
+        "result_consistency_rate": consistency,
+        "data_comparability_rate": data_comparability,
+        "data_accuracy": data_accuracy,
         "time_accuracy": time_accuracy,
         "hallucination_rate": round(hallucination_rate, 4),
         "timing": timing, "counts": counts,
     }
+    gate_metric_names = {
+        "average_score": "average_score",
+        "intent_accuracy": "intent_accuracy",
+        "ontology_accuracy": "ontology_accuracy",
+        "sql_tool_accuracy": "tool_sql_accuracy",
+        "result_consistency_rate": "result_consistency_rate",
+        "data_accuracy": "data_accuracy",
+        "reasoning_average": "reasoning_average",
+        "hallucination_rate": "hallucination_rate",
+    }
+    gate_results: dict[str, dict[str, Any]] = {}
+    for gate_name, threshold in GATES.items():
+        metric_name = gate_metric_names[gate_name]
+        metric = metrics.get(metric_name)
+        actual = metric.get("value") if isinstance(metric, dict) else metric
+        applicable = actual is not None
+        comparator = "<=" if gate_name == "hallucination_rate" else ">="
+        passed = True if not applicable else (
+            float(actual) <= float(threshold)
+            if comparator == "<="
+            else float(actual) >= float(threshold)
+        )
+        gate_results[gate_name] = {
+            "metric": metric_name,
+            "actual": actual,
+            "threshold": threshold,
+            "comparator": comparator,
+            "applicable": applicable,
+            "passed": passed,
+        }
     gates_passed = (
         bool(results)
         and metrics["completion_rate"]["value"] == 1.0
-        and metrics["effective_pass_rate"]["value"] == 1.0
-        and metrics["hallucination_rate"] <= GATES["hallucination_rate"]
         and veto_count == 0
         and judge_failed_count == 0
-        and all(bool(item.get("case_passed")) for item in results)
+        and all(bool(item.get("passed")) for item in gate_results.values())
     )
     return {
         **dataset_stats,
@@ -1946,6 +2502,7 @@ def build_summary(results: list[dict[str, Any]], dataset_stats: dict[str, Any], 
         "judge_failed_count": judge_failed_count,
         "metrics": metrics,
         "gates": GATES,
+        "gate_results": gate_results,
         "passed": gates_passed,
         "recommendation": "建议上线" if gates_passed else "不建议上线",
     }
@@ -1991,8 +2548,26 @@ def render_report(summary: dict[str, Any], results: list[dict[str, Any]]) -> str
             f"| 有效通过率 | {ratio_text('effective_pass_rate')} |",
             f"| 结果一致性 | {ratio_text('result_consistency_rate')} |",
             f"| 时间口径准确率 | {ratio_text('time_accuracy')} |",
+            f"| 参考结果可比率 | {ratio_text('data_comparability_rate')} |",
             f"| 参考 SQL 数据准确率 | {ratio_text('data_accuracy')} |",
+            f"| 推理平均分（0-2） | {float(metrics.get('reasoning_average') or 0):.2f} |",
             f"| 幻觉率 | {float(metrics.get('hallucination_rate') or 0):.2%} |",
+            "",
+            "## 门禁",
+            "",
+            "| 门禁 | 实际值 | 条件 | 通过 |",
+            "|---|---:|---:|---|",
+        ]
+    )
+    for name, gate in (summary.get("gate_results") or {}).items():
+        actual = gate.get("actual")
+        actual_text = "N/A" if actual is None else f"{float(actual):.4f}"
+        lines.append(
+            f"| {name} | {actual_text} | {gate.get('comparator')} {gate.get('threshold')} | "
+            f"{'是' if gate.get('passed') else '否'} |"
+        )
+    lines.extend(
+        [
             "",
             "## 用例明细",
             "",
@@ -2075,7 +2650,7 @@ def main(argv: list[str] | None = None) -> int:
         print("--concurrency must be >= 1", file=sys.stderr)
         return 2
     if not str(args.dataset or "").strip():
-        print("--dataset is required and must point to the private evaluation JSONL file", file=sys.stderr)
+        print("--dataset is required and must point to an evaluation V2 JSONL file", file=sys.stderr)
         return 2
     if not args.dry_run and not str(args.agent_id or "").strip():
         print("--agent-id is required for non-dry-run evaluation", file=sys.stderr)

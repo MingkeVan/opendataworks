@@ -6,7 +6,9 @@ It is intentionally separate from the DataAgent backend runtime. DataAgent is on
 
 ## Dataset
 
-Datasets are private deployment assets and are not committed with this tool. Pass the JSONL file explicitly with `--dataset` or set `DATAAGENT_EVAL_DATASET`.
+Pass the V2 JSONL file explicitly with `--dataset` or set
+`DATAAGENT_EVAL_DATASET`. Public examples may live with the tool; deployment
+datasets may remain external.
 
 Only Evaluation V2 (`schema_version=2`) is executable. See
 `../dataset/README.md` for the structured semantic, time, tool, SQL, result,
@@ -43,11 +45,11 @@ DATAAGENT_BUILTIN_RUN_LOCAL=1 bash scripts/run-dataagent-evals.sh --dry-run --da
 
 Dry run validates the dataset and writes `summary.json` / `report.md` without calling DataAgent or the judge model.
 
-For local real-chain smoke, use
-`../dataset/examples/opendataworks-business-knowledge-smoke-v2.jsonl` with
-`--agent-snapshot-path dataagent/.claude/skills/opendataworks-business-knowledge`.
-It does not require the private architecture-ontology data source. When OAuth
-is enabled, pass an administrator JWT only through
+For a local real-chain smoke, pass any V2 dataset and an Agent profile that can
+answer it. The runner never selects behavior from a dataset filename,
+`dataset_id`, category, or suite tag. A 10-case verification set and a formal
+suite use this exact runner; only the `--dataset` and output paths change.
+When OAuth is enabled, pass an administrator JWT only through
 `DATAAGENT_EVAL_AUTH_TOKEN`.
 
 ## Outputs
