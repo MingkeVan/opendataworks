@@ -1,8 +1,7 @@
 # DataAgent Evaluation Dataset V2
 
 Evaluation runners accept JSONL records with `schema_version: 2`. This directory
-contains only the public contract, anonymous examples, and dataset lifecycle
-tools. Private business cases must remain outside this repository.
+contains the public contract, public examples, and dataset lifecycle tools.
 
 ## Required case shape
 
@@ -30,10 +29,30 @@ defined, data accuracy is reported as `N/A`, never as zero. A reference-query
 execution failure is an evaluation-infrastructure failure rather than a model
 quality failure.
 
-The repository-local
-`examples/opendataworks-business-knowledge-smoke-v2.jsonl` suite targets the
-`opendataworks-business-knowledge` skill and can be used for real local smoke
-tests without the private architecture-ontology database.
+Reference comparison first establishes whether one successful Agent result is
+structurally comparable. `data_accuracy` uses only comparable cases as its
+denominator; `data_comparability_rate` reports comparable reference cases over
+all reference cases. `unordered_values` may project away extra Agent columns
+when every reference column is present. Use `comparison_fields` when the
+intended projection must be explicit.
+
+A comparable reference mismatch is diagnostic by default and does not fail the
+case or enter the LLM judge input. A case may set `enforce_case_gate: true` only
+when its reference query and comparison contract are stable enough to be a hard
+oracle. Required SQL fragments, time boundaries, empty results, explicit answer
+fields, reference comparability, and reference values are deterministic checks;
+the LLM judge is reserved for semantic equivalence, reasoning, answer quality,
+and answer/result consistency that cannot be decided from explicit fields.
+
+Entries in `expected_sql.tables`, `fields`, `predicates`, and `aggregations`
+may be strings or explicit alternative groups such as
+`{"any_of": ["is_deleted = 0", "is_deleted != 1"]}`. Equivalent SQL forms
+must be declared in case data; runners must not hardcode domain-specific
+aliases, predicates, tool names, dataset IDs, or suite tags.
+
+Example datasets are ordinary V2 inputs. Their filenames, case IDs, categories,
+and suite tags never alter runner logic. Formal and verification datasets must
+use the same runner and metric semantics.
 
 ## Commands
 
