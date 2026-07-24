@@ -354,3 +354,21 @@ def test_data_dev_skill_documents_engine_aware_ddl_standards():
 
     # The create-table tool is referenced as the execution path.
     assert "portal_create_table" in snapshot
+
+
+def test_data_dev_skill_presets_scenarios_and_gates_dml_validation():
+    snapshot = _skill_text_snapshot(DATA_DEV_SKILL_ROOT)
+
+    # Preset scenario SQL templates exist and are wired into the skill.
+    assert (DATA_DEV_SKILL_ROOT / "reference" / "50-sql-scenarios.md").exists()
+    assert "50-sql-scenarios.md" in snapshot
+    for token in ("每日增量", "INSERT OVERWRITE", "GROUP BY"):
+        assert token in snapshot, token
+
+    # DDL builds the target table directly via the tool, never as a scheduled
+    # "DDL task"; data tasks only carry DML.
+    assert "单独创建执行 DDL 的数据任务" in snapshot
+
+    # DML must pass validation before it becomes a task / enters the plan.
+    assert "portal_analyze_sql" in snapshot
+    assert "验证不通过不建任务" in snapshot

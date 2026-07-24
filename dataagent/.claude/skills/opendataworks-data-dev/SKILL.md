@@ -40,23 +40,26 @@ tools: [Bash, Read]
 - 发布：`portal_preview_publish` →（确认）→ `portal_publish_workflow`。
 - 调度：`portal_upsert_schedule`、`portal_workflow_schedule_online`、`portal_workflow_schedule_offline`。
 
-字段契约见 `reference/10-task-fields.md`，生命周期与状态机见 `reference/20-workflow-lifecycle.md`，建表 DDL 规范见 `reference/40-ddl-standards.md`，命名/校验规则见 `assets/dev-policies.json`，引擎建表默认值见 `assets/engine-ddl-rules.json`，任务模板见 `assets/task-template.json`。
+字段契约见 `reference/10-task-fields.md`，生命周期与状态机见 `reference/20-workflow-lifecycle.md`，建表 DDL 规范见 `reference/40-ddl-standards.md`，常见加工场景模板见 `reference/50-sql-scenarios.md`，命名/校验规则见 `assets/dev-policies.json`，引擎建表默认值见 `assets/engine-ddl-rules.json`，任务模板见 `assets/task-template.json`。
 
 ## Playbook（核心规则）
 
 1. **SQL 生成 / 润色**
    - 生成前用 `portal_search_tables` / `portal_get_table_ddl` 核实库、表、字段，不臆造表名或字段。
    - 润色或落任务前，先 `portal_analyze_sql` 识别输入/输出表与操作类型；据此推荐 `inputTableIds` / `outputTableIds`。
+   - 常见加工场景(每日增量/全量快照/聚合/关联拉宽/upsert)可参照 `reference/50-sql-scenarios.md` 的模板起手，再按真实表结构改写。
    - 含写操作的 SQL（INSERT/UPDATE/INSERT OVERWRITE 等）只允许写进任务定义，**不要**用只读查询工具试跑。
 
 2. **建表（当需求需要新目标表时）**
+   - **新目标表一律走建表工具直接建表，不要为"建表"单独创建执行 DDL 的数据任务**;数据任务只承载 DML 加工逻辑。
    - 建表 DDL **必须匹配目标引擎规范**，严格遵循 `reference/40-ddl-standards.md`；默认值(分桶数、副本数、表模型等)取自 `assets/engine-ddl-rules.json`，与后端一致。
    - Doris:先判定表模型——明细层用 `DUPLICATE`(默认)，需去重/ upsert 用 `UNIQUE KEY(...)`，预聚合用 `AGGREGATE`；给出 KEY 列、分区列、分桶键与桶数、副本数。
    - 优先 `portal_preview_create_table` 传结构化字段，让后端产出规范化 DDL 与最终表名；把 DDL/表名/是否已存在展示给用户核对。
    - 确认后 `portal_create_table` 执行建表(高危，会触发确认卡；批准即执行)。建成的表再进入建任务环节维护血缘。
    - 后端建表当前仅执行 Doris；MySQL 等目标表按规范产出 DDL 供落任务或人工执行。
 
-3. **创建任务**
+3. **创建任务（DML 加工）**
+   - **落任务前 DML SQL 必须验证通过**:`portal_analyze_sql` 解析成功、输入/输出表可解析、无 error 级风险;必要时用 `portal_query_readonly` 只读抽样核对 SELECT 逻辑。**验证不通过不建任务、不加入计划**;含写操作的整段 SQL 不试跑,只落任务定义。
    - 一律以 draft 创建（`status: draft`）。
    - 必填字段参照 `reference/10-task-fields.md` 与 `assets/task-template.json`；命名遵循 `assets/dev-policies.json`。
    - 传入 analyze 得到的输入/输出表 ID，保持血缘完整。

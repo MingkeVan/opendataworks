@@ -72,3 +72,13 @@
 - `portal_create_table` 初版仅 Doris(后端仅 Doris handler);MySQL 仅有 DDL 规范知识,
   不经工具执行。
 - 建表为不可逆 DDL,统一按 HIGH_RISK 每次确认;plan 模式下 deny,仅出方案。
+
+## Follow-up 任务(同批,应用户反馈)
+
+10. data-dev 技能:SKILL.md 明确「建表走工具、不建 DDL 任务」与「DML 落任务前必须
+    `portal_analyze_sql` 验证通过」;新增 `reference/50-sql-scenarios.md` 场景模板;
+    `test_builtin_skill_content.py` 增断言。
+11. 前端(独立小改):`WidgetChat.vue` 去掉权限模式下拉的 `isBusy` 禁用(忙时可切,只影响
+    下一轮);`WidgetChat.spec.js` 增断言。chat v2 已无此禁用,无需改。
+
+验证:skill content pytest(12 passed);`vitest run WidgetChat.spec.js`(29 passed)。

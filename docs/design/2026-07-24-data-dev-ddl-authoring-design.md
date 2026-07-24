@@ -153,3 +153,16 @@
   「生成/校验 DDL、落任务 SQL」已有即时价值。
 - 规范并入 data-dev 技能而非独立技能:零 DB 迁移、改动最小,落在 DDL 实际生成处;若日后
   本体建模等流程也要复用,再提升为独立技能。
+
+## Follow-up(同批,应用户反馈)
+
+- **DDL vs DML 边界**:新目标表一律走 `portal_create_table` 直接建表,**不创建执行 DDL 的
+  数据任务**;数据任务只承载 DML 加工逻辑。已在 SKILL.md 建表/建任务步骤明确。
+- **DML 落任务前必须验证**:DML SQL 先经 `portal_analyze_sql` 解析通过(输入/输出表可解析、
+  无 error 级风险),必要时 `portal_query_readonly` 只读抽样核对 SELECT,**验证通过才建任务/
+  加入计划**;含写操作整段 SQL 不试跑。
+- **场景 SQL 模板**:新增 `reference/50-sql-scenarios.md`(每日增量/全量快照/聚合/关联拉宽/
+  UNIQUE upsert),作为加工 SQL 起手式。
+- **前端(与 DDL 无关的并行 UX 修复)**:widget 权限模式下拉在 `isBusy` 时也可切换——
+  权限模式于 run 起始快照,忙时切换只影响下一轮,与 chat v2 行为一致
+  (`WidgetChat.vue` 去掉 `isBusy` 禁用)。
