@@ -162,7 +162,12 @@
   无 error 级风险),必要时 `portal_query_readonly` 只读抽样核对 SELECT,**验证通过才建任务/
   加入计划**;含写操作整段 SQL 不试跑。
 - **场景 SQL 模板**:新增 `reference/50-sql-scenarios.md`(每日增量/全量快照/聚合/关联拉宽/
-  UNIQUE upsert),作为加工 SQL 起手式。
+  UNIQUE upsert),写入采用**先删再增**(`DELETE ... WHERE dt` → `INSERT INTO`)以支持重跑幂等;
+  `INSERT OVERWRITE ... PARTITION` 作为 Doris 2.0+ 的等效替代在说明中提及。
+- **DDL 精简**:规范与模板去掉 `storage_format=V2` / `compression=LZ4`(Doris 默认值,无需显式
+  写),PROPERTIES 一般只留 `replication_num`。注:后端 `DorisTableEngineHandler.buildCreateDdl`
+  仍会写这两项(引擎默认、无害),Data Studio UI 建表沿用之;仅技能侧指导做了精简,若需后端
+  建表模板也一并去掉,是一处独立的 Java 改动。
 - **前端(与 DDL 无关的并行 UX 修复)**:widget 权限模式下拉在 `isBusy` 时也可切换——
   权限模式于 run 起始快照,忙时切换只影响下一轮,与 chat v2 行为一致
   (`WidgetChat.vue` 去掉 `isBusy` 禁用)。

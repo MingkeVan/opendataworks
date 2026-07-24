@@ -347,8 +347,6 @@ def test_data_dev_skill_documents_engine_aware_ddl_standards():
     assert rules["doris"]["default_bucket_num"] == 10
     assert rules["doris"]["default_replica_num"] == 3
     assert rules["doris"]["default_table_model"] == "DUPLICATE"
-    assert rules["doris"]["fixed_properties"]["storage_format"] == "V2"
-    assert rules["doris"]["fixed_properties"]["compression"] == "LZ4"
     assert rules["mysql"]["engine"] == "InnoDB"
     assert rules["mysql"]["charset"] == "utf8mb4"
 
@@ -362,7 +360,8 @@ def test_data_dev_skill_presets_scenarios_and_gates_dml_validation():
     # Preset scenario SQL templates exist and are wired into the skill.
     assert (DATA_DEV_SKILL_ROOT / "reference" / "50-sql-scenarios.md").exists()
     assert "50-sql-scenarios.md" in snapshot
-    for token in ("每日增量", "INSERT OVERWRITE", "GROUP BY"):
+    # Writes use the delete-then-insert idiom (idempotent rerun), not INSERT OVERWRITE.
+    for token in ("每日增量", "DELETE FROM", "INSERT INTO", "GROUP BY"):
         assert token in snapshot, token
 
     # DDL builds the target table directly via the tool, never as a scheduled

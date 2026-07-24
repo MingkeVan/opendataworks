@@ -31,9 +31,7 @@ COMMENT '表注释'
 PARTITION BY RANGE(`dt`) ()
 DISTRIBUTED BY HASH(`k1`) BUCKETS 10
 PROPERTIES (
-  "replication_num" = "3",
-  "storage_format" = "V2",
-  "compression" = "LZ4"
+  "replication_num" = "3"
 );
 ```
 
@@ -76,9 +74,9 @@ PROPERTIES (
   `"replication_allocation" = "tag.location.default: <n>"` 表达副本,二者语义等价,平台解析
   两种写法。
 
-### 固定 PROPERTIES
+### PROPERTIES
 
-- `"storage_format" = "V2"`、`"compression" = "LZ4"`(与后端建表一致,除非有明确理由不要改)。
+- 一般只需 `"replication_num"`。`storage_format` / `compression` 用 Doris 默认即可,**无需显式写**。
 
 ### 数据类型注意
 
@@ -108,9 +106,7 @@ COMMENT '用户订单明细（每日增量）'
 PARTITION BY RANGE(`dt`) ()
 DISTRIBUTED BY HASH(`order_id`) BUCKETS 10
 PROPERTIES (
-  "replication_num" = "3",
-  "storage_format" = "V2",
-  "compression" = "LZ4"
+  "replication_num" = "3"
 );
 ```
 

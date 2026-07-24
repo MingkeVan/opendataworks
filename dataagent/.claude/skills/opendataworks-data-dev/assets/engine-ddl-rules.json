@@ -14,10 +14,7 @@
       "prefer_multiple_of_be_nodes": true,
       "distribution_key": "high-cardinality, high-frequency equality/join column"
     },
-    "fixed_properties": {
-      "storage_format": "V2",
-      "compression": "LZ4"
-    },
+    "optional_properties_note": "storage_format/compression 用 Doris 默认即可,无需显式指定",
     "replication_property_names": ["replication_num", "replication_allocation"],
     "type_notes": {
       "no_unsigned": true,
