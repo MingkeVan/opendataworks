@@ -6,6 +6,8 @@ from core import permission_gate as pg
 PUBLISH = "mcp__portal__portal_publish_workflow"
 SCHED_ONLINE = "mcp__portal__portal_workflow_schedule_online"
 CREATE_TASK = "mcp__portal__portal_create_task"
+CREATE_TABLE = "mcp__portal__portal_create_table"
+PREVIEW_CREATE_TABLE = "mcp__portal__portal_preview_create_table"
 ANALYZE = "mcp__portal__portal_analyze_sql"
 READ = "mcp__portal__portal_search_tables"
 
@@ -74,6 +76,22 @@ def test_post_plan_mode_is_accept_edits() -> None:
     assert pg.post_plan_mode() == "acceptEdits"
     assert pg.requires_confirmation(CREATE_TASK, pg.post_plan_mode()) is False
     assert pg.requires_confirmation(PUBLISH, pg.post_plan_mode()) is True
+
+
+def test_create_table_is_high_risk_and_preview_is_read_only() -> None:
+    # portal_create_table executes irreversible CREATE TABLE DDL -> high-risk write:
+    # confirmed in default AND acceptEdits, denied under plan.
+    assert pg.is_write_tool(CREATE_TABLE)
+    assert pg.is_high_risk_tool(CREATE_TABLE)
+    assert pg.requires_confirmation(CREATE_TABLE, "default") is True
+    assert pg.requires_confirmation(CREATE_TABLE, "acceptEdits") is True
+    assert pg.requires_confirmation(CREATE_TABLE, "bypassPermissions") is False
+    assert pg.plan_denies_tool(CREATE_TABLE) is True
+    # The preview tool is read-only: not a write tool, never confirmed, allowed under plan.
+    assert not pg.is_write_tool(PREVIEW_CREATE_TABLE)
+    assert not pg.is_high_risk_tool(PREVIEW_CREATE_TABLE)
+    assert pg.requires_confirmation(PREVIEW_CREATE_TABLE, "default") is False
+    assert pg.plan_denies_tool(PREVIEW_CREATE_TABLE) is False
 
 
 def test_strip_card_annotations_drops_only_annotation_keys() -> None:

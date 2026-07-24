@@ -29,6 +29,12 @@ class PortalToolService:
 
     # --- write surface (data development assistant) ---------------------------
 
+    async def preview_create_table(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._wrap(self.backend_client.preview_create_table(payload))
+
+    async def create_table(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._wrap(self.backend_client.create_table(payload))
+
     async def create_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._wrap(self.backend_client.create_task(payload))
 

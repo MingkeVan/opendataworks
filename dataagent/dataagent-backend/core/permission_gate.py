@@ -23,6 +23,10 @@ HIGH_RISK_TOOL_NAMES: frozenset[str] = frozenset(
     {
         "portal_publish_workflow",
         "portal_workflow_schedule_online",
+        # Executes real, irreversible CREATE TABLE DDL on the engine; confirm every
+        # time in default/acceptEdits, deny under plan. The read-only
+        # portal_preview_create_table is intentionally not a write tool.
+        "portal_create_table",
     }
 )
 

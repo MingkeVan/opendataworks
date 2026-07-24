@@ -39,6 +39,12 @@ class BackendApiClient:
 
     # --- write surface (data development assistant) ---------------------------
 
+    async def preview_create_table(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._request("POST", "/v1/ai/table/preview", json=payload)
+
+    async def create_table(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._request("POST", "/v1/ai/table", json=payload)
+
     async def create_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._request("POST", "/v1/ai/task", json=payload)
 

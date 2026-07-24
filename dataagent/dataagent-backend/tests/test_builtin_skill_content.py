@@ -10,6 +10,7 @@ SQL_SKILL_ROOT = SKILLS_ROOT / "dataagent-nl2sql"
 BUSINESS_SKILL_ROOT = SKILLS_ROOT / "opendataworks-business-knowledge"
 PLATFORM_TOOLS_SKILL_ROOT = SKILLS_ROOT / "opendataworks-platform-tools"
 ONTOLOGY_MODELING_SKILL_ROOT = SKILLS_ROOT / "ontology-modeling-assistant"
+DATA_DEV_SKILL_ROOT = SKILLS_ROOT / "opendataworks-data-dev"
 
 
 def _skill_text_snapshot(root: Path) -> str:
@@ -308,3 +309,48 @@ def test_ontology_modeling_skill_contains_modeling_assets_without_sql_execution_
     assert not (ONTOLOGY_MODELING_SKILL_ROOT / "bin").exists()
     assert "run_sql.py 是唯一推荐的 SQL 执行入口" not in snapshot
     assert "validate_sql.py 是唯一推荐的 SQL 验证入口" not in snapshot
+
+
+def test_data_dev_skill_documents_engine_aware_ddl_standards():
+    snapshot = _skill_text_snapshot(DATA_DEV_SKILL_ROOT)
+
+    # DDL standards reference exists and is wired into the skill.
+    assert (DATA_DEV_SKILL_ROOT / "reference" / "40-ddl-standards.md").exists()
+    assert "40-ddl-standards.md" in snapshot
+
+    # Engine-aware CREATE TABLE knowledge, aligned with the backend
+    # DorisTableEngineHandler.buildCreateDdl conventions.
+    doris_tokens = [
+        "ENGINE=OLAP",
+        "DUPLICATE",
+        "AGGREGATE",
+        "UNIQUE KEY",
+        "DISTRIBUTED BY HASH",
+        "BUCKETS",
+        "replication_num",
+        "PARTITION BY RANGE",
+        "分桶数量建议",
+        "明细表",
+    ]
+    for token in doris_tokens:
+        assert token in snapshot, token
+
+    # MySQL DDL standards (knowledge-first, not executed by the tool yet).
+    for token in ["InnoDB", "utf8mb4", "PRIMARY KEY"]:
+        assert token in snapshot, token
+
+    # Machine-readable engine defaults must match the backend defaults exactly
+    # (DorisTableEngineHandler: bucketNum default 10, replicaNum default 3).
+    rules = json.loads(
+        (DATA_DEV_SKILL_ROOT / "assets" / "engine-ddl-rules.json").read_text(encoding="utf-8")
+    )
+    assert rules["doris"]["default_bucket_num"] == 10
+    assert rules["doris"]["default_replica_num"] == 3
+    assert rules["doris"]["default_table_model"] == "DUPLICATE"
+    assert rules["doris"]["fixed_properties"]["storage_format"] == "V2"
+    assert rules["doris"]["fixed_properties"]["compression"] == "LZ4"
+    assert rules["mysql"]["engine"] == "InnoDB"
+    assert rules["mysql"]["charset"] == "utf8mb4"
+
+    # The create-table tool is referenced as the execution path.
+    assert "portal_create_table" in snapshot

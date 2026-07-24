@@ -1,0 +1,37 @@
+{
+  "description": "引擎建表默认值与约束(供生成/校验建表 DDL 时取默认值)。与后端 TableCreateService/DorisTableEngineHandler 严格一致;详解见 reference/40-ddl-standards.md。",
+  "doris": {
+    "engine": "OLAP",
+    "default_table_model": "DUPLICATE",
+    "table_models": ["DUPLICATE", "AGGREGATE", "UNIQUE"],
+    "default_bucket_num": 10,
+    "default_replica_num": 3,
+    "replica_num_hint": { "local_or_test": 1, "production": 3 },
+    "bucket_sizing": {
+      "target_bytes_per_bucket": "1GB-10GB",
+      "partitioned_estimate_basis": "single_partition",
+      "min_buckets_small_table": 1,
+      "prefer_multiple_of_be_nodes": true,
+      "distribution_key": "high-cardinality, high-frequency equality/join column"
+    },
+    "fixed_properties": {
+      "storage_format": "V2",
+      "compression": "LZ4"
+    },
+    "replication_property_names": ["replication_num", "replication_allocation"],
+    "type_notes": {
+      "no_unsigned": true,
+      "big_integer": "LARGEINT",
+      "long_string": "STRING"
+    }
+  },
+  "mysql": {
+    "engine": "InnoDB",
+    "charset": "utf8mb4",
+    "collation": "utf8mb4_general_ci",
+    "auto_increment_type": "BIGINT UNSIGNED",
+    "supports_unsigned": true,
+    "execute_via_create_table_tool": false,
+    "note": "MySQL DDL 规范先行用于生成/校验与落任务 SQL;后端建表工具当前仅执行 Doris。"
+  }
+}
