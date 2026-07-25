@@ -1,6 +1,25 @@
 <template>
   <div class="meta-section meta-section-fill">
-    <section class="section-block section-fill">
+    <div class="detail-subtabs">
+      <el-radio-group v-model="subTab" size="small">
+        <el-radio-button label="fields">字段信息</el-radio-button>
+        <el-radio-button label="partitions">分区信息</el-radio-button>
+        <el-radio-button label="changes">变更记录</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <DataStudioRightPanelPartitions v-if="subTab === 'partitions'" />
+
+    <section v-else-if="subTab === 'changes'" class="section-block section-fill">
+      <div class="section-header">
+        <div class="section-title">变更记录</div>
+      </div>
+      <div class="changes-body">
+        <TableVersionHistoryPanel :table-id="state.table?.id" :active="subTab === 'changes'" />
+      </div>
+    </section>
+
+    <section v-else class="section-block section-fill">
       <div class="section-header">
         <div class="section-title">
           字段定义
@@ -240,6 +259,8 @@ import { computed, inject } from 'vue'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { isDemoMode } from '@/demo/runtime'
 import { computeMetadataCompleteness } from '../metadataGeneration'
+import DataStudioRightPanelPartitions from './DataStudioRightPanelPartitions.vue'
+import TableVersionHistoryPanel from './TableVersionHistoryPanel.vue'
 
 // P2-2 F17d：右侧面板「列详情」tab pane 从 DataStudioRightPanel.vue 抽出。
 // 共享脚手架样式由父组件的 .meta-tabs :deep() 提供。
@@ -273,6 +294,14 @@ const state = computed(() => {
 })
 const fieldRows = computed(() => getFieldRows(activeTabId.value))
 
+// 明细信息子页：字段信息 / 分区信息 / 变更记录，按 tab 记忆
+const subTab = computed({
+  get: () => state.value?.metaDetailTab || 'fields',
+  set: (value) => {
+    if (state.value) state.value.metaDetailTab = value
+  },
+})
+
 // 元数据完善度：表描述 + 各字段描述的填写比例，采纳后随字段刷新自动上升
 const completeness = computed(() =>
   computeMetadataCompleteness({
@@ -298,6 +327,16 @@ const isAdopted = (row) => {
 :deep(.columns-table th.el-table__cell) {
   background: #f2f7ff;
   color: var(--text-sub);
+}
+.detail-subtabs {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+.changes-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 .completeness-tag {
   margin-left: 8px;

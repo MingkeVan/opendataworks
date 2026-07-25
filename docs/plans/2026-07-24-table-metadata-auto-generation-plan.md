@@ -19,6 +19,14 @@
 
 `frontend/src/api/table.js` 无需改动：`updateComment` / `updateField` / `getFields` 均已存在。
 
+### 明细信息子页（分区信息 / 变更记录）
+
+9. 新增 `frontend/src/views/datastudio/components/DataStudioRightPanelPartitions.vue`：分区/分桶配置 + 分区字段清单 + 分区/非分区字段计数，数据取自已加载 state。
+10. 改 `DataStudioRightPanelColumns.vue`：顶部加「字段信息 / 分区信息 / 变更记录」子页切换，分别渲染原字段表、分区面板与 `TableVersionHistoryPanel`。
+11. 改 `DataStudioRightPanel.vue`：「列详情」更名为「明细信息」；移除顶层「版本」tab（已迁入「变更记录」子页），并清理其 import。
+12. 改 `useStudioTabs.js`：`createTabState` 增加 `metaDetailTab: 'fields'`（与 `metaSuggestion: null` 一并声明）。
+13. 补 `DataStudioRightPanel.smoke.spec.js`：补齐 ctx 中的智能元数据键，新增子页切换与分区字段拆分两条用例。
+
 ## Verification
 
 - `npm --prefix frontend run test`（新增 10 条用例；全量 32 文件 / 170 用例）

@@ -32,7 +32,7 @@
             <DataStudioRightPanelBasic />
           </el-tab-pane>
 
-          <el-tab-pane name="columns" label="列详情">
+          <el-tab-pane name="columns" label="明细信息">
             <DataStudioRightPanelColumns />
           </el-tab-pane>
 
@@ -57,22 +57,6 @@
 
           <el-tab-pane name="access" label="访问情况">
             <DataStudioRightPanelAccess />
-          </el-tab-pane>
-
-          <el-tab-pane name="versions" label="版本" lazy>
-            <div class="meta-section meta-section-fill">
-              <section class="section-block section-fill">
-                <div class="section-header">
-                  <div class="section-title">版本历史</div>
-                </div>
-                <el-scrollbar class="meta-scroll">
-                  <TableVersionHistoryPanel
-                    :table-id="state.table?.id"
-                    :active="state.metaTab === 'versions'"
-                  />
-                </el-scrollbar>
-              </section>
-            </div>
           </el-tab-pane>
         </el-tabs>
       </section>
@@ -105,7 +89,6 @@
 <script setup>
 import { computed, inject } from 'vue'
 import DataStudioRightPanelLineage from './DataStudioRightPanelLineage.vue'
-import TableVersionHistoryPanel from './TableVersionHistoryPanel.vue'
 import DataStudioRightPanelBasic from './DataStudioRightPanelBasic.vue'
 import DataStudioRightPanelColumns from './DataStudioRightPanelColumns.vue'
 import DataStudioRightPanelAccess from './DataStudioRightPanelAccess.vue'

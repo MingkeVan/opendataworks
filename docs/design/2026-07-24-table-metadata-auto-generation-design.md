@@ -50,6 +50,17 @@
 - `frontend/src/views/datastudio/composables/useMetadataGeneration.js`：生成编排与采纳写回
 - `frontend/src/views/datastudio/components/SmartMetadataDialog.vue`：复核弹窗
 
+## 明细信息子页（分区信息 / 变更记录）
+
+参考产品把表详情的「明细信息」拆为「字段信息 / 分区信息 / 变更记录」三个子页。本次一并对齐：
+
+- 原「列详情」tab 更名为「明细信息」，内部用 `el-radio-group` 提供三个子页，选择结果记在 tab state 的 `metaDetailTab`，按 tab 记忆。
+- **字段信息**：原有字段表（含本次新增的「智能描述」列与元数据完善度）。
+- **分区信息**：新增 `DataStudioRightPanelPartitions.vue`。展示分区列、分桶列、分桶数、副本数、表模型、Key 列，以及按 `data_field.is_partition` 过滤出的分区字段清单与「分区字段 N · 非分区字段 M」计数。数据全部来自表详情已加载的 state，不新增请求。
+  - 说明：平台当前没有列举 Doris 实际分区实例（分区名、范围、行数）的接口，`DorisConnectionService` 仅统计 `information_schema.partitions` 的数量。因此本子页呈现的是分区与分桶**配置**及分区字段，而非分区实例列表；后者需要新增后端接口，留作后续。
+- **变更记录**：复用既有 `TableVersionHistoryPanel.vue`（版本号、变更摘要、来源、操作人、时间、快照与版本对比），数据源为 `data_table_version`。
+  - 该组件原挂在独立的顶层「版本」tab；迁入「变更记录」子页后，顶层「版本」tab 一并移除，避免同一面板在两处重复出现。功能与接口未变。
+
 ## Risks and Tradeoffs
 
 - 依赖 `da_agent_settings` 已配置可用 provider/model；未配置时生成失败并提示，不影响表详情其余功能。

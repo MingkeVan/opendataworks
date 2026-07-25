@@ -26,6 +26,8 @@ import DataStudioRightPanel from '../components/DataStudioRightPanel.vue'
 import DataStudioRightPanelBasic from '../components/DataStudioRightPanelBasic.vue'
 import DataStudioRightPanelColumns from '../components/DataStudioRightPanelColumns.vue'
 import DataStudioRightPanelAccess from '../components/DataStudioRightPanelAccess.vue'
+import DataStudioRightPanelPartitions from '../components/DataStudioRightPanelPartitions.vue'
+import TableVersionHistoryPanel from '../components/TableVersionHistoryPanel.vue'
 
 const buildCtx = () => {
   const activeTab = ref('t1')
@@ -33,10 +35,12 @@ const buildCtx = () => {
     t1: {
       table: { id: 1, tableName: 'demo_t', dbName: 'db', sourceId: 's1', sourceType: 'DORIS' },
       metaTab: 'basic',
+      metaDetailTab: 'fields',
       metaEditing: false,
       metaSaving: false,
       metaForm: {},
       metaDataDomainOptions: [],
+      metaSuggestion: null,
       metadataSyncing: false,
       fieldSubmitting: false,
       fieldsEditing: false,
@@ -85,6 +89,12 @@ const buildCtx = () => {
     goCreateRelatedTask: fn(),
     openTask: fn(),
     openTableTab: fn(),
+    generateMetadata: fn(),
+    adoptMetadata: fn(),
+    metadataGenerating: ref(false),
+    metadataAdopting: ref(false),
+    metadataDialogVisible: ref(false),
+    metadataResult: ref(null),
   }
 }
 
@@ -128,6 +138,65 @@ describe('DataStudioRightPanel mount smoke', () => {
       expect(wrapper.find(marker).exists()).toBe(true)
       wrapper.unmount()
     }
+  })
+
+  it('明细信息子页在 分区信息 / 变更记录 之间切换', async () => {
+    const ctx = buildCtx()
+    ctx.tabStates.t1.fields = [
+      { id: 1, fieldName: 'dt', fieldType: 'date', isPartition: 1, fieldComment: '业务日期' },
+      { id: 2, fieldName: 'amount', fieldType: 'decimal', isPartition: 0, fieldComment: '' },
+    ]
+    ctx.tabStates.t1.table.partitionColumn = 'dt'
+
+    const mountPane = () =>
+      shallowMount(DataStudioRightPanelColumns, {
+        global: {
+          provide: { dataStudioCtx: ctx },
+          stubs: { ElScrollbar: { template: '<div><slot /></div>' } },
+          config: { warnHandler: () => {} },
+          directives: { loading: {} },
+        },
+      })
+
+    // 默认字段信息
+    let wrapper = mountPane()
+    expect(wrapper.findComponent(DataStudioRightPanelPartitions).exists()).toBe(false)
+    wrapper.unmount()
+
+    // 分区信息：渲染分区面板
+    ctx.tabStates.t1.metaDetailTab = 'partitions'
+    wrapper = mountPane()
+    expect(wrapper.findComponent(DataStudioRightPanelPartitions).exists()).toBe(true)
+    wrapper.unmount()
+
+    // 变更记录：把 tableId 透传给版本历史面板
+    ctx.tabStates.t1.metaDetailTab = 'changes'
+    wrapper = mountPane()
+    const history = wrapper.findComponent(TableVersionHistoryPanel)
+    expect(history.exists()).toBe(true)
+    expect(history.props('tableId')).toBe(1)
+    expect(history.props('active')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('分区信息按 isPartition 拆分字段', () => {
+    const ctx = buildCtx()
+    ctx.tabStates.t1.fields = [
+      { id: 1, fieldName: 'dt', fieldType: 'date', isPartition: 1 },
+      { id: 2, fieldName: 'amount', fieldType: 'decimal', isPartition: 0 },
+      { id: 3, fieldName: 'shop_id', fieldType: 'string', isPartition: 0 },
+    ]
+    const wrapper = shallowMount(DataStudioRightPanelPartitions, {
+      global: {
+        provide: { dataStudioCtx: ctx },
+        stubs: { ElScrollbar: { template: '<div><slot /></div>' } },
+        config: { warnHandler: () => {} },
+        directives: { loading: {} },
+      },
+    })
+    expect(wrapper.text()).toContain('分区字段 1')
+    expect(wrapper.text()).toContain('非分区字段 2')
+    wrapper.unmount()
   })
 
   it('renders the empty state for query tabs', () => {
