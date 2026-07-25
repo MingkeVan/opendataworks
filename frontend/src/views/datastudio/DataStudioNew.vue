@@ -145,6 +145,7 @@ import {
   Refresh,
 } from '@element-plus/icons-vue'
 import { tableApi } from '@/api/table'
+import { taskApi } from '@/api/task'
 import PersistentTabs from '@/components/PersistentTabs.vue'
 import TaskEditDrawer from '@/components/TaskEditDrawer.vue'
 import DataStudioResultPanel from '@/views/datastudio/components/DataStudioResultPanel.vue'
@@ -167,6 +168,7 @@ import { useResultChart } from './composables/useResultChart'
 import { useTableMetaEditing } from './composables/useTableMetaEditing'
 import { useStudioTabs } from './composables/useStudioTabs'
 import { useTableActions } from './composables/useTableActions'
+import { useMetadataGeneration } from './composables/useMetadataGeneration'
 
 const CreateTableDrawer = defineAsyncComponent({
   loader: () => import('@/views/datastudio/CreateTableDrawer.vue'),
@@ -586,6 +588,22 @@ const {
   getTabItemById,
 })
 
+// 智能元数据（复用智能问数任务链路）：生成字段/表描述建议，复核后采纳写回
+const {
+  metadataGenerating,
+  metadataAdopting,
+  metadataDialogVisible,
+  metadataResult,
+  generateMetadata,
+  adoptMetadata,
+} = useMetadataGeneration({
+  clusterId,
+  tabStates,
+  taskApi,
+  loadDdl,
+  warnPlatformMetadataMissing,
+})
+
 watch(
   () => [activeTab.value, tabStates[activeTab.value]?.metaTab],
   ([tabId, metaTab]) => {
@@ -680,7 +698,13 @@ watch(
     goLineage,
     goCreateRelatedTask,
     openTask,
-    openTableTab
+    openTableTab,
+    generateMetadata,
+    adoptMetadata,
+    metadataGenerating,
+    metadataAdopting,
+    metadataDialogVisible,
+    metadataResult
   })
 
 // 查询结果面板契约（P2-2 F16a）：DataStudioResultPanel 消费,键集合与该组件解构保持一致

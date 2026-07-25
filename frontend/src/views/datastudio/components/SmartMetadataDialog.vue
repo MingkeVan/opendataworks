@@ -1,0 +1,262 @@
+<template>
+  <el-dialog v-model="visible" title="智能元数据" width="960px" append-to-body :close-on-click-modal="false">
+    <el-tabs v-if="result" v-model="tab">
+      <el-tab-pane label="字段描述" name="fields">
+        <div class="smd-toolbar">
+          <span class="smd-hint">
+            默认情况，展示表内所有字段生成的描述，您也可以
+            <el-checkbox v-model="onlyWeak">仅看描述为空/描述与名称相同的字段</el-checkbox>
+          </span>
+          <el-input v-model="keyword" size="small" clearable placeholder="请输入字段关键字" class="smd-search" />
+        </div>
+
+        <el-table :data="visibleFields" border size="small" max-height="420">
+          <el-table-column width="110" align="center">
+            <template #header>
+              <el-checkbox
+                :model-value="allSelected"
+                :indeterminate="indeterminate"
+                :disabled="!selectableVisible.length"
+                @change="toggleAll"
+              >
+                是否采纳
+              </el-checkbox>
+            </template>
+            <template #default="{ row, $index }">
+              <span class="smd-select-cell">
+                <el-checkbox v-model="selected[row.fieldName]" :disabled="!row.hasRecommendation" />
+                <span class="smd-idx">{{ $index + 1 }}</span>
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="字段名" width="190">
+            <template #default="{ row }">
+              <el-input :model-value="row.fieldName" size="small" disabled />
+            </template>
+          </el-table-column>
+          <el-table-column label="字段描述" width="230">
+            <template #default="{ row }">
+              <el-input :model-value="row.currentComment" type="textarea" autosize disabled placeholder="—" />
+            </template>
+          </el-table-column>
+          <el-table-column label="生成推荐描述">
+            <template #default="{ row }">
+              <el-input
+                v-if="row.hasRecommendation"
+                v-model="row.editedComment"
+                type="textarea"
+                autosize
+                class="smd-suggest-input"
+              />
+              <el-input v-else model-value="" type="textarea" :rows="2" disabled placeholder="已被采纳或暂无推荐" />
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="表名与表描述" name="table">
+        <div class="smd-tabledesc">
+          <div class="smd-line">
+            <span class="smd-label">表名</span>
+            <el-input :model-value="result.tableName" size="small" disabled />
+          </div>
+          <div class="smd-line">
+            <span class="smd-label">当前表描述</span>
+            <el-input :model-value="result.table.currentComment" type="textarea" autosize disabled placeholder="—" />
+          </div>
+          <div class="smd-line">
+            <span class="smd-label">
+              <el-checkbox v-model="adoptTable" :disabled="!result.table.hasRecommendation" />
+              生成推荐描述
+            </span>
+            <el-input
+              v-model="tableText"
+              type="textarea"
+              autosize
+              class="smd-suggest-input"
+              :disabled="!result.table.hasRecommendation"
+              :placeholder="result.table.hasRecommendation ? '' : '已被采纳或暂无推荐'"
+            />
+          </div>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
+
+    <template #footer>
+      <div class="smd-footer">
+        <span class="smd-count">已选 {{ totalSelected }} 项</span>
+        <span>
+          <el-button :loading="metadataGenerating" @click="regenerate">重新生成</el-button>
+          <el-button @click="visible = false">取消</el-button>
+          <el-button type="primary" :loading="metadataAdopting" :disabled="totalSelected === 0" @click="onAdopt">
+            采纳
+          </el-button>
+        </span>
+      </div>
+    </template>
+  </el-dialog>
+</template>
+
+<script setup>
+import { computed, inject, reactive, ref, watch } from 'vue'
+import { isWeakDescription } from '../metadataGeneration'
+
+// 「智能元数据」复核弹窗：字段描述 / 表名与表描述两个 tab，勾选后批量采纳直接写回。
+const ctx = inject('dataStudioCtx', null)
+if (!ctx) {
+  throw new Error('SmartMetadataDialog 需要 dataStudioCtx')
+}
+
+const {
+  metadataResult,
+  metadataDialogVisible,
+  metadataAdopting,
+  metadataGenerating,
+  adoptMetadata,
+  generateMetadata,
+  activeTab
+} = ctx
+
+const result = computed(() => metadataResult.value)
+const visible = computed({
+  get: () => metadataDialogVisible.value,
+  set: (value) => {
+    metadataDialogVisible.value = value
+  }
+})
+
+const tab = ref('fields')
+const onlyWeak = ref(false)
+const keyword = ref('')
+const selected = reactive({})
+const adoptTable = ref(false)
+const tableText = ref('')
+const localFields = ref([])
+
+watch(
+  () => metadataResult.value,
+  (value) => {
+    Object.keys(selected).forEach((key) => delete selected[key])
+    localFields.value = (value?.fields || []).map((field) => ({ ...field, editedComment: field.suggestedComment }))
+    localFields.value.forEach((field) => {
+      selected[field.fieldName] = field.hasRecommendation
+    })
+    adoptTable.value = !!value?.table?.hasRecommendation
+    tableText.value = value?.table?.suggestedComment || ''
+    tab.value = 'fields'
+  },
+  { immediate: true }
+)
+
+const visibleFields = computed(() =>
+  localFields.value.filter((field) => {
+    if (onlyWeak.value && !isWeakDescription(field.fieldName, field.currentComment)) return false
+    if (keyword.value && !field.fieldName.toLowerCase().includes(keyword.value.trim().toLowerCase())) return false
+    return true
+  })
+)
+
+const selectableVisible = computed(() => visibleFields.value.filter((field) => field.hasRecommendation))
+
+const allSelected = computed(
+  () => selectableVisible.value.length > 0 && selectableVisible.value.every((field) => selected[field.fieldName])
+)
+
+const indeterminate = computed(() => {
+  const count = selectableVisible.value.filter((field) => selected[field.fieldName]).length
+  return count > 0 && count < selectableVisible.value.length
+})
+
+const toggleAll = (value) => {
+  selectableVisible.value.forEach((field) => {
+    selected[field.fieldName] = !!value
+  })
+}
+
+const selectedFields = computed(() =>
+  localFields.value.filter((field) => field.hasRecommendation && selected[field.fieldName])
+)
+
+const totalSelected = computed(
+  () => selectedFields.value.length + (adoptTable.value && result.value?.table?.hasRecommendation ? 1 : 0)
+)
+
+const currentTabId = () => String(result.value?.tabId || activeTab.value || '')
+
+const onAdopt = () => {
+  adoptMetadata(currentTabId(), {
+    table: adoptTable.value && result.value?.table?.hasRecommendation ? { text: tableText.value } : null,
+    fields: selectedFields.value.map((field) => ({ fieldName: field.fieldName, text: field.editedComment }))
+  })
+}
+
+const regenerate = () => generateMetadata(currentTabId(), { force: true })
+</script>
+
+<style scoped>
+.smd-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.smd-hint {
+  color: #5d7491;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.smd-search {
+  width: 220px;
+  flex: none;
+}
+
+.smd-select-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.smd-idx {
+  color: #8298b2;
+}
+
+.smd-suggest-input :deep(.el-textarea__inner) {
+  border-color: #c4b5fd;
+}
+
+.smd-tabledesc {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.smd-line {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.smd-label {
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.smd-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.smd-count {
+  color: #5d7491;
+  font-size: 13px;
+}
+</style>

@@ -97,6 +97,8 @@
     <div v-else class="right-empty">
       <el-empty :description="emptyDescription" :image-size="110" />
     </div>
+
+    <SmartMetadataDialog />
   </div>
 </template>
 
@@ -107,6 +109,7 @@ import TableVersionHistoryPanel from './TableVersionHistoryPanel.vue'
 import DataStudioRightPanelBasic from './DataStudioRightPanelBasic.vue'
 import DataStudioRightPanelColumns from './DataStudioRightPanelColumns.vue'
 import DataStudioRightPanelAccess from './DataStudioRightPanelAccess.vue'
+import SmartMetadataDialog from './SmartMetadataDialog.vue'
 import { isDemoMode } from '@/demo/runtime'
 import { usePanelVerticalResize } from '../composables/usePanelVerticalResize'
 

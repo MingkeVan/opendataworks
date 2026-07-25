@@ -92,6 +92,8 @@ export function useStudioTabs({
       metaOriginal: {},
       metaDataDomainOptions: [],
       metadataSyncing: false,
+      // 智能元数据生成结果（内存态，供字段表「智能描述」列消费）
+      metaSuggestion: null,
       fieldSubmitting: false,
       fieldsEditing: false,
       fieldsDraft: [],
