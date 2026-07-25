@@ -297,7 +297,6 @@
                 <button
                   type="button"
                   class="query-dropdown-trigger query-permission-select"
-                  :disabled="isBusy"
                   title="Session permission mode"
                   @click="togglePermissionMenu"
                 >
@@ -426,7 +425,8 @@ const permissionDropdownRef = ref(null)
 const modelDropdownRef = ref(null)
 
 const togglePermissionMenu = () => {
-  if (isBusy.value) return
+  // Permission mode is read at run start, so switching it while a run is busy
+  // only affects the next turn — allow it (parity with chat v2).
   modelMenuOpen.value = false
   permissionMenuOpen.value = !permissionMenuOpen.value
 }

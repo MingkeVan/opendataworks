@@ -91,6 +91,8 @@ async def test_build_mcp_server_registers_write_tools():
     tools = await mcp.list_tools()
     names = {t.name for t in tools}
     for expected in {
+        "portal_preview_create_table",
+        "portal_create_table",
         "portal_create_task",
         "portal_update_task",
         "portal_get_task",
@@ -109,6 +111,56 @@ async def test_build_mcp_server_registers_write_tools():
         assert expected in names, f"missing tool {expected}"
     # read tools still present
     assert "portal_search_tables" in names
+
+
+def test_create_table_input_serializes_to_camel_case():
+    from portal_mcp.app import CreateTableInput
+
+    inp = CreateTableInput(
+        db_name="dwd",
+        layer="dwd",
+        update_type="di",
+        table_model="DUPLICATE",
+        bucket_num=10,
+        replica_num=3,
+        key_columns=["dt", "order_id"],
+        distribution_columns=["order_id"],
+        doris_cluster_id=5,
+        columns=[{"column_name": "order_id", "data_type": "BIGINT", "comment": "订单ID"}],
+    )
+    payload = inp.model_dump(by_alias=True, exclude_none=True)
+
+    # Backend (AgentTableCreateRequest / TableCreateRequest) expects camelCase.
+    assert payload["dbName"] == "dwd"
+    assert payload["bucketNum"] == 10
+    assert payload["replicaNum"] == 3
+    assert payload["keyColumns"] == ["dt", "order_id"]
+    assert payload["distributionColumns"] == ["order_id"]
+    assert payload["dorisClusterId"] == 5
+    assert payload["columns"][0]["columnName"] == "order_id"
+    assert payload["columns"][0]["dataType"] == "BIGINT"
+    # snake_case must not leak into the backend payload.
+    assert "db_name" not in payload
+    assert "column_name" not in payload["columns"][0]
+
+
+def test_create_table_requires_at_least_one_column():
+    from portal_mcp.app import CreateTableInput
+
+    with pytest.raises(ValidationError):
+        CreateTableInput(db_name="dwd", columns=[])
+
+
+@pytest.mark.anyio
+async def test_create_table_service_methods_delegate_to_backend():
+    backend = RecordingBackend()
+    service = PortalToolService(backend)
+
+    await service.preview_create_table({"dbName": "dwd", "columns": []})
+    await service.create_table({"dbName": "dwd", "columns": [], "dorisClusterId": 5})
+
+    names = [c[0] for c in backend.calls]
+    assert names == ["preview_create_table", "create_table"]
 
 
 def test_operator_contextvar_propagates_into_request_headers(monkeypatch):

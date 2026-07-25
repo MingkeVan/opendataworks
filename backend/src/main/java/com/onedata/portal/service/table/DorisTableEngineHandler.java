@@ -84,9 +84,7 @@ public class DorisTableEngineHandler implements TableEngineHandler {
         ddl.append("PROPERTIES (\n");
         ddl.append("  \"replication_num\" = \"")
                 .append(request.getReplicaNum() != null ? request.getReplicaNum() : 3)
-                .append("\",\n");
-        ddl.append("  \"storage_format\" = \"V2\",\n");
-        ddl.append("  \"compression\" = \"LZ4\"\n");
+                .append("\"\n");
         ddl.append(");");
         return ddl.toString();
     }

@@ -6,6 +6,7 @@ from typing import Any, Literal
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic.alias_generators import to_camel
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
@@ -81,6 +82,49 @@ class QueryReadonlyInput(BaseModel):
 # --- data development assistant: write tool inputs ---------------------------
 # Nested task/workflow/schedule payloads are forwarded as-is to the backend
 # agent API, which owns the authoritative field schema (mirrors the web DTOs).
+
+
+class CreateTableColumnInput(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid", str_strip_whitespace=True, alias_generator=to_camel, populate_by_name=True
+    )
+
+    column_name: str = Field(..., description="列名")
+    data_type: str = Field(..., description="数据类型,如 BIGINT/VARCHAR/DECIMAL/DATETIME/STRING")
+    type_params: str | None = Field(default=None, description="类型参数,如 '64'(VARCHAR)或 '18,2'(DECIMAL)")
+    nullable: bool | None = Field(default=None, description="是否可空,默认可空")
+    primary_key: bool | None = Field(default=None, description="是否为 KEY/主键列")
+    partition_column: bool | None = Field(default=None, description="是否为分区列")
+    default_value: str | None = Field(default=None, description="默认值")
+    comment: str | None = Field(default=None, description="列注释")
+
+
+class CreateTableInput(BaseModel):
+    """建表入参,对齐平台建表规范(见 opendataworks-data-dev 技能 reference/40-ddl-standards.md)。表名由分层等组件生成。"""
+
+    model_config = ConfigDict(
+        extra="forbid", str_strip_whitespace=True, alias_generator=to_camel, populate_by_name=True
+    )
+
+    db_name: str = Field(..., description="目标数据库名")
+    columns: list[CreateTableColumnInput] = Field(..., min_length=1, description="列定义(至少一列),每列建议带 comment")
+    layer: str | None = Field(default=None, description="数仓分层:ods/dwd/dws/dim/ads,用于生成表名")
+    business_domain: str | None = Field(default=None, description="业务域,用于生成表名")
+    data_domain: str | None = Field(default=None, description="数据域,用于生成表名")
+    custom_identifier: str | None = Field(default=None, description="自定义标识,用于生成表名")
+    statistics_cycle: str | None = Field(default=None, description="统计周期,用于生成表名")
+    update_type: str | None = Field(default=None, description="刷新方式,如 di(按日增量)/df(按日全量)")
+    table_comment: str | None = Field(default=None, description="表注释")
+    owner: str | None = Field(default=None, description="负责人,可选(默认取调用者身份)")
+    table_model: str | None = Field(default=None, description="Doris 表模型:DUPLICATE(默认/明细)/AGGREGATE/UNIQUE")
+    bucket_num: int | None = Field(default=None, ge=1, description="分桶数,默认 10")
+    replica_num: int | None = Field(default=None, ge=1, description="副本数,默认 3(本地/测试用 1)")
+    partition_column: str | None = Field(default=None, description="分区列(RANGE 分区)")
+    distribution_columns: list[str] | None = Field(default=None, description="分桶键(DISTRIBUTED BY HASH)")
+    key_columns: list[str] | None = Field(default=None, description="KEY 列(表模型 KEY(...),顺序敏感)")
+    doris_cluster_id: int | None = Field(default=None, description="目标 Doris 集群/数据源 ID;执行建表必填,预览可省")
+    sync_to_doris: bool | None = Field(default=None, description="是否在引擎执行建表;默认执行,置 false 仅登记元数据")
+    doris_ddl: str | None = Field(default=None, description="高级:直接提供完整 Doris CREATE TABLE DDL")
 
 
 class CreateTaskInput(BaseModel):
@@ -286,6 +330,22 @@ def build_mcp_server(service: PortalToolService) -> FastMCP:
         return await service.query_readonly(payload)
 
     # --- data development assistant: write tools -----------------------------
+
+    @mcp.tool(
+        name="portal_preview_create_table",
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+    )
+    async def portal_preview_create_table(params: CreateTableInput) -> dict[str, Any]:
+        """Preview a new target table: returns the generated table name and normalized CREATE TABLE DDL without creating anything. Follow the data-dev skill DDL standards; use before portal_create_table."""
+        return await service.preview_create_table(params.model_dump(by_alias=True, exclude_none=True))
+
+    @mcp.tool(
+        name="portal_create_table",
+        annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+    )
+    async def portal_create_table(params: CreateTableInput) -> dict[str, Any]:
+        """Create a new target table: persist metadata and execute the DDL on the engine (Doris). High-risk and irreversible; requires dorisClusterId to execute. Preview first with portal_preview_create_table."""
+        return await service.create_table(params.model_dump(by_alias=True, exclude_none=True))
 
     @mcp.tool(
         name="portal_create_task",

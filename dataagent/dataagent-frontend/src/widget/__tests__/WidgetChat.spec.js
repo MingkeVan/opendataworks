@@ -441,6 +441,18 @@ describe('WidgetChat history conversations', () => {
     expect(widgetChatSource).toContain('.query-message-footer:focus-within')
   })
 
+  it('keeps the permission-mode dropdown usable while a run is busy', () => {
+    // Permission mode is read at run start, so switching it mid-run only affects
+    // the next turn — the trigger must not be disabled by isBusy, and toggling it
+    // must not early-return while busy.
+    const trigger = widgetChatSource.match(
+      /query-permission-select"([\s\S]*?)@click="togglePermissionMenu"/
+    )
+    expect(trigger).not.toBeNull()
+    expect(trigger[1]).not.toContain(':disabled')
+    expect(widgetChatSource).toContain('Permission mode is read at run start')
+  })
+
   it('renders inline chart specs from assistant text without showing raw spec markup', async () => {
     const chartSpec = JSON.stringify({
       kind: 'chart_spec',
