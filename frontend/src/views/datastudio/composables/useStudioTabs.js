@@ -91,7 +91,11 @@ export function useStudioTabs({
       },
       metaOriginal: {},
       metaDataDomainOptions: [],
+      // 明细信息子页：fields | partitions | changes
+      metaDetailTab: 'fields',
       metadataSyncing: false,
+      // 智能元数据生成结果（内存态，供字段表「智能描述」列消费）
+      metaSuggestion: null,
       fieldSubmitting: false,
       fieldsEditing: false,
       fieldsDraft: [],

@@ -32,7 +32,7 @@
             <DataStudioRightPanelBasic />
           </el-tab-pane>
 
-          <el-tab-pane name="columns" label="列详情">
+          <el-tab-pane name="columns" label="明细信息">
             <DataStudioRightPanelColumns />
           </el-tab-pane>
 
@@ -59,11 +59,11 @@
             <DataStudioRightPanelAccess />
           </el-tab-pane>
 
-          <el-tab-pane name="versions" label="版本" lazy>
+          <el-tab-pane name="versions" label="变更" lazy>
             <div class="meta-section meta-section-fill">
               <section class="section-block section-fill">
                 <div class="section-header">
-                  <div class="section-title">版本历史</div>
+                  <div class="section-title">变更记录</div>
                 </div>
                 <el-scrollbar class="meta-scroll">
                   <TableVersionHistoryPanel
@@ -97,6 +97,8 @@
     <div v-else class="right-empty">
       <el-empty :description="emptyDescription" :image-size="110" />
     </div>
+
+    <SmartMetadataDialog />
   </div>
 </template>
 
@@ -107,6 +109,7 @@ import TableVersionHistoryPanel from './TableVersionHistoryPanel.vue'
 import DataStudioRightPanelBasic from './DataStudioRightPanelBasic.vue'
 import DataStudioRightPanelColumns from './DataStudioRightPanelColumns.vue'
 import DataStudioRightPanelAccess from './DataStudioRightPanelAccess.vue'
+import SmartMetadataDialog from './SmartMetadataDialog.vue'
 import { isDemoMode } from '@/demo/runtime'
 import { usePanelVerticalResize } from '../composables/usePanelVerticalResize'
 

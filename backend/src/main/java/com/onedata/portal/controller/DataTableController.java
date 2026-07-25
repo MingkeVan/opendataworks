@@ -8,6 +8,7 @@ import com.onedata.portal.dto.TableAccessStats;
 import com.onedata.portal.dto.TableExport;
 import com.onedata.portal.dto.TableLocation;
 import com.onedata.portal.dto.TableOption;
+import com.onedata.portal.dto.TablePartitionInfo;
 import com.onedata.portal.dto.TableRelatedLineageResponse;
 import com.onedata.portal.dto.TableRelatedTasksResponse;
 import com.onedata.portal.dto.TableStatistics;
@@ -411,6 +412,21 @@ public class DataTableController {
             @RequestParam String tableName) {
         try {
             return Result.success(dataTableQueryService.getTableDdlByName(clusterId, database, tableName));
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    /**
+     * 获取表的分区列表（分区名、范围、分桶、副本、大小、行数）
+     */
+    @RequireAuth
+    @GetMapping("/{id}/partitions")
+    public Result<List<TablePartitionInfo>> listPartitions(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long clusterId) {
+        try {
+            return Result.success(dataTableQueryService.listPartitions(id, clusterId));
         } catch (Exception e) {
             return Result.fail(e.getMessage());
         }

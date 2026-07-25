@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.onedata.portal.config.DorisJdbcProperties;
 import com.onedata.auth.context.UserContextHolder;
 import com.onedata.portal.dto.DorisCredential;
+import com.onedata.portal.dto.TablePartitionInfo;
 import com.onedata.portal.dto.TableStatistics;
 import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.entity.DataField;
@@ -866,6 +867,81 @@ public class DorisConnectionService {
         }
 
         return result;
+    }
+
+    /**
+     * 列出表的分区（分区名、范围、分桶、副本、大小、行数）。
+     *
+     * <p>基于 Doris {@code SHOW PARTITIONS}。不同 Doris 版本的返回列不完全一致，
+     * 这里按结果集实际存在的列名读取，缺失列留空，避免因版本差异整体失败。
+     * 非分区表通常也会返回一行默认分区。
+     */
+    public List<TablePartitionInfo> listPartitions(Long clusterId, String database, String tableName) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        String sql = "SHOW PARTITIONS FROM `" + database + "`.`" + tableName + "`";
+        List<TablePartitionInfo> partitions = new ArrayList<>();
+
+        try (Connection connection = getConnection(cluster, null);
+                Statement stmt = connection.createStatement();
+                ResultSet rs = stmt.executeQuery(sql)) {
+
+            Set<String> columns = availableColumnLabels(rs.getMetaData());
+            while (rs.next()) {
+                TablePartitionInfo info = new TablePartitionInfo();
+                info.setPartitionName(readString(rs, columns, "PartitionName"));
+                info.setPartitionKey(readString(rs, columns, "PartitionKey"));
+                info.setRange(readString(rs, columns, "Range"));
+                info.setDistributionKey(readString(rs, columns, "DistributionKey"));
+                info.setBuckets(readInteger(rs, columns, "Buckets"));
+                info.setReplicationNum(readInteger(rs, columns, "ReplicationNum"));
+                info.setDataSize(readString(rs, columns, "DataSize"));
+                info.setRowCount(readLong(rs, columns, "RowCount"));
+                info.setState(readString(rs, columns, "State"));
+                info.setStorageMedium(readString(rs, columns, "StorageMedium"));
+                info.setVisibleVersionTime(readString(rs, columns, "VisibleVersionTime"));
+                partitions.add(info);
+            }
+        } catch (SQLException e) {
+            log.error("Failed to list partitions for {}.{}", database, tableName, e);
+            throw new RuntimeException("获取分区列表失败: " + e.getMessage(), e);
+        }
+
+        return partitions;
+    }
+
+    private Set<String> availableColumnLabels(ResultSetMetaData metaData) throws SQLException {
+        Set<String> labels = new HashSet<>();
+        for (int i = 1; i <= metaData.getColumnCount(); i++) {
+            String label = metaData.getColumnLabel(i);
+            if (StringUtils.hasText(label)) {
+                labels.add(label.toLowerCase(Locale.ROOT));
+            }
+        }
+        return labels;
+    }
+
+    private String readString(ResultSet rs, Set<String> columns, String label) throws SQLException {
+        if (!columns.contains(label.toLowerCase(Locale.ROOT))) {
+            return null;
+        }
+        String value = rs.getString(label);
+        return value == null ? null : value.trim();
+    }
+
+    private Integer readInteger(ResultSet rs, Set<String> columns, String label) throws SQLException {
+        String value = readString(rs, columns, label);
+        if (!StringUtils.hasText(value) || !NUMERIC_PATTERN.matcher(value).matches()) {
+            return null;
+        }
+        return (int) Double.parseDouble(value);
+    }
+
+    private Long readLong(ResultSet rs, Set<String> columns, String label) throws SQLException {
+        String value = readString(rs, columns, label);
+        if (!StringUtils.hasText(value) || !NUMERIC_PATTERN.matcher(value).matches()) {
+            return null;
+        }
+        return (long) Double.parseDouble(value);
     }
 
     /**

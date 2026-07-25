@@ -1,9 +1,33 @@
 <template>
   <div class="meta-section meta-section-fill">
-    <section class="section-block section-fill">
+    <div class="detail-subtabs">
+      <el-radio-group v-model="subTab" size="small">
+        <el-radio-button label="fields">字段信息</el-radio-button>
+        <el-radio-button label="partitions">分区信息</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <DataStudioRightPanelPartitions v-if="subTab === 'partitions'" />
+
+    <section v-else class="section-block section-fill">
       <div class="section-header">
-        <div class="section-title">字段定义</div>
+        <div class="section-title">
+          字段定义
+          <el-tooltip content="表描述与字段描述的填写比例" placement="top">
+            <el-tag size="small" effect="plain" class="completeness-tag">元数据完善度 {{ completeness }}%</el-tag>
+          </el-tooltip>
+        </div>
         <div class="section-actions">
+          <el-button
+            v-if="!state.fieldsEditing"
+            size="small"
+            :loading="metadataGenerating"
+            :disabled="isDemoMode || isPlatformMetadataMissing(state.table)"
+            @click="generateMetadata(activeTabId)"
+          >
+            {{ metadataGenerating ? '元数据生成中' : '智能元数据' }}
+          </el-button>
+
           <el-tag
             v-if="state.fieldsEditing && isAggregateTable(state.table)"
             type="warning"
@@ -146,6 +170,26 @@
               <span v-else>{{ row.fieldComment || '-' }}</span>
             </template>
           </el-table-column>
+          <el-table-column
+            v-if="!state.fieldsEditing && state.metaSuggestion"
+            label="智能描述"
+            min-width="200"
+            show-overflow-tooltip
+          >
+            <template #header>
+              <span class="smart-col-header">
+                智能描述
+                <el-tooltip content="基于建表语句、上下游血缘与关联任务代码生成，请复核后采纳" placement="top">
+                  <el-icon class="smart-col-info"><InfoFilled /></el-icon>
+                </el-tooltip>
+                <el-button link type="primary" size="small" @click="generateMetadata(activeTabId)">采纳描述</el-button>
+              </span>
+            </template>
+            <template #default="{ row }">
+              <span v-if="isAdopted(row)" class="col-adopted">已采纳</span>
+              <span v-else class="col-suggest">{{ suggestFor(row.fieldName) || '-' }}</span>
+            </template>
+          </el-table-column>
           <el-table-column v-if="state.fieldsEditing" label="操作" width="150" fixed="right">
             <template #default="{ row }">
               <el-tooltip
@@ -202,7 +246,10 @@
 
 <script setup>
 import { computed, inject } from 'vue'
+import { InfoFilled } from '@element-plus/icons-vue'
 import { isDemoMode } from '@/demo/runtime'
+import { computeMetadataCompleteness } from '../metadataGeneration'
+import DataStudioRightPanelPartitions from './DataStudioRightPanelPartitions.vue'
 
 // P2-2 F17d：右侧面板「列详情」tab pane 从 DataStudioRightPanel.vue 抽出。
 // 共享脚手架样式由父组件的 .meta-tabs :deep() 提供。
@@ -224,6 +271,8 @@ const {
   saveFieldsEdit,
   addField,
   removeField,
+  generateMetadata,
+  metadataGenerating,
 } = ctx
 
 const activeTabId = computed(() => String(activeTab.value || ''))
@@ -233,6 +282,30 @@ const state = computed(() => {
   return tabStates[id] || null
 })
 const fieldRows = computed(() => getFieldRows(activeTabId.value))
+
+// 明细信息子页：字段信息 / 分区信息 / 变更记录，按 tab 记忆
+const subTab = computed({
+  get: () => state.value?.metaDetailTab || 'fields',
+  set: (value) => {
+    if (state.value) state.value.metaDetailTab = value
+  },
+})
+
+// 元数据完善度：表描述 + 各字段描述的填写比例，采纳后随字段刷新自动上升
+const completeness = computed(() =>
+  computeMetadataCompleteness({
+    tableComment: state.value?.table?.tableComment,
+    fields: state.value?.fields || [],
+  })
+)
+
+const suggestFor = (fieldName) =>
+  (state.value?.metaSuggestion?.fields || []).find((item) => item.fieldName === fieldName)?.suggestedComment || ''
+
+const isAdopted = (row) => {
+  const suggested = suggestFor(row.fieldName)
+  return !!suggested && suggested === (row.fieldComment || '')
+}
 </script>
 
 <style scoped>
@@ -243,5 +316,28 @@ const fieldRows = computed(() => getFieldRows(activeTabId.value))
 :deep(.columns-table th.el-table__cell) {
   background: #f2f7ff;
   color: var(--text-sub);
+}
+.detail-subtabs {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+.completeness-tag {
+  margin-left: 8px;
+  font-weight: 400;
+}
+.smart-col-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.smart-col-info {
+  color: var(--text-muted);
+}
+.col-suggest {
+  color: #7c3aed;
+}
+.col-adopted {
+  color: #16a34a;
 }
 </style>

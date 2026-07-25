@@ -3,6 +3,7 @@ package com.onedata.portal.service;
 import com.onedata.portal.dto.TableAccessStats;
 import com.onedata.portal.dto.TableExport;
 import com.onedata.portal.dto.TableLocation;
+import com.onedata.portal.dto.TablePartitionInfo;
 import com.onedata.portal.dto.TableStatistics;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.TableStatisticsHistory;
@@ -165,6 +166,23 @@ public class DataTableQueryService {
             return dorisConnectionService.getTableDdl(clusterId, database, actualTableName);
         } catch (Exception e) {
             throw new RuntimeException("获取建表语句失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 列出表的分区（分区名、范围、分桶、副本、大小、行数）。
+     */
+    public List<TablePartitionInfo> listPartitions(Long id, Long clusterId) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            throw new RuntimeException("表不存在");
+        }
+        TableLocation location = dataTableService.requireTableLocation(table);
+        try {
+            return dorisConnectionService.listPartitions(
+                    clusterId, location.getDatabase(), location.getTableName());
+        } catch (Exception e) {
+            throw new RuntimeException("获取分区列表失败: " + e.getMessage());
         }
     }
 

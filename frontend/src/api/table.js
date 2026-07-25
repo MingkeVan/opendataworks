@@ -148,6 +148,14 @@ export const tableApi = {
     })
   },
 
+  // 获取表分区列表（分区名、范围、分桶、副本、大小、行数）
+  listPartitions(id, clusterId = null, options = {}) {
+    return request.get(`/v1/tables/${id}/partitions`, {
+      ...options,
+      params: clusterId === null || clusterId === undefined ? {} : { clusterId }
+    })
+  },
+
   // 修改表注释（同时更新Doris）
   updateComment(id, comment, clusterId = null) {
     return request.put(`/v1/tables/${id}/comment`, { comment }, {
