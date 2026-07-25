@@ -4,20 +4,10 @@
       <el-radio-group v-model="subTab" size="small">
         <el-radio-button label="fields">字段信息</el-radio-button>
         <el-radio-button label="partitions">分区信息</el-radio-button>
-        <el-radio-button label="changes">变更记录</el-radio-button>
       </el-radio-group>
     </div>
 
     <DataStudioRightPanelPartitions v-if="subTab === 'partitions'" />
-
-    <section v-else-if="subTab === 'changes'" class="section-block section-fill">
-      <div class="section-header">
-        <div class="section-title">变更记录</div>
-      </div>
-      <div class="changes-body">
-        <TableVersionHistoryPanel :table-id="state.table?.id" :active="subTab === 'changes'" />
-      </div>
-    </section>
 
     <section v-else class="section-block section-fill">
       <div class="section-header">
@@ -260,7 +250,6 @@ import { InfoFilled } from '@element-plus/icons-vue'
 import { isDemoMode } from '@/demo/runtime'
 import { computeMetadataCompleteness } from '../metadataGeneration'
 import DataStudioRightPanelPartitions from './DataStudioRightPanelPartitions.vue'
-import TableVersionHistoryPanel from './TableVersionHistoryPanel.vue'
 
 // P2-2 F17d：右侧面板「列详情」tab pane 从 DataStudioRightPanel.vue 抽出。
 // 共享脚手架样式由父组件的 .meta-tabs :deep() 提供。
@@ -332,11 +321,6 @@ const isAdopted = (row) => {
   display: flex;
   align-items: center;
   flex: none;
-}
-.changes-body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
 }
 .completeness-tag {
   margin-left: 8px;

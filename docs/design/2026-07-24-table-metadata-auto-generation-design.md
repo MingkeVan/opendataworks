@@ -50,16 +50,30 @@
 - `frontend/src/views/datastudio/composables/useMetadataGeneration.js`：生成编排与采纳写回
 - `frontend/src/views/datastudio/components/SmartMetadataDialog.vue`：复核弹窗
 
-## 明细信息子页（分区信息 / 变更记录）
+## 明细信息子页与分区列表
 
-参考产品把表详情的「明细信息」拆为「字段信息 / 分区信息 / 变更记录」三个子页。本次一并对齐：
+参考产品把表详情的「明细信息」拆为字段信息 / 分区信息 / 变更记录。本次落地形态：
 
-- 原「列详情」tab 更名为「明细信息」，内部用 `el-radio-group` 提供三个子页，选择结果记在 tab state 的 `metaDetailTab`，按 tab 记忆。
-- **字段信息**：原有字段表（含本次新增的「智能描述」列与元数据完善度）。
-- **分区信息**：新增 `DataStudioRightPanelPartitions.vue`。展示分区列、分桶列、分桶数、副本数、表模型、Key 列，以及按 `data_field.is_partition` 过滤出的分区字段清单与「分区字段 N · 非分区字段 M」计数。数据全部来自表详情已加载的 state，不新增请求。
-  - 说明：平台当前没有列举 Doris 实际分区实例（分区名、范围、行数）的接口，`DorisConnectionService` 仅统计 `information_schema.partitions` 的数量。因此本子页呈现的是分区与分桶**配置**及分区字段，而非分区实例列表；后者需要新增后端接口，留作后续。
-- **变更记录**：复用既有 `TableVersionHistoryPanel.vue`（版本号、变更摘要、来源、操作人、时间、快照与版本对比），数据源为 `data_table_version`。
-  - 该组件原挂在独立的顶层「版本」tab；迁入「变更记录」子页后，顶层「版本」tab 一并移除，避免同一面板在两处重复出现。功能与接口未变。
+- 原「列详情」tab 更名为「明细信息」，内部用 `el-radio-group` 提供「字段信息 / 分区信息」两个子页，选择结果记在 tab state 的 `metaDetailTab`，按 tab 记忆。
+- **字段信息**：原有字段表（含「智能描述」列与元数据完善度）。
+- **分区信息**：新增 `DataStudioRightPanelPartitions.vue`，含三块内容：
+  - 分区与分桶配置（分区列、分桶列、分桶数、副本数、表模型、Key 列），取自已加载的 state
+  - 分区字段清单：按 `data_field.is_partition` 过滤，附「分区字段 N · 非分区字段 M」计数
+  - **分区列表**：进入子页时按需请求新增接口，展示分区名、范围、大小、行数、分桶、副本与状态，并可手动刷新
+- **变更记录**：保留在顶层 tab，标签由「版本」改为「变更」，内容仍是既有 `TableVersionHistoryPanel.vue`（版本号、变更摘要、来源、操作人、时间、快照与版本对比），数据源 `data_table_version`。
+
+### 分区列表接口（本次唯一的后端新增）
+
+`GET /api/v1/tables/{id}/partitions?clusterId=`，返回 `List<TablePartitionInfo>`。
+
+实现基于 Doris `SHOW PARTITIONS FROM \`db\`.\`table\``，沿用 `getTableDdl` 的同一条连接与库表解析路径
+（`DataTableService#requireTableLocation` → `DorisConnectionService`）。
+
+不同 Doris 版本 `SHOW PARTITIONS` 的返回列不一致，因此按结果集实际存在的列名读取（`ResultSetMetaData` 取列标签集合），
+缺失列以 `null` 表达，非数值计数列也归一为 `null`，避免因版本差异整体失败。非分区表通常也会返回一行默认分区。
+
+前端以 `skipErrorMessage` 静默调用，失败时在分区列表区域就地展示错误文案，不弹全局提示——
+非 Doris 数据源等场景下打开该子页不会造成打扰。
 
 ## Risks and Tradeoffs
 

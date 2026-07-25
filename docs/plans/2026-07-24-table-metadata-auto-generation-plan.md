@@ -19,19 +19,31 @@
 
 `frontend/src/api/table.js` 无需改动：`updateComment` / `updateField` / `getFields` 均已存在。
 
-### 明细信息子页（分区信息 / 变更记录）
+### 明细信息子页与分区列表
 
-9. 新增 `frontend/src/views/datastudio/components/DataStudioRightPanelPartitions.vue`：分区/分桶配置 + 分区字段清单 + 分区/非分区字段计数，数据取自已加载 state。
-10. 改 `DataStudioRightPanelColumns.vue`：顶部加「字段信息 / 分区信息 / 变更记录」子页切换，分别渲染原字段表、分区面板与 `TableVersionHistoryPanel`。
-11. 改 `DataStudioRightPanel.vue`：「列详情」更名为「明细信息」；移除顶层「版本」tab（已迁入「变更记录」子页），并清理其 import。
-12. 改 `useStudioTabs.js`：`createTabState` 增加 `metaDetailTab: 'fields'`（与 `metaSuggestion: null` 一并声明）。
-13. 补 `DataStudioRightPanel.smoke.spec.js`：补齐 ctx 中的智能元数据键，新增子页切换与分区字段拆分两条用例。
+后端（分区列表接口）：
+
+9. 新增 DTO `backend/.../dto/TablePartitionInfo.java`。
+10. `DorisConnectionService` 增加 `listPartitions(clusterId, database, tableName)`：执行 `SHOW PARTITIONS`，按结果集实际列名容错读取（缺失列与非数值计数归一为 null）。
+11. `DataTableQueryService` 增加 `listPartitions(id, clusterId)`，沿用 `requireTableLocation` 解析库表。
+12. `DataTableController` 增加 `GET /{id}/partitions`（`@RequireAuth`）。
+13. 新增 `DorisConnectionServicePartitionsTest`：覆盖正常解析、缺列容错与非数值计数归一（独立测试类，避免与既有 `DorisConnectionServiceTest` 的严格 stub 冲突）。
+
+前端：
+
+14. `api/table.js` 增加 `listPartitions(id, clusterId, options)`，支持透传 `skipErrorMessage`。
+15. 新增 `components/DataStudioRightPanelPartitions.vue`：分区/分桶配置 + 分区字段清单 + 分区列表（按需加载、可刷新、失败就地提示）。
+16. 改 `DataStudioRightPanelColumns.vue`：顶部加「字段信息 / 分区信息」子页切换。
+17. 改 `DataStudioRightPanel.vue`：「列详情」更名为「明细信息」；顶层「版本」tab 标签改为「变更」（内容不变）。
+18. 改 `useStudioTabs.js`：`createTabState` 增加 `metaDetailTab: 'fields'`（与 `metaSuggestion: null` 一并声明）。
+19. 补 `DataStudioRightPanel.smoke.spec.js`：补齐 ctx 中的智能元数据键；新增子页切换、分区字段拆分、分区列表渲染与请求失败就地提示四条用例。
 
 ## Verification
 
-- `npm --prefix frontend run test`（新增 10 条用例；全量 32 文件 / 170 用例）
+- `npm --prefix frontend run test`（全量 32 文件 / 174 用例）
 - `npm --prefix frontend run build`
 - `npx eslint`（新增文件 0 error）
+- `mvn -pl backend -am test -Dtest='DorisConnectionServicePartitionsTest,DorisConnectionServiceTest'`
 - 可选端到端 smoke：Docker MySQL `127.0.0.1:3316` + Redis `127.0.0.1:6379` + `.venv-py313` 启动 `dataagent-backend`，且 `da_agent_settings` 配置了可用 provider；对缺注释表执行 生成 → 弹窗复核 → 采纳 → 校验注释写回与完善度上升。
 
 ## Rollout / Backout

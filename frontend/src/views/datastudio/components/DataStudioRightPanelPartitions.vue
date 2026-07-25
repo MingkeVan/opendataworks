@@ -38,23 +38,58 @@
           </el-table>
           <el-empty v-else description="该表未配置分区字段" :image-size="60" />
         </div>
+
+        <div v-loading="partitionsLoading" class="partition-list">
+          <div class="partition-list-head">
+            <span class="partition-fields-title">分区列表</span>
+            <span class="partition-list-actions">
+              <span v-if="partitions.length" class="partition-counts">共 {{ partitions.length }} 个分区</span>
+              <el-button link type="primary" size="small" :disabled="partitionsLoading" @click="loadPartitions">
+                刷新
+              </el-button>
+            </span>
+          </div>
+          <el-table v-if="partitions.length" :data="partitions" border size="small" max-height="320">
+            <el-table-column prop="partitionName" label="分区名" min-width="150" show-overflow-tooltip />
+            <el-table-column label="范围" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.range || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="大小" width="100" align="right">
+              <template #default="{ row }">{{ row.dataSize || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="行数" width="110" align="right">
+              <template #default="{ row }">{{ formatRowCount(row.rowCount) }}</template>
+            </el-table-column>
+            <el-table-column label="分桶" width="70" align="right">
+              <template #default="{ row }">{{ row.buckets ?? '-' }}</template>
+            </el-table-column>
+            <el-table-column label="副本" width="70" align="right">
+              <template #default="{ row }">{{ row.replicationNum ?? '-' }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="90" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.state || '-' }}</template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else-if="!partitionsLoading" :description="partitionsError || '暂无分区'" :image-size="60" />
+        </div>
       </el-scrollbar>
     </section>
   </div>
 </template>
 
 <script setup>
-import { computed, inject } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
+import { tableApi } from '@/api/table'
 
-// 「明细信息 / 分区信息」子页：分区与分桶配置 + 分区字段清单。
-// 数据全部来自表详情已加载的 state（data_table 分区/分桶列与 data_field.isPartition），
-// 不额外请求后端；平台当前没有列举 Doris 实际分区实例的接口。
+// 「明细信息 / 分区信息」子页：
+// - 分区与分桶配置、分区字段清单：取自表详情已加载的 state，不额外请求
+// - 分区列表：进入该子页时按需请求 GET /v1/tables/{id}/partitions（Doris SHOW PARTITIONS）
 const ctx = inject('dataStudioCtx', null)
 if (!ctx) {
   throw new Error('DataStudioRightPanelPartitions 需要 dataStudioCtx')
 }
 
-const { activeTab, tabStates } = ctx
+const { activeTab, tabStates, clusterId } = ctx
 
 const activeTabId = computed(() => String(activeTab.value || ''))
 const state = computed(() => {
@@ -67,6 +102,35 @@ const allFields = computed(() => state.value?.fields || [])
 const partitionFields = computed(() => allFields.value.filter((field) => Number(field.isPartition ?? 0) === 1))
 const normalFieldCount = computed(() => allFields.value.length - partitionFields.value.length)
 const isPartitioned = computed(() => !!state.value?.table?.partitionColumn || partitionFields.value.length > 0)
+
+const partitions = ref([])
+const partitionsLoading = ref(false)
+const partitionsError = ref('')
+
+const formatRowCount = (value) =>
+  value === null || value === undefined ? '-' : Number(value).toLocaleString('en-US')
+
+const loadPartitions = async () => {
+  const tableId = state.value?.table?.id
+  if (!tableId) {
+    partitions.value = []
+    return
+  }
+  partitionsLoading.value = true
+  partitionsError.value = ''
+  try {
+    // 分区查询依赖 Doris SHOW PARTITIONS；失败时就地提示，不弹全局错误
+    const list = await tableApi.listPartitions(tableId, clusterId?.value ?? null, { skipErrorMessage: true })
+    partitions.value = Array.isArray(list) ? list : []
+  } catch (error) {
+    partitions.value = []
+    partitionsError.value = error?.message || '获取分区列表失败'
+  } finally {
+    partitionsLoading.value = false
+  }
+}
+
+watch(() => state.value?.table?.id, loadPartitions, { immediate: true })
 </script>
 
 <style scoped>
@@ -91,5 +155,22 @@ const isPartitioned = computed(() => !!state.value?.table?.partitionColumn || pa
   font-weight: 700;
   color: var(--text);
   margin-bottom: 8px;
+}
+.partition-list {
+  margin-top: 16px;
+}
+.partition-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.partition-list-head .partition-fields-title {
+  margin-bottom: 0;
+}
+.partition-list-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>

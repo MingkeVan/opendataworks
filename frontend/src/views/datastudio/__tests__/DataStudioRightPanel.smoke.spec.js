@@ -3,19 +3,23 @@
 // 用假 dataStudioCtx provide + shallowMount 真正执行 script setup / composables /
 // computed 与模板渲染。若 F17 抽取破坏了引用或响应式,挂载/渲染会抛错。
 import { describe, it, expect, vi } from 'vitest'
-import { shallowMount } from '@vue/test-utils'
+import { flushPromises, shallowMount } from '@vue/test-utils'
 import { reactive, ref } from 'vue'
 
-const { apiStub } = vi.hoisted(() => {
+const { apiStub, listPartitionsMock } = vi.hoisted(() => {
+  const listPartitionsMock = vi.fn(() => Promise.resolve([]))
+  // 默认返回通用空响应；listPartitions 走可控 mock，便于断言分区列表渲染
   const apiStub = () =>
     new Proxy(
-      {},
+      { listPartitions: listPartitionsMock },
       {
-        get: () => () =>
-          Promise.resolve({ data: [], records: [], total: 0, code: 0, success: true }),
+        get: (target, prop) =>
+          prop in target
+            ? target[prop]
+            : () => Promise.resolve({ data: [], records: [], total: 0, code: 0, success: true }),
       }
     )
-  return { apiStub }
+  return { apiStub, listPartitionsMock }
 })
 
 vi.mock('@/api/table', () => ({ tableApi: apiStub() }))
@@ -27,7 +31,6 @@ import DataStudioRightPanelBasic from '../components/DataStudioRightPanelBasic.v
 import DataStudioRightPanelColumns from '../components/DataStudioRightPanelColumns.vue'
 import DataStudioRightPanelAccess from '../components/DataStudioRightPanelAccess.vue'
 import DataStudioRightPanelPartitions from '../components/DataStudioRightPanelPartitions.vue'
-import TableVersionHistoryPanel from '../components/TableVersionHistoryPanel.vue'
 
 const buildCtx = () => {
   const activeTab = ref('t1')
@@ -140,7 +143,7 @@ describe('DataStudioRightPanel mount smoke', () => {
     }
   })
 
-  it('明细信息子页在 分区信息 / 变更记录 之间切换', async () => {
+  it('明细信息子页在 字段信息 / 分区信息 之间切换', () => {
     const ctx = buildCtx()
     ctx.tabStates.t1.fields = [
       { id: 1, fieldName: 'dt', fieldType: 'date', isPartition: 1, fieldComment: '业务日期' },
@@ -158,24 +161,53 @@ describe('DataStudioRightPanel mount smoke', () => {
         },
       })
 
-    // 默认字段信息
+    // 默认字段信息，不渲染分区面板
     let wrapper = mountPane()
     expect(wrapper.findComponent(DataStudioRightPanelPartitions).exists()).toBe(false)
     wrapper.unmount()
 
-    // 分区信息：渲染分区面板
+    // 切到分区信息
     ctx.tabStates.t1.metaDetailTab = 'partitions'
     wrapper = mountPane()
     expect(wrapper.findComponent(DataStudioRightPanelPartitions).exists()).toBe(true)
     wrapper.unmount()
+  })
 
-    // 变更记录：把 tableId 透传给版本历史面板
-    ctx.tabStates.t1.metaDetailTab = 'changes'
-    wrapper = mountPane()
-    const history = wrapper.findComponent(TableVersionHistoryPanel)
-    expect(history.exists()).toBe(true)
-    expect(history.props('tableId')).toBe(1)
-    expect(history.props('active')).toBe(true)
+  it('分区信息渲染后端返回的分区列表', async () => {
+    listPartitionsMock.mockResolvedValueOnce([
+      { partitionName: 'p20260101', range: '[20260101, 20260102)', dataSize: '1.234 GB', rowCount: 1234567, buckets: 10, replicationNum: 3, state: 'NORMAL' },
+      { partitionName: 'p20260102', range: '[20260102, 20260103)', dataSize: '2.5 GB', rowCount: null, buckets: 10, replicationNum: 3, state: 'NORMAL' },
+    ])
+    const ctx = buildCtx()
+    const wrapper = shallowMount(DataStudioRightPanelPartitions, {
+      global: {
+        provide: { dataStudioCtx: ctx },
+        stubs: { ElScrollbar: { template: '<div><slot /></div>' } },
+        config: { warnHandler: () => {} },
+        directives: { loading: {} },
+      },
+    })
+    await flushPromises()
+
+    expect(listPartitionsMock).toHaveBeenCalledWith(1, 's1', { skipErrorMessage: true })
+    expect(wrapper.text()).toContain('共 2 个分区')
+    wrapper.unmount()
+  })
+
+  it('分区列表请求失败时就地提示，不抛出', async () => {
+    listPartitionsMock.mockRejectedValueOnce(new Error('获取分区列表失败: 不支持的表类型'))
+    const ctx = buildCtx()
+    const wrapper = shallowMount(DataStudioRightPanelPartitions, {
+      global: {
+        provide: { dataStudioCtx: ctx },
+        stubs: { ElScrollbar: { template: '<div><slot /></div>' } },
+        config: { warnHandler: () => {} },
+        directives: { loading: {} },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.html()).toContain('不支持的表类型')
     wrapper.unmount()
   })
 
