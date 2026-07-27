@@ -36,12 +36,29 @@
 
 复用，不新增：
 
+- `GET /api/v1/dataagent/agents`
 - `POST /api/v1/nl2sql/topics`
 - `POST /api/v1/nl2sql/tasks/deliver-message`
 - `GET /api/v1/nl2sql/tasks/{task_id}`
 - `GET /api/v1/nl2sql/tasks/{task_id}/message`
 - `PUT /api/v1/tables/{id}/comment`
 - `PUT /api/v1/tables/{id}/fields/{fieldId}`
+
+#### agent_id 必须显式传，不能依赖默认助手
+
+建话题时省略 `agent_id`，后端会回落到 `DEFAULT_AGENT_ID`（`agent_default`，由
+`bootstrap_default_agent_profile` 保证存在）。但 `api_create_topic` 还会过 `_require_agent_profile`
+→ `agent_visible_to`：门户来源不带 `X-ODW-Client: dataagent`，解析出的身份恒为 `None`；
+一旦启用 auth 且该助手可见范围是 `authenticated` 或 `selected`，判定失败并返回
+`400 agent not found`（该文案对"不存在"与"不可见"故意一致，防助手存在性探测）。
+
+因此生成前先取 `GET /api/v1/dataagent/agents`：它的 `_catalog_identity` 对非 `dataagent`
+客户端同样返回 `None`，与建话题走的是同一套可见性过滤，返回集合即"本次调用可用的助手"。
+取其中的 `agent_id`（优先 `agent_default`，否则取第一个）传给建话题与发消息；目录为空时
+直接给出可操作提示，而不是让用户看到 `agent not found`。
+
+另外 `api/nl2sql.js` 导出 `nl2sqlErrorMessage`，从 FastAPI 的 `{"detail": ...}` 中取真实错误文案
+——否则 axios 只会给出 `Request failed with status code 400`，掩盖真正原因。
 
 前端新增模块：
 

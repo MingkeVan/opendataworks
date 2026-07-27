@@ -46,9 +46,15 @@
 23. 改 `useStudioTabs.js`：`createTabState` 增加 `partitionList: null`。
 24. 新增 `frontend/src/views/datastudio/__tests__/partitionInfo.spec.js`；smoke 测试补分区列表缓存不重复请求的用例。
 
+修复 400 agent not found：
+
+25. 改 `frontend/src/api/nl2sql.js`：`baseURL` 调整为 `/api/v1`，新增 `listAgents()`（`GET /dataagent/agents`）与 `nl2sqlErrorMessage()`（提取 FastAPI `detail`）。
+26. 改 `useMetadataGeneration.js`：生成前先解析可见助手并把 `agent_id` 传给建话题与发消息；目录为空时给可操作提示；错误提示改用 `nl2sqlErrorMessage`；轮询改为先查一次再等待，任务立即失败时能马上反馈。
+27. 新增 `__tests__/useMetadataGeneration.spec.js`、`__tests__/nl2sqlError.spec.js`。
+
 ## Verification
 
-- `npm --prefix frontend run test`（全量 32 文件 / 174 用例）
+- `npm --prefix frontend run test`（全量 35 文件 / 185 用例）
 - `npm --prefix frontend run build`
 - `npx eslint`（新增文件 0 error）
 - `mvn -pl backend -am test -Dtest='DorisConnectionServicePartitionsTest,DorisConnectionServiceTest'`
@@ -57,4 +63,4 @@
 ## Rollout / Backout
 
 - Rollout：合并后无需迁移，对缺少注释的表即时可用；未配置模型服务时按错误提示降级，不影响表详情其余功能。
-- Backout：删除 4 个新增前端文件与单测，撤销 `DataStudioNew.vue`、`DataStudioRightPanel.vue`、`DataStudioRightPanelColumns.vue` 三处改动即可完全回退；无 schema 变更、无接口变更。
+- Backout：删除新增前端文件与单测，撤销 `DataStudioNew.vue`、`DataStudioRightPanel.vue`、`DataStudioRightPanelColumns.vue` 三处改动即可完全回退；后端仅新增只读分区接口，可一并移除；无 schema 变更。

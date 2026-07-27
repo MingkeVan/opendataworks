@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { isDemoMode, showDemoReadonlyMessage } from '@/demo/runtime'
-import { nl2sqlApi } from '@/api/nl2sql'
+import { nl2sqlApi, nl2sqlErrorMessage } from '@/api/nl2sql'
 import { tableApi } from '@/api/table'
 import { buildFieldPayload } from '../fieldEdit'
 import { buildMetadataPrompt, formatFieldComment, parseMetadataResponse } from '../metadataGeneration'
@@ -11,6 +11,7 @@ import { buildMetadataPrompt, formatFieldComment, parseMetadataResponse } from '
 //
 // 建议结果为内存态：useTabPersistence 只持久化 tab 骨架，刷新页面后需重新生成。
 
+const DEFAULT_AGENT_ID = 'agent_default'
 const TERMINAL_STATUSES = new Set(['finished', 'success', 'completed', 'error', 'failed', 'suspended'])
 const SUCCESS_STATUSES = new Set(['finished', 'success', 'completed'])
 const POLL_INTERVAL_MS = 2000
@@ -18,6 +19,19 @@ const MAX_WAIT_MS = 300000
 const MAX_TASK_SQL = 5
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// 建话题必须带 agent_id：省略时后端回落到 DEFAULT_AGENT_ID，若其可见范围不含匿名调用，
+// 会返回 400 "agent not found"。这里从助手目录取——它与建话题共用同一套可见性过滤。
+const resolveAgentId = async () => {
+  const agents = await nl2sqlApi.listAgents()
+  const list = (Array.isArray(agents) ? agents : [])
+    .map((item) => String(item?.agent_id || '').trim())
+    .filter(Boolean)
+  if (!list.length) {
+    throw new Error('没有可用的智能助手，请先在智能问数中配置助手，或检查助手的可见范围设置')
+  }
+  return list.includes(DEFAULT_AGENT_ID) ? DEFAULT_AGENT_ID : list[0]
+}
 
 const messageText = (message) => {
   if (!message) return ''
@@ -68,24 +82,24 @@ export function useMetadataGeneration({
     return collected
   }
 
+  // 先查一次再等待：任务若立即失败（如未配置模型服务），能马上把错误反馈出来
   const waitForResult = async (taskId) => {
     const deadline = Date.now() + MAX_WAIT_MS
     while (Date.now() < deadline) {
-      await sleep(POLL_INTERVAL_MS)
-      let task
+      let task = null
       try {
         task = await nl2sqlApi.getTask(taskId)
       } catch {
         // 轮询期间的瞬时错误不终止等待，交给超时兜底
-        continue
       }
       const status = String(task?.task_status || '').toLowerCase()
-      if (TERMINAL_STATUSES.has(status)) {
+      if (status && TERMINAL_STATUSES.has(status)) {
         if (!SUCCESS_STATUSES.has(status)) {
-          throw new Error(`生成任务未成功（状态：${status || '未知'}）`)
+          throw new Error(`生成任务未成功（状态：${status}）`)
         }
         return
       }
+      await sleep(POLL_INTERVAL_MS)
     }
     throw new Error('生成超时，请稍后重试')
   }
@@ -172,8 +186,10 @@ export function useMetadataGeneration({
         relatedTasks
       })
 
+      const agentId = await resolveAgentId()
       const topic = await nl2sqlApi.createTopic({
-        title: `元数据生成: ${state.table.dbName || ''}.${state.table.tableName || ''}`
+        title: `元数据生成: ${state.table.dbName || ''}.${state.table.tableName || ''}`,
+        agent_id: agentId
       })
       const topicId = topic?.topic_id || topic?.id
       if (!topicId) throw new Error('创建会话失败')
@@ -181,6 +197,7 @@ export function useMetadataGeneration({
       const submitted = await nl2sqlApi.deliverMessage({
         topic_id: topicId,
         content: prompt,
+        agent_id: agentId,
         execution_mode: 'background'
       })
       const taskId = submitted?.task_id || submitted?.taskId
@@ -198,7 +215,7 @@ export function useMetadataGeneration({
         ElMessage.warning('AI 未生成可采纳的元数据建议')
       }
     } catch (error) {
-      ElMessage.error(error?.message || '智能生成元数据失败')
+      ElMessage.error(nl2sqlErrorMessage(error, '智能生成元数据失败'))
     } finally {
       metadataGenerating.value = false
     }
