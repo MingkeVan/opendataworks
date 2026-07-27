@@ -40,11 +40,11 @@
 
 分区体验修正：
 
-20. 新增 `frontend/src/views/datastudio/partitionInfo.js`：`parsePartitionColumnNames` / `resolvePartitionFields` / `paginate` 纯函数，修复 `is_partition` 未回填导致分区字段为空的问题。
-21. 改 `DataStudioRightPanelPartitions.vue`：分区字段改用合并判定；分区列表改为客户端分页（默认 5，可选 5/10/15）；结果缓存到 `state.partitionList`，仅「刷新」强制重取。
+20. 新增 `frontend/src/views/datastudio/partitionInfo.js`：`paginate` 纯函数（分页切片与越界回落）。
+21. 改 `DataStudioRightPanelPartitions.vue`：移除与「分区列」重复的分区字段清单及计数，分区信息只保留 `partition_column` 一份来源；分区列表改为客户端分页（默认 5，可选 5/10/15）；结果缓存到 `state.partitionList`，仅「刷新」强制重取。
 22. 改 `DataStudioRightPanelColumns.vue`：子页改用 `v-show` + 分区面板懒挂载，消除切换卡顿。
 23. 改 `useStudioTabs.js`：`createTabState` 增加 `partitionList: null`。
-24. 新增 `frontend/src/views/datastudio/__tests__/partitionInfo.spec.js`（8 条用例）。
+24. 新增 `frontend/src/views/datastudio/__tests__/partitionInfo.spec.js`；smoke 测试补分区列表缓存不重复请求的用例。
 
 ## Verification
 

@@ -56,23 +56,20 @@
 
 - 原「列详情」tab 更名为「明细信息」，内部用 `el-radio-group` 提供「字段信息 / 分区信息」两个子页，选择结果记在 tab state 的 `metaDetailTab`，按 tab 记忆。
 - **字段信息**：原有字段表（含「智能描述」列与元数据完善度）。
-- **分区信息**：新增 `DataStudioRightPanelPartitions.vue`，含三块内容：
+- **分区信息**：新增 `DataStudioRightPanelPartitions.vue`，含两块内容：
   - 分区与分桶配置（分区列、分桶列、分桶数、副本数、表模型、Key 列），取自已加载的 state
-  - 分区字段清单，附「分区字段 N · 非分区字段 M」计数
   - **分区列表**：异步按需请求新增接口，展示分区名、范围、大小、行数、分桶、副本与状态，客户端分页（默认每页 5，可选 5/10/15），并可手动刷新
 
-#### 分区字段判定（`is_partition` 未回填）
+#### 为什么不展示「分区字段」清单
 
-`data_field.is_partition` 只有平台建表路径（`TableCreateService`）会写入，`DorisMetadataSyncService`
-同步元数据时不会回填，因此从 Doris 同步来的表该字段恒为 0——若仅按它过滤，分区字段清单会始终为空。
+分区信息只保留一份来源：`data_table.partition_column`（由 DDL 的 `PARTITION BY (...)` 经
+`DorisCreateTableUtils.parsePartitionColumn` 解析并同步落库），直接作为「分区列」原样展示，
+与同一块里的「分桶列」「Key 列」呈现方式一致。
 
-`data_table.partition_column` 是同步的（由 DDL 的 `PARTITION BY (...)` 经 `DorisCreateTableUtils.parsePartitionColumn`
-解析而来，可能形如 `` `dt`, `region` ``），`SHOW PARTITIONS` 也会返回 `PartitionKey`。因此分区字段由
-`frontend/src/views/datastudio/partitionInfo.js` 合并三个来源判定：`is_partition === 1`、`partition_column`
-解析出的列名、以及分区列表返回的 `PartitionKey`；列名比较大小写不敏感，并保持字段原始顺序。
-
-这是展示层的兜底修复。根因（同步时回填 `is_partition`）需要改动 `DorisMetadataSyncService` 的字段同步与
-变更检测逻辑，会影响「只落库变化部分」的既有约束，故未在本次一并处理。
+不再按字段维度再列一遍分区字段：那既与「分区列」重复，也会引入不必要的列名解析与多源合并。
+需要说明的是，`data_field.is_partition` 并不适合作为判定依据——它只有平台建表路径
+（`TableCreateService`，且值本身就是从 `partitionColumn` 推导）会写入，`DorisMetadataSyncService`
+同步时不回填，因此同步来的表恒为 0。
 
 #### 子页切换性能
 

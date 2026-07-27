@@ -9,16 +9,11 @@
           </el-tag>
           <el-tag v-else size="small" type="info" effect="plain" class="partition-tag">非分区表</el-tag>
         </div>
-        <div class="section-actions">
-          <span class="partition-counts">
-            分区字段 {{ partitionFields.length }} · 非分区字段 {{ normalFieldCount }}
-          </span>
-        </div>
       </div>
 
       <el-scrollbar class="meta-scroll">
         <el-descriptions :column="1" border size="small" class="meta-descriptions">
-          <el-descriptions-item label="分区列">{{ partitionColumnText }}</el-descriptions-item>
+          <el-descriptions-item label="分区列">{{ state.table.partitionColumn || '-' }}</el-descriptions-item>
           <el-descriptions-item label="分桶列">{{ state.table.distributionColumn || '-' }}</el-descriptions-item>
           <el-descriptions-item label="分桶数">{{ state.table.bucketNum ?? '-' }}</el-descriptions-item>
           <el-descriptions-item label="副本数">{{ state.table.replicaNum ?? '-' }}</el-descriptions-item>
@@ -26,22 +21,9 @@
           <el-descriptions-item label="Key 列">{{ state.table.keyColumns || '-' }}</el-descriptions-item>
         </el-descriptions>
 
-        <div class="partition-fields">
-          <div class="partition-fields-title">分区字段</div>
-          <el-table v-if="partitionFields.length" :data="partitionFields" border size="small">
-            <el-table-column type="index" label="序号" width="60" />
-            <el-table-column prop="fieldName" label="字段名" min-width="140" show-overflow-tooltip />
-            <el-table-column prop="fieldType" label="类型" width="130" show-overflow-tooltip />
-            <el-table-column label="注释" min-width="150" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.fieldComment || '-' }}</template>
-            </el-table-column>
-          </el-table>
-          <el-empty v-else description="该表未配置分区字段" :image-size="60" />
-        </div>
-
         <div v-loading="partitionsLoading" class="partition-list">
           <div class="partition-list-head">
-            <span class="partition-fields-title">分区列表</span>
+            <span class="partition-list-title">分区列表</span>
             <span class="partition-list-actions">
               <span v-if="partitions.length" class="partition-counts">共 {{ partitions.length }} 个分区</span>
               <el-button link type="primary" size="small" :disabled="partitionsLoading" @click="refreshPartitions">
@@ -97,10 +79,10 @@
 <script setup>
 import { computed, inject, ref, watch } from 'vue'
 import { tableApi } from '@/api/table'
-import { paginate, parsePartitionColumnNames, resolvePartitionFields } from '../partitionInfo'
+import { paginate } from '../partitionInfo'
 
 // 「明细信息 / 分区信息」子页：
-// - 分区/分桶配置与分区字段：取自表详情已加载的 state
+// - 分区与分桶配置：取自表详情已加载的 state
 // - 分区列表：异步按需拉取 GET /v1/tables/{id}/partitions（Doris SHOW PARTITIONS），
 //   结果缓存在 tab state 上，子页来回切换不重复请求
 const ctx = inject('dataStudioCtx', null)
@@ -125,27 +107,7 @@ const pageSize = ref(5)
 // 分区列表缓存在 tab state 上，跨子页切换保留
 const partitions = computed(() => state.value?.partitionList || [])
 
-const allFields = computed(() => state.value?.fields || [])
-
-// is_partition 仅平台建表路径写入，同步表恒为 0；因此合并 partition_column 与
-// SHOW PARTITIONS 的 PartitionKey 一起判定，避免分区字段显示为空
-const partitionKeyFromApi = computed(() => partitions.value[0]?.partitionKey || '')
-
-const partitionFields = computed(() =>
-  resolvePartitionFields(allFields.value, state.value?.table?.partitionColumn, partitionKeyFromApi.value)
-)
-
-const normalFieldCount = computed(() => allFields.value.length - partitionFields.value.length)
-
-const partitionColumnText = computed(() => {
-  const names = parsePartitionColumnNames(state.value?.table?.partitionColumn)
-  if (names.length) return names.join(', ')
-  return partitionKeyFromApi.value || '-'
-})
-
-const isPartitioned = computed(
-  () => !!state.value?.table?.partitionColumn || partitionFields.value.length > 0
-)
+const isPartitioned = computed(() => !!state.value?.table?.partitionColumn)
 
 const pagedPartitions = computed(() => paginate(partitions.value, currentPage.value, pageSize.value))
 
@@ -205,26 +167,19 @@ watch(pageSize, () => {
   background: #f7faff;
   color: var(--text-sub);
 }
-.partition-fields {
-  margin-top: 12px;
+.partition-list {
+  margin-top: 16px;
 }
-.partition-fields-title {
+.partition-list-title {
   font-size: 13px;
   font-weight: 700;
   color: var(--text);
-  margin-bottom: 8px;
-}
-.partition-list {
-  margin-top: 16px;
 }
 .partition-list-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
-}
-.partition-list-head .partition-fields-title {
-  margin-bottom: 0;
 }
 .partition-list-actions {
   display: inline-flex;

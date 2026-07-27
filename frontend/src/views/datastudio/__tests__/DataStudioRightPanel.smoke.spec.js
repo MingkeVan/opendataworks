@@ -211,23 +211,30 @@ describe('DataStudioRightPanel mount smoke', () => {
     wrapper.unmount()
   })
 
-  it('分区信息按 isPartition 拆分字段', () => {
+  it('分区列表结果缓存后不重复请求', async () => {
+    listPartitionsMock.mockClear()
+    listPartitionsMock.mockResolvedValueOnce([{ partitionName: 'p1', dataSize: '1 GB' }])
     const ctx = buildCtx()
-    ctx.tabStates.t1.fields = [
-      { id: 1, fieldName: 'dt', fieldType: 'date', isPartition: 1 },
-      { id: 2, fieldName: 'amount', fieldType: 'decimal', isPartition: 0 },
-      { id: 3, fieldName: 'shop_id', fieldType: 'string', isPartition: 0 },
-    ]
-    const wrapper = shallowMount(DataStudioRightPanelPartitions, {
-      global: {
-        provide: { dataStudioCtx: ctx },
-        stubs: { ElScrollbar: { template: '<div><slot /></div>' } },
-        config: { warnHandler: () => {} },
-        directives: { loading: {} },
-      },
-    })
-    expect(wrapper.text()).toContain('分区字段 1')
-    expect(wrapper.text()).toContain('非分区字段 2')
+    const mountPane = () =>
+      shallowMount(DataStudioRightPanelPartitions, {
+        global: {
+          provide: { dataStudioCtx: ctx },
+          stubs: { ElScrollbar: { template: '<div><slot /></div>' } },
+          config: { warnHandler: () => {} },
+          directives: { loading: {} },
+        },
+      })
+
+    let wrapper = mountPane()
+    await flushPromises()
+    expect(listPartitionsMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+
+    // 结果已缓存在 tab state 上，再次挂载不再发请求
+    wrapper = mountPane()
+    await flushPromises()
+    expect(listPartitionsMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('共 1 个分区')
     wrapper.unmount()
   })
 
