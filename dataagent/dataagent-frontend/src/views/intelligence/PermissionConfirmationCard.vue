@@ -4,7 +4,26 @@
       <span class="v2-perm-badge">{{ riskLabel }}</span>
       <span class="v2-perm-title">{{ block.title || (isPlan ? '请确认执行计划' : ('请确认操作：' + bareTool)) }}</span>
     </div>
-    <div v-if="block.summary" class="v2-perm-summary" :class="{ 'is-plan': isPlan }">{{ block.summary }}</div>
+    <!-- Plan body reads as a document: the model writes the plan in markdown
+         (headings, ordered steps, code), so render it instead of showing raw
+         markup. Non-plan summaries stay plain text — they are short tool blurbs. -->
+    <template v-if="isPlan && block.summary">
+      <div
+        ref="planBodyRef"
+        class="v2-perm-plan"
+        :class="{ 'is-collapsed': !planExpanded }"
+        v-html="renderedPlan"
+      />
+      <button
+        v-if="planOverflows"
+        type="button"
+        class="v2-perm-plan-toggle"
+        @click="planExpanded = !planExpanded"
+      >
+        {{ planExpanded ? '收起' : '展开全文' }}
+      </button>
+    </template>
+    <div v-else-if="block.summary" class="v2-perm-summary">{{ block.summary }}</div>
     <div v-if="!isPlan" class="v2-perm-tool">工具：<code>{{ bareTool }}</code></div>
     <details v-if="!isPlan && hasPreview" class="v2-perm-preview">
       <summary>参数详情</summary>
@@ -20,7 +39,9 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+
+import { renderMarkdown } from './chatMessage'
 
 const props = defineProps({
   block: { type: Object, required: true },
@@ -40,6 +61,31 @@ const bareTool = computed(() => {
   return name.startsWith('mcp__') ? name.split('__').pop() : name
 })
 const isPlan = computed(() => props.block.risk_level === 'plan')
+// renderMarkdown escapes the source before parsing, so model-authored plan text
+// cannot inject markup here.
+const renderedPlan = computed(() => (isPlan.value ? renderMarkdown(props.block.summary) : ''))
+
+// A long plan collapses to a readable height with a "展开全文" toggle; the toggle
+// only appears when the body actually overflows.
+const planExpanded = ref(false)
+const planBodyRef = ref(null)
+const planOverflows = ref(false)
+const measurePlanOverflow = async () => {
+  await nextTick()
+  const el = planBodyRef.value
+  if (!el) {
+    planOverflows.value = false
+    return
+  }
+  // Measuring an expanded body says nothing about whether it overflows when
+  // collapsed — keep the current flag so the "收起" toggle stays reachable.
+  if (planExpanded.value) return
+  // scrollHeight/clientHeight are 0 in non-layout environments (jsdom), which
+  // simply leaves the toggle hidden.
+  planOverflows.value = el.scrollHeight > el.clientHeight + 4
+}
+onMounted(measurePlanOverflow)
+watch([() => props.block.summary, isPlan], measurePlanOverflow)
 const riskLabel = computed(() => {
   if (props.block.risk_level === 'plan') return '执行计划'
   if (props.block.risk_level === 'critical') return '高危操作'
@@ -109,16 +155,83 @@ function decide(decision) {
 .risk-plan .v2-perm-badge { background: #3b82f6; }
 .v2-perm-title { font-weight: 600; font-size: 14px; }
 .v2-perm-summary { font-size: 13px; color: #555; margin: 4px 0; white-space: pre-wrap; }
-.v2-perm-summary.is-plan {
-  max-height: 320px;
-  overflow: auto;
+
+/* The plan reads as a document: roomy surface, markdown typography, and a
+   collapse that fades out rather than cutting a line in half. */
+.v2-perm-plan {
+  position: relative;
+  font-size: 13px;
+  color: #333;
+  line-height: 1.65;
   background: #fff;
   border: 1px solid #e3ecfb;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 8px 0 0;
+  overflow: hidden;
+}
+.v2-perm-plan.is-collapsed {
+  max-height: 460px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent 100%);
+}
+.v2-perm-plan-toggle {
+  border: none;
+  background: none;
+  color: #2563eb;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 6px 2px 0;
+}
+.v2-perm-plan-toggle:hover { text-decoration: underline; }
+
+.v2-perm-plan :deep(h1),
+.v2-perm-plan :deep(h2),
+.v2-perm-plan :deep(h3) {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 14px 0 6px;
+  line-height: 1.4;
+}
+.v2-perm-plan :deep(h1:first-child),
+.v2-perm-plan :deep(h2:first-child),
+.v2-perm-plan :deep(h3:first-child) { margin-top: 0; }
+.v2-perm-plan :deep(p) { margin: 0 0 8px; }
+.v2-perm-plan :deep(p:last-child) { margin: 0; }
+.v2-perm-plan :deep(ul), .v2-perm-plan :deep(ol) { margin: 0 0 8px; padding-left: 20px; }
+.v2-perm-plan :deep(li) { margin: 3px 0; }
+.v2-perm-plan :deep(li::marker) { color: #64748b; }
+.v2-perm-plan :deep(code) {
+  background: #eef1f6;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.v2-perm-plan :deep(pre) {
+  background: #f4f7fb;
   border-radius: 6px;
   padding: 10px 12px;
-  margin: 6px 0;
-  line-height: 1.5;
+  overflow-x: auto;
+  margin: 8px 0;
 }
+.v2-perm-plan :deep(pre code) { background: none; padding: 0; }
+.v2-perm-plan :deep(table) { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.v2-perm-plan :deep(th), .v2-perm-plan :deep(td) {
+  border: 1px solid #dbe3ef;
+  padding: 5px 10px;
+  font-size: 12px;
+  text-align: left;
+}
+.v2-perm-plan :deep(th) { background: #f4f7fb; font-weight: 600; }
+.v2-perm-plan :deep(blockquote) {
+  margin: 8px 0;
+  padding-left: 10px;
+  border-left: 3px solid #dbe3ef;
+  color: #64748b;
+}
+.v2-perm-plan :deep(hr) { border: none; border-top: 1px solid #e3ecfb; margin: 12px 0; }
+.v2-perm-plan :deep(a) { color: #2563eb; }
 .v2-perm-tool { font-size: 12px; color: #777; margin: 4px 0; }
 .v2-perm-tool code { background: #eef1f6; padding: 1px 5px; border-radius: 4px; }
 .v2-perm-preview { margin: 6px 0; }

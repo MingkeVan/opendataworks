@@ -109,6 +109,9 @@ prod 同),因其需挂载的 docker socket 拉起子沙箱;Claude Code 拒绝 ro
 - 前端 `chatMessage.js` 的 `permission_request` 投影对 `risk_level==='plan'` 渲染
   "计划待批准"卡片(展示计划全文 + 批准/拒绝),复用现有确认卡决策链路;两个入口
   (NL2SqlChatV2 / WidgetChat)模式选择器补 tooltip 使标签承诺与行为一致。
+- 计划正文以 **markdown 渲染**(`PermissionConfirmationCard.vue` 复用 `chatMessage.renderMarkdown`,
+  先转义再解析),长计划折叠到 460px 并提供"展开全文";决策后正文保留在对话中可回溯。
+  仍不落工作区文件——"可查看的计划文档"由该卡片承担,Non-Goal 不变。
 
 ## Tradeoffs
 
