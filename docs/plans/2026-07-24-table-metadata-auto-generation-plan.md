@@ -38,6 +38,14 @@
 18. 改 `useStudioTabs.js`：`createTabState` 增加 `metaDetailTab: 'fields'`（与 `metaSuggestion: null` 一并声明）。
 19. 补 `DataStudioRightPanel.smoke.spec.js`：补齐 ctx 中的智能元数据键；新增子页切换、分区字段拆分、分区列表渲染与请求失败就地提示四条用例。
 
+分区体验修正：
+
+20. 新增 `frontend/src/views/datastudio/partitionInfo.js`：`parsePartitionColumnNames` / `resolvePartitionFields` / `paginate` 纯函数，修复 `is_partition` 未回填导致分区字段为空的问题。
+21. 改 `DataStudioRightPanelPartitions.vue`：分区字段改用合并判定；分区列表改为客户端分页（默认 5，可选 5/10/15）；结果缓存到 `state.partitionList`，仅「刷新」强制重取。
+22. 改 `DataStudioRightPanelColumns.vue`：子页改用 `v-show` + 分区面板懒挂载，消除切换卡顿。
+23. 改 `useStudioTabs.js`：`createTabState` 增加 `partitionList: null`。
+24. 新增 `frontend/src/views/datastudio/__tests__/partitionInfo.spec.js`（8 条用例）。
+
 ## Verification
 
 - `npm --prefix frontend run test`（全量 32 文件 / 174 用例）

@@ -58,8 +58,27 @@
 - **字段信息**：原有字段表（含「智能描述」列与元数据完善度）。
 - **分区信息**：新增 `DataStudioRightPanelPartitions.vue`，含三块内容：
   - 分区与分桶配置（分区列、分桶列、分桶数、副本数、表模型、Key 列），取自已加载的 state
-  - 分区字段清单：按 `data_field.is_partition` 过滤，附「分区字段 N · 非分区字段 M」计数
-  - **分区列表**：进入子页时按需请求新增接口，展示分区名、范围、大小、行数、分桶、副本与状态，并可手动刷新
+  - 分区字段清单，附「分区字段 N · 非分区字段 M」计数
+  - **分区列表**：异步按需请求新增接口，展示分区名、范围、大小、行数、分桶、副本与状态，客户端分页（默认每页 5，可选 5/10/15），并可手动刷新
+
+#### 分区字段判定（`is_partition` 未回填）
+
+`data_field.is_partition` 只有平台建表路径（`TableCreateService`）会写入，`DorisMetadataSyncService`
+同步元数据时不会回填，因此从 Doris 同步来的表该字段恒为 0——若仅按它过滤，分区字段清单会始终为空。
+
+`data_table.partition_column` 是同步的（由 DDL 的 `PARTITION BY (...)` 经 `DorisCreateTableUtils.parsePartitionColumn`
+解析而来，可能形如 `` `dt`, `region` ``），`SHOW PARTITIONS` 也会返回 `PartitionKey`。因此分区字段由
+`frontend/src/views/datastudio/partitionInfo.js` 合并三个来源判定：`is_partition === 1`、`partition_column`
+解析出的列名、以及分区列表返回的 `PartitionKey`；列名比较大小写不敏感，并保持字段原始顺序。
+
+这是展示层的兜底修复。根因（同步时回填 `is_partition`）需要改动 `DorisMetadataSyncService` 的字段同步与
+变更检测逻辑，会影响「只落库变化部分」的既有约束，故未在本次一并处理。
+
+#### 子页切换性能
+
+字段表行数较多时，用 `v-if` 在子页间切换会反复销毁/重建表格造成卡顿。因此改为：字段区常驻并用 `v-show`
+切换；分区面板首次进入时才挂载，之后同样常驻 `v-show`。分区列表结果缓存在 tab state 的 `partitionList`
+上（`null` 表示未加载过），子页来回切换不重复请求，仅「刷新」强制重取。
 - **变更记录**：保留在顶层 tab，标签由「版本」改为「变更」，内容仍是既有 `TableVersionHistoryPanel.vue`（版本号、变更摘要、来源、操作人、时间、快照与版本对比），数据源 `data_table_version`。
 
 ### 分区列表接口（本次唯一的后端新增）

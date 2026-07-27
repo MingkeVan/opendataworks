@@ -7,9 +7,10 @@
       </el-radio-group>
     </div>
 
-    <DataStudioRightPanelPartitions v-if="subTab === 'partitions'" />
+    <!-- 首次进入后保持挂载，用 v-show 切换：避免来回切子页时重建字段表造成卡顿 -->
+    <DataStudioRightPanelPartitions v-if="partitionsMounted" v-show="subTab === 'partitions'" />
 
-    <section v-else class="section-block section-fill">
+    <section v-show="subTab === 'fields'" class="section-block section-fill">
       <div class="section-header">
         <div class="section-title">
           字段定义
@@ -245,7 +246,7 @@
 </template>
 
 <script setup>
-import { computed, inject } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { isDemoMode } from '@/demo/runtime'
 import { computeMetadataCompleteness } from '../metadataGeneration'
@@ -283,13 +284,23 @@ const state = computed(() => {
 })
 const fieldRows = computed(() => getFieldRows(activeTabId.value))
 
-// 明细信息子页：字段信息 / 分区信息 / 变更记录，按 tab 记忆
+// 明细信息子页：字段信息 / 分区信息，按 tab 记忆
 const subTab = computed({
   get: () => state.value?.metaDetailTab || 'fields',
   set: (value) => {
     if (state.value) state.value.metaDetailTab = value
   },
 })
+
+// 分区面板懒挂载：首次切到分区信息时才创建，之后常驻用 v-show 切换
+const partitionsMounted = ref(subTab.value === 'partitions')
+watch(
+  subTab,
+  (value) => {
+    if (value === 'partitions') partitionsMounted.value = true
+  },
+  { immediate: true }
+)
 
 // 元数据完善度：表描述 + 各字段描述的填写比例，采纳后随字段刷新自动上升
 const completeness = computed(() =>
