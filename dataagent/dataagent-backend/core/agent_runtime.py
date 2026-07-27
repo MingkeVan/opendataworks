@@ -37,6 +37,9 @@ PORTAL_MCP_TOOL_NAMES = [
     "portal_query_readonly",
 ]
 PLATFORM_TOOLS_SKILL_FOLDER = "opendataworks-platform-tools"
+# Legacy alias kept for the platform-tools skill, whose docs and scripts already
+# reference this exact name; the generic per-folder variable is derived below.
+PLATFORM_TOOLS_SKILL_ROOT_ENV = "DATAAGENT_PLATFORM_SKILL_ROOT"
 SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "data_agent_system_prompt.md"
 _FILE_BOUNDARY_PATH_KEYS = {
     "Read": ("file_path", "path"),
@@ -194,6 +197,21 @@ def _is_offloaded_tool_result_path(candidate: Path, tool_result_root: Path | Non
         and parts[1] == "tool-results"
         and candidate.suffix.lower() in _OFFLOADED_TOOL_RESULT_SUFFIXES
     )
+
+
+def skill_root_env_name(folder: str) -> str:
+    """Derive the per-skill root variable name from a skill folder name.
+
+    ``opendataworks-methodology-dag`` becomes
+    ``DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT``: the shared ``opendataworks-`` prefix
+    is dropped so the variable stays readable, and the rest is upper snake case.
+    Returns an empty string when the folder cannot form a valid variable name.
+    """
+    name = str(folder or "").strip().removeprefix("opendataworks-")
+    normalized = re.sub(r"[^0-9a-zA-Z]+", "_", name).strip("_").upper()
+    if not normalized or normalized[0].isdigit():
+        return ""
+    return f"DATAAGENT_{normalized}_SKILL_ROOT"
 
 
 def _build_workspace_allowed_roots(project_cwd: str | Path, skill_runtime: dict[str, Any] | None) -> list[Path]:
@@ -592,8 +610,15 @@ def _build_runtime_env(
             "TZ": str(os.getenv("TZ") or "Asia/Shanghai"),
         }
     )
+    # Every enabled skill gets its own root variable so a skill's scripts can be
+    # addressed without borrowing the primary ``DATAAGENT_SKILL_ROOT``. The name is
+    # derived from the folder, so no skill name is hardcoded here.
+    for folder, root in enabled_roots.items():
+        variable = skill_root_env_name(str(folder))
+        if variable and str(root or "").strip():
+            runtime_env[variable] = str(Path(str(root)).expanduser().resolve(strict=False))
     if platform_skill_root:
-        runtime_env["DATAAGENT_PLATFORM_SKILL_ROOT"] = str(Path(platform_skill_root).resolve())
+        runtime_env[PLATFORM_TOOLS_SKILL_ROOT_ENV] = str(Path(platform_skill_root).resolve())
     agent_env = getattr(params, "agent_env_vars", None)
     if not agent_env and getattr(params, "agent_snapshot", None):
         agent_env = dict((getattr(params, "agent_snapshot", None) or {}).get("env_vars") or {})
