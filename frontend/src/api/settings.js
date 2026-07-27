@@ -122,5 +122,21 @@ export const settingsApi = {
             url: `/v1/settings/minio/${id}/default`,
             method: 'post'
         })
+    },
+
+    // 智能助手设置（当前仅：智能元数据使用的助手）
+    getAgentSettings() {
+        return request({
+            url: '/v1/settings/agent',
+            method: 'get'
+        })
+    },
+
+    updateAgentSettings(data) {
+        return request({
+            url: '/v1/settings/agent',
+            method: 'put',
+            data
+        })
     }
 }

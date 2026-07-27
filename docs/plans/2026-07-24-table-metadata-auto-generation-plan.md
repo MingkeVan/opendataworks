@@ -52,6 +52,15 @@
 26. 改 `useMetadataGeneration.js`：生成前先解析可见助手并把 `agent_id` 传给建话题与发消息；目录为空时给可操作提示；错误提示改用 `nl2sqlErrorMessage`；轮询改为先查一次再等待，任务立即失败时能马上反馈。
 27. 新增 `__tests__/useMetadataGeneration.spec.js`、`__tests__/nl2sqlError.spec.js`。
 
+助手改为设置项（部署级）：
+
+28. 后端新增 `V47__create_sys_config.sql`（平台级通用键值表）、`SysConfig` 实体、`SysConfigMapper`、`SysConfigService`（按 key upsert）。
+29. 后端新增 `AgentSettingsController`：`GET/PUT /v1/settings/agent`，键 `metadata.agent_id`，写接口带 `@RequireAuth`。
+30. 前端 `api/settings.js` 增加 `getAgentSettings` / `updateAgentSettings`。
+31. 新增 `views/settings/AgentSettings.vue`：助手下拉（选项取自 `/dataagent/agents`）、保存/刷新，并对「未配置」「已保存助手不在清单中」「目录获取失败」分别给出提示。
+32. `ConfigurationManagement.vue` 新增「智能助手」tab（`name=agent`，并入 `availableTabs`）。
+33. `useMetadataGeneration.js` 改为读取配置的助手，移除隐式挑选；相应更新单测。
+
 ## Verification
 
 - `npm --prefix frontend run test`（全量 35 文件 / 185 用例）

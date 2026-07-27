@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { reactive, ref } from 'vue'
 
-const { nl2sqlApiMock, elMessageMock } = vi.hoisted(() => ({
+const { nl2sqlApiMock, settingsApiMock, elMessageMock } = vi.hoisted(() => ({
   nl2sqlApiMock: {
     listAgents: vi.fn(),
     createTopic: vi.fn(),
@@ -9,6 +9,7 @@ const { nl2sqlApiMock, elMessageMock } = vi.hoisted(() => ({
     getTask: vi.fn(),
     getTaskMessage: vi.fn()
   },
+  settingsApiMock: { getAgentSettings: vi.fn() },
   elMessageMock: { error: vi.fn(), success: vi.fn(), warning: vi.fn() }
 }))
 
@@ -16,6 +17,7 @@ vi.mock('@/api/nl2sql', async () => {
   const actual = await vi.importActual('@/api/nl2sql')
   return { nl2sqlApi: nl2sqlApiMock, nl2sqlErrorMessage: actual.nl2sqlErrorMessage }
 })
+vi.mock('@/api/settings', () => ({ settingsApi: settingsApiMock }))
 vi.mock('@/api/table', () => ({ tableApi: { updateComment: vi.fn(), updateField: vi.fn(), getFields: vi.fn() } }))
 vi.mock('element-plus', () => ({ ElMessage: elMessageMock }))
 vi.mock('@/demo/runtime', () => ({ isDemoMode: false, showDemoReadonlyMessage: vi.fn() }))
@@ -53,30 +55,48 @@ const okMessage = {
 describe('useMetadataGeneration agent 解析', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    settingsApiMock.getAgentSettings.mockResolvedValue({ metadataAgentId: 'agent_biz' })
+    nl2sqlApiMock.listAgents.mockResolvedValue([{ agent_id: 'agent_biz' }, { agent_id: 'agent_default' }])
     nl2sqlApiMock.createTopic.mockResolvedValue({ topic_id: 'tp1' })
     nl2sqlApiMock.deliverMessage.mockResolvedValue({ task_id: 'tk1' })
     nl2sqlApiMock.getTask.mockResolvedValue({ task_status: 'finished' })
     nl2sqlApiMock.getTaskMessage.mockResolvedValue(okMessage)
   })
 
-  it('从助手目录解析 agent_id 并透传给建话题与发消息', async () => {
-    nl2sqlApiMock.listAgents.mockResolvedValue([{ agent_id: 'agent_biz' }, { agent_id: 'agent_default' }])
+  it('使用设置中配置的助手，而不是隐式挑选默认助手', async () => {
     const { generateMetadata, metadataResult } = useMetadataGeneration(buildDeps())
 
     await generateMetadata('t1')
 
-    // 目录里存在默认助手时优先用它
-    expect(nl2sqlApiMock.createTopic).toHaveBeenCalledWith(
-      expect.objectContaining({ agent_id: 'agent_default' })
-    )
+    expect(nl2sqlApiMock.createTopic).toHaveBeenCalledWith(expect.objectContaining({ agent_id: 'agent_biz' }))
     expect(nl2sqlApiMock.deliverMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ agent_id: 'agent_default', topic_id: 'tp1' })
+      expect.objectContaining({ agent_id: 'agent_biz', topic_id: 'tp1' })
     )
     expect(metadataResult.value.table.suggestedComment).toBe('订单表')
   })
 
-  it('目录中没有默认助手时用第一个可见助手', async () => {
-    nl2sqlApiMock.listAgents.mockResolvedValue([{ agent_id: 'agent_biz' }])
+  it('未配置助手时提示去设置，且不建话题', async () => {
+    settingsApiMock.getAgentSettings.mockResolvedValue({ metadataAgentId: '' })
+    const { generateMetadata } = useMetadataGeneration(buildDeps())
+
+    await generateMetadata('t1')
+
+    expect(nl2sqlApiMock.createTopic).not.toHaveBeenCalled()
+    expect(elMessageMock.error).toHaveBeenCalledWith(expect.stringContaining('尚未配置'))
+  })
+
+  it('配置的助手已不在可用清单时提示重新选择', async () => {
+    settingsApiMock.getAgentSettings.mockResolvedValue({ metadataAgentId: 'agent_removed' })
+    const { generateMetadata } = useMetadataGeneration(buildDeps())
+
+    await generateMetadata('t1')
+
+    expect(nl2sqlApiMock.createTopic).not.toHaveBeenCalled()
+    expect(elMessageMock.error).toHaveBeenCalledWith(expect.stringContaining('agent_removed'))
+  })
+
+  it('助手目录暂时取不到时不阻断，仍用已配置的助手', async () => {
+    nl2sqlApiMock.listAgents.mockRejectedValue(new Error('boom'))
     const { generateMetadata } = useMetadataGeneration(buildDeps())
 
     await generateMetadata('t1')
@@ -84,18 +104,7 @@ describe('useMetadataGeneration agent 解析', () => {
     expect(nl2sqlApiMock.createTopic).toHaveBeenCalledWith(expect.objectContaining({ agent_id: 'agent_biz' }))
   })
 
-  it('没有可见助手时给出可操作提示，且不再建话题', async () => {
-    nl2sqlApiMock.listAgents.mockResolvedValue([])
-    const { generateMetadata } = useMetadataGeneration(buildDeps())
-
-    await generateMetadata('t1')
-
-    expect(nl2sqlApiMock.createTopic).not.toHaveBeenCalled()
-    expect(elMessageMock.error).toHaveBeenCalledWith(expect.stringContaining('没有可用的智能助手'))
-  })
-
   it('后端 400 时透出 detail 而不是 axios 通用文案', async () => {
-    nl2sqlApiMock.listAgents.mockResolvedValue([{ agent_id: 'agent_default' }])
     nl2sqlApiMock.createTopic.mockRejectedValue({
       message: 'Request failed with status code 400',
       response: { data: { detail: 'agent not found' } }

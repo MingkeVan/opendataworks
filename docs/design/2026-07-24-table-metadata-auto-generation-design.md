@@ -36,7 +36,7 @@
 
 复用，不新增：
 
-- `GET /api/v1/dataagent/agents`
+- `GET /api/v1/dataagent/agents`（助手选项来源）
 - `POST /api/v1/nl2sql/topics`
 - `POST /api/v1/nl2sql/tasks/deliver-message`
 - `GET /api/v1/nl2sql/tasks/{task_id}`
@@ -44,7 +44,13 @@
 - `PUT /api/v1/tables/{id}/comment`
 - `PUT /api/v1/tables/{id}/fields/{fieldId}`
 
-#### agent_id 必须显式传，不能依赖默认助手
+本次新增（Java 后端）：
+
+- `GET /api/v1/settings/agent` → `{ metadataAgentId }`
+- `PUT /api/v1/settings/agent`（`@RequireAuth`），空值表示清除配置
+- 新表 `sys_config`（`V47__create_sys_config.sql`）：平台级通用键值配置，后续其他全局设置可复用
+
+#### agent_id 由设置显式配置，不能依赖默认助手
 
 建话题时省略 `agent_id`，后端会回落到 `DEFAULT_AGENT_ID`（`agent_default`，由
 `bootstrap_default_agent_profile` 保证存在）。但 `api_create_topic` 还会过 `_require_agent_profile`
@@ -52,10 +58,15 @@
 一旦启用 auth 且该助手可见范围是 `authenticated` 或 `selected`，判定失败并返回
 `400 agent not found`（该文案对"不存在"与"不可见"故意一致，防助手存在性探测）。
 
-因此生成前先取 `GET /api/v1/dataagent/agents`：它的 `_catalog_identity` 对非 `dataagent`
-客户端同样返回 `None`，与建话题走的是同一套可见性过滤，返回集合即"本次调用可用的助手"。
-取其中的 `agent_id`（优先 `agent_default`，否则取第一个）传给建话题与发消息；目录为空时
-直接给出可操作提示，而不是让用户看到 `agent not found`。
+使用哪个助手由「配置管理 / 智能助手」显式配置，不在代码里隐式挑选（早期实现按
+`agent_default` → 第一个 的顺序自动选取，行为不可预期且不可控）：
+
+- 存储：新增平台级通用键值表 `sys_config`，键 `metadata.agent_id`。
+  `GET/PUT /api/v1/settings/agent` 读写，部署级生效。
+- 选项来源：`GET /api/v1/dataagent/agents`。其 `_catalog_identity` 对非 `dataagent`
+  客户端同样返回 `None`，与建话题共用同一套可见性过滤，因此目录返回的即"建话题会被接受的助手"。
+- 生成前校验：未配置时提示前往设置；已配置但不在当前目录中（助手被删除或可见范围收紧）时
+  提示重新选择；目录接口本身失败则不阻断，仍用已配置的助手，把最终判定交给后端。
 
 另外 `api/nl2sql.js` 导出 `nl2sqlErrorMessage`，从 FastAPI 的 `{"detail": ...}` 中取真实错误文案
 ——否则 axios 只会给出 `Request failed with status code 400`，掩盖真正原因。

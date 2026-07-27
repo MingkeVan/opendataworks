@@ -12,6 +12,9 @@
         <el-tab-pane label="MinIO 环境" name="minio" lazy>
           <MinioConfigManagement />
         </el-tab-pane>
+        <el-tab-pane label="智能助手" name="agent" lazy>
+          <AgentSettings />
+        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
@@ -22,10 +25,11 @@ import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DolphinConfig from './DolphinConfig.vue'
 import MinioConfigManagement from './MinioConfigManagement.vue'
+import AgentSettings from './AgentSettings.vue'
 
 const route = useRoute()
 const router = useRouter()
-const availableTabs = new Set(['dolphin', 'minio'])
+const availableTabs = new Set(['dolphin', 'minio', 'agent'])
 const legacyTabMap = {
   dataagent: true,
   skills: true

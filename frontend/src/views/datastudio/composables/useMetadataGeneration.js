@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { isDemoMode, showDemoReadonlyMessage } from '@/demo/runtime'
 import { nl2sqlApi, nl2sqlErrorMessage } from '@/api/nl2sql'
+import { settingsApi } from '@/api/settings'
 import { tableApi } from '@/api/table'
 import { buildFieldPayload } from '../fieldEdit'
 import { buildMetadataPrompt, formatFieldComment, parseMetadataResponse } from '../metadataGeneration'
@@ -11,7 +12,6 @@ import { buildMetadataPrompt, formatFieldComment, parseMetadataResponse } from '
 //
 // 建议结果为内存态：useTabPersistence 只持久化 tab 骨架，刷新页面后需重新生成。
 
-const DEFAULT_AGENT_ID = 'agent_default'
 const TERMINAL_STATUSES = new Set(['finished', 'success', 'completed', 'error', 'failed', 'suspended'])
 const SUCCESS_STATUSES = new Set(['finished', 'success', 'completed'])
 const POLL_INTERVAL_MS = 2000
@@ -21,16 +21,26 @@ const MAX_TASK_SQL = 5
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // 建话题必须带 agent_id：省略时后端回落到 DEFAULT_AGENT_ID，若其可见范围不含匿名调用，
-// 会返回 400 "agent not found"。这里从助手目录取——它与建话题共用同一套可见性过滤。
+// 会返回 400 "agent not found"。使用哪个助手由「配置管理 / 智能助手」显式配置，
+// 不在代码里隐式挑选；这里只校验该助手当前确实可用（助手目录与建话题共用同一套可见性过滤）。
 const resolveAgentId = async () => {
-  const agents = await nl2sqlApi.listAgents()
-  const list = (Array.isArray(agents) ? agents : [])
+  const [settings, agents] = await Promise.all([
+    settingsApi.getAgentSettings().catch(() => ({})),
+    nl2sqlApi.listAgents().catch(() => [])
+  ])
+
+  const configured = String(settings?.metadataAgentId || '').trim()
+  if (!configured) {
+    throw new Error('尚未配置智能元数据使用的助手，请前往「配置管理 / 智能助手」选择')
+  }
+
+  const available = (Array.isArray(agents) ? agents : [])
     .map((item) => String(item?.agent_id || '').trim())
     .filter(Boolean)
-  if (!list.length) {
-    throw new Error('没有可用的智能助手，请先在智能问数中配置助手，或检查助手的可见范围设置')
+  if (available.length && !available.includes(configured)) {
+    throw new Error(`配置的助手 ${configured} 当前不可用，请前往「配置管理 / 智能助手」重新选择`)
   }
-  return list.includes(DEFAULT_AGENT_ID) ? DEFAULT_AGENT_ID : list[0]
+  return configured
 }
 
 const messageText = (message) => {
