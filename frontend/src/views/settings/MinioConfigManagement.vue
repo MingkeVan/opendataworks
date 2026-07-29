@@ -1,11 +1,8 @@
 <template>
   <div class="minio-config">
-    <el-card class="config-card" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>MinIO 环境管理</span>
-          <el-button type="primary" @click="openCreate">新增环境</el-button>
-        </div>
+    <SettingsSection title="MinIO 环境管理">
+      <template #actions>
+        <el-button type="primary" @click="openCreate">新增环境</el-button>
       </template>
 
       <el-table v-loading="loading" :data="configs" border style="width: 100%">
@@ -46,7 +43,7 @@
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+    </SettingsSection>
 
     <el-dialog
       v-model="dialogVisible"
@@ -112,6 +109,7 @@
 import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { settingsApi } from '@/api/settings'
+import SettingsSection from './components/SettingsSection.vue'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -282,13 +280,4 @@ loadConfigs()
   margin: 0 auto;
 }
 
-.config-card {
-  width: 100%;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
 </style>
