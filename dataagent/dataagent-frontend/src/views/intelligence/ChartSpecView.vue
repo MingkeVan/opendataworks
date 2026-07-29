@@ -73,7 +73,7 @@ import {
   RadarComponent
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import { buildChartRenderModel } from './chartSpec'
+import { buildChartRenderModel, parseChartSpec } from './chartSpec'
 import { downloadCsv, exportFilename } from '@/utils/tableExport'
 import ResultDataTable from './components/ResultDataTable.vue'
 
@@ -106,7 +106,12 @@ const typeOverride = ref('')
 const imageCopied = ref(false)
 let imageCopiedTimer = 0
 
-const baseRenderModel = computed(() => buildChartRenderModel(props.spec))
+// parseChartSpec interns normalized specs by content, so a re-render that hands
+// over a structurally identical spec resolves to the very same object here.
+// Everything derived below therefore keeps a stable identity, and the chart is
+// only rebuilt when the underlying data actually changes.
+const normalizedSpec = computed(() => parseChartSpec(props.spec))
+const baseRenderModel = computed(() => buildChartRenderModel(normalizedSpec.value || props.spec))
 const baseSpec = computed(() => baseRenderModel.value?.spec || null)
 const baseChartType = computed(() => String(baseSpec.value?.chart_type || ''))
 
@@ -152,12 +157,13 @@ const clipboardImageSupported = typeof window !== 'undefined'
   && Boolean(typeof window !== 'undefined' && window.isSecureContext)
 const canCopyImage = computed(() => canExportImage.value && clipboardImageSupported)
 
+// buildChartRenderModel hands back one option object per distinct spec, so
+// caching the polish keyed on it keeps `option` identity-stable across renders.
+const polishedOptionCache = new WeakMap()
+
 // Mirror the chart polish applied to tool-call charts so inline conclusion
 // charts stay visually consistent with the ones rendered below tool blocks.
-const option = computed(() => {
-  if (renderModel.value?.kind !== 'echarts') return null
-  const baseOption = renderModel.value.option
-  if (!baseOption) return null
+const polishOption = (baseOption) => {
   try {
     const opt = JSON.parse(JSON.stringify(baseOption))
 
@@ -188,11 +194,28 @@ const option = computed(() => {
   } catch (_error) {
     return baseOption
   }
+}
+
+const option = computed(() => {
+  if (renderModel.value?.kind !== 'echarts') return null
+  const baseOption = renderModel.value.option
+  if (!baseOption) return null
+  const cached = polishedOptionCache.get(baseOption)
+  if (cached) return cached
+  const polished = polishOption(baseOption)
+  polishedOptionCache.set(baseOption, polished)
+  return polished
 })
 
 let chartRefreshFrame = 0
 let chartInstance = null
 let chartResizeObserver = null
+let appliedOption = null
+// ECharts owns legend selection, but a notMerge setOption resets it. Keep the
+// viewer's last selection outside Vue's reactivity — a reactive copy would
+// re-trigger the option computed on every legend click — and re-apply it
+// whenever the option is re-applied, e.g. after a 柱状/折线 toggle.
+let legendSelection = null
 
 const toggleChartType = () => {
   const next = effectiveChartType.value === 'bar' ? 'line' : 'bar'
@@ -248,6 +271,18 @@ const disposeChart = () => {
     chartInstance.dispose()
     chartInstance = null
   }
+  appliedOption = null
+}
+
+// Legend selection lives on the instance, so it must be re-applied on top of a
+// freshly built option; unknown names are simply ignored by ECharts.
+const withLegendSelection = (opt) => {
+  if (!legendSelection || !opt?.legend) return opt
+  const selected = { ...legendSelection }
+  if (Array.isArray(opt.legend)) {
+    return { ...opt, legend: opt.legend.map((item) => ({ ...item, selected })) }
+  }
+  return { ...opt, legend: { ...opt.legend, selected } }
 }
 
 const observeChartResize = (container) => {
@@ -264,21 +299,32 @@ const refreshChart = async () => {
   if (chartRefreshFrame) window.cancelAnimationFrame(chartRefreshFrame)
   chartRefreshFrame = window.requestAnimationFrame(() => {
     const container = chartCanvasRef.value
-    if (!container || !option.value) return
+    const nextOption = option.value
+    if (!container || !nextOption) return
+    // Re-applying the option the chart already shows buys nothing and replays
+    // the entry animation; that repeated redraw is what read as flicker.
+    if (chartInstance && appliedOption === nextOption) return
     try {
       if (!chartInstance) {
         chartInstance = echarts.init(container, undefined, { renderer: 'canvas' })
+        chartInstance.on?.('legendselectchanged', (params) => {
+          legendSelection = { ...(params?.selected || {}) }
+        })
         observeChartResize(container)
       }
-      chartInstance.clear()
-      chartInstance.setOption(option.value, { notMerge: true, lazyUpdate: false })
+      // No clear() first: notMerge already replaces the option wholesale, and
+      // the extra blank frame it inserted was visible as a flash.
+      chartInstance.setOption(withLegendSelection(nextOption), { notMerge: true, lazyUpdate: false })
       chartInstance.resize()
+      appliedOption = nextOption
     } catch (_error) {
       // Swallow redraw failures and let the empty/error state remain visible.
     }
   })
 }
 
+// Identity comparison is enough now that the model and option keep a stable
+// identity for unchanged content; a deep watch would re-fire on every re-render.
 watch(
   () => [renderState.value, option.value, showDataTable.value],
   () => {
@@ -287,15 +333,18 @@ watch(
       return
     }
     disposeChart()
-  },
-  { deep: true }
+  }
 )
 
+// Only a genuinely different chart discards what the viewer picked. Watching the
+// raw prop reset the 柱状/折线 toggle and legend selection on every re-render,
+// because each render handed over a new object for the same chart.
 watch(
-  () => props.spec,
+  normalizedSpec,
   () => {
     viewMode.value = 'chart'
     typeOverride.value = ''
+    legendSelection = null
   }
 )
 

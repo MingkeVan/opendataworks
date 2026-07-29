@@ -243,12 +243,18 @@ function _findBlock(turn, index) {
   return turn.blocks.find((b) => b.blockIndex === index) || null
 }
 
+// This runs inside the chat templates, so it is re-invoked on every re-render of
+// the message list. Handing back a fresh object each time would invalidate every
+// computed ToolOutputRenderer derives from it — including the chart spec it feeds
+// to ChartSpecView — so unchanged blocks reuse their previous prop object.
+const toolPropCache = new WeakMap()
+
 /**
  * Convert a v2 tool_use block to the prop shape expected by ToolOutputRenderer.
  */
 export function blockToToolProp(block) {
   const hasOutput = block.output != null
-  return {
+  const next = {
     name: block.name,
     input: block.input,
     output: block.output,
@@ -258,4 +264,9 @@ export function blockToToolProp(block) {
     _runtimeStarted: hasOutput,
     _startedAt: null,
   }
+
+  const cached = toolPropCache.get(block)
+  if (cached && Object.keys(next).every((key) => cached[key] === next[key])) return cached
+  toolPropCache.set(block, next)
+  return next
 }

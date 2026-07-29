@@ -107,6 +107,42 @@ const normalizeSeries = (value, fallbackType) => {
     : []
 }
 
+// Chat rendering re-parses specs on every parent re-render (each streamed token,
+// the topic-status poll, any unrelated reactive change), and the tool/answer
+// wrappers hand the parser a fresh object every time. Returning a new normalized
+// object for unchanged content would change the `spec` prop identity of a chart
+// that did not change, forcing ChartSpecView to rebuild the ECharts option —
+// which replays the entry animation (the flicker) and throws away the viewer's
+// legend selection and 柱状/折线 toggle. Interning by content keeps identical
+// specs identity-stable so an unchanged chart is never rebuilt.
+//
+// A render walks the whole message list, so the budget has to cover every chart
+// of one conversation at once: a smaller cache would evict the charts at the top
+// before the pass reaches the bottom, and rebuild them on the next render.
+const SPEC_INTERN_LIMIT = 128
+const specInternCache = new Map()
+
+const internSpec = (spec) => {
+  let signature = ''
+  try {
+    signature = JSON.stringify(spec)
+  } catch (_error) {
+    return spec
+  }
+  const cached = specInternCache.get(signature)
+  if (cached) {
+    // Refresh recency so the charts currently on screen stay interned.
+    specInternCache.delete(signature)
+    specInternCache.set(signature, cached)
+    return cached
+  }
+  specInternCache.set(signature, spec)
+  if (specInternCache.size > SPEC_INTERN_LIMIT) {
+    specInternCache.delete(specInternCache.keys().next().value)
+  }
+  return spec
+}
+
 export const parseChartSpec = (value) => {
   if (typeof value === 'string') {
     return parseChartSpec(parseMaybeJson(value))
@@ -135,7 +171,7 @@ export const parseChartSpec = (value) => {
     orientation: textOrEmpty(value.orientation).toLowerCase() === 'horizontal' ? 'horizontal' : 'vertical',
     error: value.error == null ? null : textOrEmpty(value.error)
   }
-  return normalized
+  return internSpec(normalized)
 }
 
 export const validateChartSpec = (specInput) => {
@@ -453,6 +489,10 @@ const buildGaugeOption = (spec) => {
   }
 }
 
+// Keyed by the interned spec, so identical content resolves to one render model
+// (and therefore one ECharts option object) instead of a rebuilt one per render.
+const renderModelCache = new WeakMap()
+
 export const buildChartRenderModel = (specInput) => {
   const spec = parseChartSpec(specInput)
   if (!spec) {
@@ -464,6 +504,15 @@ export const buildChartRenderModel = (specInput) => {
     }
   }
 
+  const cached = renderModelCache.get(spec)
+  if (cached) return cached
+
+  const model = buildRenderModelForSpec(spec)
+  renderModelCache.set(spec, model)
+  return model
+}
+
+const buildRenderModelForSpec = (spec) => {
   if (spec.error) {
     return {
       state: 'error',

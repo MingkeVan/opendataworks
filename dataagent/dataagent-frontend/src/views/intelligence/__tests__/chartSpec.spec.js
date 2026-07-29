@@ -598,6 +598,41 @@ describe('chartSpec', () => {
     expect(stripChartSpecsFromText(message)).not.toContain('chart_spec')
   })
 
+  it('returns identity-stable specs and render models for unchanged content', () => {
+    // Chat re-renders re-parse the same chart over and over. A fresh object each
+    // time would remount the chart and drop the viewer's toggle/legend state.
+    const makeSpec = () => ({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'line',
+      title: '趋势',
+      x_field: 'day',
+      series: [{ name: '次数', field: 'cnt', type: 'line' }],
+      dataset: [{ day: '2026-06-01', cnt: 3 }],
+      error: null
+    })
+
+    expect(parseChartSpec(makeSpec())).toBe(parseChartSpec(makeSpec()))
+    expect(buildChartRenderModel(makeSpec())).toBe(buildChartRenderModel(makeSpec()))
+    expect(buildChartRenderModel(makeSpec()).option).toBe(buildChartRenderModel(makeSpec()).option)
+
+    // Different content must still produce a different model.
+    const other = { ...makeSpec(), title: '另一个趋势' }
+    expect(parseChartSpec(other)).not.toBe(parseChartSpec(makeSpec()))
+  })
+
+  it('keeps embedded spec identity stable while the surrounding answer grows', () => {
+    const chart = '```chart\n{"kind":"chart_spec","version":1,"chart_type":"line","title":"趋势","x_field":"day",'
+      + '"series":[{"name":"次数","field":"cnt","type":"line"}],"dataset":[{"day":"2026-06-01","cnt":3}]}\n```'
+
+    const partial = splitChartSpecText(`结论如下。\n\n${chart}\n\n补充说`)
+    const complete = splitChartSpecText(`结论如下。\n\n${chart}\n\n补充说明已写完。`)
+
+    const partialChart = partial.find((seg) => seg.type === 'chart')
+    const completeChart = complete.find((seg) => seg.type === 'chart')
+    expect(partialChart.spec).toBe(completeChart.spec)
+  })
+
   it('rejects funnel specs with more than one series', () => {
     const validation = validateChartSpec({
       kind: 'chart_spec',
