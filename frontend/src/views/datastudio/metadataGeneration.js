@@ -18,7 +18,8 @@ export function buildMetadataPrompt(context = {}) {
     fields = [],
     upstreamTables = [],
     downstreamTables = [],
-    relatedTasks = []
+    relatedTasks = [],
+    columnValueProfiles = []
   } = context
 
   const fieldLines =
@@ -31,6 +32,16 @@ export function buildMetadataPrompt(context = {}) {
 
   const downstreamLines =
     (downstreamTables || []).map((t) => `- ${t.tableName} | ${t.tableComment || '（无注释）'}`).join('\n') || '（无）'
+
+  const profiles = normalizeColumnValueProfiles(columnValueProfiles)
+  const enumLines =
+    profiles
+      .map(
+        (profile) =>
+          `- ${profile.fieldName}: ` +
+          profile.values.map((item) => `${item.value}(${item.count ?? '-'})`).join('、')
+      )
+      .join('\n') || '（本次未取到实测取值）'
 
   const taskBlocks =
     (relatedTasks || [])
@@ -70,10 +81,14 @@ export function buildMetadataPrompt(context = {}) {
     '# 关联任务代码',
     taskBlocks,
     '',
+    '# 字段实测取值(字段名: 取值(出现行数)…)',
+    '以下取值由平台直接查询该表真实数据得到，是本次唯一可用的枚举取值来源。',
+    enumLines,
+    '',
     '# 要求',
     '1. 推导表级业务说明(table_comment) 与每个字段业务含义(comment)，使用简体中文。',
     '2. comment 先给字段业务含义；若能从关联任务代码推断该字段加工逻辑，追加一句「加工逻辑：……」，点明来源表、分组维度与计算方式。',
-    '3. 疑似枚举/状态/类型字段，结合 DDL 与任务代码中的取值(如 CASE WHEN status=0 ...)推导 enum_values；value 为原始取值，label 为中文含义；无法确定时该字段返回空数组。',
+    '3. enum_values 的 value 只能逐字复制「字段实测取值」中列出的取值：未出现在该清单里的字段一律返回空数组，也不得补充清单外的取值。label 由你结合 DDL、任务代码与字段名给出中文含义；含义无法确定时保留 value 并给空 label，不要猜。',
     '4. 只依据给定上下文推导，不编造无依据的含义；无把握时给保守简短说明。',
     '5. field_name 必须与上面字段列表完全一致，并覆盖全部字段。',
     '6. 只输出一个 JSON 代码块，不要任何解释文字。结构严格如下：',
@@ -81,6 +96,58 @@ export function buildMetadataPrompt(context = {}) {
     '{"table_comment":"...","fields":[{"field_name":"...","comment":"...","enum_values":[{"value":"0","label":"待支付"}]}]}',
     '```'
   ].join('\n')
+}
+
+/**
+ * 归一化后端 `GET /v1/tables/{id}/column-values` 的实测取值分布。
+ * 结构不合法的条目直接丢弃：缺了实测取值只会少写枚举，不会写错枚举。
+ */
+export function normalizeColumnValueProfiles(raw) {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const fieldName = String(item.fieldName ?? item.field_name ?? '').trim()
+      if (!fieldName) return null
+      const values = (Array.isArray(item.values) ? item.values : [])
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') return null
+          const value = entry.value
+          if (value === null || value === undefined || String(value).trim() === '') return null
+          const count = Number(entry.count)
+          return { value: String(value).trim(), count: Number.isFinite(count) ? count : null }
+        })
+        .filter(Boolean)
+      if (!values.length) return null
+      return { fieldName, values }
+    })
+    .filter(Boolean)
+}
+
+/**
+ * 字段名 -> 实测取值集合（小写归一，用于比对模型给出的 value）。
+ */
+export function buildObservedValueIndex(profiles) {
+  const index = new Map()
+  normalizeColumnValueProfiles(profiles).forEach((profile) => {
+    index.set(
+      profile.fieldName,
+      new Set(profile.values.map((item) => item.value.toLowerCase()))
+    )
+  })
+  return index
+}
+
+/**
+ * 丢弃未在真实数据中出现过的枚举取值。
+ *
+ * 这是「枚举不许编造」的硬约束：prompt 只是要求，实际写回前一律按实测取值过滤。
+ * 该字段没有实测取值（不是枚举候选列、取值过于发散、或统计失败）时返回空数组。
+ */
+export function filterEnumValuesByObserved(enumValues, observedValues) {
+  const list = normalizeEnumValues(enumValues)
+  if (!list.length || !observedValues || !observedValues.size) return []
+  return list.filter((item) => observedValues.has(item.value.toLowerCase()))
 }
 
 /**

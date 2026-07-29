@@ -2,6 +2,7 @@ package com.onedata.portal.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.onedata.auth.annotation.RequireAuth;
+import com.onedata.portal.dto.ColumnValueProfile;
 import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
 import com.onedata.portal.dto.TableAccessStats;
@@ -427,6 +428,21 @@ public class DataTableController {
             @RequestParam(required = false) Long clusterId) {
         try {
             return Result.success(dataTableQueryService.listPartitions(id, clusterId));
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    /**
+     * 统计疑似枚举列的实测取值分布（智能元数据用于校验枚举，避免模型凭空编造取值）
+     */
+    @RequireAuth
+    @GetMapping("/{id}/column-values")
+    public Result<List<ColumnValueProfile>> profileEnumColumns(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long clusterId) {
+        try {
+            return Result.success(dataTableQueryService.profileEnumColumns(id, clusterId));
         } catch (Exception e) {
             return Result.fail(e.getMessage());
         }

@@ -134,9 +134,11 @@ public class MysqlTableEngineHandler implements TableEngineHandler {
                 || !Objects.equals(normalize(oldField.getIsNullable()), normalize(newField.getIsNullable()));
     }
 
+    // 空串与 null 都表示「未设置」，与 DorisTableEngineHandler 保持一致
     private Object normalize(Object value) {
         if (value instanceof String) {
-            return ((String) value).trim();
+            String text = ((String) value).trim();
+            return text.isEmpty() ? null : text;
         }
         return value;
     }

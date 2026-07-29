@@ -143,6 +143,13 @@ public class DorisTableEngineHandler implements TableEngineHandler {
             dorisConnectionService.renameColumn(datasourceId, database, tableName,
                     oldField.getFieldName(), newField.getFieldName());
         }
+        // 只改注释走轻量 MODIFY COLUMN ... COMMENT：不重建列定义，
+        // 也就不依赖平台侧 key 列元数据是否准确（智能元数据采纳走的正是这条路径）
+        if (onlyCommentChanged(oldField, newField)) {
+            dorisConnectionService.modifyColumnComment(datasourceId, database, tableName,
+                    newField.getFieldName(), newField.getFieldComment());
+            return;
+        }
         if (isColumnChanged(oldField, newField)) {
             boolean isKey = isKeyColumn(table, newField);
             String columnDef = dorisConnectionService.buildColumnDefinition(newField, isKey);
@@ -298,9 +305,12 @@ public class DorisTableEngineHandler implements TableEngineHandler {
                 && !Objects.equals(normalize(oldField.getFieldComment()), normalize(newField.getFieldComment()));
     }
 
+    // 空串与 null 都表示「未设置」：前端表单会把缺省值/注释回填成空串，
+    // 若按字面比较会把「注释未变」误判成定义变更，进而触发无谓的 MODIFY COLUMN
     private Object normalize(Object value) {
         if (value instanceof String) {
-            return ((String) value).trim();
+            String text = ((String) value).trim();
+            return text.isEmpty() ? null : text;
         }
         return value;
     }

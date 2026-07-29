@@ -180,7 +180,10 @@
             <template #header>
               <span class="smart-col-header">
                 智能描述
-                <el-tooltip content="基于建表语句、上下游血缘与关联任务代码生成，请复核后采纳" placement="top">
+                <el-tooltip
+                  content="基于建表语句、上下游血缘与关联任务代码生成，枚举取值取自该表真实数据，请复核后采纳"
+                  placement="top"
+                >
                   <el-icon class="smart-col-info"><InfoFilled /></el-icon>
                 </el-tooltip>
                 <el-button link type="primary" size="small" @click="generateMetadata(activeTabId)">采纳描述</el-button>

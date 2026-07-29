@@ -21,13 +21,16 @@
 
 前端新增生成入口、生成编排、结果解析、「智能元数据」复核弹窗与采纳写回，以及字段表的内联「智能描述」列与元数据完善度指标。复用既有写回接口，不新增 DataAgent / Java 端点，不改数据库结构。
 
-不在本次范围：参考产品中的「数据分类」tab（平台无对应存储模型）；服务端持久化生成建议；通过抽样真实数据推导枚举。
+不在本次范围：参考产品中的「数据分类」tab（平台无对应存储模型）；服务端持久化生成建议。
+
+> 2026-07-29 修订：枚举取值改为从真实数据查询（原先「不推导真实枚举」的范围限制已移除），并修复采纳写回时 Doris 报
+> `Invalid column order. value should be after key.` 的问题。见文末「枚举取值必须来自真实数据」与「采纳写回的 Doris 列变更」。
 
 ## Solution
 
 1. **复用问数发送消息端点发起任务**：前端组装上下文 prompt（DDL + 字段 + 上下游血缘 + 关联任务 SQL）→ 创建话题 → `tasks/deliver-message` 以 `background` 模式发起 → 每 2s 轮询任务状态至终态（上限 300s）→ 取助手消息。
 2. **前端解析格式化内容**：约定模型只输出一个 JSON 代码块；前端容错提取（优先最后一个 ``` 围栏，回退首尾花括号）后严格解析，结构非法即报错，不做静默降级。该思路对齐 `dataagent/dataagent-backend/core/followup_suggestions.py`。
-3. **枚举并入描述**：平台无独立枚举列，`formatFieldComment` 将 `enum_values` 折叠进字段描述（如「订单状态。枚举：0=待支付；1=已支付」）。
+3. **枚举并入描述**：平台无独立枚举列，`formatFieldComment` 将 `enum_values` 折叠进字段描述（如「订单状态。枚举：0=待支付；1=已支付」）。取值本身来自真实数据实测，见「枚举取值必须来自真实数据」。
 4. **加工逻辑**：prompt 要求在可从关联任务 SQL 推断时追加「加工逻辑：……」，点明来源表、分组维度与计算方式。
 5. **复核与采纳**：「智能元数据」弹窗含「字段描述」「表名与表描述」两个 tab；字段 tab 提供全选、关键字搜索、「仅看描述为空/描述与名称相同的字段」过滤、可编辑的推荐描述与「已选 N 项」计数；点「采纳」对所选项直接调用既有写回接口并刷新字段列表。
 6. **结果可见性**：生成后字段表出现只读「智能描述」列（含来源说明 tooltip 与「采纳描述」入口），已采纳字段显示「已采纳」；「字段定义」标题旁显示「元数据完善度 N%」，采纳后随字段刷新自动上升。
@@ -46,6 +49,7 @@
 
 本次新增（Java 后端）：
 
+- `GET /api/v1/tables/{id}/column-values?clusterId=` → `List<ColumnValueProfile>`（`@RequireAuth`，字段实测取值分布）
 - `GET /api/v1/settings/agent` → `{ metadataAgentId }`
 - `PUT /api/v1/settings/agent`（`@RequireAuth`），空值表示清除配置
 - 新表 `sys_config`（`V47__create_sys_config.sql`）：平台级通用键值配置，后续其他全局设置可复用
@@ -118,6 +122,51 @@
 
 前端以 `skipErrorMessage` 静默调用，失败时在分区列表区域就地展示错误文案，不弹全局提示——
 非 Doris 数据源等场景下打开该子页不会造成打扰。
+
+## 枚举取值必须来自真实数据（2026-07-29）
+
+初版 prompt 让模型「结合 DDL 与任务代码中的取值推导 `enum_values`」。DDL 与任务 SQL 里通常
+根本没有取值线索，模型于是按字段名编出一套看似合理的枚举（`0=待支付；1=已支付；2=已完成`），
+写进注释后比没有注释更有害——它看上去是权威元数据。
+
+改为「先查数据，再让模型贴标签」，分三层：
+
+1. **后端只读取值统计**：新增 `GET /api/v1/tables/{id}/column-values?clusterId=`，返回
+   `List<ColumnValueProfile>`。候选列由字段类型与命名先筛
+   （`DataTableQueryService#isEnumCandidate`：可分组类型，且命名不是 `*_id` / `*_no` 这类标识列，
+   单表上限 20 列），逐列执行
+   `SELECT col, COUNT(*) FROM db.tbl WHERE col IS NOT NULL GROUP BY col ORDER BY 2 DESC LIMIT n+1`。
+   多取一行用于判定是否超过枚举上限（30）：超过即认为不是枚举列并整列丢弃，**不返回截断结果**，
+   避免下游把不完整的取值集合当成完整枚举。取值统一 `getString` 读出，不做 `CAST`，因此 Doris 与
+   MySQL 数据源同样适用；单列失败（权限、类型不可分组）只跳过该列。
+2. **prompt 只给实测取值**：新增「# 字段实测取值」段，要求 `value` 逐字复制该清单，清单外字段一律返回空数组，
+   模型只负责补 `label` 中文含义。
+3. **写回前硬过滤**：`filterEnumValuesByObserved` 按实测取值集合过滤模型返回的 `enum_values`，
+   清单里没有的取值直接丢弃；该字段没有实测取值（非候选列、取值发散、统计失败）时枚举整体清空。
+   prompt 是要求，这一层才是约束——第 2 层失效时第 3 层仍然保证注释里不会出现编造的取值。
+
+取值统计失败不阻断生成：前端 `skipErrorMessage` 静默调用，失败时按「无实测取值」处理，
+本次生成不含枚举，字段业务含义照常产出（fail-closed，宁缺毋滥）。
+
+## 采纳写回的 Doris 列变更（2026-07-29）
+
+采纳字段描述会走 `PUT /v1/tables/{id}/fields/{fieldId}` → `DorisTableEngineHandler#updateColumn`。
+原实现对非 AGGREGATE 表一律重建整列定义并执行 `ALTER TABLE ... MODIFY COLUMN <完整定义>`，
+在 key 列上必然失败：
+
+- `DorisConnectionService#buildColumnDefinition(field, isKey)` 声明了 `isKey` 却从未使用，
+  生成的定义永远不带 `KEY` 标记。Doris 的 `MODIFY COLUMN` 按定义重建该列，缺少标记就把它当成 value 列，
+  而 value 列排在 key 列之前触发 FE 校验 `Invalid column order. value should be after key. index[...]`。
+- 前端 `buildFieldPayload` 把未设置的缺省值回填成空串，`mergeField` 后与库里的 `null` 不相等，
+  于是「只改了注释」被判定成定义变更，本可以避免的 `MODIFY COLUMN` 也被触发
+  （AGGREGATE 表上则表现为「AGGREGATE 表字段变更需指定聚合方式，暂不支持同步」）。
+
+三处修正：
+
+1. 只改注释时走轻量 `ALTER TABLE ... MODIFY COLUMN col COMMENT '...'`（与 AGGREGATE 分支一致），
+   不重建列定义，也就不依赖平台侧 key 列元数据是否准确——采纳走的正是这条路径。
+2. `buildColumnDefinition` 真正使用 `isKey`，在类型后补 `KEY`，让确需改类型/缺省值的 key 列也能改。
+3. 两个引擎 handler 的 `normalize` 统一把空串视作 `null`，消除「空串 vs null」造成的假变更。
 
 ## Risks and Tradeoffs
 
