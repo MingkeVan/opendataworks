@@ -1,0 +1,91 @@
+{
+  "id": "workflow_publish_trend",
+  "version": "1.0.0",
+  "name_zh": "工作流发布次数趋势",
+  "name_en": "Workflow publish trend",
+  "intent": "按天统计工作流发布次数与失败次数，并给出每日失败率；可选只看某一类发布操作",
+  "caliber": "口径字段为 workflow_publish_record.created_at；发布次数为记录条数，失败次数为 status = 'failed' 的记录数；未指定 operation 时统计全部发布操作（deploy/online/offline）。",
+  "owner": "data-platform",
+  "synonyms": [
+    "发布趋势",
+    "发布次数",
+    "发布失败率",
+    "工作流上线趋势",
+    "publish trend"
+  ],
+  "output_fields": [
+    "stat_date",
+    "publish_cnt",
+    "failed_cnt",
+    "failed_rate"
+  ],
+  "notes": "对应论文 Talent-pool report 结构：条件节点按是否传了 operation 选择查全量表还是过滤表，未选中的分支及其子图永不执行。",
+  "params": [
+    {
+      "name": "days",
+      "type": "int",
+      "description": "统计最近多少天",
+      "required": false,
+      "default": 30,
+      "minimum": 1,
+      "maximum": 365
+    },
+    {
+      "name": "operation",
+      "type": "enum",
+      "description": "只看某一类发布操作；不传则统计全部",
+      "required": false,
+      "values": [
+        "deploy",
+        "online",
+        "offline"
+      ]
+    }
+  ],
+  "target": "trend",
+  "nodes": {
+    "publish_all": {
+      "type": "sql",
+      "description": "全部发布操作的每日发布与失败次数",
+      "database": "opendataworks",
+      "engine": "mysql",
+      "sql": "SELECT DATE(created_at) AS stat_date,\n       COUNT(id) AS publish_cnt,\n       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_cnt\nFROM opendataworks.workflow_publish_record\nWHERE created_at >= DATE_SUB(CURDATE(), INTERVAL {{ params.days }} DAY)\nGROUP BY DATE(created_at)"
+    },
+    "publish_scoped": {
+      "type": "sql",
+      "description": "限定单一发布操作的每日发布与失败次数",
+      "database": "opendataworks",
+      "engine": "mysql",
+      "sql": "SELECT DATE(created_at) AS stat_date,\n       COUNT(id) AS publish_cnt,\n       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_cnt\nFROM opendataworks.workflow_publish_record\nWHERE created_at >= DATE_SUB(CURDATE(), INTERVAL {{ params.days }} DAY)\n  AND operation = {{ params.operation }}\nGROUP BY DATE(created_at)"
+    },
+    "pick": {
+      "type": "conditional",
+      "description": "没传 operation 就查全量口径，否则查过滤口径；另一条分支不执行",
+      "when": "params.operation == None",
+      "then_node": "publish_all",
+      "else_node": "publish_scoped"
+    },
+    "trend": {
+      "type": "transform",
+      "description": "补出每日失败率并按日期升序排列",
+      "dependencies": [
+        "pick"
+      ],
+      "derive": {
+        "failed_rate": "round(float(row.failed_cnt) / float(row.publish_cnt), 4) if row.publish_cnt else 0.0"
+      },
+      "select": [
+        "stat_date",
+        "publish_cnt",
+        "failed_cnt",
+        "failed_rate"
+      ],
+      "sort": [
+        {
+          "field": "stat_date",
+          "order": "asc"
+        }
+      ]
+    }
+  }
+}

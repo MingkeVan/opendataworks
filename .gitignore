@@ -57,6 +57,11 @@ dolphinscheduler-service/*.egg-info/
 !/dataagent/.claude/skills/ontology-modeling-assistant/**
 !/dataagent/.claude/skills/opendataworks-data-dev/
 !/dataagent/.claude/skills/opendataworks-data-dev/**
+!/dataagent/.claude/skills/opendataworks-methodology-dag/
+!/dataagent/.claude/skills/opendataworks-methodology-dag/**
+# Skills carry their own pytest suites; the allowlist above must not re-admit
+# the caches those runs leave behind.
+**/.pytest_cache/
 *.swp
 *.swo
 *~
