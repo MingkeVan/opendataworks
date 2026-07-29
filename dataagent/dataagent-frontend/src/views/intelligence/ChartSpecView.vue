@@ -106,12 +106,29 @@ const typeOverride = ref('')
 const imageCopied = ref(false)
 let imageCopiedTimer = 0
 
-// parseChartSpec interns normalized specs by content, so a re-render that hands
-// over a structurally identical spec resolves to the very same object here.
-// Everything derived below therefore keeps a stable identity, and the chart is
-// only rebuilt when the underlying data actually changes.
-const normalizedSpec = computed(() => parseChartSpec(props.spec))
-const baseRenderModel = computed(() => buildChartRenderModel(normalizedSpec.value || props.spec))
+// The chat list re-renders constantly and rebuilds the spec object every time,
+// so `props.spec` changes identity even when the chart is unchanged. Routing
+// everything through a content signature makes that a non-event: a string
+// compares by value, so an unchanged chart yields an equal signature, Vue's
+// computed does not notify downstream, and the model/option below keep the very
+// same object. No cache and nothing to evict — one string per instance.
+const specSignature = computed(() => {
+  const normalized = parseChartSpec(props.spec)
+  if (!normalized) return ''
+  try {
+    // Key order is fixed by parseChartSpec's object literal, so equal content
+    // always serializes to an equal string.
+    return JSON.stringify(normalized)
+  } catch (_error) {
+    return ''
+  }
+})
+
+// Only re-runs when the signature actually differs, which is also the only time
+// the JSON.parse cost is paid.
+const baseRenderModel = computed(() => (
+  specSignature.value ? buildChartRenderModel(JSON.parse(specSignature.value)) : buildChartRenderModel(props.spec)
+))
 const baseSpec = computed(() => baseRenderModel.value?.spec || null)
 const baseChartType = computed(() => String(baseSpec.value?.chart_type || ''))
 
@@ -157,10 +174,6 @@ const clipboardImageSupported = typeof window !== 'undefined'
   && Boolean(typeof window !== 'undefined' && window.isSecureContext)
 const canCopyImage = computed(() => canExportImage.value && clipboardImageSupported)
 
-// buildChartRenderModel hands back one option object per distinct spec, so
-// caching the polish keyed on it keeps `option` identity-stable across renders.
-const polishedOptionCache = new WeakMap()
-
 // Mirror the chart polish applied to tool-call charts so inline conclusion
 // charts stay visually consistent with the ones rendered below tool blocks.
 const polishOption = (baseOption) => {
@@ -196,15 +209,13 @@ const polishOption = (baseOption) => {
   }
 }
 
+// renderModel only changes when the signature does, so this computed's own
+// caching is enough to keep the applied option identity-stable.
 const option = computed(() => {
   if (renderModel.value?.kind !== 'echarts') return null
   const baseOption = renderModel.value.option
   if (!baseOption) return null
-  const cached = polishedOptionCache.get(baseOption)
-  if (cached) return cached
-  const polished = polishOption(baseOption)
-  polishedOptionCache.set(baseOption, polished)
-  return polished
+  return polishOption(baseOption)
 })
 
 let chartRefreshFrame = 0
@@ -340,7 +351,7 @@ watch(
 // raw prop reset the 柱状/折线 toggle and legend selection on every re-render,
 // because each render handed over a new object for the same chart.
 watch(
-  normalizedSpec,
+  specSignature,
   () => {
     viewMode.value = 'chart'
     typeOverride.value = ''

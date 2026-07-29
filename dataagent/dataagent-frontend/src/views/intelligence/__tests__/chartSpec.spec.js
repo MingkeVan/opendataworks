@@ -598,9 +598,9 @@ describe('chartSpec', () => {
     expect(stripChartSpecsFromText(message)).not.toContain('chart_spec')
   })
 
-  it('returns identity-stable specs and render models for unchanged content', () => {
-    // Chat re-renders re-parse the same chart over and over. A fresh object each
-    // time would remount the chart and drop the viewer's toggle/legend state.
+  it('serializes equal content to an equal signature', () => {
+    // ChartSpecView keys its whole derived chain off JSON.stringify(parseChartSpec(...)),
+    // so equal content must serialize identically — including key order.
     const makeSpec = () => ({
       kind: 'chart_spec',
       version: 1,
@@ -612,25 +612,13 @@ describe('chartSpec', () => {
       error: null
     })
 
-    expect(parseChartSpec(makeSpec())).toBe(parseChartSpec(makeSpec()))
-    expect(buildChartRenderModel(makeSpec())).toBe(buildChartRenderModel(makeSpec()))
-    expect(buildChartRenderModel(makeSpec()).option).toBe(buildChartRenderModel(makeSpec()).option)
+    expect(JSON.stringify(parseChartSpec(makeSpec()))).toBe(JSON.stringify(parseChartSpec(makeSpec())))
+    // Spec fields written in a different order still normalize to one signature.
+    const reordered = { chart_type: 'line', title: '趋势', kind: 'chart_spec', version: 1, x_field: 'day', error: null, dataset: [{ day: '2026-06-01', cnt: 3 }], series: [{ field: 'cnt', type: 'line', name: '次数' }] }
+    expect(JSON.stringify(parseChartSpec(reordered))).toBe(JSON.stringify(parseChartSpec(makeSpec())))
 
-    // Different content must still produce a different model.
     const other = { ...makeSpec(), title: '另一个趋势' }
-    expect(parseChartSpec(other)).not.toBe(parseChartSpec(makeSpec()))
-  })
-
-  it('keeps embedded spec identity stable while the surrounding answer grows', () => {
-    const chart = '```chart\n{"kind":"chart_spec","version":1,"chart_type":"line","title":"趋势","x_field":"day",'
-      + '"series":[{"name":"次数","field":"cnt","type":"line"}],"dataset":[{"day":"2026-06-01","cnt":3}]}\n```'
-
-    const partial = splitChartSpecText(`结论如下。\n\n${chart}\n\n补充说`)
-    const complete = splitChartSpecText(`结论如下。\n\n${chart}\n\n补充说明已写完。`)
-
-    const partialChart = partial.find((seg) => seg.type === 'chart')
-    const completeChart = complete.find((seg) => seg.type === 'chart')
-    expect(partialChart.spec).toBe(completeChart.spec)
+    expect(JSON.stringify(parseChartSpec(other))).not.toBe(JSON.stringify(parseChartSpec(makeSpec())))
   })
 
   it('rejects funnel specs with more than one series', () => {

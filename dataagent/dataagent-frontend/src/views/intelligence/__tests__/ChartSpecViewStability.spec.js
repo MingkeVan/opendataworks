@@ -60,6 +60,14 @@ const flushChart = async (wrapper) => {
   await wrapper.vm.$nextTick()
 }
 
+// Same flush for many instances at once: one shared frame drains every pending
+// rAF callback, instead of paying ~16ms per chart.
+const flushAllCharts = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await new Promise((resolve) => requestAnimationFrame(() => resolve()))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
 const mountView = (spec) => mount(ChartSpecView, {
   props: { spec },
   global: {
@@ -128,6 +136,39 @@ describe('ChartSpecView redraw stability', () => {
     const lastOption = echartsMocks.instance.setOption.mock.calls.at(-1)[0]
     expect(lastOption.legend.selected).toEqual({ 发布: true, 下线: false })
   })
+
+  // Stability must not depend on any fixed-capacity cache: a topic loads up to
+  // 500 messages, so a bounded LRU would evict the charts at the top of the pass
+  // before it reaches the bottom and rebuild every one of them on each render.
+  it('stays stable for far more charts than any fixed cache would hold', async () => {
+    const CHART_COUNT = 300
+    const makeSpec = (index) => ({
+      kind: 'chart_spec',
+      version: 1,
+      chart_type: 'line',
+      title: `趋势 ${index}`,
+      x_field: 'day',
+      series: [{ name: '次数', field: 'cnt', type: 'line' }],
+      dataset: [{ day: '2026-06-01', cnt: index }],
+      error: null
+    })
+
+    const wrappers = []
+    for (let i = 0; i < CHART_COUNT; i += 1) wrappers.push(mountView(makeSpec(i)))
+    await flushAllCharts()
+
+    const drawCount = echartsMocks.instance.setOption.mock.calls.length
+    expect(drawCount).toBe(CHART_COUNT)
+
+    // Two more full passes, each handing every chart a fresh but equal object.
+    for (let pass = 0; pass < 2; pass += 1) {
+      for (let i = 0; i < CHART_COUNT; i += 1) await wrappers[i].setProps({ spec: makeSpec(i) })
+      await flushAllCharts()
+    }
+
+    expect(echartsMocks.instance.setOption.mock.calls.length).toBe(drawCount)
+    for (const wrapper of wrappers) wrapper.unmount()
+  }, 30000)
 
   it('resets the toggle and legend selection when a different chart arrives', async () => {
     const wrapper = mountView(multiSeriesSpec())
