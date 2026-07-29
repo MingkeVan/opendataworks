@@ -117,24 +117,44 @@ def _resolve_python_bin() -> str:
     return str(os.getenv("DATAAGENT_PYTHON_BIN") or "").strip() or sys.executable
 
 
+PLATFORM_TOOLS_FOLDER = "opendataworks-platform-tools"
+PLATFORM_TOOLS_ROOT_ENV = "DATAAGENT_PLATFORM_SKILL_ROOT"
+
+
+def _platform_skill_candidates() -> list[Path]:
+    """Where the platform-tools skill may live, most specific first.
+
+    The sibling directory is tried first because it needs nothing from the host:
+    skills are installed side by side, so this skill can find its neighbour from
+    its own location. The environment variable is an optional override for hosts
+    that install skills somewhere else.
+    """
+    candidates: list[Path] = []
+    override = str(os.getenv(PLATFORM_TOOLS_ROOT_ENV) or "").strip()
+    if override:
+        candidates.append(Path(override).expanduser())
+    skill_root = Path(__file__).resolve().parent.parent
+    candidates.append(skill_root.parent / PLATFORM_TOOLS_FOLDER)
+    return candidates
+
+
 def _resolve_platform_skill_root() -> Path:
-    raw = str(os.getenv("DATAAGENT_PLATFORM_SKILL_ROOT") or "").strip()
-    if not raw:
-        raise MethodologyError(
-            "缺少 DATAAGENT_PLATFORM_SKILL_ROOT：方法论的 sql 节点依赖 opendataworks-platform-tools 执行只读查询",
-            error_code="platform_tools_unavailable",
-            failure_attribution=["invalid_tool_path"],
-            stop_reason="本 skill 必须与 opendataworks-platform-tools 同时启用；请先启用平台工具技能，不要改用其他 SQL 执行方式。",
-        )
-    root = Path(raw).expanduser().resolve(strict=False)
-    if not (root / "scripts" / "run_sql.py").is_file():
-        raise MethodologyError(
-            f"DATAAGENT_PLATFORM_SKILL_ROOT 下找不到 scripts/run_sql.py: {root}",
-            error_code="platform_tools_unavailable",
-            failure_attribution=["invalid_tool_path"],
-            stop_reason="平台工具技能目录不完整，无法执行只读查询。",
-        )
-    return root
+    checked: list[str] = []
+    for candidate in _platform_skill_candidates():
+        root = candidate.resolve(strict=False)
+        if (root / "scripts" / "run_sql.py").is_file():
+            return root
+        checked.append(str(root))
+    raise MethodologyError(
+        "找不到 opendataworks-platform-tools：方法论的 sql 节点依赖它执行只读查询。已尝试："
+        + "、".join(checked),
+        error_code="platform_tools_unavailable",
+        failure_attribution=["invalid_tool_path"],
+        stop_reason=(
+            "本 skill 必须与 opendataworks-platform-tools 一起安装并启用；"
+            "请先启用平台工具技能，不要改用其他 SQL 执行方式。"
+        ),
+    )
 
 
 class MethodologyEngine:

@@ -6,8 +6,18 @@
   "intent": "按数仓分层统计本期与上一等长周期的新增建表数，并计算环比增长率",
   "caliber": "口径字段为 data_table.created_at；只统计 deleted = 0 的表；上期区间与本期等长且不重叠；上期为 0 的分层不参与环比计算，会被剔除。",
   "owner": "data-platform",
-  "synonyms": ["建表数环比", "分层建表增长", "数据表增长率", "table growth"],
-  "output_fields": ["layer", "current_cnt", "previous_cnt", "growth"],
+  "synonyms": [
+    "建表数环比",
+    "分层建表增长",
+    "数据表增长率",
+    "table growth"
+  ],
+  "output_fields": [
+    "layer",
+    "current_cnt",
+    "previous_cnt",
+    "growth"
+  ],
   "notes": "对应论文 HeadcountGrowth 结构：previous 依赖 current 并把它返回的分层拼进 IN 列表；current 同时被 previous 与 growth 依赖，引擎只执行一次。",
   "params": [
     {
@@ -24,7 +34,13 @@
       "type": "enum",
       "description": "只看某一个数仓分层；不传则覆盖全部分层",
       "required": false,
-      "values": ["ODS", "DWD", "DIM", "DWS", "ADS"]
+      "values": [
+        "ODS",
+        "DWD",
+        "DIM",
+        "DWS",
+        "ADS"
+      ]
     }
   ],
   "target": "growth",
@@ -35,16 +51,22 @@
       "database": "opendataworks",
       "engine": "mysql",
       "predicates": {
-        "layer_filter": { "op": "eq", "field": "layer", "value": "$params.layer" }
+        "layer_filter": {
+          "op": "eq",
+          "field": "layer",
+          "value": "$params.layer"
+        }
       },
-      "sql": "SELECT layer, COUNT(id) AS table_cnt\nFROM data_table\nWHERE deleted = 0\n  AND created_at >= DATE_SUB(CURDATE(), INTERVAL {{ params.days }} DAY)\n  {{? layer_filter }}\nGROUP BY layer"
+      "sql": "SELECT layer, COUNT(id) AS table_cnt\nFROM opendataworks.data_table\nWHERE deleted = 0\n  AND created_at >= DATE_SUB(CURDATE(), INTERVAL {{ params.days }} DAY)\n  {{? layer_filter }}\nGROUP BY layer"
     },
     "previous": {
       "type": "sql",
       "description": "上一等长周期各分层新增建表数，范围收敛到本期出现过的分层",
       "database": "opendataworks",
       "engine": "mysql",
-      "dependencies": ["current"],
+      "dependencies": [
+        "current"
+      ],
       "predicates": {
         "layer_scope": {
           "op": "in",
@@ -52,13 +74,23 @@
           "values": "$pluck(current.rows, 'layer')"
         }
       },
-      "sql": "SELECT layer, COUNT(id) AS table_cnt\nFROM data_table\nWHERE deleted = 0\n  AND created_at >= DATE_SUB(CURDATE(), INTERVAL {{ params.days * 2 }} DAY)\n  AND created_at < DATE_SUB(CURDATE(), INTERVAL {{ params.days }} DAY)\n  {{? layer_scope }}\nGROUP BY layer"
+      "sql": "SELECT layer, COUNT(id) AS table_cnt\nFROM opendataworks.data_table\nWHERE deleted = 0\n  AND created_at >= DATE_SUB(CURDATE(), INTERVAL {{ params.days * 2 }} DAY)\n  AND created_at < DATE_SUB(CURDATE(), INTERVAL {{ params.days }} DAY)\n  {{? layer_scope }}\nGROUP BY layer"
     },
     "growth": {
       "type": "sqlite",
       "description": "内存 join 两期结果并计算环比增长率",
-      "dependencies": ["current", "previous"],
-      "primary_keys": { "current": ["layer"], "previous": ["layer"] },
+      "dependencies": [
+        "current",
+        "previous"
+      ],
+      "primary_keys": {
+        "current": [
+          "layer"
+        ],
+        "previous": [
+          "layer"
+        ]
+      },
       "sql": "SELECT c.layer AS layer,\n       c.table_cnt AS current_cnt,\n       p.table_cnt AS previous_cnt,\n       CAST(c.table_cnt - p.table_cnt AS REAL) / p.table_cnt AS growth\nFROM current c\nINNER JOIN previous p ON c.layer = p.layer\nWHERE p.table_cnt > 0\nORDER BY growth DESC"
     }
   }

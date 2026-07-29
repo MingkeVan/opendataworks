@@ -200,9 +200,10 @@ JSON Schema——完全对齐 `ontology-modeling-assistant/scripts/ontology_sche
 
 ### `sql` 节点委托 platform-tools
 
-`sql` 节点**不自己连数据库**，而是子进程调用
-`"$DATAAGENT_PLATFORM_SKILL_ROOT/scripts/run_sql.py" --database <db> --engine <engine> --sql <bound sql>`
-并解析其 JSON 输出。
+`sql` 节点**不自己连数据库**，而是子进程调用 platform-tools 的
+`scripts/run_sql.py --database <db> --engine <engine> --sql <bound sql>` 并解析其 JSON 输出。
+平台工具目录由脚本自行定位：默认取同级目录 `../opendataworks-platform-tools`，
+宿主可用 `DATAAGENT_PLATFORM_SKILL_ROOT` 覆盖。
 
 这样保住了 `30-tool-recipes.md:15` 的契约"`run_sql.py` 是唯一推荐的 SQL 执行入口"，
 并且免费继承它的全部护栏：只读校验（`ensure_read_only`）、血缘 guard
@@ -210,10 +211,26 @@ JSON Schema——完全对齐 `ontology-modeling-assistant/scripts/ontology_sche
 以及 `run_sql.py:25` `classify_sql_execution_failure` 的失败归因分类。这正是论文
 "把专门问题留在接缝后面"那条教训的应用。
 
-**硬前置**：本 skill 必须与 `opendataworks-platform-tools` 同时启用。
-`core/agent_runtime.py:199` `_build_workspace_allowed_roots` 只在 platform-tools 被启用时
-才把它的根目录加入允许列表。缺失时 `run_methodology.py` 返回
+**硬前置**：本 skill 必须与 `opendataworks-platform-tools` 一起安装并启用。
+`core/agent_runtime.py:199` `_build_workspace_allowed_roots` 也只在 platform-tools 被启用时
+才把它的根目录加入允许列表。两处都找不到时 `run_methodology.py` 返回
 `error_code=platform_tools_unavailable`，不静默降级。
+
+### 技能包必须自包含
+
+一个 skill bundle 装到哪都应该能跑，所以**技能内不写任何根路径**：
+
+- 不写宿主注入的根路径变量（`${DATAAGENT_..._SKILL_ROOT}`）——那把技能绑死在这套 backend 上；
+- 不写 `.claude/skills/<folder>/...`——那把技能绑死在 `topic_workspace.py` 的 staging 布局这个内部实现上；
+- 不写仓库相对路径或 `/app/...` 部署绝对路径。
+
+文档里的调用形式一律是 `cd <本技能目录> && python3 scripts/<name>.py ...`，
+脚本自身用 `Path(__file__).resolve().parent.parent` 解析技能根（`registry.py:24`），
+注册表、schema、同级技能全部由脚本定位。因此本 skill **不需要后端做任何配套改动**，
+共享运行时模块零改动。
+
+这条同样适用于对 platform-tools 的依赖：先找同级目录，环境变量只作为可选覆盖，
+而不是必需输入。
 
 ### 占位符绑定与注入安全（论文 V 的直接移植）
 
@@ -322,21 +339,17 @@ JSON Schema——完全对齐 `ontology-modeling-assistant/scripts/ontology_sche
 ### 新增
 
 - skill 目录 `dataagent/.claude/skills/opendataworks-methodology-dag/`（全部新增文件）。
-- 脚本调用契约：
-  - `"$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/lookup_methodology.py" --query "<问题>"`
-  - `"$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/run_methodology.py" --id <id> --params '<json>'`
-  - `"$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/validate_methodology.py" --all`
-
-### 变更
-
-- `core/agent_runtime.py`：为每个已启用 skill folder 导出
-  `DATAAGENT_<UPPER_SNAKE>_SKILL_ROOT`。当前只导出 primary 的 `DATAAGENT_SKILL_ROOT` 和硬编码的
-  `DATAAGENT_PLATFORM_SKILL_ROOT`（`agent_runtime.py:39,558-596`），而 AGENTS.md 禁止非 primary
-  skill 使用 `DATAAGENT_SKILL_ROOT`。改成通用规则后，共享模块里不再需要新增 skill 名，
-  符合"keep generic runtime modules skill-agnostic"。`DATAAGENT_PLATFORM_SKILL_ROOT` 保留为兼容别名。
+- 脚本调用契约，路径相对技能自身目录：
+  - `cd <本技能目录> && python3 scripts/lookup_methodology.py --query "<问题>"`
+  - `cd <本技能目录> && python3 scripts/run_methodology.py --id <id> --params '<json>'`
+  - `cd <本技能目录> && python3 scripts/validate_methodology.py --all`
+- 可选环境覆盖（全部有默认值，缺失不影响运行）：`DATAAGENT_PLATFORM_SKILL_ROOT`、
+  `DATAAGENT_QUERY_LIMIT`、`DATAAGENT_SQL_READ_TIMEOUT_SECONDS`、
+  `DATAAGENT_METHODOLOGY_TOTAL_TIMEOUT_SECONDS`。
 
 ### 不变
 
+- **后端零改动**。技能自包含，不需要共享运行时导出任何新变量。
 - `run_sql.py` / `validate_sql.py` / `build_chart_spec.py` 契约不变。
 - 前端渲染不变。
 - 系统提示词不变。

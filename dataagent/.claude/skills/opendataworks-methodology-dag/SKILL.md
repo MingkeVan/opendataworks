@@ -20,17 +20,30 @@ tools: [Read, Bash, Glob, Grep]
 ## 前置依赖
 
 本技能的 `sql` 节点通过 `opendataworks-platform-tools` 的 `run_sql.py` 执行只读查询，
-以复用平台既有的只读校验、数据范围校验和失败归因。
+以复用平台既有的只读校验、数据范围校验和失败归因。脚本自己定位它：默认取同级目录
+`../opendataworks-platform-tools`，宿主可用 `DATAAGENT_PLATFORM_SKILL_ROOT` 覆盖。
 
-**必须与 `opendataworks-platform-tools` 同时启用。** 未启用时执行会返回
+**必须与 `opendataworks-platform-tools` 一起安装并启用。** 两者都不存在时执行会返回
 `error_code=platform_tools_unavailable`；此时说明缺少执行入口，不要改用其他方式取数。
+
+## 脚本怎么调
+
+所有脚本都在本技能目录的 `scripts/` 下，**路径一律相对本 SKILL.md 所在目录**。
+先切到本技能目录再执行，不要把仓库路径、部署路径或工作区路径写死到命令里：
+
+```bash
+cd <本技能目录> && python3 scripts/<name>.py ...
+```
+
+`<本技能目录>` 就是你读到这份 SKILL.md 的那个目录。脚本自身会解析它自己的位置
+（注册表、schema、同级技能都由脚本自行定位），所以只要能进到这个目录，命令就能跑。
 
 ## Playbook
 
 1. **先检索，再决定**。拿到用户问题后先查注册表：
 
    ```bash
-   "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/lookup_methodology.py" --query "<用户问题>"
+   cd <本技能目录> && python3 scripts/lookup_methodology.py --query "<用户问题>"
    ```
 
    返回每个候选的 `intent`、`caliber`、参数槽位和输出字段。**这一步不执行任何查询。**
@@ -38,7 +51,7 @@ tools: [Read, Bash, Glob, Grep]
 2. **命中且参数齐全 → 一次执行拿最终结果**：
 
    ```bash
-   "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/run_methodology.py" --id <id> --params '{"days":30}'
+   cd <本技能目录> && python3 scripts/run_methodology.py --id <id> --params '{"days":30}'
    ```
 
    输出契约与 `run_sql.py` 一致（`kind=sql_execution`），可直接收口回答，也可直接喂给

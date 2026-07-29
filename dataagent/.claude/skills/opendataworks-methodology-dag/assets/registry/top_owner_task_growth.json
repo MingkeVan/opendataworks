@@ -6,8 +6,19 @@
   "intent": "先选出任务数最多的 Top-N 负责人，再针对这些负责人统计近期新增任务数与增量占比",
   "caliber": "只统计 data_task 中 deleted = 0 且 owner 非空的任务；Top-N 按历史累计任务数排序；近期区间以 created_at 为口径。",
   "owner": "data-platform",
-  "synonyms": ["任务最多的人", "负责人任务排行", "top负责人", "任务增量排行", "top owner"],
-  "output_fields": ["owner", "total_cnt", "recent_cnt", "recent_share"],
+  "synonyms": [
+    "任务最多的人",
+    "负责人任务排行",
+    "top负责人",
+    "任务增量排行",
+    "top owner"
+  ],
+  "output_fields": [
+    "owner",
+    "total_cnt",
+    "recent_cnt",
+    "recent_share"
+  ],
   "notes": "对应论文 Top skills 结构：一次 Top-N 选择喂给第二轮参数化查询，中间用谓词把选中实体收敛进 IN 列表。",
   "params": [
     {
@@ -36,14 +47,16 @@
       "description": "按历史累计任务数选出 Top-N 负责人",
       "database": "opendataworks",
       "engine": "mysql",
-      "sql": "SELECT owner, COUNT(id) AS total_cnt\nFROM data_task\nWHERE deleted = 0\n  AND owner IS NOT NULL\n  AND owner <> ''\nGROUP BY owner\nORDER BY total_cnt DESC\nLIMIT {{ params.top_n }}"
+      "sql": "SELECT owner, COUNT(id) AS total_cnt\nFROM opendataworks.data_task\nWHERE deleted = 0\n  AND owner IS NOT NULL\n  AND owner <> ''\nGROUP BY owner\nORDER BY total_cnt DESC\nLIMIT {{ params.top_n }}"
     },
     "recent_by_owner": {
       "type": "sql",
       "description": "只针对选中的负责人统计近期新增任务数",
       "database": "opendataworks",
       "engine": "mysql",
-      "dependencies": ["top_owners"],
+      "dependencies": [
+        "top_owners"
+      ],
       "predicates": {
         "owner_scope": {
           "op": "in",
@@ -51,13 +64,20 @@
           "values": "$pluck(top_owners.rows, 'owner')"
         }
       },
-      "sql": "SELECT owner, COUNT(id) AS recent_cnt\nFROM data_task\nWHERE deleted = 0\n  AND created_at >= DATE_SUB(CURDATE(), INTERVAL {{ params.days }} DAY)\n  {{? owner_scope }}\nGROUP BY owner"
+      "sql": "SELECT owner, COUNT(id) AS recent_cnt\nFROM opendataworks.data_task\nWHERE deleted = 0\n  AND created_at >= DATE_SUB(CURDATE(), INTERVAL {{ params.days }} DAY)\n  {{? owner_scope }}\nGROUP BY owner"
     },
     "merged": {
       "type": "sqlite",
       "description": "把两轮结果合并，缺失的近期增量按 0 处理",
-      "dependencies": ["top_owners", "recent_by_owner"],
-      "primary_keys": { "top_owners": ["owner"] },
+      "dependencies": [
+        "top_owners",
+        "recent_by_owner"
+      ],
+      "primary_keys": {
+        "top_owners": [
+          "owner"
+        ]
+      },
       "sql": "SELECT t.owner AS owner,\n       t.total_cnt AS total_cnt,\n       COALESCE(r.recent_cnt, 0) AS recent_cnt,\n       CAST(COALESCE(r.recent_cnt, 0) AS REAL) / t.total_cnt AS recent_share\nFROM top_owners t\nLEFT JOIN recent_by_owner r ON t.owner = r.owner\nORDER BY t.total_cnt DESC"
     }
   }

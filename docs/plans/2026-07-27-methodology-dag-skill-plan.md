@@ -5,7 +5,7 @@
 ## 受影响栈
 
 - **DataAgent skill 包**：新增 `dataagent/.claude/skills/opendataworks-methodology-dag/`（主要工作量）
-- **DataAgent 后端**：`core/agent_runtime.py` 一处通用化改动 + 对应测试
+- **DataAgent 后端**：无改动（技能自包含，不需要共享运行时导出任何新变量）
 - **前端**：无改动（复用 `sql_execution` 渲染）
 - **数据库 / 部署**：无改动（不写迁移；skills 目录是 bind mount）
 
@@ -35,8 +35,9 @@
    - 依赖并发：`ThreadPoolExecutor` 同时 force 独立依赖。
    - `conditional`：先算谓词再 force 选中分支；分支是软依赖，不参与预先依赖解析。
    - `call`：解析注册表中的另一方法论，维护调用链并拒绝环。
-   - `sql` 执行器：子进程调用 `${DATAAGENT_PLATFORM_SKILL_ROOT}/scripts/run_sql.py`，
-     解析 JSON；`DATAAGENT_PLATFORM_SKILL_ROOT` 缺失时抛
+   - `sql` 执行器：子进程调用 platform-tools 的 `scripts/run_sql.py` 并解析 JSON。
+     平台工具目录由脚本自行定位：默认同级目录 `../opendataworks-platform-tools`，
+     `DATAAGENT_PLATFORM_SKILL_ROOT` 仅作可选覆盖；两处都找不到时抛
      `platform_tools_unavailable`。
    - `sqlite` 执行器：依赖结果按节点名建表装入 `sqlite3` 内存库后执行 SQL。
    - 两级超时：总预算 + 单节点超时。
@@ -67,38 +68,36 @@
 9. `SKILL.md`：定位、边界、playbook（先 lookup 后 run，未命中回落）、
    与 platform-tools 的硬前置关系、口径变更规则。
 10. `reference/10-model.md`、`20-authoring.md`、`30-invocation.md`、`40-output-contract.md`。
-    可执行引用一律用完整形式
-    `"$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/<name>.py"`。
+    可执行引用一律相对技能自身目录：`cd <本技能目录> && python3 scripts/<name>.py`。
+    技能包内不得出现任何根路径——宿主注入的变量、`.claude/skills/...` staging 布局、
+    仓库相对路径、`/app/...` 部署路径都不行，否则技能只能在某一套运行时里活。
 
-### G5 —— 后端通用化改动
+### G5 —— 后端契约测试
 
-11. `core/agent_runtime.py`
-    - 为每个已启用 skill folder 导出 `DATAAGENT_<UPPER_SNAKE>_SKILL_ROOT`。
-    - 保留 `DATAAGENT_PLATFORM_SKILL_ROOT` 作为兼容别名，`PLATFORM_TOOLS_SKILL_FOLDER`
-      的 sibling 回落逻辑不动。
-12. `tests/test_agent_runtime.py`：断言新导出规则与旧别名同时成立。
-13. `tests/test_builtin_skill_content.py`：新增本 skill 的内容契约测试，
+11. `tests/test_builtin_skill_content.py`：新增本 skill 的内容契约测试，
     参照现有 `test_platform_tools_skill_documents_run_sql_as_only_recommended_sql_execution_entrypoint`。
+    其中一条专门断言**技能包不含任何根路径**（宿主变量、staging 布局、仓库路径、部署路径），
+    防止以后有人为了省事又把根路径写回文档。
 
 ### G6 —— 测试
 
-14. `tests/test_methodology_dag_schema.py`：模型接受合法工件、拒绝多余字段与非法节点类型；
+12. `tests/test_methodology_dag_schema.py`：模型接受合法工件、拒绝多余字段与非法节点类型；
     `assets/methodology.schema.json` 与模型导出一致（防止 schema 文件漂移）。
-15. `tests/test_methodology_dag_binding.py`（注入安全，必须逐条断言）：
+13. `tests/test_methodology_dag_binding.py`（注入安全，必须逐条断言）：
     - 受检值里的 `'` 被转义，无法闭合字符串。
     - 标量数组展开成逗号列表可直接用于 `IN (...)`。
     - 片段占位符拒绝 `1;DROP TABLE x`、空格、引号等非标识符输入。
     - 谓词 DSL 丢弃 null 子谓词；全空时 WHERE 片段为空串。
     - 表达式求值器拒绝函数调用、属性访问、下标以外的 AST 节点。
-16. `tests/test_methodology_dag_engine.py`（论文四条语义，逐条断言，不只是"跑通"）：
+14. `tests/test_methodology_dag_engine.py`（论文四条语义，逐条断言，不只是"跑通"）：
     - 共享依赖节点一次运行只执行一次（计数 mock 的调用次数）。
     - 条件未选中分支从未被执行（该分支挂一个会抛异常的 mock 节点，运行仍成功）。
     - 独立分支并发（mock 节点各 sleep 0.2s，总耗时显著小于串行和）。
     - `call` 环、依赖环、缺失依赖、不存在的 target 在加载期被拒绝，环报出具体路径。
-17. `tests/test_methodology_dag_validate.py`：各类非法工件被拒绝且错误信息可定位。
-18. `tests/test_methodology_dag_registry.py`：注册表里每个方法论都通过静态校验，
+15. `tests/test_methodology_dag_validate.py`：各类非法工件被拒绝且错误信息可定位。
+16. `tests/test_methodology_dag_registry.py`：注册表里每个方法论都通过静态校验，
     且都能在 mock 模式下跑到 target。
-19. `tests/evals/evals.json`：问题 → 期望命中的方法论 id 与参数槽位。
+17. `tests/evals/evals.json`：问题 → 期望命中的方法论 id 与参数槽位。
 
 ## 验证
 
@@ -106,8 +105,7 @@
 
 ```bash
 python -m pytest dataagent/.claude/skills/opendataworks-methodology-dag/tests -q
-python -m pytest dataagent/dataagent-backend/tests/test_builtin_skill_content.py \
-                dataagent/dataagent-backend/tests/test_agent_runtime.py -q
+python -m pytest dataagent/dataagent-backend/tests/test_builtin_skill_content.py -q
 "$(command -v python3)" dataagent/.claude/skills/opendataworks-methodology-dag/scripts/validate_methodology.py --all
 ```
 
@@ -132,8 +130,7 @@ python -m pytest dataagent/dataagent-backend/tests/test_builtin_skill_content.py
 ## 回滚
 
 - skill 未默认启用，现网零影响。删除 skill 目录即可完全回滚。
-- `core/agent_runtime.py` 的改动是纯增量导出（旧变量名保留），单独 revert 该文件即可，
-  不影响其他 skill。
+- 后端零改动，没有需要单独回滚的共享模块变更。
 
 ## 已知限制
 

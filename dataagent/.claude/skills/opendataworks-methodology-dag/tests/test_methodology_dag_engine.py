@@ -9,6 +9,7 @@ import time
 
 import pytest
 
+import engine
 from engine import MethodologyEngine, MethodologyError, run_methodology
 
 
@@ -193,12 +194,35 @@ def test_an_exhausted_total_budget_stops_the_run():
 
 # -- node behaviour ---------------------------------------------------------
 
-def test_sql_node_without_platform_tools_reports_a_precise_cause(monkeypatch):
-    monkeypatch.delenv("DATAAGENT_PLATFORM_SKILL_ROOT", raising=False)
+def test_platform_tools_is_found_as_a_sibling_without_any_environment_variable(monkeypatch):
+    """The skill locates its neighbour from its own path, needing nothing from the host."""
+    monkeypatch.delenv(engine.PLATFORM_TOOLS_ROOT_ENV, raising=False)
+
+    root = engine._resolve_platform_skill_root()
+
+    assert root.name == engine.PLATFORM_TOOLS_FOLDER
+    assert (root / "scripts" / "run_sql.py").is_file()
+
+
+def test_an_environment_override_wins_over_the_sibling(monkeypatch, tmp_path):
+    override = tmp_path / "elsewhere"
+    (override / "scripts").mkdir(parents=True)
+    (override / "scripts" / "run_sql.py").write_text("", encoding="utf-8")
+    monkeypatch.setenv(engine.PLATFORM_TOOLS_ROOT_ENV, str(override))
+
+    assert engine._resolve_platform_skill_root() == override.resolve()
+
+
+def test_sql_node_without_platform_tools_anywhere_reports_a_precise_cause(monkeypatch):
+    monkeypatch.delenv(engine.PLATFORM_TOOLS_ROOT_ENV, raising=False)
+    monkeypatch.setattr(engine, "PLATFORM_TOOLS_FOLDER", "absent-platform-tools")
     methodology = _graph({"a": {"type": "sql", "database": "d", "sql": "SELECT 1"}}, "a")
+
     with pytest.raises(MethodologyError) as excinfo:
         MethodologyEngine(methodology, {}).run()
+
     assert excinfo.value.error_code == "platform_tools_unavailable"
+    assert "absent-platform-tools" in str(excinfo.value)
 
 
 def test_transform_filters_derives_and_sorts():

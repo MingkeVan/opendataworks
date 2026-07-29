@@ -1,10 +1,19 @@
 # 脚本调用契约
 
-先结论：只有三个脚本，统一通过
-`"$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/<name>.py" ...` 调用。
+先结论：只有三个脚本，都在本技能目录的 `scripts/` 下，统一通过
 
-不要自己拼脚本路径或脚本名，不要用 primary `DATAAGENT_SKILL_ROOT`、部署绝对路径、
-裸相对路径，也不要猜测其他脚本名。三个脚本之外没有别的入口。
+```bash
+cd <本技能目录> && python3 scripts/<name>.py ...
+```
+
+调用。`<本技能目录>` 就是 SKILL.md 所在的目录。
+
+**路径一律相对本技能目录**，不要把仓库路径、部署绝对路径或宿主注入的根路径变量写进命令——
+技能包要装到哪都能跑，写死任何一种根路径都会让它只在某一套运行时里有效。
+脚本自己会解析自身位置（注册表、schema、同级技能都由脚本定位），
+所以只要能进到本技能目录，命令就成立。
+
+也不要猜测其他脚本名，三个脚本之外没有别的入口。
 
 标准链路：`lookup_methodology.py` → 命中就 `run_methodology.py`，未命中就回落平台工具链路。
 
@@ -15,9 +24,9 @@
 - 命令模板：
 
   ```bash
-  "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/lookup_methodology.py" --query "<用户问题>"
-  "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/lookup_methodology.py" --id <id>
-  "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/lookup_methodology.py" --list
+  python3 scripts/lookup_methodology.py --query "<用户问题>"
+  python3 scripts/lookup_methodology.py --id <id>
+  python3 scripts/lookup_methodology.py --list
   ```
 
 - 输出 `kind=methodology_lookup`，含 `matched`、`results[]`。每个候选带
@@ -31,7 +40,7 @@
 - 命令模板：
 
   ```bash
-  "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/run_methodology.py" --id <id> --params '<JSON 对象>'
+  python3 scripts/run_methodology.py --id <id> --params '<JSON 对象>'
   ```
 
 - 参数：
@@ -58,9 +67,9 @@
 - 命令模板：
 
   ```bash
-  "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/validate_methodology.py" --all
-  "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/validate_methodology.py" --path <file.json>
-  "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/validate_methodology.py" --id <id>
+  python3 scripts/validate_methodology.py --all
+  python3 scripts/validate_methodology.py --path <file.json>
+  python3 scripts/validate_methodology.py --id <id>
   ```
 
 - 加 `--check-sql` 会用桩参数绑定每个 `sql` 节点，再交给平台工具的 `validate_sql.py`。
@@ -86,22 +95,27 @@ mock 文件形如：
 `growth` 的内存 join。
 
 ```bash
-"$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/run_methodology.py" \
+python3 scripts/run_methodology.py \
   --id table_growth_ratio --params '{"days":30}' --mock <mock.json>
 ```
 
 mock 模式主要给方法论作者和回归测试用；回答用户问题时不要用它，
 mock 出来的不是真实结果。
 
-## 环境依赖
+## 依赖与可选环境变量
+
+运行本技能**不需要任何环境变量**：脚本从自身位置解析技能根、注册表和同级技能，
+只要 `python3` 可用即可。下列变量全是可选覆盖，用于宿主想改默认值的场合。
 
 | 变量 | 用途 | 缺失后果 |
 |---|---|---|
-| `DATAAGENT_PYTHON_BIN` | 解释器 | 回落到当前解释器 |
-| `DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT` | 本技能根目录 | 无法定位脚本 |
-| `DATAAGENT_PLATFORM_SKILL_ROOT` | 平台工具根目录，`sql` 节点靠它执行 | `error_code=platform_tools_unavailable` |
+| `DATAAGENT_PLATFORM_SKILL_ROOT` | 平台工具目录的覆盖值 | 回落到同级目录 `../opendataworks-platform-tools` |
 | `DATAAGENT_QUERY_LIMIT` | 查询节点行数上限 | 默认 1000 |
 | `DATAAGENT_SQL_READ_TIMEOUT_SECONDS` | 单节点超时 | 默认 60 |
+| `DATAAGENT_METHODOLOGY_TOTAL_TIMEOUT_SECONDS` | 单次运行总预算 | 默认 240 |
+
+唯一的真实依赖是**同级安装的 `opendataworks-platform-tools`**：`sql` 节点靠它的
+`run_sql.py` 执行只读查询。两处都找不到时报 `error_code=platform_tools_unavailable`。
 
 不要执行环境探测或依赖安装命令。脚本报错时优先收敛参数或向用户追问，
 不要切换解释器反复试探。

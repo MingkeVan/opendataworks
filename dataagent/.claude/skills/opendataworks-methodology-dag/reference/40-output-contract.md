@@ -83,7 +83,7 @@ per-node trace 是声明式结构的直接红利：方法论作者不写任何�
 | `param_missing` | 缺必填参数 | 只追问 `stop_reason` 里列出的槽位 |
 | `param_rejected` | 参数取值非法（类型、范围、枚举、绑定失败）| 修正参数取值，不要绕过方法论自己写 SQL |
 | `methodology_timeout` | 总执行预算耗尽 | 缩小参数范围，或改后台执行 |
-| `platform_tools_unavailable` | 缺 `DATAAGENT_PLATFORM_SKILL_ROOT` 或平台工具目录不完整 | 说明缺少执行入口；这不是可以换个方式绕过的问题 |
+| `platform_tools_unavailable` | 同级目录与覆盖变量都找不到完整的 `opendataworks-platform-tools` | 说明缺少执行入口；这不是可以换个方式绕过的问题 |
 
 查询节点失败时，`error_code`、`failure_attribution`、`stop_reason` 直接透传
 `run_sql.py` 的归因结果（`permission_denied`、`unknown_column`、`unknown_table`、

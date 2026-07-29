@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from engine import run_methodology
+from engine import _platform_skill_candidates, run_methodology
 from registry import coerce_params, load_registry
 from validate_methodology import validate_methodology
 
@@ -67,6 +67,25 @@ def test_each_methodology_reaches_its_target_under_mock(identifier):
         assert list(result.columns) == list(declared), (
             f"{identifier} 的实际输出列与 output_fields 声明不一致"
         )
+
+
+@pytest.mark.parametrize("identifier", sorted(REGISTRY))
+def test_each_methodology_sql_passes_the_platform_validator(identifier):
+    """Bind with stub parameters and hand the SQL to platform-tools.
+
+    This catches what a methodology-only check cannot — engine-side rules such as
+    the schema-prefix requirement. It is skipped rather than silently passing when
+    platform-tools is not installed, because a check that quietly does nothing is
+    how such a defect hides.
+    """
+    if not any((c.resolve(strict=False) / "scripts" / "validate_sql.py").is_file() for c in _platform_skill_candidates()):
+        pytest.skip("opendataworks-platform-tools 未安装，无法做 SQL 校验")
+
+    report = validate_methodology(REGISTRY[identifier], registry=REGISTRY, check_sql=True)
+
+    assert report.ok, report.errors
+    skipped = [warning for warning in report.warnings if "校验被跳过" in warning]
+    assert not skipped, f"SQL 校验被跳过而不是真的执行了: {skipped}"
 
 
 @pytest.mark.parametrize("identifier", sorted(REGISTRY))

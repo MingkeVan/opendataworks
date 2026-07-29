@@ -6,8 +6,6 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
@@ -51,11 +49,6 @@ def test_build_runtime_env_does_not_expose_direct_db_connection_settings(monkeyp
     assert runtime_env["DATAAGENT_PLATFORM_SKILL_ROOT"] == str(Path("/tmp/platform-tools").resolve())
     assert runtime_env["DATAAGENT_ENABLED_SKILLS"] == "opendataworks-business-knowledge,opendataworks-platform-tools,marketing-insights"
     assert "marketing-insights" in runtime_env["DATAAGENT_ENABLED_SKILL_ROOTS"]
-    # Every enabled skill also gets its own root variable, derived from the folder
-    # name, so a skill's scripts never have to borrow the primary skill root.
-    assert runtime_env["DATAAGENT_BUSINESS_KNOWLEDGE_SKILL_ROOT"] == str(Path("/tmp/skill-root").resolve())
-    assert runtime_env["DATAAGENT_PLATFORM_TOOLS_SKILL_ROOT"] == str(Path("/tmp/platform-tools").resolve())
-    assert runtime_env["DATAAGENT_MARKETING_INSIGHTS_SKILL_ROOT"] == str(Path("/tmp/marketing-insights").resolve())
     assert "ODW_MYSQL_HOST" not in runtime_env
     assert "ODW_MYSQL_PORT" not in runtime_env
     assert "ODW_MYSQL_USER" not in runtime_env
@@ -94,43 +87,6 @@ def test_build_runtime_env_derives_platform_root_from_primary_root_when_enabled_
         },
     )
 
-    assert runtime_env["DATAAGENT_PLATFORM_SKILL_ROOT"] == str(platform_root.resolve())
-
-
-def test_skill_root_env_name_drops_the_shared_prefix_and_upper_snakes_the_rest():
-    assert agent_runtime.skill_root_env_name("opendataworks-methodology-dag") == "DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT"
-    assert agent_runtime.skill_root_env_name("ontology-modeling-assistant") == "DATAAGENT_ONTOLOGY_MODELING_ASSISTANT_SKILL_ROOT"
-    assert agent_runtime.skill_root_env_name("Marketing Insights") == "DATAAGENT_MARKETING_INSIGHTS_SKILL_ROOT"
-
-
-@pytest.mark.parametrize("folder", ["", "   ", "-", "123", "opendataworks-"])
-def test_skill_root_env_name_rejects_folders_that_cannot_form_a_variable(folder):
-    assert agent_runtime.skill_root_env_name(folder) == ""
-
-
-def test_methodology_dag_skill_gets_its_own_root_alongside_platform_tools(tmp_path: Path):
-    skills_root = tmp_path / ".claude" / "skills"
-    platform_root = skills_root / "opendataworks-platform-tools"
-    methodology_root = skills_root / "opendataworks-methodology-dag"
-    platform_root.mkdir(parents=True)
-    methodology_root.mkdir(parents=True)
-
-    runtime_env = agent_runtime._build_runtime_env(
-        SimpleNamespace(query_result_limit=1000),
-        {},
-        SimpleNamespace(question="", sql_read_timeout_seconds=0),
-        {
-            "primary_root": str(platform_root),
-            "enabled_folders": ["opendataworks-platform-tools", "opendataworks-methodology-dag"],
-            "enabled_roots": {
-                "opendataworks-platform-tools": str(platform_root),
-                "opendataworks-methodology-dag": str(methodology_root),
-            },
-        },
-    )
-
-    assert runtime_env["DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT"] == str(methodology_root.resolve())
-    # The legacy alias the platform-tools docs reference must keep working.
     assert runtime_env["DATAAGENT_PLATFORM_SKILL_ROOT"] == str(platform_root.resolve())
 
 

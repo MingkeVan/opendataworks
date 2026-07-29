@@ -29,7 +29,7 @@
 4. **写节点**。查询用 `sql`，合并用 `sqlite`，补算列用 `transform`，切换口径用 `conditional`。
 5. **校验**：
    ```bash
-   "$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/validate_methodology.py" --path assets/registry/<id>.json
+   python3 scripts/validate_methodology.py --path assets/registry/<id>.json
    ```
 6. **写 mock 用例并跑通**。见 [`30-invocation.md`](30-invocation.md) 的 mock 模式。
    方法论应该能在不碰数据库的情况下被断言，这是它相对手写 SQL 最大的优势之一。

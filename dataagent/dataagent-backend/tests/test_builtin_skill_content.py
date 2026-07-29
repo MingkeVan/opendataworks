@@ -379,7 +379,6 @@ def test_methodology_dag_skill_routes_lookup_first_and_falls_back_on_a_miss():
 
     required_tokens = [
         "OpenDataWorks Methodology DAG Skill",
-        "DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT",
         "lookup_methodology.py",
         "run_methodology.py",
         "validate_methodology.py",
@@ -398,13 +397,35 @@ def test_methodology_dag_skill_routes_lookup_first_and_falls_back_on_a_miss():
     for token in required_tokens:
         assert token in snapshot, token
 
-    # Executable references use the full contract form, never a bare script name.
-    assert (
-        '"$DATAAGENT_PYTHON_BIN" "${DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT}/scripts/run_methodology.py"'
-        in snapshot
-    )
     # The skill must not re-document a second SQL execution entrypoint.
     assert "唯一推荐的 SQL 执行入口" not in snapshot
+
+
+def test_methodology_dag_skill_stays_portable_and_embeds_no_root_path():
+    """A skill bundle must run wherever it is installed.
+
+    Baking in a host-injected root variable, a repo path, or the runtime's
+    workspace staging layout would tie the bundle to one particular host, so the
+    documented invocation is relative to the skill's own directory instead.
+    """
+    snapshot = _skill_text_snapshot(METHODOLOGY_DAG_SKILL_ROOT)
+
+    assert "python3 scripts/run_methodology.py" in snapshot
+    assert "python3 scripts/lookup_methodology.py" in snapshot
+    assert "路径一律相对本技能目录" in snapshot
+
+    forbidden_tokens = [
+        # A root path injected by this particular backend.
+        "DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT",
+        "${DATAAGENT_SKILL_ROOT}",
+        # The workspace staging layout, which is an internal runtime detail.
+        ".claude/skills/opendataworks-methodology-dag/scripts",
+        # Repo-relative and deployment-absolute paths.
+        "dataagent/.claude/skills/opendataworks-methodology-dag/scripts",
+        "/app/.claude/skills",
+    ]
+    for token in forbidden_tokens:
+        assert token not in snapshot, token
 
 
 def test_methodology_dag_skill_forbids_bypassing_a_registered_caliber():
@@ -422,7 +443,9 @@ def test_methodology_dag_skill_forbids_bypassing_a_registered_caliber():
 def test_methodology_dag_skill_declares_the_platform_tools_prerequisite():
     snapshot = _skill_text_snapshot(METHODOLOGY_DAG_SKILL_ROOT)
 
-    assert "必须与 `opendataworks-platform-tools` 同时启用" in snapshot
+    assert "必须与 `opendataworks-platform-tools` 一起安装并启用" in snapshot
+    # The neighbour is located from the skill's own path, not from a host variable.
+    assert "../opendataworks-platform-tools" in snapshot
     # The sql node delegates rather than re-implementing SQL execution.
     assert "run_sql.py" in snapshot
 
