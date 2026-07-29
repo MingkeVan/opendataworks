@@ -48,7 +48,7 @@
   "predicates": {
     "layer_scope": { "op": "in", "field": "layer", "values": "$pluck(current.rows, 'layer')" }
   },
-  "sql": "SELECT layer, COUNT(id) AS table_cnt FROM data_table WHERE ... {{? layer_scope }} GROUP BY layer"
+  "sql": "SELECT layer, COUNT(id) AS table_cnt FROM opendataworks.data_table WHERE ... {{? layer_scope }} GROUP BY layer"
 }
 ```
 
@@ -102,6 +102,9 @@
 
 - **把口径写进注释而不是 `caliber`**。注释不会回给用户，`caliber` 会。
 - **用 `{{! }}` 拼用户输入**。片段占位符只给列名/别名用。任何来自用户的值都走 `{{ }}` 或谓词。
+- **表名不带 schema 前缀**。`sql` 节点必须写 `opendataworks.data_table`，
+  裸表名会被 `validate_sql.py` 拒绝。写完用 `--check-sql` 跑一遍就能发现。
+  （`sqlite` 节点相反：`FROM` 里写的是**依赖节点名**，不加任何前缀。）
 - **忘了软删除**。`data_table` / `data_task` 都有 `deleted` 字段，漏掉就多算。
 - **`transform` 挂多个依赖**。它只接受一个；要合并多个结果请用 `sqlite`。
 - **在方法论里查元数据**。表/字段发现走 `opendataworks-platform-tools` 的元数据工具，
