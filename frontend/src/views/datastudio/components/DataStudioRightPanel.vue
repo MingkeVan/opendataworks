@@ -4,20 +4,18 @@
 
       <section class="meta-panel">
         <header class="table-header">
-          <div class="table-identity">
-            <div class="table-title-row">
-              <span class="table-name" :title="fullTableName">{{ fullTableName }}</span>
-              <el-tag v-if="isDorisTable(state.table)" size="small" type="warning" effect="plain">DORIS</el-tag>
-              <el-tag v-if="state.table.layer" size="small" effect="plain">{{ state.table.layer }}</el-tag>
-              <el-tooltip content="表描述与字段描述的填写比例" placement="top">
-                <el-tag size="small" effect="plain" class="completeness-tag">
-                  元数据完善度 {{ completeness }}%
-                </el-tag>
-              </el-tooltip>
-            </div>
-            <div class="table-comment" :title="state.table.tableComment || ''">
+          <!-- 右侧面板较窄：表名单独一行占满，标签与描述并作一行，操作区再一行 -->
+          <div class="table-name" :title="fullTableName">{{ fullTableName }}</div>
+
+          <div class="table-meta-row">
+            <el-tag v-if="isDorisTable(state.table)" size="small" type="warning" effect="plain">DORIS</el-tag>
+            <el-tag v-if="state.table.layer" size="small" effect="plain">{{ state.table.layer }}</el-tag>
+            <el-tooltip content="表描述与字段描述的填写比例" placement="top">
+              <el-tag size="small" effect="plain" class="completeness-tag">完善度 {{ completeness }}%</el-tag>
+            </el-tooltip>
+            <span class="table-comment" :title="state.table.tableComment || ''">
               {{ state.table.tableComment || '暂无表描述' }}
-            </div>
+            </span>
           </div>
 
           <div class="table-actions">
@@ -529,27 +527,11 @@ const {
 
 .table-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
-}
-
-.table-identity {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.table-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  min-width: 0;
 }
 
 .table-name {
@@ -559,11 +541,18 @@ const {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 420px;
+}
+
+.table-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .completeness-tag {
   font-weight: 400;
+  flex: none;
 }
 
 .table-comment {
@@ -572,16 +561,20 @@ const {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 620px;
+  min-width: 0;
 }
 
 .table-actions {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
-  flex: none;
-  flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+/* 窄面板下按钮不换行，必要时内缩 */
+.table-actions :deep(.el-button) {
+  padding-left: 9px;
+  padding-right: 9px;
 }
 
 .metadata-missing-alert {

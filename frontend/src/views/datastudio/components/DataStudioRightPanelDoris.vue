@@ -1,105 +1,107 @@
 <template>
   <div class="meta-section meta-section-fill">
-    <section class="section-block">
-      <div class="section-header">
-        <div class="section-title">Doris 配置</div>
-        <el-tag size="small" type="warning" effect="plain">DORIS</el-tag>
-      </div>
-
-      <el-descriptions :column="2" border size="small" class="meta-descriptions">
-        <el-descriptions-item label="表模型">
-          <span>{{ state.table.tableModel || '-' }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="主键列">
-          <span>{{ state.table.keyColumns || '-' }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="分区字段">
-          <span>{{ state.table.partitionColumn || '-' }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="分桶字段">
-          <span>{{ state.table.distributionColumn || '-' }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="分桶数">
-          <el-input-number
-            v-if="state.metaEditing"
-            v-model="state.metaForm.bucketNum"
-            :min="1"
-            size="small"
-            controls-position="right"
-            class="meta-input"
-          />
-          <span v-else>{{ state.table.bucketNum || '-' }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="副本数">
-          <template v-if="state.metaEditing">
-            <div class="replica-edit">
-              <el-input-number
-                v-model="state.metaForm.replicaNum"
-                :min="1"
-                size="small"
-                controls-position="right"
-                class="meta-input"
-              />
-              <span v-if="isReplicaWarning(state.metaForm.replicaNum)" class="replica-warning">
-                <el-icon><Warning /></el-icon>
-                建议≥3
-              </span>
-            </div>
-          </template>
-          <span v-else :class="['replica-value', { 'replica-danger': isReplicaWarning(state.table.replicaNum) }]">
-            <el-icon v-if="isReplicaWarning(state.table.replicaNum)" class="warning-icon"><Warning /></el-icon>
-            {{ state.table.replicaNum || '-' }}
-          </span>
-        </el-descriptions-item>
-      </el-descriptions>
-    </section>
-
-    <section v-loading="partitionsLoading" class="section-block section-fill">
-      <div class="section-header">
-        <div class="section-title">分区列表</div>
-        <div class="section-actions">
-          <span v-if="partitions.length" class="partition-count">共 {{ partitions.length }} 个分区</span>
-          <el-button link type="primary" size="small" :disabled="partitionsLoading" @click="refreshPartitions">
-            刷新
-          </el-button>
+    <el-scrollbar class="meta-scroll">
+      <section class="section-block">
+        <div class="section-header">
+          <div class="section-title">Doris 配置</div>
+          <el-tag size="small" type="warning" effect="plain">DORIS</el-tag>
         </div>
-      </div>
 
-      <template v-if="partitions.length">
-        <el-table :data="pagedPartitions" border size="small">
-          <el-table-column prop="partitionName" label="分区名" min-width="150" show-overflow-tooltip />
-          <el-table-column label="范围" min-width="200" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.range || '-' }}</template>
-          </el-table-column>
-          <el-table-column label="大小" width="100" align="right">
-            <template #default="{ row }">{{ row.dataSize || '-' }}</template>
-          </el-table-column>
-          <el-table-column label="行数" width="110" align="right">
-            <template #default="{ row }">{{ formatRowCount(row.rowCount) }}</template>
-          </el-table-column>
-          <el-table-column label="分桶" width="70" align="right">
-            <template #default="{ row }">{{ row.buckets ?? '-' }}</template>
-          </el-table-column>
-          <el-table-column label="副本" width="70" align="right">
-            <template #default="{ row }">{{ row.replicationNum ?? '-' }}</template>
-          </el-table-column>
-          <el-table-column label="状态" width="90" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.state || '-' }}</template>
-          </el-table-column>
-        </el-table>
-        <el-pagination
-          v-model:current-page="currentPage"
-          v-model:page-size="pageSize"
-          class="partition-pager"
-          size="small"
-          background
-          layout="total, sizes, prev, pager, next"
-          :page-sizes="[5, 10, 15]"
-          :total="partitions.length"
-        />
-      </template>
-      <el-empty v-else-if="!partitionsLoading" :description="partitionsError || '暂无分区'" :image-size="60" />
-    </section>
+        <el-descriptions :column="2" border size="small" class="meta-descriptions">
+          <el-descriptions-item label="表模型">
+            <span>{{ state.table.tableModel || '-' }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="主键列">
+            <span>{{ state.table.keyColumns || '-' }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="分区字段">
+            <span>{{ state.table.partitionColumn || '-' }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="分桶字段">
+            <span>{{ state.table.distributionColumn || '-' }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="分桶数">
+            <el-input-number
+              v-if="state.metaEditing"
+              v-model="state.metaForm.bucketNum"
+              :min="1"
+              size="small"
+              controls-position="right"
+              class="meta-input"
+            />
+            <span v-else>{{ state.table.bucketNum || '-' }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="副本数">
+            <template v-if="state.metaEditing">
+              <div class="replica-edit">
+                <el-input-number
+                  v-model="state.metaForm.replicaNum"
+                  :min="1"
+                  size="small"
+                  controls-position="right"
+                  class="meta-input"
+                />
+                <span v-if="isReplicaWarning(state.metaForm.replicaNum)" class="replica-warning">
+                  <el-icon><Warning /></el-icon>
+                  建议≥3
+                </span>
+              </div>
+            </template>
+            <span v-else :class="['replica-value', { 'replica-danger': isReplicaWarning(state.table.replicaNum) }]">
+              <el-icon v-if="isReplicaWarning(state.table.replicaNum)" class="warning-icon"><Warning /></el-icon>
+              {{ state.table.replicaNum || '-' }}
+            </span>
+          </el-descriptions-item>
+        </el-descriptions>
+      </section>
+
+      <section v-loading="partitionsLoading" class="section-block partition-block">
+        <div class="section-header">
+          <div class="section-title">分区列表</div>
+          <div class="section-actions">
+            <span v-if="partitions.length" class="partition-count">共 {{ partitions.length }} 个分区</span>
+            <el-button link type="primary" size="small" :disabled="partitionsLoading" @click="refreshPartitions">
+              刷新
+            </el-button>
+          </div>
+        </div>
+
+        <template v-if="partitions.length">
+          <el-table :data="pagedPartitions" border size="small">
+            <el-table-column prop="partitionName" label="分区名" min-width="150" show-overflow-tooltip />
+            <el-table-column label="范围" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.range || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="大小" width="100" align="right">
+              <template #default="{ row }">{{ row.dataSize || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="行数" width="110" align="right">
+              <template #default="{ row }">{{ formatRowCount(row.rowCount) }}</template>
+            </el-table-column>
+            <el-table-column label="分桶" width="70" align="right">
+              <template #default="{ row }">{{ row.buckets ?? '-' }}</template>
+            </el-table-column>
+            <el-table-column label="副本" width="70" align="right">
+              <template #default="{ row }">{{ row.replicationNum ?? '-' }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="90" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.state || '-' }}</template>
+            </el-table-column>
+          </el-table>
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            class="partition-pager"
+            size="small"
+            background
+            layout="total, sizes, prev, pager, next"
+            :page-sizes="[5, 10, 15]"
+            :total="partitions.length"
+          />
+        </template>
+        <el-empty v-else-if="!partitionsLoading" :description="partitionsError || '暂无分区'" :image-size="60" />
+      </section>
+    </el-scrollbar>
   </div>
 </template>
 
@@ -207,6 +209,9 @@ watch(pageSize, () => {
 }
 .warning-icon {
   font-size: 13px;
+}
+.partition-block {
+  margin-top: 10px;
 }
 .partition-count {
   color: var(--text-muted);
