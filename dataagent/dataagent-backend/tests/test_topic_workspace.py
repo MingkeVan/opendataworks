@@ -120,6 +120,7 @@ def test_prepare_topic_workspace_copies_enabled_skills(monkeypatch, tmp_path: Pa
     # Real directory copies, not symlinks, so SDK skill discovery sees real files.
     assert skill_copy.is_dir() and not skill_copy.is_symlink()
     assert platform_copy.is_dir() and not platform_copy.is_symlink()
+    assert (workspace / ".claude" / "plans").is_dir()
     assert (skill_copy / "SKILL.md").read_text(encoding="utf-8") == "# opendataworks-business-knowledge\n"
     assert (platform_copy / "SKILL.md").read_text(encoding="utf-8") == "# opendataworks-platform-tools\n"
 

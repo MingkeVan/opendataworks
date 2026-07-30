@@ -539,6 +539,9 @@ def test_execute_task_stream_persists_sdk_records_without_magic_records(monkeypa
     assert result.session_id == "sdk-session-1"
     assert ClaudeAgentOptions.last_kwargs["include_partial_messages"] is True
     assert ClaudeAgentOptions.last_kwargs["cwd"] == str(tmp_path)
+    assert json.loads(ClaudeAgentOptions.last_kwargs["settings"]) == {
+        "plansDirectory": ".claude/plans"
+    }
     assert ClaudeAgentOptions.last_kwargs["cli_path"] == "/tmp/claude-cli"
     assert ClaudeAgentOptions.last_kwargs["skills"] == ["opendataworks-business-knowledge", "marketing-insights"]
     assert runtime["folders"] == ["opendataworks-business-knowledge", "marketing-insights"]
@@ -824,6 +827,25 @@ def test_execute_task_stream_uses_topic_workspace_for_sdk_cwd_and_keeps_home_dis
     assert ClaudeAgentOptions.last_kwargs["cwd"] == str(topic_workspace)
     assert ClaudeAgentOptions.last_kwargs["env"]["HOME"] == "/stable/claude-home"
     assert ClaudeAgentOptions.last_kwargs["env"]["HOME"] != str(topic_workspace)
+    assert json.loads(ClaudeAgentOptions.last_kwargs["settings"]) == {
+        "plansDirectory": ".claude/plans"
+    }
+    hooks = ClaudeAgentOptions.last_kwargs["hooks"]
+    boundary_hook = hooks["PreToolUse"][0].hooks[0]
+    allowed = asyncio.run(
+        boundary_hook(
+            {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": str(topic_workspace / ".claude" / "plans" / "runtime-plan.md"),
+                    "content": "# Plan",
+                },
+            },
+            "tool-write-plan",
+            {"signal": None},
+        )
+    )
+    assert allowed["continue_"] is True
     assert "DATAAGENT_WORKSPACE_DIR" not in ClaudeAgentOptions.last_kwargs["env"]
     assert "DATAAGENT_WORKSPACE_PREPARED" not in ClaudeAgentOptions.last_kwargs["env"]
 

@@ -125,6 +125,10 @@ def prepare_topic_workspace(
     workspace = Path(workspace_dir).expanduser().resolve() if workspace_dir else resolve_topic_workspace(topic_id, runtime_root=runtime_root)
     runtime_skills_dir = workspace / ".claude" / "skills"
     runtime_skills_dir.mkdir(parents=True, exist_ok=True)
+    # Claude Code receives plansDirectory=".claude/plans" from the task
+    # executor. Create its parent eagerly so the first plan-mode Write can use
+    # the workspace-local path without touching the separate Claude HOME.
+    (workspace / ".claude" / "plans").mkdir(parents=True, exist_ok=True)
 
     discovery_root = resolve_skill_discovery_root_dir()
     enabled = [str(folder or "").strip() for folder in enabled_folders if str(folder or "").strip()]
