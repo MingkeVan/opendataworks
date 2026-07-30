@@ -2,6 +2,7 @@ package com.onedata.portal.dto;
 
 import lombok.Data;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -22,6 +23,14 @@ public class DashboardTableAccessSummary {
     private Boolean dorisAuditEnabled;
 
     private String dorisAuditSource;
+
+    private String tableAccessSyncStatus;
+
+    private LocalDateTime tableAccessCoverageStart;
+
+    private Boolean tableAccessCoverageComplete;
+
+    private LocalDateTime tableAccessLastSyncedAt;
 
     private String note;
 }

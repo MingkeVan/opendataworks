@@ -92,6 +92,26 @@ public class TableAccessStats {
     private String dorisAuditSource;
 
     /**
+     * READY/BACKFILLING/DEGRADED/DISABLED/UNAVAILABLE。
+     */
+    private String tableAccessSyncStatus;
+
+    /**
+     * 当前汇总的可信历史覆盖起点。
+     */
+    private LocalDateTime tableAccessCoverageStart;
+
+    /**
+     * 是否覆盖本次请求所需的完整历史窗口。
+     */
+    private Boolean tableAccessCoverageComplete;
+
+    /**
+     * 最近成功同步时间。
+     */
+    private LocalDateTime tableAccessLastSyncedAt;
+
+    /**
      * 统计说明（降级场景）
      */
     private String note;
