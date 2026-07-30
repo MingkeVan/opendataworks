@@ -2,7 +2,17 @@
   <div class="meta-section meta-section-fill" v-loading="state.accessLoading">
     <section class="section-block section-fill">
       <div class="section-header">
-        <div class="section-title">访问概况</div>
+        <div class="access-title-row">
+          <div class="section-title">访问概况</div>
+          <el-tag
+            v-if="accessSyncMeta.label"
+            :type="accessSyncMeta.type"
+            size="small"
+            effect="plain"
+          >
+            {{ accessSyncMeta.label }}
+          </el-tag>
+        </div>
         <div class="section-actions">
           <el-button size="small" :disabled="!state.table?.id || state.accessLoading" @click="refreshAccess">
             刷新
@@ -98,8 +108,27 @@ const accessMetrics = computed(() => {
     { label: '访问用户数', value: stats.distinctUserCount ?? 0 },
     { label: '平均耗时', value: formatAccessDuration(stats.averageDurationMs) },
     { label: '最近访问', value: formatDateTime(stats.lastAccessTime) },
-    { label: '审计来源', value: stats.dorisAuditEnabled ? (stats.dorisAuditSource || '已启用') : '未启用' }
+    { label: '审计来源', value: stats.dorisAuditEnabled ? (stats.dorisAuditSource || '已启用') : '未启用' },
+    { label: '数据截至', value: formatDateTime(stats.tableAccessLastSyncedAt) },
+    {
+      label: '历史覆盖',
+      value: stats.tableAccessCoverageComplete
+        ? '完整'
+        : (stats.tableAccessCoverageStart ? `自 ${formatDateTime(stats.tableAccessCoverageStart)}` : '不足')
+    }
   ]
+})
+
+const accessSyncMeta = computed(() => {
+  const status = state.value?.accessStats?.tableAccessSyncStatus
+  const mapping = {
+    READY: { label: '已就绪', type: 'success' },
+    BACKFILLING: { label: '历史回填中', type: 'warning' },
+    DEGRADED: { label: '同步异常', type: 'danger' },
+    DISABLED: { label: '同步已关闭', type: 'info' },
+    UNAVAILABLE: { label: '统计不可用', type: 'danger' }
+  }
+  return mapping[status] || { label: '', type: 'info' }
 })
 
 const refreshAccess = () => {
@@ -113,6 +142,12 @@ const refreshAccess = () => {
 .section-header.small {
   font-size: 12px;
   color: var(--text-sub);
+}
+
+.access-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .section-divider {

@@ -1,63 +1,57 @@
 package com.onedata.portal.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.onedata.portal.config.DorisAuditAccessSyncProperties;
+import com.onedata.portal.dto.DashboardTableAccessAggregate;
 import com.onedata.portal.dto.DashboardTableAccessItem;
 import com.onedata.portal.dto.DashboardTableAccessSummary;
+import com.onedata.portal.dto.TableAccessAggregate;
 import com.onedata.portal.dto.TableAccessStats;
 import com.onedata.portal.dto.TableAccessTrendPoint;
-import com.onedata.portal.dto.TableAccessUserStat;
 import com.onedata.portal.entity.DataTable;
+import com.onedata.portal.entity.DorisAuditAccessCheckpoint;
 import com.onedata.portal.mapper.DataTableMapper;
+import com.onedata.portal.mapper.DorisAuditAccessCheckpointMapper;
+import com.onedata.portal.mapper.TableAccessDailyMapper;
+import com.onedata.portal.mapper.TableAccessUserDailyMapper;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.sql.*;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Doris 表访问统计服务（面向 Doris 2.0.x）
- * <p>
- * 统计策略：
- * 1. 访问频次/最近访问/趋势：统一读取审计表（__internal_schema.audit_log 或 doris_audit_db__.doris_audit_tbl__）；
- * 2. 审计不可用时返回不可统计说明（audit-only，不回退 SHOW QUERY STATS）。
+ * 基于 MySQL 每日汇总的 Doris 表访问统计查询服务。
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class DorisTableAccessService {
 
-    private static final Pattern FROM_JOIN_PATTERN = Pattern.compile(
-            "\\b(?:FROM|JOIN)\\s+(?:`?([a-zA-Z0-9_]+)`?\\.)?`?([a-zA-Z0-9_]+)`?",
-            Pattern.CASE_INSENSITIVE);
-    private static final Pattern INSERT_INTO_PATTERN = Pattern.compile(
-            "\\bINSERT\\s+INTO\\s+(?:`?([a-zA-Z0-9_]+)`?\\.)?`?([a-zA-Z0-9_]+)`?",
-            Pattern.CASE_INSENSITIVE);
-    private static final Pattern UPDATE_PATTERN = Pattern.compile(
-            "\\bUPDATE\\s+(?:`?([a-zA-Z0-9_]+)`?\\.)?`?([a-zA-Z0-9_]+)`?",
-            Pattern.CASE_INSENSITIVE);
-    private static final Pattern DELETE_FROM_PATTERN = Pattern.compile(
-            "\\bDELETE\\s+FROM\\s+(?:`?([a-zA-Z0-9_]+)`?\\.)?`?([a-zA-Z0-9_]+)`?",
-            Pattern.CASE_INSENSITIVE);
-
-    private static final int MAX_AUDIT_SCAN_ROWS = 200000;
-    private static final long AUDIT_SOURCE_CACHE_MILLIS = 5 * 60 * 1000L;
-
-    private final DorisConnectionService dorisConnectionService;
+    private final DorisAuditAccessSyncProperties properties;
     private final DataTableMapper dataTableMapper;
+    private final DorisAuditAccessCheckpointMapper checkpointMapper;
+    private final TableAccessDailyMapper tableAccessDailyMapper;
+    private final TableAccessUserDailyMapper tableAccessUserDailyMapper;
+    private final TableAccessSummaryCache summaryCache;
 
-    private final Map<Long, CachedAuditSource> auditSourceCache = new ConcurrentHashMap<>();
-
-    public TableAccessStats getTableAccessStats(DataTable table, Long requestedClusterId, int recentDays, int trendDays,
+    public TableAccessStats getTableAccessStats(DataTable table,
+            Long requestedClusterId,
+            int recentDays,
+            int trendDays,
             int topUsers) {
         if (table == null) {
             throw new IllegalArgumentException("表信息不能为空");
@@ -66,305 +60,387 @@ public class DorisTableAccessService {
             throw new IllegalArgumentException("表缺少 database/tableName 信息");
         }
         Long clusterId = resolveClusterId(table, requestedClusterId);
-        String database = normalizeIdentifier(table.getDbName());
-        String tableName = normalizeIdentifier(extractTableName(table.getTableName()));
-        String targetIdentifier = buildIdentifier(database, tableName);
-
         int safeRecentDays = Math.max(1, Math.min(recentDays, 365));
         int safeTrendDays = Math.max(1, Math.min(trendDays, 90));
         int safeTopUsers = Math.max(1, Math.min(topUsers, 20));
+        String database = normalizeIdentifier(table.getDbName());
+        String tableName = normalizeIdentifier(extractTableName(table.getTableName()));
+        String cacheKey = "cluster:" + clusterId + ":table:" + table.getId()
+                + ":" + safeRecentDays + ":" + safeTrendDays + ":" + safeTopUsers;
+        return summaryCache.getOrLoad(cacheKey, () -> loadTableAccessStats(
+                table, clusterId, database, tableName, safeRecentDays, safeTrendDays, safeTopUsers));
+    }
+
+    public DashboardTableAccessSummary getDashboardAccessSummary(Long clusterId,
+            int hotDays,
+            int hotLimit,
+            int coldDays,
+            int coldLimit) {
+        int safeHotDays = Math.max(1, Math.min(hotDays, 365));
+        int safeColdDays = Math.max(1, Math.min(coldDays, 365));
+        int safeHotLimit = Math.max(1, Math.min(hotLimit, 50));
+        int safeColdLimit = Math.max(1, Math.min(coldLimit, 50));
+        String token = clusterId == null ? "all" : String.valueOf(clusterId);
+        String cacheKey = "cluster:" + token + ":dashboard:" + safeHotDays + ":" + safeHotLimit
+                + ":" + safeColdDays + ":" + safeColdLimit;
+        return summaryCache.getOrLoad(cacheKey,
+                () -> loadDashboardSummary(clusterId, safeHotDays, safeHotLimit, safeColdDays, safeColdLimit));
+    }
+
+    public void evictCache(Long clusterId) {
+        summaryCache.evictCluster(clusterId);
+    }
+
+    private TableAccessStats loadTableAccessStats(DataTable table,
+            Long clusterId,
+            String database,
+            String tableName,
+            int recentDays,
+            int trendDays,
+            int topUsers) {
+        LocalDateTime now = LocalDateTime.now();
+        int requiredDays = Math.max(30, Math.max(recentDays, trendDays));
+        DorisAuditAccessCheckpoint checkpoint = checkpointMapper.selectById(clusterId);
+        AccessState state = buildState(checkpoint, requiredDays, now);
 
         TableAccessStats stats = new TableAccessStats();
         stats.setTableId(table.getId());
         stats.setClusterId(clusterId);
         stats.setDatabaseName(database);
         stats.setTableName(tableName);
-        stats.setRecentDays(safeRecentDays);
-        stats.setTrendDays(safeTrendDays);
-        stats.setTotalAccessCount(0L);
-        stats.setRecentAccessCount(0L);
-        stats.setAccessCount7d(0L);
-        stats.setAccessCount30d(0L);
-        stats.setDistinctUserCount(0L);
+        stats.setRecentDays(recentDays);
+        stats.setTrendDays(trendDays);
+        applyState(stats, state);
 
-        Optional<AuditSource> auditSource = resolveAuditSource(clusterId);
-        if (!auditSource.isPresent()) {
-            stats.setDorisAuditEnabled(false);
-            stats.setNote("当前 Doris 未检测到可查询的审计表，无法生成访问统计（audit-only 模式）。");
-            return stats;
+        LocalDate today = now.toLocalDate();
+        TableAccessAggregate aggregate = tableAccessDailyMapper.selectTableAggregate(
+                clusterId,
+                database,
+                tableName,
+                windowStart(today, requiredDays),
+                windowStart(today, recentDays),
+                windowStart(today, 7),
+                windowStart(today, 30));
+        if (aggregate == null) {
+            aggregate = new TableAccessAggregate();
+        }
+        stats.setTotalAccessCount(zeroIfNull(aggregate.getTotalAccessCount()));
+        stats.setRecentAccessCount(zeroIfNull(aggregate.getRecentAccessCount()));
+        stats.setAccessCount7d(zeroIfNull(aggregate.getAccessCount7d()));
+        stats.setAccessCount30d(zeroIfNull(aggregate.getAccessCount30d()));
+        stats.setFirstAccessTime(aggregate.getFirstAccessTime());
+        stats.setLastAccessTime(aggregate.getLastAccessTime());
+
+        long durationSamples = zeroIfNull(aggregate.getDurationSampleCount());
+        if (durationSamples > 0L) {
+            stats.setAverageDurationMs(BigDecimal.valueOf(zeroIfNull(aggregate.getDurationSumMs()))
+                    .divide(BigDecimal.valueOf(durationSamples), 2, RoundingMode.HALF_UP));
         }
 
-        stats.setDorisAuditEnabled(true);
-        stats.setDorisAuditSource(auditSource.get().qualifiedName());
+        Long distinctUsers = tableAccessUserDailyMapper.countDistinctUsers(
+                clusterId, database, tableName, windowStart(today, recentDays));
+        stats.setDistinctUserCount(zeroIfNull(distinctUsers));
+        stats.setTopUsers(tableAccessUserDailyMapper.selectTopUsers(
+                clusterId, database, tableName, windowStart(today, recentDays), topUsers));
 
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime auditScanStart = now.minusDays(Math.max(30, Math.max(safeRecentDays, safeTrendDays)));
-        List<AuditEntry> entries = queryAuditEntries(clusterId, auditSource.get(), auditScanStart);
-
-        long recentCount = 0L;
-        long count7d = 0L;
-        long count30d = 0L;
-        long matchedTotal = 0L;
-        long durationSum = 0L;
-        long durationCount = 0L;
-        LocalDateTime lastAccess = null;
-        LocalDateTime firstAccess = null;
-        LocalDateTime recentStart = now.minusDays(safeRecentDays);
-        LocalDateTime days7Start = now.minusDays(7);
-        LocalDateTime days30Start = now.minusDays(30);
-        LocalDateTime trendStart = now.minusDays(safeTrendDays - 1L);
-
-        Map<String, Long> userCounter = new HashMap<>();
-        Map<String, LocalDateTime> userLastAccess = new HashMap<>();
-        Map<LocalDate, Long> trendCounter = new HashMap<>();
-
-        for (AuditEntry entry : entries) {
-            if (entry.getTime() == null || !StringUtils.hasText(entry.getStmt())) {
-                continue;
-            }
-            Set<String> referenced = extractIdentifiers(entry.getStmt(), entry.getDatabaseName());
-            if (!referenced.contains(targetIdentifier)) {
-                continue;
-            }
-
-            matchedTotal++;
-
-            if (lastAccess == null || entry.getTime().isAfter(lastAccess)) {
-                lastAccess = entry.getTime();
-            }
-            if (firstAccess == null || entry.getTime().isBefore(firstAccess)) {
-                firstAccess = entry.getTime();
-            }
-
-            if (!entry.getTime().isBefore(recentStart)) {
-                recentCount++;
-                if (StringUtils.hasText(entry.getUser())) {
-                    userCounter.merge(entry.getUser(), 1L, Long::sum);
-                    LocalDateTime previous = userLastAccess.get(entry.getUser());
-                    if (previous == null || entry.getTime().isAfter(previous)) {
-                        userLastAccess.put(entry.getUser(), entry.getTime());
-                    }
-                }
-                if (entry.getQueryTimeMs() != null && entry.getQueryTimeMs() >= 0) {
-                    durationSum += entry.getQueryTimeMs();
-                    durationCount++;
-                }
-            }
-
-            if (!entry.getTime().isBefore(days7Start)) {
-                count7d++;
-            }
-            if (!entry.getTime().isBefore(days30Start)) {
-                count30d++;
-            }
-            if (!entry.getTime().isBefore(trendStart)) {
-                trendCounter.merge(entry.getTime().toLocalDate(), 1L, Long::sum);
-            }
-        }
-
-        stats.setTotalAccessCount(matchedTotal);
-        stats.setRecentAccessCount(recentCount);
-        stats.setAccessCount7d(count7d);
-        stats.setAccessCount30d(count30d);
-        stats.setLastAccessTime(lastAccess);
-        stats.setFirstAccessTime(firstAccess);
-        stats.setDistinctUserCount((long) userCounter.size());
-
-        if (durationCount > 0L) {
-            stats.setAverageDurationMs(BigDecimal.valueOf(durationSum)
-                    .divide(BigDecimal.valueOf(durationCount), 2, RoundingMode.HALF_UP));
-        }
-
-        List<TableAccessTrendPoint> trendPoints = new ArrayList<>();
-        for (int i = safeTrendDays - 1; i >= 0; i--) {
-            LocalDate day = now.toLocalDate().minusDays(i);
+        Map<String, Long> trendByDate = tableAccessDailyMapper.selectTableTrend(
+                        clusterId, database, tableName, windowStart(today, trendDays))
+                .stream()
+                .collect(Collectors.toMap(
+                        TableAccessTrendPoint::getDate,
+                        point -> zeroIfNull(point.getAccessCount()),
+                        Long::sum));
+        List<TableAccessTrendPoint> trend = new ArrayList<>();
+        for (int offset = trendDays - 1; offset >= 0; offset--) {
+            String date = today.minusDays(offset).toString();
             TableAccessTrendPoint point = new TableAccessTrendPoint();
-            point.setDate(day.toString());
-            point.setAccessCount(trendCounter.getOrDefault(day, 0L));
-            trendPoints.add(point);
+            point.setDate(date);
+            point.setAccessCount(trendByDate.getOrDefault(date, 0L));
+            trend.add(point);
         }
-        stats.setTrend(trendPoints);
-
-        List<TableAccessUserStat> topUserStats = userCounter.entrySet().stream()
-                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
-                .limit(safeTopUsers)
-                .map(entry -> {
-                    TableAccessUserStat item = new TableAccessUserStat();
-                    item.setUserId(entry.getKey());
-                    item.setAccessCount(entry.getValue());
-                    item.setLastAccessTime(userLastAccess.get(entry.getKey()));
-                    return item;
-                })
-                .collect(Collectors.toList());
-        stats.setTopUsers(topUserStats);
-
+        stats.setTrend(trend);
         return stats;
     }
 
-    public DashboardTableAccessSummary getDashboardAccessSummary(Long clusterId, int hotDays, int hotLimit, int coldDays,
+    private DashboardTableAccessSummary loadDashboardSummary(Long clusterId,
+            int hotDays,
+            int hotLimit,
+            int coldDays,
             int coldLimit) {
-        int safeHotDays = Math.max(1, Math.min(hotDays, 365));
-        int safeColdDays = Math.max(1, Math.min(coldDays, 365));
-        int safeHotLimit = Math.max(1, Math.min(hotLimit, 50));
-        int safeColdLimit = Math.max(1, Math.min(coldLimit, 50));
-
         DashboardTableAccessSummary summary = new DashboardTableAccessSummary();
-        summary.setHotWindowDays(safeHotDays);
-        summary.setColdWindowDays(safeColdDays);
+        summary.setHotWindowDays(hotDays);
+        summary.setColdWindowDays(coldDays);
 
-        LambdaQueryWrapper<DataTable> tableWrapper = new LambdaQueryWrapper<DataTable>()
+        LambdaQueryWrapper<DataTable> tableQuery = new LambdaQueryWrapper<DataTable>()
+                .select(
+                        DataTable::getId,
+                        DataTable::getClusterId,
+                        DataTable::getDbName,
+                        DataTable::getTableName,
+                        DataTable::getLayer,
+                        DataTable::getOwner,
+                        DataTable::getDorisCreateTime,
+                        DataTable::getCreatedAt)
                 .isNotNull(DataTable::getClusterId)
                 .isNotNull(DataTable::getDbName)
                 .isNotNull(DataTable::getTableName)
                 .ne(DataTable::getStatus, "deprecated");
         if (clusterId != null) {
-            tableWrapper.eq(DataTable::getClusterId, clusterId);
+            tableQuery.eq(DataTable::getClusterId, clusterId);
         }
-        List<DataTable> tables = dataTableMapper.selectList(tableWrapper);
+        List<DataTable> tables = dataTableMapper.selectList(tableQuery);
         if (tables.isEmpty()) {
             summary.setDorisAuditEnabled(false);
+            summary.setTableAccessSyncStatus(properties.isEnabled() ? "UNAVAILABLE" : "DISABLED");
+            summary.setTableAccessCoverageComplete(false);
             summary.setNote("暂无可统计的数据表。");
             return summary;
         }
 
-        Map<String, DataTable> tableIndex = new LinkedHashMap<>();
-        Map<Long, Map<String, Set<String>>> clusterDbTables = new HashMap<>();
-        for (DataTable table : tables) {
-            Long tableClusterId = table.getClusterId();
-            if (tableClusterId == null) {
-                continue;
-            }
-            String db = normalizeIdentifier(table.getDbName());
-            String name = normalizeIdentifier(extractTableName(table.getTableName()));
-            if (!StringUtils.hasText(db) || !StringUtils.hasText(name)) {
-                continue;
-            }
-            String key = buildClusterIdentifier(tableClusterId, db, name);
-            tableIndex.put(key, table);
-            clusterDbTables.computeIfAbsent(tableClusterId, k -> new HashMap<>())
-                    .computeIfAbsent(db, k -> new HashSet<>())
-                    .add(name);
+        List<Long> clusterIds = tables.stream()
+                .map(DataTable::getClusterId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, DorisAuditAccessCheckpoint> checkpoints = loadCheckpoints(clusterIds);
+        AccessState overallState = buildOverallState(clusterIds, checkpoints, coldDays, LocalDateTime.now());
+        applyState(summary, overallState);
+
+        Set<Long> clustersWithSummary = checkpoints.values().stream()
+                .filter(checkpoint -> checkpoint.getLastSyncedAt() != null)
+                .map(DorisAuditAccessCheckpoint::getClusterId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (clustersWithSummary.isEmpty()) {
+            return summary;
         }
 
-        boolean hasAnyAudit = false;
-        String auditSourceName = null;
-        Set<Long> auditEnabledClusters = new HashSet<>();
+        LocalDate today = LocalDate.now();
+        List<DashboardTableAccessAggregate> aggregates = tableAccessDailyMapper.selectDashboardAggregates(
+                new ArrayList<>(clustersWithSummary),
+                windowStart(today, hotDays),
+                windowStart(today, Math.max(coldDays, properties.getSummaryRetentionDays())));
+        Map<String, DashboardTableAccessAggregate> aggregateIndex = new HashMap<>();
+        for (DashboardTableAccessAggregate aggregate : aggregates) {
+            aggregateIndex.put(key(aggregate.getClusterId(), aggregate.getDbName(), aggregate.getTableName()), aggregate);
+        }
+
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime scanStart = now.minusDays(Math.max(safeHotDays, safeColdDays));
-        LocalDateTime hotStart = now.minusDays(safeHotDays);
-        LocalDateTime coldThreshold = now.minusDays(safeColdDays);
-
-        Map<String, Long> hotWindowCount = new HashMap<>();
-        Map<String, LocalDateTime> lastAccess = new HashMap<>();
-
-        for (Long auditClusterId : clusterDbTables.keySet()) {
-            Optional<AuditSource> auditSource = resolveAuditSource(auditClusterId);
-            if (!auditSource.isPresent()) {
-                continue;
-            }
-            hasAnyAudit = true;
-            auditEnabledClusters.add(auditClusterId);
-            if (auditSourceName == null) {
-                auditSourceName = auditSource.get().qualifiedName();
-            }
-
-            List<AuditEntry> entries = queryAuditEntries(auditClusterId, auditSource.get(), scanStart);
-            Set<String> tableIdentifiers = new HashSet<>();
-            for (Map.Entry<String, Set<String>> dbTables : clusterDbTables.get(auditClusterId).entrySet()) {
-                for (String table : dbTables.getValue()) {
-                    tableIdentifiers.add(buildIdentifier(dbTables.getKey(), table));
-                }
-            }
-
-            for (AuditEntry entry : entries) {
-                if (entry.getTime() == null || !StringUtils.hasText(entry.getStmt())) {
-                    continue;
-                }
-                Set<String> refs = extractIdentifiers(entry.getStmt(), entry.getDatabaseName());
-                if (refs.isEmpty()) {
-                    continue;
-                }
-                for (String ref : refs) {
-                    if (!tableIdentifiers.contains(ref)) {
-                        continue;
-                    }
-                    String key = buildClusterIdentifier(auditClusterId, ref);
-                    LocalDateTime previous = lastAccess.get(key);
-                    if (previous == null || entry.getTime().isAfter(previous)) {
-                        lastAccess.put(key, entry.getTime());
-                    }
-                    if (!entry.getTime().isBefore(hotStart)) {
-                        hotWindowCount.merge(key, 1L, Long::sum);
-                    }
-                }
-            }
-        }
-
-        summary.setDorisAuditEnabled(hasAnyAudit);
-        summary.setDorisAuditSource(auditSourceName);
-        if (!hasAnyAudit) {
-            summary.setNote("未检测到 Doris 审计表，无法生成热点表/长期未用表（audit-only 模式）。");
-        } else if (auditEnabledClusters.size() < clusterDbTables.size()) {
-            summary.setNote("部分集群未开启审计表，仅展示已开启审计集群的热点/冷表结果（audit-only 模式）。");
-        }
-
+        LocalDateTime coldThreshold = now.minusDays(coldDays);
         List<DashboardTableAccessItem> hotItems = new ArrayList<>();
-        for (Map.Entry<String, DataTable> entry : tableIndex.entrySet()) {
-            String key = entry.getKey();
-            DataTable table = entry.getValue();
-            boolean clusterAuditEnabled = auditEnabledClusters.contains(table.getClusterId());
-            if (!clusterAuditEnabled) {
-                continue;
-            }
-            Long count = hotWindowCount.getOrDefault(key, 0L);
-            DashboardTableAccessItem item = toDashboardItem(
-                    table,
-                    count,
-                    lastAccess.get(key),
-                    now);
-            hotItems.add(item);
-        }
-        hotItems.sort((a, b) -> Long.compare(
-                b.getAccessCount() == null ? 0L : b.getAccessCount(),
-                a.getAccessCount() == null ? 0L : a.getAccessCount()));
-        summary.setHotTables(hotItems.stream().limit(safeHotLimit).collect(Collectors.toList()));
-
         List<DashboardTableAccessItem> coldItems = new ArrayList<>();
-        for (Map.Entry<String, DataTable> entry : tableIndex.entrySet()) {
-            String key = entry.getKey();
-            DataTable table = entry.getValue();
-            LocalDateTime last = lastAccess.get(key);
-            boolean clusterAuditEnabled = auditEnabledClusters.contains(table.getClusterId());
-            if (!clusterAuditEnabled) {
+        for (DataTable table : tables) {
+            if (!clustersWithSummary.contains(table.getClusterId())) {
                 continue;
             }
-            Long count = hotWindowCount.getOrDefault(key, 0L);
+            DashboardTableAccessAggregate aggregate = aggregateIndex.get(
+                    key(table.getClusterId(), table.getDbName(), extractTableName(table.getTableName())));
+            long count = aggregate == null ? 0L : zeroIfNull(aggregate.getAccessCount());
+            LocalDateTime lastAccess = aggregate == null ? null : aggregate.getLastAccessTime();
+            hotItems.add(toDashboardItem(table, count, lastAccess, now));
 
-            boolean isCold = (last == null || last.isBefore(coldThreshold));
-            if (!isCold) {
-                continue;
+            if (overallState.coverageComplete && "READY".equals(overallState.status)
+                    && isCold(table, lastAccess, coldThreshold)) {
+                coldItems.add(toDashboardItem(table, count, lastAccess, now));
             }
-            coldItems.add(toDashboardItem(table, count, last, now));
         }
 
-        coldItems.sort((a, b) -> {
-            if (a.getLastAccessTime() == null && b.getLastAccessTime() == null) {
-                return 0;
-            }
-            if (a.getLastAccessTime() == null) {
-                return -1;
-            }
-            if (b.getLastAccessTime() == null) {
-                return 1;
-            }
-            return a.getLastAccessTime().compareTo(b.getLastAccessTime());
-        });
-        summary.setLongUnusedTables(coldItems.stream().limit(safeColdLimit).collect(Collectors.toList()));
+        hotItems.sort(Comparator
+                .comparing((DashboardTableAccessItem item) -> zeroIfNull(item.getAccessCount()))
+                .reversed()
+                .thenComparing(DashboardTableAccessItem::getTableId));
+        summary.setHotTables(hotItems.stream().limit(hotLimit).collect(Collectors.toList()));
 
+        coldItems.sort(Comparator
+                .comparing(DashboardTableAccessItem::getLastAccessTime,
+                        Comparator.nullsFirst(Comparator.naturalOrder()))
+                .thenComparing(DashboardTableAccessItem::getTableId));
+        summary.setLongUnusedTables(coldItems.stream().limit(coldLimit).collect(Collectors.toList()));
         return summary;
     }
 
-    private DashboardTableAccessItem toDashboardItem(DataTable table, Long count, LocalDateTime lastAccess,
+    private Map<Long, DorisAuditAccessCheckpoint> loadCheckpoints(List<Long> clusterIds) {
+        if (clusterIds.isEmpty()) {
+            return new HashMap<>();
+        }
+        return checkpointMapper.selectList(new LambdaQueryWrapper<DorisAuditAccessCheckpoint>()
+                        .in(DorisAuditAccessCheckpoint::getClusterId, clusterIds))
+                .stream()
+                .collect(Collectors.toMap(DorisAuditAccessCheckpoint::getClusterId, checkpoint -> checkpoint));
+    }
+
+    private AccessState buildState(DorisAuditAccessCheckpoint checkpoint,
+            int requiredDays,
+            LocalDateTime now) {
+        if (!properties.isEnabled()) {
+            return stateFromCheckpoint("DISABLED", checkpoint, requiredDays, now,
+                    checkpoint == null
+                            ? "Doris 审计访问同步已关闭，暂无可用汇总数据。"
+                            : "Doris 审计访问同步已关闭，当前展示截至最近同步时间的历史汇总。");
+        }
+        if (checkpoint == null) {
+            return stateFromCheckpoint("UNAVAILABLE", null, requiredDays, now,
+                    "尚无 Doris 审计访问汇总数据。");
+        }
+        String status = StringUtils.hasText(checkpoint.getSyncStatus())
+                ? checkpoint.getSyncStatus().toUpperCase(Locale.ROOT)
+                : "UNAVAILABLE";
+        String note = buildNote(status, checkpoint, requiredDays, now);
+        return stateFromCheckpoint(status, checkpoint, requiredDays, now, note);
+    }
+
+    private AccessState buildOverallState(List<Long> clusterIds,
+            Map<Long, DorisAuditAccessCheckpoint> checkpoints,
+            int requiredDays,
+            LocalDateTime now) {
+        if (!properties.isEnabled()) {
+            AccessState state = combineStates(clusterIds, checkpoints, requiredDays, now, "DISABLED");
+            state.note = "Doris 审计访问同步已关闭，当前展示截至最近同步时间的历史汇总；冷表统计暂停。";
+            return state;
+        }
+        if (checkpoints.isEmpty()) {
+            return new AccessState("UNAVAILABLE", null, false, null, false, null,
+                    "尚无 Doris 审计访问汇总数据。");
+        }
+        boolean missingCluster = clusterIds.stream().anyMatch(id -> !checkpoints.containsKey(id));
+        Collection<DorisAuditAccessCheckpoint> values = checkpoints.values();
+        String status;
+        if (missingCluster || values.stream().anyMatch(item -> "UNAVAILABLE".equalsIgnoreCase(item.getSyncStatus()))) {
+            status = values.stream().anyMatch(item -> item.getLastSyncedAt() != null) ? "DEGRADED" : "UNAVAILABLE";
+        } else if (values.stream().anyMatch(item -> "DEGRADED".equalsIgnoreCase(item.getSyncStatus()))) {
+            status = "DEGRADED";
+        } else if (values.stream().anyMatch(item -> "BACKFILLING".equalsIgnoreCase(item.getSyncStatus()))) {
+            status = "BACKFILLING";
+        } else {
+            status = "READY";
+        }
+        AccessState state = combineStates(clusterIds, checkpoints, requiredDays, now, status);
+        state.note = buildOverallNote(state, missingCluster);
+        return state;
+    }
+
+    private AccessState combineStates(List<Long> clusterIds,
+            Map<Long, DorisAuditAccessCheckpoint> checkpoints,
+            int requiredDays,
+            LocalDateTime now,
+            String status) {
+        LocalDateTime coverageStart = null;
+        LocalDateTime lastSyncedAt = null;
+        boolean coverageComplete = checkpoints.size() == clusterIds.size();
+        boolean auditEnabled = false;
+        String auditSource = null;
+        for (Long id : clusterIds) {
+            DorisAuditAccessCheckpoint checkpoint = checkpoints.get(id);
+            if (checkpoint == null) {
+                coverageComplete = false;
+                continue;
+            }
+            auditEnabled = auditEnabled || StringUtils.hasText(checkpoint.getAuditSource());
+            if (auditSource == null && StringUtils.hasText(checkpoint.getAuditSource())) {
+                auditSource = checkpoint.getAuditSource();
+            }
+            if (checkpoint.getCoverageStart() == null) {
+                coverageComplete = false;
+            } else {
+                if (coverageStart == null || checkpoint.getCoverageStart().isAfter(coverageStart)) {
+                    coverageStart = checkpoint.getCoverageStart();
+                }
+                coverageComplete = coverageComplete
+                        && !checkpoint.getCoverageStart().isAfter(now.minusDays(requiredDays));
+            }
+            if (checkpoint.getLastSyncedAt() != null
+                    && (lastSyncedAt == null || checkpoint.getLastSyncedAt().isBefore(lastSyncedAt))) {
+                lastSyncedAt = checkpoint.getLastSyncedAt();
+            }
+        }
+        return new AccessState(status, coverageStart, coverageComplete, lastSyncedAt,
+                auditEnabled, auditSource, null);
+    }
+
+    private AccessState stateFromCheckpoint(String status,
+            DorisAuditAccessCheckpoint checkpoint,
+            int requiredDays,
+            LocalDateTime now,
+            String note) {
+        LocalDateTime coverageStart = checkpoint == null ? null : checkpoint.getCoverageStart();
+        boolean coverageComplete = coverageStart != null && !coverageStart.isAfter(now.minusDays(requiredDays));
+        return new AccessState(
+                status,
+                coverageStart,
+                coverageComplete,
+                checkpoint == null ? null : checkpoint.getLastSyncedAt(),
+                checkpoint != null && StringUtils.hasText(checkpoint.getAuditSource()),
+                checkpoint == null ? null : checkpoint.getAuditSource(),
+                note);
+    }
+
+    private String buildNote(String status,
+            DorisAuditAccessCheckpoint checkpoint,
+            int requiredDays,
+            LocalDateTime now) {
+        if ("BACKFILLING".equals(status)) {
+            return "Doris 审计访问历史正在回填，当前结果仅覆盖已同步范围，冷表统计暂停。";
+        }
+        if ("DEGRADED".equals(status)) {
+            return "Doris 审计访问同步异常，当前展示最近一次成功汇总，冷表统计暂停。"
+                    + errorSuffix(checkpoint);
+        }
+        if ("UNAVAILABLE".equals(status)) {
+            return "Doris 审计访问汇总不可用，无法生成访问统计。" + errorSuffix(checkpoint);
+        }
+        if (checkpoint.getCoverageStart() == null
+                || checkpoint.getCoverageStart().isAfter(now.minusDays(requiredDays))) {
+            return "审计历史覆盖不足 " + requiredDays + " 天，当前结果仅供参考，冷表统计暂停。";
+        }
+        return null;
+    }
+
+    private String buildOverallNote(AccessState state, boolean missingCluster) {
+        if ("BACKFILLING".equals(state.status)) {
+            return "部分 Doris 审计历史正在回填，热点结果仅覆盖已同步范围，冷表统计暂停。";
+        }
+        if ("DEGRADED".equals(state.status)) {
+            return missingCluster
+                    ? "部分数据源尚无访问汇总或同步异常，当前展示可用历史数据，冷表统计暂停。"
+                    : "部分数据源同步异常，当前展示最近一次成功汇总，冷表统计暂停。";
+        }
+        if ("UNAVAILABLE".equals(state.status)) {
+            return "Doris 审计访问汇总不可用，无法生成热点表或冷表。";
+        }
+        if (!state.coverageComplete) {
+            return "审计历史覆盖不足，热点结果仅供参考，冷表统计暂停。";
+        }
+        return null;
+    }
+
+    private String errorSuffix(DorisAuditAccessCheckpoint checkpoint) {
+        return checkpoint != null && StringUtils.hasText(checkpoint.getLastError())
+                ? " 原因：" + checkpoint.getLastError()
+                : "";
+    }
+
+    private void applyState(TableAccessStats stats, AccessState state) {
+        stats.setDorisAuditEnabled(state.auditEnabled);
+        stats.setDorisAuditSource(state.auditSource);
+        stats.setTableAccessSyncStatus(state.status);
+        stats.setTableAccessCoverageStart(state.coverageStart);
+        stats.setTableAccessCoverageComplete(state.coverageComplete);
+        stats.setTableAccessLastSyncedAt(state.lastSyncedAt);
+        stats.setNote(state.note);
+    }
+
+    private void applyState(DashboardTableAccessSummary summary, AccessState state) {
+        summary.setDorisAuditEnabled(state.auditEnabled);
+        summary.setDorisAuditSource(state.auditSource);
+        summary.setTableAccessSyncStatus(state.status);
+        summary.setTableAccessCoverageStart(state.coverageStart);
+        summary.setTableAccessCoverageComplete(state.coverageComplete);
+        summary.setTableAccessLastSyncedAt(state.lastSyncedAt);
+        summary.setNote(state.note);
+    }
+
+    private DashboardTableAccessItem toDashboardItem(DataTable table,
+            Long count,
+            LocalDateTime lastAccess,
             LocalDateTime now) {
         DashboardTableAccessItem item = new DashboardTableAccessItem();
         item.setTableId(table.getId());
@@ -373,12 +449,22 @@ public class DorisTableAccessService {
         item.setTableName(extractTableName(table.getTableName()));
         item.setLayer(table.getLayer());
         item.setOwner(table.getOwner());
-        item.setAccessCount(count == null ? 0L : count);
+        item.setAccessCount(zeroIfNull(count));
         item.setLastAccessTime(lastAccess);
         if (lastAccess != null) {
-            item.setDaysSinceLastAccess((long) java.time.Duration.between(lastAccess, now).toDays());
+            item.setDaysSinceLastAccess(Duration.between(lastAccess, now).toDays());
         }
         return item;
+    }
+
+    private boolean isCold(DataTable table, LocalDateTime lastAccess, LocalDateTime threshold) {
+        if (lastAccess != null) {
+            return lastAccess.isBefore(threshold);
+        }
+        LocalDateTime createdAt = table.getDorisCreateTime() != null
+                ? table.getDorisCreateTime()
+                : table.getCreatedAt();
+        return createdAt != null && createdAt.isBefore(threshold);
     }
 
     private Long resolveClusterId(DataTable table, Long requestedClusterId) {
@@ -391,182 +477,12 @@ public class DorisTableAccessService {
         throw new IllegalArgumentException("未指定 clusterId，且表未绑定 clusterId");
     }
 
-    private Optional<AuditSource> resolveAuditSource(Long clusterId) {
-        CachedAuditSource cached = auditSourceCache.get(clusterId);
-        long now = System.currentTimeMillis();
-        if (cached != null && (now - cached.cachedAt) <= AUDIT_SOURCE_CACHE_MILLIS) {
-            return Optional.ofNullable(cached.source);
-        }
-
-        AuditSource source = null;
-        try (Connection connection = dorisConnectionService.getConnection(clusterId);
-                Statement stmt = connection.createStatement()) {
-            List<String[]> candidates = Arrays.asList(
-                    new String[] { "__internal_schema", "audit_log" },
-                    new String[] { "doris_audit_db__", "doris_audit_tbl__" });
-
-            for (String[] candidate : candidates) {
-                String sql = "SELECT * FROM " + wrapTable(candidate[0], candidate[1]) + " LIMIT 1";
-                try (ResultSet rs = stmt.executeQuery(sql)) {
-                    ResultSetMetaData md = rs.getMetaData();
-                    source = buildAuditSource(candidate[0], candidate[1], md);
-                    if (source != null) {
-                        break;
-                    }
-                } catch (SQLException ignore) {
-                    // try next candidate
-                }
-            }
-        } catch (Exception e) {
-            log.debug("resolveAuditSource failed for cluster={}, reason={}", clusterId, e.getMessage());
-        }
-
-        auditSourceCache.put(clusterId, new CachedAuditSource(source, now));
-        return Optional.ofNullable(source);
+    private LocalDate windowStart(LocalDate today, int days) {
+        return today.minusDays(Math.max(0, days - 1L));
     }
 
-    private AuditSource buildAuditSource(String db, String table, ResultSetMetaData md) throws SQLException {
-        Map<String, String> cols = new HashMap<>();
-        for (int i = 1; i <= md.getColumnCount(); i++) {
-            String label = md.getColumnLabel(i);
-            if (!StringUtils.hasText(label)) {
-                label = md.getColumnName(i);
-            }
-            cols.put(label.toLowerCase(Locale.ROOT), label);
-        }
-
-        String timeCol = firstPresent(cols, "time", "event_time", "log_time");
-        String dbCol = firstPresent(cols, "db", "database", "db_name");
-        String stmtCol = firstPresent(cols, "stmt", "statement", "sql");
-        if (!StringUtils.hasText(timeCol) || !StringUtils.hasText(dbCol) || !StringUtils.hasText(stmtCol)) {
-            return null;
-        }
-
-        String userCol = firstPresent(cols, "user", "qualified_user", "username");
-        String durationCol = firstPresent(cols, "query_time", "query_time_ms", "latency_ms");
-        return new AuditSource(db, table, timeCol, dbCol, stmtCol, userCol, durationCol);
-    }
-
-    private List<AuditEntry> queryAuditEntries(Long clusterId, AuditSource source, LocalDateTime startTime) {
-        List<AuditEntry> entries = new ArrayList<>();
-        String selectUser = StringUtils.hasText(source.userColumn) ? wrapIdentifier(source.userColumn) : "NULL";
-        String selectDuration = StringUtils.hasText(source.durationColumn) ? wrapIdentifier(source.durationColumn) : "NULL";
-        String sql = "SELECT "
-                + wrapIdentifier(source.timeColumn) + " AS t, "
-                + wrapIdentifier(source.dbColumn) + " AS d, "
-                + wrapIdentifier(source.stmtColumn) + " AS s, "
-                + selectUser + " AS u, "
-                + selectDuration + " AS q "
-                + "FROM " + source.qualifiedName()
-                + " WHERE " + wrapIdentifier(source.timeColumn) + " >= ? "
-                + "ORDER BY " + wrapIdentifier(source.timeColumn) + " DESC "
-                + "LIMIT " + MAX_AUDIT_SCAN_ROWS;
-        try (Connection connection = dorisConnectionService.getConnection(clusterId);
-                PreparedStatement stmt = connection.prepareStatement(sql)) {
-            stmt.setTimestamp(1, Timestamp.valueOf(startTime));
-            try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    AuditEntry entry = new AuditEntry();
-                    entry.setTime(parseLocalDateTime(rs.getObject("t")));
-                    entry.setDatabaseName(normalizeIdentifier(rs.getString("d")));
-                    entry.setStmt(rs.getString("s"));
-                    entry.setUser(rs.getString("u"));
-                    entry.setQueryTimeMs(parseNullableLong(rs.getObject("q")));
-                    entries.add(entry);
-                }
-            }
-        } catch (Exception e) {
-            log.warn("queryAuditEntries failed, source={}, cluster={}, reason={}",
-                    source.qualifiedName(), clusterId, e.getMessage());
-        }
-        return entries;
-    }
-
-    private Set<String> extractIdentifiers(String sql, String defaultDb) {
-        Set<String> refs = new HashSet<>();
-        if (!StringUtils.hasText(sql)) {
-            return refs;
-        }
-        collectRefs(refs, sql, defaultDb, FROM_JOIN_PATTERN);
-        collectRefs(refs, sql, defaultDb, INSERT_INTO_PATTERN);
-        collectRefs(refs, sql, defaultDb, UPDATE_PATTERN);
-        collectRefs(refs, sql, defaultDb, DELETE_FROM_PATTERN);
-        return refs;
-    }
-
-    private void collectRefs(Set<String> collector, String sql, String defaultDb, Pattern pattern) {
-        Matcher matcher = pattern.matcher(sql);
-        while (matcher.find()) {
-            String db = normalizeIdentifier(matcher.group(1));
-            String table = normalizeIdentifier(matcher.group(2));
-            if (!StringUtils.hasText(table)) {
-                continue;
-            }
-            String resolvedDb = StringUtils.hasText(db) ? db : normalizeIdentifier(defaultDb);
-            if (!StringUtils.hasText(resolvedDb)) {
-                continue;
-            }
-            collector.add(buildIdentifier(resolvedDb, table));
-        }
-    }
-
-    private String buildIdentifier(String db, String table) {
-        return normalizeIdentifier(db) + "." + normalizeIdentifier(table);
-    }
-
-    private String buildClusterIdentifier(Long clusterId, String db, String table) {
-        return clusterId + "::" + buildIdentifier(db, table);
-    }
-
-    private String buildClusterIdentifier(Long clusterId, String dbAndTable) {
-        return clusterId + "::" + normalizeIdentifier(dbAndTable);
-    }
-
-    private String firstPresent(Map<String, String> columns, String... candidates) {
-        for (String candidate : candidates) {
-            String found = columns.get(candidate.toLowerCase(Locale.ROOT));
-            if (StringUtils.hasText(found)) {
-                return found;
-            }
-        }
-        return null;
-    }
-
-    private LocalDateTime parseLocalDateTime(Object value) {
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof Timestamp) {
-            return ((Timestamp) value).toLocalDateTime();
-        }
-        if (value instanceof java.util.Date) {
-            return new Timestamp(((java.util.Date) value).getTime()).toLocalDateTime();
-        }
-        if (value instanceof LocalDateTime) {
-            return (LocalDateTime) value;
-        }
-        if (value instanceof String) {
-            try {
-                return Timestamp.valueOf((String) value).toLocalDateTime();
-            } catch (Exception ignore) {
-                return null;
-            }
-        }
-        return null;
-    }
-
-    private Long parseNullableLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof Number) {
-            return ((Number) value).longValue();
-        }
-        try {
-            return Long.parseLong(String.valueOf(value).trim());
-        } catch (Exception ignore) {
-            return null;
-        }
+    private String key(Long clusterId, String database, String table) {
+        return clusterId + "::" + normalizeIdentifier(database) + "." + normalizeIdentifier(table);
     }
 
     private String normalizeIdentifier(String value) {
@@ -581,98 +497,37 @@ public class DorisTableAccessService {
             return fullName;
         }
         String cleaned = fullName.replace("`", "").trim();
-        int idx = cleaned.indexOf('.');
-        return idx >= 0 && idx < cleaned.length() - 1 ? cleaned.substring(idx + 1) : cleaned;
+        int index = cleaned.indexOf('.');
+        return index >= 0 && index < cleaned.length() - 1 ? cleaned.substring(index + 1) : cleaned;
     }
 
-    private String wrapIdentifier(String identifier) {
-        return "`" + identifier.replace("`", "``") + "`";
+    private long zeroIfNull(Long value) {
+        return value == null ? 0L : value;
     }
 
-    private String wrapTable(String database, String table) {
-        return wrapIdentifier(database) + "." + wrapIdentifier(table);
-    }
+    private static class AccessState {
+        private final String status;
+        private final LocalDateTime coverageStart;
+        private final boolean coverageComplete;
+        private final LocalDateTime lastSyncedAt;
+        private final boolean auditEnabled;
+        private final String auditSource;
+        private String note;
 
-    private static class CachedAuditSource {
-        private final AuditSource source;
-        private final long cachedAt;
-
-        private CachedAuditSource(AuditSource source, long cachedAt) {
-            this.source = source;
-            this.cachedAt = cachedAt;
-        }
-    }
-
-    private static class AuditSource {
-        private final String database;
-        private final String table;
-        private final String timeColumn;
-        private final String dbColumn;
-        private final String stmtColumn;
-        private final String userColumn;
-        private final String durationColumn;
-
-        private AuditSource(String database, String table, String timeColumn, String dbColumn, String stmtColumn,
-                String userColumn, String durationColumn) {
-            this.database = database;
-            this.table = table;
-            this.timeColumn = timeColumn;
-            this.dbColumn = dbColumn;
-            this.stmtColumn = stmtColumn;
-            this.userColumn = userColumn;
-            this.durationColumn = durationColumn;
-        }
-
-        private String qualifiedName() {
-            return "`" + database + "`.`" + table + "`";
-        }
-    }
-
-    private static class AuditEntry {
-        private LocalDateTime time;
-        private String databaseName;
-        private String stmt;
-        private String user;
-        private Long queryTimeMs;
-
-        public LocalDateTime getTime() {
-            return time;
-        }
-
-        public void setTime(LocalDateTime time) {
-            this.time = time;
-        }
-
-        public String getDatabaseName() {
-            return databaseName;
-        }
-
-        public void setDatabaseName(String databaseName) {
-            this.databaseName = databaseName;
-        }
-
-        public String getStmt() {
-            return stmt;
-        }
-
-        public void setStmt(String stmt) {
-            this.stmt = stmt;
-        }
-
-        public String getUser() {
-            return user;
-        }
-
-        public void setUser(String user) {
-            this.user = user;
-        }
-
-        public Long getQueryTimeMs() {
-            return queryTimeMs;
-        }
-
-        public void setQueryTimeMs(Long queryTimeMs) {
-            this.queryTimeMs = queryTimeMs;
+        private AccessState(String status,
+                LocalDateTime coverageStart,
+                boolean coverageComplete,
+                LocalDateTime lastSyncedAt,
+                boolean auditEnabled,
+                String auditSource,
+                String note) {
+            this.status = status;
+            this.coverageStart = coverageStart;
+            this.coverageComplete = coverageComplete;
+            this.lastSyncedAt = lastSyncedAt;
+            this.auditEnabled = auditEnabled;
+            this.auditSource = auditSource;
+            this.note = note;
         }
     }
 }
