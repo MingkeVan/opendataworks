@@ -54,7 +54,6 @@
 opendataagent-deployment/
 ├── README.md
 ├── deploy/
-│   ├── .env
 │   ├── .env.example
 │   ├── docker-compose.yml
 │   └── docker-images/
@@ -95,7 +94,8 @@ opendataagent-deployment/
 ## Shared Skills Strategy
 
 - 打包脚本从仓库根 `skills/` 复制共享技能源码到离线包 `shared-skills/`
-- 离线包内 `deploy/.env` 和 `deploy/.env.example` 默认把 `OPENDATAAGENT_SHARED_SKILLS_PATH` 改写为 `../shared-skills`
+- 离线包只携带 `deploy/.env.example`，并把其中的 `OPENDATAAGENT_SHARED_SKILLS_PATH` 改写为 `../shared-skills`
+- 运行时 `deploy/.env` 仅在目标环境缺失时由模板初始化，不进入离线制品，升级解压不会覆盖服务器配置
 - 这样离线部署无需依赖原仓库路径，也不要求宿主机单独挂载 `skills/`
 
 ## Script Boundary

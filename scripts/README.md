@@ -12,7 +12,7 @@ This directory contains various utility scripts for building and deploying the O
 | `restart.sh` | Restart services from the compose file. |
 | `load-images.sh` | Load tarred images from `deploy/docker-images/` (offline deployment). |
 | `load-package-and-start.sh` | Extract an offline package, load images, and optionally start the stack. |
-| `create-offline-package.sh` | Produce an offline tarball containing compose files, scripts, and images. |
+| `create-offline-package.sh` | Produce an offline tarball containing compose files, scripts, images, and only the `.env.example` configuration template. |
 | `run-dataagent-evals.sh` | Run the DataAgent online evaluation suite against a deployed backend. |
 | `run-dataagent-deepeval-evals.sh` | Run the parallel DeepEval-based DataAgent evaluation suite in Docker/Podman. |
 

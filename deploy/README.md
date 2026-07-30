@@ -117,6 +117,9 @@ Use this method for isolated environments without internet access. You will use 
    #   xz -dc opendataworks-deployment-*.tar.xz | tar -xf -
    cd opendataworks-deployment
    ```
+   新版离线包只包含 `deploy/.env.example`，不会携带打包机的
+   `deploy/.env`。升级时即使把包内容同步到已有部署目录，也不会覆盖服务器现有的
+   `deploy/.env`。
 
 2. **Load Images**:
    This loads all required Docker images from the local archive. 新版离线包将全部镜像去重保存为单个 `deploy/docker-images/all-images.tar`，加载脚本会自动识别（旧版逐镜像 `*.tar` 也兼容）。
@@ -126,7 +129,8 @@ Use this method for isolated environments without internet access. You will use 
 
 3. **Configure Environment**:
    ```bash
-   cp deploy/.env.example deploy/.env
+   # 仅首次安装、deploy/.env 不存在时执行
+   test -f deploy/.env || cp deploy/.env.example deploy/.env
    # Edit .env and configure settings
    vim deploy/.env
    ```

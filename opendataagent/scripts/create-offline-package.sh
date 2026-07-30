@@ -25,7 +25,7 @@ Options:
   -h, --help              Show help
 
 The package contains:
-  - deploy/docker-compose.yml and env templates
+  - deploy/docker-compose.yml and deploy/.env.example (never deploy/.env)
   - docker images for opendataagent-server, opendataagent-web, mysql:8.0
   - shared-skills/ snapshot from repository root skills/
   - offline load/start scripts
@@ -106,8 +106,6 @@ if ! ensure_container_runtime_ready "$CONTAINER_CMD"; then
 fi
 
 log "Using container runtime: $CONTAINER_CMD"
-log "Syncing shared skills into server bundle"
-"$SYNC_SCRIPT"
 
 SERVER_IMAGE="opendataagent-server:${TAG}"
 WEB_IMAGE="opendataagent-web:${TAG}"
@@ -138,6 +136,8 @@ pull_image() {
 }
 
 if [[ "$SKIP_BUILD" = false ]]; then
+    log "Syncing shared skills into server bundle"
+    "$SYNC_SCRIPT"
     log "Building $SERVER_IMAGE"
     build_image "$SERVER_IMAGE" "$PROJECT_ROOT/server"
     log "Building $WEB_IMAGE"
@@ -164,7 +164,13 @@ log "Preparing workspace at $PACKAGE_ROOT"
 mkdir -p "$PACKAGED_DEPLOY_DIR" "$PACKAGED_SCRIPTS_DIR" "$PACKAGED_IMAGE_DIR" "$PACKAGED_SHARED_SKILLS_DIR"
 
 log "Copying deploy/ assets"
-tar -C "$PROJECT_ROOT/deploy" --exclude='docker-images/*.tar' --exclude='docker-images/checksums.sha256' --exclude='docker-images/manifest.json' -cf - . | tar -C "$PACKAGED_DEPLOY_DIR" -xf -
+tar -C "$PROJECT_ROOT/deploy" \
+    --exclude='./.env' \
+    --exclude='.env' \
+    --exclude='docker-images/*.tar' \
+    --exclude='docker-images/checksums.sha256' \
+    --exclude='docker-images/manifest.json' \
+    -cf - . | tar -C "$PACKAGED_DEPLOY_DIR" -xf -
 
 log "Copying runtime scripts"
 mkdir -p "$PACKAGED_SCRIPTS_DIR/lib"
@@ -203,11 +209,19 @@ rewrite_env_file() {
         echo "OPENDATAAGENT_SHARED_SKILLS_PATH=../shared-skills" >> "$env_file"
 }
 
-rewrite_env_file "$PACKAGED_DEPLOY_DIR/.env"
-rewrite_env_file "$PACKAGED_DEPLOY_DIR/.env.example"
-if [[ ! -f "$PACKAGED_DEPLOY_DIR/.env" && -f "$PACKAGED_DEPLOY_DIR/.env.example" ]]; then
-    cp "$PACKAGED_DEPLOY_DIR/.env.example" "$PACKAGED_DEPLOY_DIR/.env"
+rm -f "$PACKAGED_DEPLOY_DIR/.env"
+if [[ ! -f "$PACKAGED_DEPLOY_DIR/.env.example" ]]; then
+    die "deploy/.env.example is required for the offline package"
 fi
+rewrite_env_file "$PACKAGED_DEPLOY_DIR/.env.example"
+
+assert_package_has_no_runtime_env() {
+    local unexpected_env
+    unexpected_env="$(find "$PACKAGE_ROOT" -type f -name '.env' -print -quit)"
+    if [[ -n "$unexpected_env" ]]; then
+        die "runtime .env must not be included in the offline package: $unexpected_env"
+    fi
+}
 
 save_image() {
     local image="$1"
@@ -246,6 +260,8 @@ save_image "$MYSQL_IMAGE" "mysql-8.0.tar"
 
 log "Generating checksums"
 (cd "$PACKAGED_IMAGE_DIR" && compute_checksums *.tar > checksums.sha256)
+
+assert_package_has_no_runtime_env
 
 log "Creating archive $OUTPUT_PATH"
 tar -C "$WORKDIR" -czf "$OUTPUT_PATH" "$PACKAGE_NAME"

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ "${1:-}" == "save" ]]; then
+    shift
+    output_file=""
+    while [[ $# -gt 0 ]]; do
+        if [[ "$1" == "-o" ]]; then
+            output_file="$2"
+            break
+        fi
+        shift
+    done
+    [[ -n "$output_file" ]]
+    touch "$output_file"
+fi

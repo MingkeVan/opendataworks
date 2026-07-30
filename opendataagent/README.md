@@ -105,6 +105,7 @@ docker compose --project-name opendataagent --env-file .env up -d --build
 - `opendataagent-web` 镜像
 - `mysql:8.0` 镜像
 - `shared-skills/` 快照
+- `deploy/.env.example`，不包含或覆盖目标环境的 `deploy/.env`
 - `deploy/` 和 `scripts/` 启动辅助文件
 
 示例：
