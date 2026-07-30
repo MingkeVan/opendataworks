@@ -217,6 +217,50 @@ class WorkflowDefinitionLifecycleServiceTest {
     }
 
     @Test
+    void commitShouldAvoidTaskCodeOwnedByLogicallyDeletedTask() {
+        RuntimeWorkflowDefinition definition = baseDefinition();
+        RuntimeTaskDefinition task = sqlTask(1L, "t_extract", "SQL_A");
+        definition.setTasks(Collections.singletonList(task));
+        definition.setExplicitEdges(Collections.singletonList(new RuntimeTaskEdge(0L, 1L)));
+
+        when(runtimeDefinitionService.parseRuntimeDefinitionFromJson(any())).thenReturn(definition);
+        when(sqlTableMatcherService.analyze(eq("SQL_A"), eq("SQL"))).thenReturn(analyze(null, 101L));
+        when(dataTaskMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(dataTaskMapper.countByTaskCodeIncludingDeleted("wf_imp_t_extract_1")).thenReturn(1L);
+        when(dataWorkflowMapper.selectOne(any())).thenReturn(null);
+
+        DataTask persistedTask = new DataTask();
+        persistedTask.setId(11L);
+        persistedTask.setTaskName("t_extract");
+        persistedTask.setTaskCode("wf_imp_t_extract_1_2");
+        when(dataTaskService.create(any(), any(), any())).thenReturn(persistedTask);
+
+        DataWorkflow createdWorkflow = new DataWorkflow();
+        createdWorkflow.setId(77L);
+        createdWorkflow.setWorkflowName("wf_import_demo");
+        createdWorkflow.setCurrentVersionId(900L);
+        when(workflowService.createWorkflow(any())).thenReturn(createdWorkflow);
+
+        WorkflowVersion version = new WorkflowVersion();
+        version.setId(900L);
+        version.setVersionNo(3);
+        when(workflowVersionMapper.selectById(900L)).thenReturn(version);
+
+        WorkflowImportCommitRequest request = new WorkflowImportCommitRequest();
+        request.setDefinitionJson("{\"dummy\":true}");
+        request.setOperator("tester");
+
+        WorkflowImportCommitResponse response = service.commit(request);
+
+        assertEquals(77L, response.getWorkflowId());
+        ArgumentCaptor<DataTask> taskCaptor = ArgumentCaptor.forClass(DataTask.class);
+        verify(dataTaskService).create(taskCaptor.capture(), any(), any());
+        assertEquals("wf_imp_t_extract_1_2", taskCaptor.getValue().getTaskCode());
+        verify(dataTaskMapper).countByTaskCodeIncludingDeleted("wf_imp_t_extract_1");
+        verify(dataTaskMapper).countByTaskCodeIncludingDeleted("wf_imp_t_extract_1_2");
+    }
+
+    @Test
     void commitShouldKeepImportTaskMetadataRawThenNormalizePersist() {
         RuntimeWorkflowDefinition definition = baseDefinition();
         RuntimeTaskDefinition task = sqlTask(11L, "t_raw_meta", "SQL_A");
