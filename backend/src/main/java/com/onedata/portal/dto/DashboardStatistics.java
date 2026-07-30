@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -113,6 +114,26 @@ public class DashboardStatistics {
      * Doris 审计源名称
      */
     private String dorisAuditSource;
+
+    /**
+     * READY/BACKFILLING/DEGRADED/DISABLED/UNAVAILABLE。
+     */
+    private String tableAccessSyncStatus;
+
+    /**
+     * 表访问汇总可信历史起点。
+     */
+    private LocalDateTime tableAccessCoverageStart;
+
+    /**
+     * 是否覆盖 Dashboard 冷表判断所需的完整窗口。
+     */
+    private Boolean tableAccessCoverageComplete;
+
+    /**
+     * 最近成功同步时间。
+     */
+    private LocalDateTime tableAccessLastSyncedAt;
 
     /**
      * 表访问统计备注

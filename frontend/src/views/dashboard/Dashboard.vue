@@ -66,11 +66,24 @@
         </el-col>
       </el-row>
 
-      <div class="section-title" style="margin-top: 30px;">表访问总览</div>
+      <div class="access-section-header" style="margin-top: 30px;">
+        <div class="section-title">表访问总览</div>
+        <el-tag
+          v-if="accessSyncMeta.label"
+          :type="accessSyncMeta.type"
+          size="small"
+          effect="plain"
+        >
+          {{ accessSyncMeta.label }}
+        </el-tag>
+        <span v-if="statistics.tableAccessLastSyncedAt" class="access-sync-time">
+          数据截至 {{ formatDateTime(statistics.tableAccessLastSyncedAt) }}
+        </span>
+      </div>
       <el-alert
         v-if="statistics.tableAccessNote"
         :title="statistics.tableAccessNote"
-        type="warning"
+        :type="accessSyncMeta.alertType"
         show-icon
         :closable="false"
         class="access-alert"
@@ -103,11 +116,11 @@
           <el-card class="list-card" shadow="never">
             <template #header>
               <div class="list-card-header">
-                <span>长期未用表 Top{{ (statistics.longUnusedTables || []).length }}</span>
+                <span>长期未用表 Top{{ visibleLongUnusedTables.length }}</span>
                 <span class="list-card-sub">超过 {{ statistics.coldWindowDays || 90 }} 天</span>
               </div>
             </template>
-            <el-table :data="statistics.longUnusedTables || []" size="small" border height="320">
+            <el-table :data="visibleLongUnusedTables" size="small" border height="320">
               <el-table-column label="表名" min-width="180" show-overflow-tooltip>
                 <template #default="{ row }">
                   {{ formatTableName(row) }}
@@ -283,6 +296,26 @@ const assetSourceCount = computed(() => {
     return (clusters.value || []).length
   }
   return assetClusterId.value ? 1 : 0
+})
+
+const accessSyncMeta = computed(() => {
+  const status = statistics.value.tableAccessSyncStatus
+  const mapping = {
+    READY: { label: '已就绪', type: 'success', alertType: 'success' },
+    BACKFILLING: { label: '历史回填中', type: 'warning', alertType: 'warning' },
+    DEGRADED: { label: '同步异常', type: 'danger', alertType: 'error' },
+    DISABLED: { label: '同步已关闭', type: 'info', alertType: 'warning' },
+    UNAVAILABLE: { label: '统计不可用', type: 'danger', alertType: 'error' }
+  }
+  return mapping[status] || { label: '', type: 'info', alertType: 'warning' }
+})
+
+const visibleLongUnusedTables = computed(() => {
+  const status = statistics.value.tableAccessSyncStatus
+  const isLegacyResponse = !status
+  const canShowConclusion = isLegacyResponse
+    || (status === 'READY' && statistics.value.tableAccessCoverageComplete === true)
+  return canShowConclusion ? (statistics.value.longUnusedTables || []) : []
 })
 
 // 页面加载
@@ -537,6 +570,21 @@ const formatTableName = (row) => {
 
 .access-alert {
   margin-bottom: 16px;
+}
+
+.access-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.access-section-header .section-title {
+  margin-bottom: 0;
+}
+
+.access-sync-time {
+  font-size: 12px;
+  color: #909399;
 }
 
 .list-card {

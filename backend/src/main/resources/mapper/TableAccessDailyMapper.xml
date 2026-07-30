@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.onedata.portal.mapper.TableAccessDailyMapper">
+
+    <insert id="upsertBatch">
+        INSERT INTO table_access_daily (
+            cluster_id, access_date, db_name, table_name,
+            total_access_count, read_access_count, write_access_count,
+            duration_sum_ms, duration_sample_count,
+            first_access_time, last_access_time
+        ) VALUES
+        <foreach collection="items" item="item" separator=",">
+            (
+                #{item.clusterId}, #{item.accessDate}, #{item.dbName}, #{item.tableName},
+                #{item.totalAccessCount}, #{item.readAccessCount}, #{item.writeAccessCount},
+                #{item.durationSumMs}, #{item.durationSampleCount},
+                #{item.firstAccessTime}, #{item.lastAccessTime}
+            )
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+            total_access_count = total_access_count + VALUES(total_access_count),
+            read_access_count = read_access_count + VALUES(read_access_count),
+            write_access_count = write_access_count + VALUES(write_access_count),
+            duration_sum_ms = duration_sum_ms + VALUES(duration_sum_ms),
+            duration_sample_count = duration_sample_count + VALUES(duration_sample_count),
+            first_access_time = CASE
+                WHEN first_access_time IS NULL THEN VALUES(first_access_time)
+                WHEN VALUES(first_access_time) IS NULL THEN first_access_time
+                ELSE LEAST(first_access_time, VALUES(first_access_time))
+            END,
+            last_access_time = CASE
+                WHEN last_access_time IS NULL THEN VALUES(last_access_time)
+                WHEN VALUES(last_access_time) IS NULL THEN last_access_time
+                ELSE GREATEST(last_access_time, VALUES(last_access_time))
+            END
+    </insert>
+
+    <select id="selectTableAggregate" resultType="com.onedata.portal.dto.TableAccessAggregate">
+        SELECT
+            COALESCE(SUM(total_access_count), 0) AS total_access_count,
+            COALESCE(SUM(CASE WHEN access_date &gt;= #{recentStart} THEN total_access_count ELSE 0 END), 0)
+                AS recent_access_count,
+            COALESCE(SUM(CASE WHEN access_date &gt;= #{days7Start} THEN total_access_count ELSE 0 END), 0)
+                AS access_count7d,
+            COALESCE(SUM(CASE WHEN access_date &gt;= #{days30Start} THEN total_access_count ELSE 0 END), 0)
+                AS access_count30d,
+            COALESCE(SUM(CASE WHEN access_date &gt;= #{recentStart} THEN duration_sum_ms ELSE 0 END), 0)
+                AS duration_sum_ms,
+            COALESCE(SUM(CASE WHEN access_date &gt;= #{recentStart} THEN duration_sample_count ELSE 0 END), 0)
+                AS duration_sample_count,
+            MIN(first_access_time) AS first_access_time,
+            MAX(last_access_time) AS last_access_time
+        FROM table_access_daily
+        WHERE cluster_id = #{clusterId}
+          AND db_name = #{dbName}
+          AND table_name = #{tableName}
+          AND access_date &gt;= #{totalStart}
+    </select>
+
+    <select id="selectTableTrend" resultType="com.onedata.portal.dto.TableAccessTrendPoint">
+        SELECT DATE_FORMAT(access_date, '%Y-%m-%d') AS date,
+               SUM(total_access_count) AS access_count
+        FROM table_access_daily
+        WHERE cluster_id = #{clusterId}
+          AND db_name = #{dbName}
+          AND table_name = #{tableName}
+          AND access_date &gt;= #{startDate}
+        GROUP BY access_date
+        ORDER BY access_date
+    </select>
+
+    <select id="selectDashboardAggregates"
+            resultType="com.onedata.portal.dto.DashboardTableAccessAggregate">
+        SELECT cluster_id,
+               db_name,
+               table_name,
+               SUM(CASE WHEN access_date &gt;= #{hotStart} THEN total_access_count ELSE 0 END) AS access_count,
+               MAX(last_access_time) AS last_access_time
+        FROM table_access_daily
+        WHERE access_date &gt;= #{historyStart}
+          AND cluster_id IN
+        <foreach collection="clusterIds" item="clusterId" open="(" separator="," close=")">
+            #{clusterId}
+        </foreach>
+        GROUP BY cluster_id, db_name, table_name
+    </select>
+</mapper>

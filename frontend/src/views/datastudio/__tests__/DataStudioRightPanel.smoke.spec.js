@@ -142,6 +142,93 @@ describe('DataStudioRightPanel mount smoke', () => {
     }
   })
 
+  it('访问概况展示同步关闭状态和历史覆盖信息', () => {
+    const ctx = buildCtx()
+    ctx.tabStates.t1.accessStats = {
+      totalAccessCount: 12,
+      recentAccessCount: 3,
+      distinctUserCount: 1,
+      trendDays: 14,
+      trend: [],
+      topUsers: [],
+      tableAccessSyncStatus: 'DISABLED',
+      tableAccessCoverageComplete: false,
+      tableAccessCoverageStart: '2026-07-01 00:00:00',
+      tableAccessLastSyncedAt: '2026-07-30 12:00:00',
+      note: 'Doris 审计访问同步已关闭'
+    }
+    const wrapper = shallowMount(DataStudioRightPanelAccess, {
+      global: {
+        provide: { dataStudioCtx: ctx },
+        stubs: {
+          ElScrollbar: { template: '<div><slot /></div>' },
+          ElTag: { template: '<span><slot /></span>' },
+          ElAlert: { props: ['title'], template: '<div>{{ title }}</div>' },
+        },
+        config: { warnHandler: () => {} },
+        directives: { loading: {} },
+      },
+    })
+
+    expect(wrapper.text()).toContain('同步已关闭')
+    expect(wrapper.text()).toContain('历史覆盖')
+    expect(wrapper.text()).toContain('2026-07-01 00:00:00')
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['READY', '已就绪'],
+    ['BACKFILLING', '历史回填中'],
+    ['DEGRADED', '同步异常'],
+    ['DISABLED', '同步已关闭'],
+    ['UNAVAILABLE', '统计不可用'],
+  ])('访问概况将 %s 映射为明确状态提示', (status, label) => {
+    const ctx = buildCtx()
+    ctx.tabStates.t1.accessStats = {
+      totalAccessCount: 0,
+      trend: [],
+      topUsers: [],
+      tableAccessSyncStatus: status,
+    }
+    const wrapper = shallowMount(DataStudioRightPanelAccess, {
+      global: {
+        provide: { dataStudioCtx: ctx },
+        stubs: {
+          ElScrollbar: { template: '<div><slot /></div>' },
+          ElTag: { template: '<span><slot /></span>' },
+        },
+        config: { warnHandler: () => {} },
+        directives: { loading: {} },
+      },
+    })
+
+    expect(wrapper.text()).toContain(label)
+    wrapper.unmount()
+  })
+
+  it('访问概况兼容缺少新增同步字段的旧响应', () => {
+    const ctx = buildCtx()
+    ctx.tabStates.t1.accessStats = {
+      totalAccessCount: 8,
+      recentAccessCount: 2,
+      distinctUserCount: 1,
+      trend: [],
+      topUsers: [],
+    }
+    const wrapper = shallowMount(DataStudioRightPanelAccess, {
+      global: {
+        provide: { dataStudioCtx: ctx },
+        stubs: { ElScrollbar: { template: '<div><slot /></div>' } },
+        config: { warnHandler: () => {} },
+        directives: { loading: {} },
+      },
+    })
+
+    expect(wrapper.text()).toContain('总访问次数')
+    expect(wrapper.text()).toContain('8')
+    wrapper.unmount()
+  })
+
   it('头部操作区随 tab 联动', () => {
     const ctx = buildCtx()
     const mountPanel = () =>
