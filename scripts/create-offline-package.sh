@@ -25,7 +25,8 @@ Environment overrides:
 
 The script packages current scripts/ and deploy/ content, pulls required images
 from Docker Hub, retags them, saves them into a single deduplicated image
-archive, and produces an xz-compressed archive.
+archive, and produces an xz-compressed archive. Runtime deploy/.env is never
+included; the package contains deploy/.env.example only.
 EOF
 }
 
@@ -127,7 +128,11 @@ mkdir -p "$DEPLOY_IMAGE_DIR"
 
 # 1. 复制 deploy/ 下的内容
 log "Copying deploy/ content to package deploy/"
-tar -C "$REPO_ROOT/deploy" --exclude='docker-images/*.tar' -cf - . | tar -C "$PACKAGED_DEPLOY_DIR" -xf -
+tar -C "$REPO_ROOT/deploy" \
+    --exclude='./.env' \
+    --exclude='.env' \
+    --exclude='docker-images/*.tar' \
+    -cf - . | tar -C "$PACKAGED_DEPLOY_DIR" -xf -
 
 # 2. 复制 scripts/ 下的内容 (excluding build/ which is for dev)
 log "Copying scripts/ content to package scripts/"
@@ -186,29 +191,11 @@ if [[ -f "$REPO_ROOT/docs/handbook/testing-guide.md" ]]; then
     cp "$REPO_ROOT/docs/handbook/testing-guide.md" "$PACKAGE_ROOT/TESTING_GUIDE.md"
 fi
 
-# 6. 处理 .env 文件
-# 优先使用 deploy/.env（若已存在），否则尝试仓库根 .env，最后回退到示例
-ROOT_ENV_FILE="$REPO_ROOT/.env"
-ROOT_ENV_EXAMPLE="$REPO_ROOT/deploy/.env.example"
-
-# 如果 deploy 目录里已经有了 .env (从上面 tar 复制过来的)，则保留
-if [[ ! -f "$PACKAGED_DEPLOY_DIR/.env" ]]; then
-    if [[ -f "$ROOT_ENV_FILE" ]]; then
-        log "Copying repository .env to deploy/.env"
-        cp "$ROOT_ENV_FILE" "$PACKAGED_DEPLOY_DIR/.env"
-    elif [[ -f "$ROOT_ENV_EXAMPLE" ]]; then
-        log "No .env found, copying .env.example as deploy/.env"
-        cp "$ROOT_ENV_EXAMPLE" "$PACKAGED_DEPLOY_DIR/.env"
-    else
-        log "WARNING: neither .env nor .env.example found at repository root"
-    fi
-fi
-
-# 确保 .env.example 存在
+# 6. 只处理环境配置模板。
+# 运行时 deploy/.env 属于目标服务器，不得从打包机复制或在制品内生成。
+rm -f "$PACKAGED_DEPLOY_DIR/.env"
 if [[ ! -f "$PACKAGED_DEPLOY_DIR/.env.example" ]]; then
-    if [[ -f "$ROOT_ENV_EXAMPLE" ]]; then
-         cp "$ROOT_ENV_EXAMPLE" "$PACKAGED_DEPLOY_DIR/.env.example"
-    fi
+    die "deploy/.env.example is required for the offline package"
 fi
 
 rewrite_offline_env_file() {
@@ -266,8 +253,15 @@ rewrite_offline_env_file() {
         echo "DATAAGENT_SANDBOX_MODE=container" >> "$env_file"
 }
 
-rewrite_offline_env_file "$PACKAGED_DEPLOY_DIR/.env"
 rewrite_offline_env_file "$PACKAGED_DEPLOY_DIR/.env.example"
+
+assert_package_has_no_runtime_env() {
+    local unexpected_env
+    unexpected_env="$(find "$PACKAGE_ROOT" -type f -name '.env' -print -quit)"
+    if [[ -n "$unexpected_env" ]]; then
+        die "runtime .env must not be included in the offline package: $unexpected_env"
+    fi
+}
 
 declare -a MANIFEST_RAW=()
 
@@ -388,6 +382,8 @@ MANIFEST_FILE="$DEPLOY_IMAGE_DIR/manifest.json"
 checksum_file="$DEPLOY_IMAGE_DIR/checksums.sha256"
 log "Generating checksums"
 (cd "$DEPLOY_IMAGE_DIR" && compute_checksums *.tar > checksums.tmp && mv checksums.tmp "$(basename "$checksum_file")")
+
+assert_package_has_no_runtime_env
 
 log "Creating xz archive $OUTPUT_PATH (level ${XZ_LEVEL}, multi-threaded)"
 tar -C "$WORKDIR" -cf - "$PACKAGE_NAME" | xz -T0 "-${XZ_LEVEL}" -c > "$OUTPUT_PATH"

@@ -40,7 +40,11 @@ bash opendataagent/scripts/create-offline-package.sh
 - `opendataagent-web` 镜像
 - `mysql:8.0` 镜像
 - `shared-skills/` 快照
+- `deploy/.env.example` 配置模板；不包含运行时 `deploy/.env`
 - 离线镜像加载和启动脚本
+
+因此升级解压不会覆盖服务器现有的 `deploy/.env`。首次安装时，
+`load-package-and-start.sh` 只会在 `.env` 不存在时从模板初始化。
 
 ## 安装离线包
 

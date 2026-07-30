@@ -50,6 +50,7 @@
   - 同步根 `skills/`
   - 构建 `opendataagent-server`、`opendataagent-web`
   - 拉取 `mysql:8.0`
+  - 只打包 `deploy/.env.example`，不把运行时 `deploy/.env` 放入制品
   - 导出镜像 tar、manifest、checksum
   - 打包成 `opendataagent-deployment-<tag>.tar.gz`
 
