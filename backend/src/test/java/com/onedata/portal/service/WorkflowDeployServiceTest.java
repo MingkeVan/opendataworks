@@ -307,6 +307,64 @@ class WorkflowDeployServiceTest {
         verify(dolphinSchedulerService, never()).checkWorkflowExists(anyLong());
     }
 
+    @Test
+    void deployShouldRejectCyclicTaskDependenciesWithoutStackOverflow() {
+        DataWorkflow workflow = new DataWorkflow();
+        workflow.setId(1L);
+        workflow.setWorkflowName("wf_cycle");
+
+        WorkflowTaskRelation relA = new WorkflowTaskRelation();
+        relA.setWorkflowId(1L);
+        relA.setTaskId(10L);
+        WorkflowTaskRelation relB = new WorkflowTaskRelation();
+        relB.setWorkflowId(1L);
+        relB.setTaskId(20L);
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Arrays.asList(relA, relB));
+
+        DataTask taskA = taskWithDolphinIdentity(10L, "task_a", 1001L);
+        DataTask taskB = taskWithDolphinIdentity(20L, "task_b", 2002L);
+        when(dataTaskMapper.selectBatchIds(anyList())).thenReturn(Arrays.asList(taskA, taskB));
+
+        TableTaskRelation writeA = tableRelation(10L, 501L, "write");
+        TableTaskRelation readA = tableRelation(10L, 502L, "read");
+        TableTaskRelation writeB = tableRelation(20L, 502L, "write");
+        TableTaskRelation readB = tableRelation(20L, 501L, "read");
+        when(tableTaskRelationMapper.selectList(any()))
+                .thenReturn(Arrays.asList(writeA, readA, writeB, readB));
+        when(dolphinSchedulerService.getProjectCode(true)).thenReturn(11L);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> service.deploy(workflow));
+
+        assertTrue(ex.getMessage().contains("循环依赖"));
+        assertTrue(ex.getMessage().contains("task_a"));
+        assertTrue(ex.getMessage().contains("task_b"));
+        verify(dolphinSchedulerService, never()).syncWorkflow(
+                anyLong(),
+                anyString(),
+                anyString(),
+                anyList(),
+                anyList(),
+                anyList(),
+                any());
+    }
+
+    private DataTask taskWithDolphinIdentity(long id, String name, long dolphinTaskCode) {
+        DataTask task = new DataTask();
+        task.setId(id);
+        task.setTaskName(name);
+        task.setDolphinTaskCode(dolphinTaskCode);
+        task.setDolphinTaskVersion(1);
+        return task;
+    }
+
+    private TableTaskRelation tableRelation(long taskId, long tableId, String relationType) {
+        TableTaskRelation relation = new TableTaskRelation();
+        relation.setTaskId(taskId);
+        relation.setTableId(tableId);
+        relation.setRelationType(relationType);
+        return relation;
+    }
+
     private DolphinSchedulerService.TaskRelationPayload dolphinRelation(long preCode,
             int preVersion,
             long postCode,

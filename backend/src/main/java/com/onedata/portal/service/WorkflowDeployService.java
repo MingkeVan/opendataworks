@@ -28,6 +28,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -450,17 +451,14 @@ public class WorkflowDeployService {
         Map<Long, DataTask> taskMap = tasks.stream()
                 .collect(Collectors.toMap(DataTask::getId, t -> t));
 
-        // Build adjacency graph (upstream -> downstreams) and reverse (downstream ->
-        // upstreams)
+        // Build adjacency graph (upstream -> downstreams)
         Map<Long, List<Long>> adjacency = new HashMap<>();
-        Map<Long, List<Long>> reverseAdjacency = new HashMap<>(); // for level calculation
         Map<Long, Integer> inDegree = new HashMap<>();
 
         // Initialize graph
         for (DataTask task : tasks) {
             inDegree.put(task.getId(), 0);
             adjacency.put(task.getId(), new ArrayList<>());
-            reverseAdjacency.put(task.getId(), new ArrayList<>());
         }
 
         // Populate edges
@@ -468,26 +466,22 @@ public class WorkflowDeployService {
             List<DataTask> upstreams = resolveUpstreamTasks(task, tasks, readTables, writeTables);
             for (DataTask upstream : upstreams) {
                 adjacency.get(upstream.getId()).add(task.getId());
-                reverseAdjacency.get(task.getId()).add(upstream.getId());
                 inDegree.merge(task.getId(), 1, Integer::sum);
             }
         }
 
-        // Compute topological levels (longest path from any source)
+        // Compute topological levels while sorting. Keeping this iterative avoids both
+        // unbounded recursion on cyclic graphs and stack exhaustion on very deep DAGs.
         Map<Long, Integer> taskLevels = new HashMap<>();
-        for (DataTask task : tasks) {
-            computeLevel(task.getId(), reverseAdjacency, taskLevels);
-        }
+        tasks.forEach(task -> taskLevels.put(task.getId(), 0));
+        java.util.Queue<Long> queue = new PriorityQueue<>(
+                Comparator.comparingInt((Long id) -> taskLevels.getOrDefault(id, 0))
+                        .thenComparingLong(Long::longValue));
 
-        // Kahn's Algorithm for sorted order
-        java.util.Queue<Long> queue = new java.util.LinkedList<>();
-
-        // Add initial zero-degree nodes in a deterministic order (by level first, then
-        // by ID)
+        // Add initial zero-degree nodes. The priority queue keeps the output
+        // deterministic by topological level and then task ID.
         tasks.stream()
                 .filter(t -> inDegree.get(t.getId()) == 0)
-                .sorted(Comparator.comparing((DataTask t) -> taskLevels.getOrDefault(t.getId(), 0))
-                        .thenComparing(DataTask::getId))
                 .map(DataTask::getId)
                 .forEach(queue::add);
 
@@ -497,12 +491,9 @@ public class WorkflowDeployService {
             result.add(taskMap.get(currentId));
 
             if (adjacency.containsKey(currentId)) {
-                // Sort downstreams by level then ID for deterministic order
-                List<Long> downstreams = adjacency.get(currentId);
-                downstreams.sort(Comparator.comparing((Long id) -> taskLevels.getOrDefault(id, 0))
-                        .thenComparing(id -> id));
-
-                for (Long downstreamId : downstreams) {
+                int downstreamLevel = taskLevels.getOrDefault(currentId, 0) + 1;
+                for (Long downstreamId : adjacency.get(currentId)) {
+                    taskLevels.merge(downstreamId, downstreamLevel, Math::max);
                     inDegree.put(downstreamId, inDegree.get(downstreamId) - 1);
                     if (inDegree.get(downstreamId) == 0) {
                         queue.add(downstreamId);
@@ -511,48 +502,22 @@ public class WorkflowDeployService {
             }
         }
 
-        // Cycle handling: if we didn't visit all nodes, there's a cycle.
+        // A Dolphin workflow must be a DAG. Fail before constructing or submitting an
+        // invalid payload, and report a useful error instead of recursing until the JVM
+        // throws StackOverflowError.
         if (result.size() < tasks.size()) {
-            log.warn(
-                    "Cycle detected or disconnected components in workflow tasks. topologicalSort visited {}/{} tasks.",
-                    result.size(), tasks.size());
             Set<Long> processed = result.stream().map(DataTask::getId).collect(Collectors.toSet());
-
-            // Append remaining tasks in level/ID order
-            tasks.stream()
+            String blockedTasks = tasks.stream()
                     .filter(t -> !processed.contains(t.getId()))
-                    .sorted(Comparator.comparing((DataTask t) -> taskLevels.getOrDefault(t.getId(), 0))
-                            .thenComparing(DataTask::getId))
-                    .forEach(result::add);
+                    .sorted(Comparator.comparing(DataTask::getId))
+                    .map(this::taskLabel)
+                    .collect(Collectors.joining(", "));
+            throw new IllegalStateException(
+                    "检测到任务循环依赖，无法发布。请检查以下任务的读写表关系（可能包含被循环阻塞的下游任务）: "
+                            + blockedTasks);
         }
 
         return new TopologicalSortResult(result, taskLevels);
-    }
-
-    /**
-     * Recursively compute the topological level of a task.
-     * Level = max(upstream levels) + 1, or 0 if no upstreams.
-     */
-    private int computeLevel(Long taskId, Map<Long, List<Long>> reverseAdjacency, Map<Long, Integer> levels) {
-        if (levels.containsKey(taskId)) {
-            return levels.get(taskId);
-        }
-
-        List<Long> upstreams = reverseAdjacency.getOrDefault(taskId, Collections.emptyList());
-        if (upstreams.isEmpty()) {
-            levels.put(taskId, 0);
-            return 0;
-        }
-
-        int maxUpstreamLevel = 0;
-        for (Long upstreamId : upstreams) {
-            int upstreamLevel = computeLevel(upstreamId, reverseAdjacency, levels);
-            maxUpstreamLevel = Math.max(maxUpstreamLevel, upstreamLevel);
-        }
-
-        int level = maxUpstreamLevel + 1;
-        levels.put(taskId, level);
-        return level;
     }
 
     private String mapPriority(Integer value, DataTask task) {
