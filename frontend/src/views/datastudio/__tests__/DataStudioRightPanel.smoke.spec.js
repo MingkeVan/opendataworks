@@ -177,10 +177,10 @@ describe('DataStudioRightPanel mount smoke', () => {
     expect(actions(wrapper)).toMatchObject({ generate: true, edit: false, del: true })
     wrapper.unmount()
 
-    // DDL：出现复制，且不可编辑
+    // DDL：不可编辑；复制按钮留在 DDL 内容区，不在头部
     ctx.tabStates.t1.metaTab = 'ddl'
     wrapper = mountPanel()
-    expect(actions(wrapper)).toMatchObject({ copy: true, edit: false })
+    expect(actions(wrapper)).toMatchObject({ generate: true, edit: false, del: true, copy: false })
     wrapper.unmount()
 
     // 列信息编辑态：只剩取消 / 保存

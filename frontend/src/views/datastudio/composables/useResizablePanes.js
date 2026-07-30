@@ -7,10 +7,12 @@ import { computed, reactive, ref, onMounted, onBeforeUnmount } from 'vue'
 export function useResizablePanes({ activeTab, syncResultPaneLayout }) {
   const studioLayoutRef = ref(null)
   const DEFAULT_SIDEBAR_RATIO = 0.2
-  const DEFAULT_RIGHT_RATIO = 0.23
+  const DEFAULT_RIGHT_RATIO = 0.3
   const MIN_SIDEBAR_WIDTH = 220
   const MAX_SIDEBAR_WIDTH = 840
-  const MIN_RIGHT_WIDTH = 320
+  // 表详情有六个 tab（表信息/Doris信息/列信息/DDL/访问情况/变更记录），
+  // 低于 400px 时 tab 栏会出现左右滚动箭头
+  const MIN_RIGHT_WIDTH = 400
   const MAX_RIGHT_WIDTH = 900
   const sidebarWidthRatio = ref(DEFAULT_SIDEBAR_RATIO)
   const rightPanelWidthRatio = ref(DEFAULT_RIGHT_RATIO)

@@ -44,16 +44,6 @@
                 {{ metadataGenerating ? '元数据生成中' : '智能元数据' }}
               </el-button>
 
-              <el-button
-                v-if="state.metaTab === 'ddl'"
-                data-test="action-copy-ddl"
-                size="small"
-                :disabled="!state.ddl"
-                @click="copyDdl(activeTabId)"
-              >
-                复制
-              </el-button>
-
               <el-tooltip v-if="editDisabledReason" :content="editDisabledReason" placement="top">
                 <span>
                   <el-button data-test="action-edit" type="primary" size="small" disabled>编辑</el-button>
@@ -132,6 +122,9 @@
               <section class="section-block section-fill">
                 <div class="section-header">
                   <div class="section-title">建表语句</div>
+                  <div class="section-actions">
+                    <el-button size="small" :disabled="!state.ddl" @click="copyDdl(activeTabId)">复制</el-button>
+                  </div>
                 </div>
                 <div class="code-shell">
                   <el-scrollbar class="ddl-scroll">
@@ -638,50 +631,30 @@ const {
   flex: none;
 }
 
+/* tab 使用 el-tabs 原生下划线样式，这里只做布局约束：
+   头部按内容高度，内容区占满剩余空间（不写死头部高度，避免样式变化后错位） */
+.detail-tabs {
+  display: flex;
+  flex-direction: column;
+}
+
 :deep(.detail-tabs > .el-tabs__header) {
+  flex: none;
   margin: 0;
-  padding: 8px 10px 6px;
-  border-bottom: 1px solid var(--line);
+  padding: 0 10px;
   box-sizing: border-box;
 }
 
-:deep(.detail-tabs .el-tabs__nav-wrap::after) {
-  display: none;
-}
-
-:deep(.detail-tabs .el-tabs__active-bar) {
-  display: none;
-}
-
-:deep(.detail-tabs .el-tabs__nav) {
-  float: none;
-  display: inline-flex;
-  gap: 4px;
-  padding: 3px;
-  border-radius: 8px;
-  background: var(--tab-bg);
-  border: 1px solid var(--line);
-}
-
+/* 六个 tab 在右栏宽度内排开：原生 item 默认左右各 20px，共占 240px 纯内边距，
+   在最窄的 400px 右栏放不下。收到 8px 后 tab 栏约 361px，1280px 视口（右栏取下限
+   400px、可用 378px）也不会出现滚动箭头，且不必再从中间查询区抢宽度。 */
 :deep(.detail-tabs .el-tabs__item) {
-  height: 28px;
-  line-height: 28px;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  padding: 0 10px;
-  font-weight: 600;
-  color: var(--text-sub);
-  transition: background-color 100ms ease, color 100ms ease, border-color 100ms ease;
+  padding: 0 8px;
 }
 
-:deep(.detail-tabs .el-tabs__item.is-active) {
-  color: var(--text);
-  border-color: var(--line);
-  background: var(--tab-active);
-}
-
-:deep(.detail-tabs .el-tabs__content) {
-  height: calc(100% - 44px);
+:deep(.detail-tabs > .el-tabs__content) {
+  flex: 1;
+  min-height: 0;
   padding: 10px;
   box-sizing: border-box;
 }
