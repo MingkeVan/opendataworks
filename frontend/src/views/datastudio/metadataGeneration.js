@@ -19,7 +19,10 @@ export function buildMetadataPrompt(context = {}) {
     upstreamTables = [],
     downstreamTables = [],
     relatedTasks = [],
-    columnValueProfiles = []
+    columnValueProfiles = [],
+    layerOptions = [],
+    businessDomains = [],
+    dataDomains = []
   } = context
 
   const fieldLines =
@@ -42,6 +45,19 @@ export function buildMetadataPrompt(context = {}) {
           profile.values.map((item) => `${item.value}(${item.count ?? '-'})`).join('、')
       )
       .join('\n') || '（本次未取到实测取值）'
+
+  // 分层/业务域/数据域只能取平台已有编码，否则写回就是脏值；清单同时喂给模型并在写回前硬过滤
+  const layerLine =
+    (layerOptions || []).map((item) => String(item?.value ?? item ?? '').trim()).filter(Boolean).join(' | ') ||
+    '（无可选分层）'
+  const businessDomainLines =
+    (businessDomains || [])
+      .map((item) => `- ${item.domainCode}（${item.domainName || '未命名'}）`)
+      .join('\n') || '（无可选业务域）'
+  const dataDomainLines =
+    (dataDomains || [])
+      .map((item) => `- ${item.domainCode}（${item.domainName || '未命名'}，属于业务域 ${item.businessDomain || '未指定'}）`)
+      .join('\n') || '（无可选数据域）'
 
   const taskBlocks =
     (relatedTasks || [])
@@ -85,15 +101,23 @@ export function buildMetadataPrompt(context = {}) {
     '以下取值由平台直接查询该表真实数据得到，是本次唯一可用的枚举取值来源。',
     enumLines,
     '',
+    '# 可选的表属性取值(只能从下列编码中原样选择)',
+    `分层: ${layerLine}`,
+    '业务域:',
+    businessDomainLines,
+    '数据域:',
+    dataDomainLines,
+    '',
     '# 要求',
     '1. 推导表级业务说明(table_comment) 与每个字段业务含义(comment)，使用简体中文。',
     '2. comment 先给字段业务含义；若能从关联任务代码推断该字段加工逻辑，追加一句「加工逻辑：……」，点明来源表、分组维度与计算方式。',
     '3. enum_values 的 value 只能逐字复制「字段实测取值」中列出的取值：未出现在该清单里的字段一律返回空数组，也不得补充清单外的取值。label 由你结合 DDL、任务代码与字段名给出中文含义；含义无法确定时保留 value 并给空 label，不要猜。',
     '4. 只依据给定上下文推导，不编造无依据的含义；无把握时给保守简短说明。',
     '5. field_name 必须与上面字段列表完全一致，并覆盖全部字段。',
-    '6. 只输出一个 JSON 代码块，不要任何解释文字。结构严格如下：',
+    '6. table_attributes 推断该表的分层与归属：layer / business_domain / data_domain 的取值必须逐字复制「可选的表属性取值」中的编码；data_domain 必须属于所选 business_domain；任一项无法确定就留空字符串，不要猜。',
+    '7. 只输出一个 JSON 代码块，不要任何解释文字。结构严格如下：',
     '```json',
-    '{"table_comment":"...","fields":[{"field_name":"...","comment":"...","enum_values":[{"value":"0","label":"待支付"}]}]}',
+    '{"table_comment":"...","table_attributes":{"layer":"DWD","business_domain":"","data_domain":""},"fields":[{"field_name":"...","comment":"...","enum_values":[{"value":"0","label":"待支付"}]}]}',
     '```'
   ].join('\n')
 }
@@ -210,10 +234,53 @@ export function parseMetadataResponse(text) {
     })
     .filter(Boolean)
 
+  const rawAttrs = parsed.table_attributes ?? parsed.tableAttributes
+  const attrs = rawAttrs && typeof rawAttrs === 'object' && !Array.isArray(rawAttrs) ? rawAttrs : {}
+
   return {
     tableComment: String(parsed.table_comment ?? parsed.tableComment ?? '').trim(),
+    tableAttributes: {
+      layer: String(attrs.layer ?? '').trim(),
+      businessDomain: String(attrs.business_domain ?? attrs.businessDomain ?? '').trim(),
+      dataDomain: String(attrs.data_domain ?? attrs.dataDomain ?? '').trim()
+    },
     fields
   }
+}
+
+/**
+ * 按平台已有取值硬过滤表属性建议。
+ *
+ * prompt 只是要求，实际写回前一律在这里过滤：分层必须是已知分层，业务域/数据域必须是
+ * 已有编码；数据域还必须归属于所选业务域。业务域被丢弃时数据域一并丢弃（存在依赖关系）。
+ */
+export function filterTableAttributes(attributes, options = {}) {
+  const { layerOptions = [], businessDomains = [], dataDomains = [] } = options
+  const attrs = attributes && typeof attributes === 'object' ? attributes : {}
+
+  const layerSet = new Set(
+    (layerOptions || []).map((item) => String(item?.value ?? item ?? '').trim().toUpperCase()).filter(Boolean)
+  )
+  const rawLayer = String(attrs.layer || '').trim().toUpperCase()
+  const layer = layerSet.has(rawLayer) ? rawLayer : ''
+
+  const businessSet = new Set(
+    (businessDomains || []).map((item) => String(item?.domainCode || '').trim()).filter(Boolean)
+  )
+  const rawBusiness = String(attrs.businessDomain || '').trim()
+  const businessDomain = businessSet.has(rawBusiness) ? rawBusiness : ''
+
+  let dataDomain = ''
+  const rawData = String(attrs.dataDomain || '').trim()
+  if (businessDomain && rawData) {
+    const matched = (dataDomains || []).find((item) => String(item?.domainCode || '').trim() === rawData)
+    // 数据域必须归属所选业务域，否则是跨域的无效组合
+    if (matched && String(matched.businessDomain || '').trim() === businessDomain) {
+      dataDomain = rawData
+    }
+  }
+
+  return { layer, businessDomain, dataDomain }
 }
 
 /**

@@ -168,6 +168,36 @@
 2. `buildColumnDefinition` 真正使用 `isKey`，在类型后补 `KEY`，让确需改类型/缺省值的 key 列也能改。
 3. 两个引擎 handler 的 `normalize` 统一把空串视作 `null`，消除「空串 vs null」造成的假变更。
 
+## 表属性补全：分层与业务域/数据域（2026-07-30）
+
+原先只生成表描述与字段描述，「表信息」里的分层、业务域、数据域仍要手填。本次一并纳入生成范围。
+
+可补全的只有这三项：表名与负责人不交给模型推断（改名有物理副作用、负责人无从推断），
+数据库/行数/数据量/Doris 时间是同步来的只读值。
+
+这三项都是**受控取值**，不能让模型自由输出，否则写回就是脏值：
+
+- 候选清单来自平台自身：分层取 `DataStudioNew.vue` 的 `layerOptions`（ODS/DWD/DIM/DWS/ADS），
+  业务域取 `GET /v1/business-domains`，数据域取 `GET /v1/data-domains`（不带参数返回全部，
+  每条带 `businessDomain` 字段，一次请求即可拿到完整映射，无需按业务域逐个查询）。
+- prompt 新增「可选的表属性取值」段，要求 `table_attributes.layer / business_domain / data_domain`
+  逐字复制清单中的编码，无法确定就留空。
+- 与枚举取值同一套防线：prompt 只是要求，写回前由 `filterTableAttributes` 硬过滤——
+  分层必须是已知分层（大小写归一），业务域/数据域必须是已有编码，数据域还必须归属于所选业务域；
+  业务域被丢弃时数据域一并丢弃（存在依赖关系）。
+
+采纳走 `PUT /api/v1/tables/{id}`（`tableApi.update`）。两个必须注意的点：
+
+- `DataTableService.updateTable` 强制校验分层非空，而缺分层的表正是本功能的目标对象。
+  因此采纳属性时提交的分层取「本次采纳的分层 || 表上已有分层」；两者都为空时前端直接给出
+  「请同时采纳分层」的提示，而不是把 `数据分层不能为空` 抛给用户。
+- 提交载荷只带分层与被采纳的属性。MyBatis-Plus 按非空字段更新，其余字段不受影响；
+  刻意不提交 `tableComment`/`bucketNum`/`replicaNum`，避免触发 `alterTableComment` 与
+  分桶/副本的 Doris 物理变更。表描述仍走 `PUT /{id}/comment`（该接口不校验分层）。
+
+弹窗「表名与表描述」tab 更名为「表信息」，在表描述下方增加属性表格（是否采纳 / 属性 / 当前值 / 生成推荐值），
+无推荐的行禁用勾选，与字段描述 tab 的交互一致。
+
 ## Risks and Tradeoffs
 
 - 依赖 `da_agent_settings` 已配置可用 provider/model；未配置时生成失败并提示，不影响表详情其余功能。

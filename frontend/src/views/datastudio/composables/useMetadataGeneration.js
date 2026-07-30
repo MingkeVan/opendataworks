@@ -3,12 +3,14 @@ import { ElMessage } from 'element-plus'
 import { isDemoMode, showDemoReadonlyMessage } from '@/demo/runtime'
 import { nl2sqlApi, nl2sqlErrorMessage } from '@/api/nl2sql'
 import { settingsApi } from '@/api/settings'
+import { businessDomainApi, dataDomainApi } from '@/api/domain'
 import { tableApi } from '@/api/table'
 import { buildFieldPayload } from '../fieldEdit'
 import {
   buildMetadataPrompt,
   buildObservedValueIndex,
   filterEnumValuesByObserved,
+  filterTableAttributes,
   formatFieldComment,
   parseMetadataResponse
 } from '../metadataGeneration'
@@ -26,6 +28,13 @@ const SUCCESS_STATUSES = new Set(['finished', 'success', 'completed'])
 const POLL_INTERVAL_MS = 2000
 const MAX_WAIT_MS = 300000
 const MAX_TASK_SQL = 5
+
+// 表属性建议的展示顺序与中文名；layer 必须在最前，采纳时它是 update 接口的必填项
+const TABLE_ATTRIBUTE_META = [
+  { key: 'layer', label: '分层' },
+  { key: 'businessDomain', label: '业务域' },
+  { key: 'dataDomain', label: '数据域' }
+]
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -68,6 +77,7 @@ export function useMetadataGeneration({
   tabStates,
   taskApi,
   loadDdl,
+  layerOptions,
   warnPlatformMetadataMissing
 }) {
   const metadataGenerating = ref(false)
@@ -134,7 +144,35 @@ export function useMetadataGeneration({
     }
   }
 
-  const buildResult = (tabId, state, parsed, columnValueProfiles) => {
+  // 分层/业务域/数据域的候选取值：既喂给模型，也用于写回前硬过滤
+  const collectAttributeOptions = async () => {
+    const [businessDomains, dataDomains] = await Promise.all([
+      businessDomainApi.list().catch(() => []),
+      dataDomainApi.list().catch(() => [])
+    ])
+    return {
+      layerOptions: layerOptions || [],
+      businessDomains: Array.isArray(businessDomains) ? businessDomains : [],
+      dataDomains: Array.isArray(dataDomains) ? dataDomains : []
+    }
+  }
+
+  const buildAttributeRows = (state, parsed, attributeOptions) => {
+    const suggested = filterTableAttributes(parsed.tableAttributes, attributeOptions)
+    return TABLE_ATTRIBUTE_META.map(({ key, label }) => {
+      const currentValue = String(state.table?.[key] || '')
+      const suggestedValue = String(suggested[key] || '')
+      return {
+        key,
+        label,
+        currentValue,
+        suggestedValue,
+        hasRecommendation: !!suggestedValue && suggestedValue !== currentValue
+      }
+    })
+  }
+
+  const buildResult = (tabId, state, parsed, columnValueProfiles, attributeOptions) => {
     const currentByName = new Map((state.fields || []).map((field) => [field.fieldName, field]))
     const observedByField = buildObservedValueIndex(columnValueProfiles)
     const fields = parsed.fields
@@ -171,6 +209,7 @@ export function useMetadataGeneration({
         suggestedComment: parsed.tableComment,
         hasRecommendation: !!parsed.tableComment && parsed.tableComment !== tableComment
       },
+      attributes: buildAttributeRows(state, parsed, attributeOptions),
       fields
     }
   }
@@ -202,6 +241,7 @@ export function useMetadataGeneration({
 
       const relatedTasks = await collectRelatedTasks(state)
       const columnValueProfiles = await collectColumnValueProfiles(state)
+      const attributeOptions = await collectAttributeOptions()
       const prompt = buildMetadataPrompt({
         dbName: state.table.dbName,
         tableName: state.table.tableName,
@@ -217,7 +257,8 @@ export function useMetadataGeneration({
         upstreamTables: state.lineage?.upstreamTables || [],
         downstreamTables: state.lineage?.downstreamTables || [],
         relatedTasks,
-        columnValueProfiles
+        columnValueProfiles,
+        ...attributeOptions
       })
 
       const agentId = await resolveAgentId()
@@ -240,10 +281,11 @@ export function useMetadataGeneration({
       await waitForResult(taskId)
       const parsed = parseMetadataResponse(messageText(await nl2sqlApi.getTaskMessage(taskId)))
 
-      metadataResult.value = buildResult(tabId, state, parsed, columnValueProfiles)
+      metadataResult.value = buildResult(tabId, state, parsed, columnValueProfiles, attributeOptions)
       metadataDialogVisible.value = true
       if (
         !metadataResult.value.table.hasRecommendation &&
+        !metadataResult.value.attributes.some((item) => item.hasRecommendation) &&
         !metadataResult.value.fields.some((field) => field.hasRecommendation)
       ) {
         ElMessage.warning('AI 未生成可采纳的元数据建议')
@@ -255,11 +297,11 @@ export function useMetadataGeneration({
     }
   }
 
-  // payload: { table: { text } | null, fields: [{ fieldName, text }] }
+  // payload: { table: { text } | null, attributes: [{ key, value }], fields: [{ fieldName, text }] }
   const adoptMetadata = async (tabId, payload = {}) => {
     const state = tabStates[tabId]
     if (!state?.table?.id) return
-    const { table = null, fields = [] } = payload
+    const { table = null, attributes = [], fields = [] } = payload
 
     metadataAdopting.value = true
     try {
@@ -268,6 +310,33 @@ export function useMetadataGeneration({
         state.table.tableComment = table.text
         if (state.metaForm) state.metaForm.tableComment = table.text
         if (state.metaOriginal) state.metaOriginal.tableComment = table.text
+      }
+
+      const adoptedAttrs = (attributes || []).filter((item) => item?.key && String(item.value || '').trim())
+      if (adoptedAttrs.length) {
+        const next = {}
+        adoptedAttrs.forEach((item) => {
+          next[item.key] = String(item.value).trim()
+        })
+        // updateTable 强制校验分层非空，而缺分层的表正是本功能的目标对象：
+        // 采纳属性时必须带上有效分层，否则后端会以「数据分层不能为空」失败
+        const effectiveLayer = next.layer || state.table.layer || ''
+        if (!effectiveLayer) {
+          throw new Error('该表尚未设置数据分层，请同时采纳「分层」建议，或先手动设置分层')
+        }
+        // 只带必要字段：MyBatis-Plus 按非空字段更新，其余字段不受影响；
+        // tableComment/bucketNum/replicaNum 不在此提交，避免触发 Doris 物理变更
+        const updated = await tableApi.update(
+          state.table.id,
+          { layer: effectiveLayer, ...next },
+          clusterId.value || null
+        )
+        state.table = { ...state.table, ...(updated || next), layer: effectiveLayer }
+        if (state.metaForm) {
+          state.metaForm.layer = state.table.layer || ''
+          state.metaForm.businessDomain = state.table.businessDomain || ''
+          state.metaForm.dataDomain = state.table.dataDomain || ''
+        }
       }
 
       for (const item of fields) {

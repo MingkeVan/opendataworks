@@ -601,6 +601,7 @@ const {
   tabStates,
   taskApi,
   loadDdl,
+  layerOptions,
   warnPlatformMetadataMissing,
 })
 

@@ -81,6 +81,15 @@
     新增 `DataTableQueryServiceEnumColumnsTest`（标识列与不可分组类型不参与、宽表候选列封顶、无候选列不发查询、类型回填）；
     `metadataGeneration.spec.js` 增 5 例；`useMetadataGeneration.spec.js` 增 2 例（编造取值被丢弃、取不到实测取值则不产枚举）。
 
+
+## 表属性补全（2026-07-30）
+
+45. `metadataGeneration.js`：`buildMetadataPrompt` 增加 `layerOptions`/`businessDomains`/`dataDomains` 上下文与「可选的表属性取值」段；`parseMetadataResponse` 解析 `table_attributes`；新增 `filterTableAttributes` 按平台清单硬过滤（含数据域必须归属所选业务域）。
+46. `useMetadataGeneration.js`：新增 `collectAttributeOptions`（业务域/数据域各一次请求）与 `buildAttributeRows`；`adoptMetadata` 支持 `attributes`，经 `tableApi.update` 写回并强制带上有效分层，缺分层时给出可操作提示。
+47. `DataStudioNew.vue`：把 `layerOptions` 传入 composable。
+48. `SmartMetadataDialog.vue`：「表名与表描述」更名「表信息」，增加属性采纳表格并计入「已选 N 项」。
+49. 测试：`metadataGeneration.spec.js` 补 prompt 清单、`table_attributes` 解析与过滤（含跨业务域数据域）用例；`useMetadataGeneration.spec.js` 补属性过滤入结果、采纳带分层、缺分层提示、沿用已有分层四条用例。
+
 ## Verification
 
 - `npm --prefix frontend run test`（全量 35 文件 / 185 用例）

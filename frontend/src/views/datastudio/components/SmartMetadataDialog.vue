@@ -54,7 +54,7 @@
         </el-table>
       </el-tab-pane>
 
-      <el-tab-pane label="表名与表描述" name="table">
+      <el-tab-pane label="表信息" name="table">
         <div class="smd-tabledesc">
           <div class="smd-line">
             <span class="smd-label">表名</span>
@@ -79,6 +79,26 @@
             />
           </div>
         </div>
+
+        <el-table :data="result.attributes" border size="small" class="smd-attr-table">
+          <el-table-column width="96" align="center">
+            <template #header>是否采纳</template>
+            <template #default="{ row }">
+              <el-checkbox v-model="selectedAttrs[row.key]" :disabled="!row.hasRecommendation" />
+            </template>
+          </el-table-column>
+          <el-table-column prop="label" label="属性" width="90" />
+          <el-table-column label="当前值" width="140" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.currentValue || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="生成推荐值" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row.hasRecommendation">{{ row.suggestedValue }}</span>
+              <span v-else class="smd-muted">已被采纳或暂无推荐</span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="smd-attr-hint">推荐值只会取自平台已有的分层与业务域/数据域编码，清单外的取值会被丢弃。</div>
       </el-tab-pane>
     </el-tabs>
 
@@ -129,6 +149,7 @@ const tab = ref('fields')
 const onlyWeak = ref(false)
 const keyword = ref('')
 const selected = reactive({})
+const selectedAttrs = reactive({})
 const adoptTable = ref(false)
 const tableText = ref('')
 const localFields = ref([])
@@ -137,6 +158,10 @@ watch(
   () => metadataResult.value,
   (value) => {
     Object.keys(selected).forEach((key) => delete selected[key])
+    Object.keys(selectedAttrs).forEach((key) => delete selectedAttrs[key])
+    ;(value?.attributes || []).forEach((item) => {
+      selectedAttrs[item.key] = item.hasRecommendation
+    })
     localFields.value = (value?.fields || []).map((field) => ({ ...field, editedComment: field.suggestedComment }))
     localFields.value.forEach((field) => {
       selected[field.fieldName] = field.hasRecommendation
@@ -177,8 +202,15 @@ const selectedFields = computed(() =>
   localFields.value.filter((field) => field.hasRecommendation && selected[field.fieldName])
 )
 
+const selectedAttributes = computed(() =>
+  (result.value?.attributes || []).filter((item) => item.hasRecommendation && selectedAttrs[item.key])
+)
+
 const totalSelected = computed(
-  () => selectedFields.value.length + (adoptTable.value && result.value?.table?.hasRecommendation ? 1 : 0)
+  () =>
+    selectedFields.value.length +
+    selectedAttributes.value.length +
+    (adoptTable.value && result.value?.table?.hasRecommendation ? 1 : 0)
 )
 
 const currentTabId = () => String(result.value?.tabId || activeTab.value || '')
@@ -186,6 +218,7 @@ const currentTabId = () => String(result.value?.tabId || activeTab.value || '')
 const onAdopt = () => {
   adoptMetadata(currentTabId(), {
     table: adoptTable.value && result.value?.table?.hasRecommendation ? { text: tableText.value } : null,
+    attributes: selectedAttributes.value.map((item) => ({ key: item.key, value: item.suggestedValue })),
     fields: selectedFields.value.map((field) => ({ fieldName: field.fieldName, text: field.editedComment }))
   })
 }

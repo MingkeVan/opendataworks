@@ -6,6 +6,7 @@ import {
   extractJsonBlock,
   filterEnumValuesByObserved,
   formatFieldComment,
+  filterTableAttributes,
   isWeakDescription,
   normalizeColumnValueProfiles,
   parseMetadataResponse
@@ -97,6 +98,60 @@ describe('metadataGeneration', () => {
 
     expect(filterEnumValuesByObserved([{ value: '0', label: '待支付' }], index.get('status'))).toEqual([])
     expect(filterEnumValuesByObserved([{ value: '0', label: '待支付' }], undefined)).toEqual([])
+  })
+
+  it('buildMetadataPrompt 内嵌可选的分层与业务域/数据域清单', () => {
+    const prompt = buildMetadataPrompt({
+      tableName: 'orders',
+      layerOptions: [{ value: 'ODS' }, { value: 'DWD' }],
+      businessDomains: [{ domainCode: 'TRADE', domainName: '交易' }],
+      dataDomains: [{ domainCode: 'REFUND', domainName: '退款', businessDomain: 'TRADE' }]
+    })
+
+    expect(prompt).toContain('# 可选的表属性取值(只能从下列编码中原样选择)')
+    expect(prompt).toContain('分层: ODS | DWD')
+    expect(prompt).toContain('- TRADE（交易）')
+    expect(prompt).toContain('- REFUND（退款，属于业务域 TRADE）')
+    expect(prompt).toContain('table_attributes')
+  })
+
+  it('parseMetadataResponse 解析 table_attributes，缺失时给空值', () => {
+    const withAttrs = parseMetadataResponse(
+      '{"table_comment":"订单","table_attributes":{"layer":"DWD","business_domain":"TRADE","data_domain":"REFUND"},"fields":[]}'
+    )
+    expect(withAttrs.tableAttributes).toEqual({ layer: 'DWD', businessDomain: 'TRADE', dataDomain: 'REFUND' })
+
+    const without = parseMetadataResponse('{"table_comment":"订单","fields":[]}')
+    expect(without.tableAttributes).toEqual({ layer: '', businessDomain: '', dataDomain: '' })
+  })
+
+  it('filterTableAttributes 只保留平台已有的取值', () => {
+    const options = {
+      layerOptions: [{ value: 'ODS' }, { value: 'DWD' }],
+      businessDomains: [{ domainCode: 'TRADE' }],
+      dataDomains: [{ domainCode: 'REFUND', businessDomain: 'TRADE' }]
+    }
+
+    expect(
+      filterTableAttributes({ layer: 'dwd', businessDomain: 'TRADE', dataDomain: 'REFUND' }, options)
+    ).toEqual({ layer: 'DWD', businessDomain: 'TRADE', dataDomain: 'REFUND' })
+
+    // 分层不在清单、业务域编造 -> 一律丢弃；业务域丢弃时数据域也不保留
+    expect(
+      filterTableAttributes({ layer: 'DWM', businessDomain: 'FAKE', dataDomain: 'REFUND' }, options)
+    ).toEqual({ layer: '', businessDomain: '', dataDomain: '' })
+  })
+
+  it('filterTableAttributes 丢弃与所选业务域不匹配的数据域', () => {
+    const options = {
+      layerOptions: [{ value: 'DWD' }],
+      businessDomains: [{ domainCode: 'TRADE' }, { domainCode: 'USER' }],
+      dataDomains: [{ domainCode: 'REFUND', businessDomain: 'TRADE' }]
+    }
+    // REFUND 属于 TRADE，与所选 USER 不匹配
+    expect(
+      filterTableAttributes({ layer: 'DWD', businessDomain: 'USER', dataDomain: 'REFUND' }, options)
+    ).toEqual({ layer: 'DWD', businessDomain: 'USER', dataDomain: '' })
   })
 
   it('extractJsonBlock 从带散文的 json 围栏中提取', () => {

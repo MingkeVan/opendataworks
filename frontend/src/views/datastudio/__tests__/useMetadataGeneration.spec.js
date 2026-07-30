@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { reactive, ref } from 'vue'
 
-const { nl2sqlApiMock, settingsApiMock, elMessageMock, tableApiMock } = vi.hoisted(() => ({
+const { nl2sqlApiMock, settingsApiMock, elMessageMock, tableApiMock, domainApiMock } = vi.hoisted(() => ({
   nl2sqlApiMock: {
     listAgents: vi.fn(),
     createTopic: vi.fn(),
@@ -15,7 +15,12 @@ const { nl2sqlApiMock, settingsApiMock, elMessageMock, tableApiMock } = vi.hoist
     updateComment: vi.fn(),
     updateField: vi.fn(),
     getFields: vi.fn(),
-    profileColumnValues: vi.fn()
+    profileColumnValues: vi.fn(),
+    update: vi.fn()
+  },
+  domainApiMock: {
+    businessDomainApi: { list: vi.fn() },
+    dataDomainApi: { list: vi.fn() }
   }
 }))
 
@@ -25,6 +30,7 @@ vi.mock('@/api/nl2sql', async () => {
 })
 vi.mock('@/api/settings', () => ({ settingsApi: settingsApiMock }))
 vi.mock('@/api/table', () => ({ tableApi: tableApiMock }))
+vi.mock('@/api/domain', () => domainApiMock)
 vi.mock('element-plus', () => ({ ElMessage: elMessageMock }))
 vi.mock('@/demo/runtime', () => ({ isDemoMode: false, showDemoReadonlyMessage: vi.fn() }))
 
@@ -45,6 +51,7 @@ const buildDeps = () => {
     tabStates,
     taskApi: { getById: vi.fn() },
     loadDdl: vi.fn(),
+    layerOptions: [{ value: 'ODS' }, { value: 'DWD' }],
     warnPlatformMetadataMissing: () => false
   }
 }
@@ -83,6 +90,8 @@ describe('useMetadataGeneration agent 解析', () => {
     nl2sqlApiMock.getTask.mockResolvedValue({ task_status: 'finished' })
     nl2sqlApiMock.getTaskMessage.mockResolvedValue(okMessage)
     tableApiMock.profileColumnValues.mockResolvedValue([])
+    domainApiMock.businessDomainApi.list.mockResolvedValue([])
+    domainApiMock.dataDomainApi.list.mockResolvedValue([])
   })
 
   it('使用设置中配置的助手，而不是隐式挑选默认助手', async () => {
@@ -172,5 +181,72 @@ describe('useMetadataGeneration agent 解析', () => {
     await generateMetadata('t1')
 
     expect(elMessageMock.error).toHaveBeenCalledWith('agent not found')
+  })
+
+  it('表属性建议按平台清单过滤后进入结果', async () => {
+    domainApiMock.businessDomainApi.list.mockResolvedValue([{ domainCode: 'TRADE', domainName: '交易' }])
+    domainApiMock.dataDomainApi.list.mockResolvedValue([
+      { domainCode: 'REFUND', domainName: '退款', businessDomain: 'TRADE' }
+    ])
+    nl2sqlApiMock.getTaskMessage.mockResolvedValue({
+      blocks: [
+        {
+          type: 'main_text',
+          text: '```json\n{"table_comment":"订单表","table_attributes":{"layer":"DWD","business_domain":"TRADE","data_domain":"FAKE"},"fields":[]}\n```'
+        }
+      ]
+    })
+    const { generateMetadata, metadataResult } = useMetadataGeneration(buildDeps())
+
+    await generateMetadata('t1')
+
+    const byKey = Object.fromEntries(metadataResult.value.attributes.map((a) => [a.key, a]))
+    expect(byKey.layer).toMatchObject({ suggestedValue: 'DWD', hasRecommendation: true })
+    expect(byKey.businessDomain).toMatchObject({ suggestedValue: 'TRADE', hasRecommendation: true })
+    // FAKE 不在数据域清单里，被丢弃
+    expect(byKey.dataDomain).toMatchObject({ suggestedValue: '', hasRecommendation: false })
+  })
+
+  it('采纳表属性时走 tableApi.update 并带上有效分层', async () => {
+    tableApiMock.update.mockResolvedValue({ layer: 'DWD', businessDomain: 'TRADE' })
+    tableApiMock.getFields.mockResolvedValue([])
+    const deps = buildDeps()
+    const { adoptMetadata } = useMetadataGeneration(deps)
+
+    await adoptMetadata('t1', {
+      attributes: [
+        { key: 'layer', value: 'DWD' },
+        { key: 'businessDomain', value: 'TRADE' }
+      ]
+    })
+
+    expect(tableApiMock.update).toHaveBeenCalledWith(
+      1,
+      { layer: 'DWD', businessDomain: 'TRADE' },
+      'c1'
+    )
+    expect(deps.tabStates.t1.table.layer).toBe('DWD')
+  })
+
+  it('表无分层且未采纳分层时给出明确提示，不调用 update', async () => {
+    const deps = buildDeps()
+    const { adoptMetadata } = useMetadataGeneration(deps)
+
+    await adoptMetadata('t1', { attributes: [{ key: 'businessDomain', value: 'TRADE' }] })
+
+    expect(tableApiMock.update).not.toHaveBeenCalled()
+    expect(elMessageMock.error).toHaveBeenCalledWith(expect.stringContaining('数据分层'))
+  })
+
+  it('表已有分层时采纳业务域会自动带上现有分层', async () => {
+    tableApiMock.update.mockResolvedValue({})
+    tableApiMock.getFields.mockResolvedValue([])
+    const deps = buildDeps()
+    deps.tabStates.t1.table.layer = 'ODS'
+    const { adoptMetadata } = useMetadataGeneration(deps)
+
+    await adoptMetadata('t1', { attributes: [{ key: 'businessDomain', value: 'TRADE' }] })
+
+    expect(tableApiMock.update).toHaveBeenCalledWith(1, { layer: 'ODS', businessDomain: 'TRADE' }, 'c1')
   })
 })
