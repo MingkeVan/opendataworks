@@ -61,15 +61,37 @@
 32. `ConfigurationManagement.vue` 新增「智能助手」tab（`name=agent`，并入 `availableTabs`）。
 33. `useMetadataGeneration.js` 改为读取配置的助手，移除隐式挑选；相应更新单测。
 
+枚举取值改为实测 + 修复采纳报错（2026-07-29）：
+
+34. 后端新增 DTO `dto/ColumnValueProfile.java`（字段名、类型、去重取值数、`value/count` 列表）。
+35. `DorisConnectionService` 增加 `profileColumnValues(clusterId, database, tableName, columns, maxDistinct)`：
+    逐列 `GROUP BY` 取真实取值，多取一行判定是否超过枚举上限（超过整列丢弃），单列失败只跳过该列。
+36. `DataTableQueryService` 增加 `profileEnumColumns(id, clusterId)` 与候选列判定 `isEnumCandidate`
+    （可分组类型 + 非标识列命名，单表上限 20 列，取值上限 30）。
+37. `DataTableController` 增加 `GET /{id}/column-values`（`@RequireAuth`）。
+38. 改 `DorisTableEngineHandler#updateColumn`：只改注释走 `modifyColumnComment`，不重建列定义。
+39. 改 `DorisConnectionService#buildColumnDefinition`：`isKey` 生效，key 列定义补 `KEY` 标记。
+40. 改 `DorisTableEngineHandler` / `MysqlTableEngineHandler` 的 `normalize`：空串等价 `null`，消除假变更。
+41. 改 `frontend/src/api/table.js`：新增 `profileColumnValues(id, clusterId)`（`skipErrorMessage`，120s 超时）。
+42. 改 `metadataGeneration.js`：prompt 新增「# 字段实测取值」段并改写枚举要求；新增
+    `normalizeColumnValueProfiles` / `buildObservedValueIndex` / `filterEnumValuesByObserved`。
+43. 改 `useMetadataGeneration.js`：生成前拉取实测取值并入 prompt，`buildResult` 按实测取值过滤枚举；
+    取值获取失败时按「无实测取值」处理，本次不产出枚举。
+44. 补测：`DorisTableEngineHandlerTest` 增 6 例（注释轻量路径、AGGREGATE 注释、空串缺省值、key/value 列 KEY 标记、无变更不发 DDL）；
+    新增 `DataTableQueryServiceEnumColumnsTest`（标识列与不可分组类型不参与、宽表候选列封顶、无候选列不发查询、类型回填）；
+    `metadataGeneration.spec.js` 增 5 例；`useMetadataGeneration.spec.js` 增 2 例（编造取值被丢弃、取不到实测取值则不产枚举）。
+
 ## Verification
 
 - `npm --prefix frontend run test`（全量 35 文件 / 185 用例）
 - `npm --prefix frontend run build`
 - `npx eslint`（新增文件 0 error）
 - `mvn -pl backend -am test -Dtest='DorisConnectionServicePartitionsTest,DorisConnectionServiceTest'`
+- `mvn -pl backend test -Dtest='DataTableQueryServiceEnumColumnsTest,DorisTableEngineHandlerTest,MysqlTableEngineHandlerTest'`（2026-07-29 修订）
+- 2026-07-29 修订未覆盖：真实 Doris 集群上的采纳写回与取值统计（本地无 Doris/MySQL 数据源，后端集成测试因缺 DB 连接整体报错，与本次改动无关）
 - 可选端到端 smoke：Docker MySQL `127.0.0.1:3316` + Redis `127.0.0.1:6379` + `.venv-py313` 启动 `dataagent-backend`，且 `da_agent_settings` 配置了可用 provider；对缺注释表执行 生成 → 弹窗复核 → 采纳 → 校验注释写回与完善度上升。
 
 ## Rollout / Backout
 
 - Rollout：合并后无需迁移，对缺少注释的表即时可用；未配置模型服务时按错误提示降级，不影响表详情其余功能。
-- Backout：删除新增前端文件与单测，撤销 `DataStudioNew.vue`、`DataStudioRightPanel.vue`、`DataStudioRightPanelColumns.vue` 三处改动即可完全回退；后端仅新增只读分区接口，可一并移除；无 schema 变更。
+- Backout：删除新增前端文件与单测，撤销 `DataStudioNew.vue`、`DataStudioRightPanel.vue`、`DataStudioRightPanelColumns.vue` 三处改动即可完全回退；后端仅新增只读分区接口与只读取值统计接口，可一并移除；无 schema 变更。列变更修复（任务 38-40）改的是既有写回路径行为，回退会让 key 列采纳重新报 `Invalid column order`。

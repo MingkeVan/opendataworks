@@ -11,6 +11,7 @@ BUSINESS_SKILL_ROOT = SKILLS_ROOT / "opendataworks-business-knowledge"
 PLATFORM_TOOLS_SKILL_ROOT = SKILLS_ROOT / "opendataworks-platform-tools"
 ONTOLOGY_MODELING_SKILL_ROOT = SKILLS_ROOT / "ontology-modeling-assistant"
 DATA_DEV_SKILL_ROOT = SKILLS_ROOT / "opendataworks-data-dev"
+METHODOLOGY_DAG_SKILL_ROOT = SKILLS_ROOT / "opendataworks-methodology-dag"
 
 
 def _skill_text_snapshot(root: Path) -> str:
@@ -371,3 +372,93 @@ def test_data_dev_skill_presets_scenarios_and_gates_dml_validation():
     # DML must pass validation before it becomes a task / enters the plan.
     assert "portal_analyze_sql" in snapshot
     assert "验证不通过不建任务" in snapshot
+
+
+def test_methodology_dag_skill_routes_lookup_first_and_falls_back_on_a_miss():
+    snapshot = _skill_text_snapshot(METHODOLOGY_DAG_SKILL_ROOT)
+
+    required_tokens = [
+        "OpenDataWorks Methodology DAG Skill",
+        "lookup_methodology.py",
+        "run_methodology.py",
+        "validate_methodology.py",
+        # Lookup precedes execution, and a miss is a first-class path.
+        "先检索，再决定",
+        "回落",
+        "matched=0",
+        # The caliber travels with the result and must reach the user.
+        "caliber",
+        # Attribution vocabulary is shared with the SQL tool path.
+        "result_state",
+        "error_code",
+        "failure_attribution",
+        "platform_tools_unavailable",
+    ]
+    for token in required_tokens:
+        assert token in snapshot, token
+
+    # The skill must not re-document a second SQL execution entrypoint.
+    assert "唯一推荐的 SQL 执行入口" not in snapshot
+
+
+def test_methodology_dag_skill_stays_portable_and_embeds_no_root_path():
+    """A skill bundle must run wherever it is installed.
+
+    Baking in a host-injected root variable, a repo path, or the runtime's
+    workspace staging layout would tie the bundle to one particular host, so the
+    documented invocation is relative to the skill's own directory instead.
+    """
+    snapshot = _skill_text_snapshot(METHODOLOGY_DAG_SKILL_ROOT)
+
+    assert "python3 scripts/run_methodology.py" in snapshot
+    assert "python3 scripts/lookup_methodology.py" in snapshot
+    assert "路径一律相对本技能目录" in snapshot
+
+    forbidden_tokens = [
+        # A root path injected by this particular backend.
+        "DATAAGENT_METHODOLOGY_DAG_SKILL_ROOT",
+        "${DATAAGENT_SKILL_ROOT}",
+        # The workspace staging layout, which is an internal runtime detail.
+        ".claude/skills/opendataworks-methodology-dag/scripts",
+        # Repo-relative and deployment-absolute paths.
+        "dataagent/.claude/skills/opendataworks-methodology-dag/scripts",
+        "/app/.claude/skills",
+    ]
+    for token in forbidden_tokens:
+        assert token not in snapshot, token
+
+
+def test_methodology_dag_skill_forbids_bypassing_a_registered_caliber():
+    snapshot = _skill_text_snapshot(METHODOLOGY_DAG_SKILL_ROOT)
+
+    for token in (
+        "不得",
+        "口径漂移",
+        "临时修改注册表",
+        "升 `version`",
+    ):
+        assert token in snapshot, token
+
+
+def test_methodology_dag_skill_declares_the_platform_tools_prerequisite():
+    snapshot = _skill_text_snapshot(METHODOLOGY_DAG_SKILL_ROOT)
+
+    assert "必须与 `opendataworks-platform-tools` 一起安装并启用" in snapshot
+    # The neighbour is located from the skill's own path, not from a host variable.
+    assert "../opendataworks-platform-tools" in snapshot
+    # The sql node delegates rather than re-implementing SQL execution.
+    assert "run_sql.py" in snapshot
+
+
+def test_methodology_dag_registry_entries_declare_an_executable_caliber():
+    registry_dir = METHODOLOGY_DAG_SKILL_ROOT / "assets" / "registry"
+    entries = sorted(registry_dir.glob("*.json"))
+    assert entries, "注册表为空"
+
+    for path in entries:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload["id"] == path.stem
+        for field in ("version", "intent", "caliber", "owner", "target", "nodes"):
+            assert payload.get(field), f"{path.name} 缺少 {field}"
+        assert payload["target"] in payload["nodes"], f"{path.name} 的 target 不是已定义节点"
+

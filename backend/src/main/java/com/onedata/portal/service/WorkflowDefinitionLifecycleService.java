@@ -817,12 +817,17 @@ public class WorkflowDefinitionLifecycleService {
         }
         String candidate = base + "_" + suffix;
         int seq = 2;
-        while (reservedCodes.contains(candidate)) {
+        while (reservedCodes.contains(candidate) || existsTaskCodeIncludingDeleted(candidate)) {
             candidate = base + "_" + suffix + "_" + seq;
             seq++;
         }
         reservedCodes.add(candidate);
         return candidate;
+    }
+
+    private boolean existsTaskCodeIncludingDeleted(String taskCode) {
+        Long count = dataTaskMapper.countByTaskCodeIncludingDeleted(taskCode);
+        return count != null && count > 0;
     }
 
     private Integer priorityToNumber(String taskPriority) {

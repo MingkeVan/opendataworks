@@ -124,6 +124,15 @@ export const tableApi = {
     })
   },
 
+  // 统计疑似枚举列的实测取值分布（智能元数据用于校验枚举）
+  profileColumnValues(id, clusterId = null) {
+    return request.get(`/v1/tables/${id}/column-values`, {
+      params: { clusterId },
+      timeout: 120000,
+      skipErrorMessage: true
+    })
+  },
+
   // 预览表数据
   previewTableData(id, clusterId = null, limit = 100) {
     return request.get(`/v1/tables/${id}/preview`, {

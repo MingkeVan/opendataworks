@@ -1,10 +1,12 @@
 package com.onedata.portal.service;
 
+import com.onedata.portal.dto.ColumnValueProfile;
 import com.onedata.portal.dto.TableAccessStats;
 import com.onedata.portal.dto.TableExport;
 import com.onedata.portal.dto.TableLocation;
 import com.onedata.portal.dto.TablePartitionInfo;
 import com.onedata.portal.dto.TableStatistics;
+import com.onedata.portal.entity.DataField;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.TableStatisticsHistory;
 import lombok.RequiredArgsConstructor;
@@ -12,8 +14,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 数据表只读查询编排服务。
@@ -25,6 +34,18 @@ import java.util.Map;
 @Service
 @RequiredArgsConstructor
 public class DataTableQueryService {
+
+    /** 单表最多统计多少个候选列，避免宽表打出几十条分组查询 */
+    private static final int MAX_ENUM_CANDIDATE_COLUMNS = 20;
+    /** 实测取值超过这个数就不当枚举 */
+    private static final int MAX_ENUM_DISTINCT = 30;
+    /** 可分组、且值域可能有限的类型；日期、浮点、复杂类型不参与 */
+    private static final Set<String> ENUM_CANDIDATE_TYPES = new HashSet<>(Arrays.asList(
+            "BOOLEAN", "BOOL", "TINYINT", "SMALLINT", "INT", "INTEGER", "BIGINT",
+            "CHAR", "VARCHAR", "STRING", "TEXT"));
+    /** 标识类命名：主键、编号、流水号等，取值必然发散，不必扫 */
+    private static final Pattern IDENTIFIER_NAME_PATTERN = Pattern.compile(
+            "(^|.*_)(id|uid|uuid|guid|sn|seq|key|no)$");
 
     private final DataTableService dataTableService;
     private final DorisConnectionService dorisConnectionService;
@@ -184,6 +205,67 @@ public class DataTableQueryService {
         } catch (Exception e) {
             throw new RuntimeException("获取分区列表失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 统计疑似枚举列的实测取值分布。
+     *
+     * <p>供智能元数据把枚举含义建立在真实数据上：只有出现在返回结果里的取值才允许写进字段描述。
+     * 候选列由字段类型与命名先筛一遍（见 {@link #isEnumCandidate}），再由取值数上限决定是否算枚举
+     * ——超过 {@link #MAX_ENUM_DISTINCT} 个取值的列不会返回。
+     */
+    public List<ColumnValueProfile> profileEnumColumns(Long id, Long clusterId) {
+        DataTable table = dataTableService.getById(id);
+        if (table == null) {
+            throw new RuntimeException("表不存在");
+        }
+        List<DataField> fields = dataTableService.listFields(id);
+        if (fields == null || fields.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Map<String, String> typeByName = new LinkedHashMap<>();
+        List<String> candidates = new ArrayList<>();
+        for (DataField field : fields) {
+            if (candidates.size() >= MAX_ENUM_CANDIDATE_COLUMNS) {
+                break;
+            }
+            if (!isEnumCandidate(field)) {
+                continue;
+            }
+            candidates.add(field.getFieldName());
+            typeByName.put(field.getFieldName(), field.getFieldType());
+        }
+        if (candidates.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        TableLocation location = dataTableService.requireTableLocation(table);
+        try {
+            List<ColumnValueProfile> profiles = dorisConnectionService.profileColumnValues(
+                    clusterId, location.getDatabase(), location.getTableName(), candidates, MAX_ENUM_DISTINCT);
+            profiles.forEach(profile -> profile.setFieldType(typeByName.get(profile.getFieldName())));
+            return profiles;
+        } catch (Exception e) {
+            throw new RuntimeException("统计字段取值失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 疑似枚举列判定：类型可分组、命名不像标识列。真正是不是枚举由实测取值数决定。
+     */
+    private boolean isEnumCandidate(DataField field) {
+        if (field == null || !StringUtils.hasText(field.getFieldName()) || !StringUtils.hasText(field.getFieldType())) {
+            return false;
+        }
+        String type = field.getFieldType().trim().toUpperCase();
+        int paren = type.indexOf('(');
+        String baseType = paren > 0 ? type.substring(0, paren) : type;
+        if (!ENUM_CANDIDATE_TYPES.contains(baseType)) {
+            return false;
+        }
+        String name = field.getFieldName().trim().toLowerCase();
+        return !IDENTIFIER_NAME_PATTERN.matcher(name).matches();
     }
 
     /**

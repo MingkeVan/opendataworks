@@ -3,6 +3,7 @@ package com.onedata.portal.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.onedata.portal.config.DorisJdbcProperties;
 import com.onedata.auth.context.UserContextHolder;
+import com.onedata.portal.dto.ColumnValueProfile;
 import com.onedata.portal.dto.DorisCredential;
 import com.onedata.portal.dto.TablePartitionInfo;
 import com.onedata.portal.dto.TableStatistics;
@@ -13,6 +14,7 @@ import com.onedata.portal.util.DorisCreateTableUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.sql.*;
@@ -37,6 +39,8 @@ public class DorisConnectionService {
             Pattern.CASE_INSENSITIVE);
     private static final Set<String> SYSTEM_DATABASES = new HashSet<>(
             Arrays.asList("information_schema", "mysql", "performance_schema", "sys"));
+    /** 单列取值统计的查询超时（秒）：候选列可能有十几个，单列必须快速失败 */
+    private static final int COLUMN_PROFILE_TIMEOUT_SECONDS = 20;
 
     /**
      * 执行 SQL (主要用于创建表等 DDL)
@@ -562,13 +566,21 @@ public class DorisConnectionService {
     }
 
     /**
-     * 生成 Doris 列定义
+     * 生成 Doris 列定义。
+     *
+     * <p>Key 列必须带 {@code KEY} 标记（紧跟类型之后）：Doris 的
+     * {@code MODIFY COLUMN} 按定义重建该列，缺少标记会被当成 value 列，
+     * 而 value 列排在 key 列之前时 FE 直接报
+     * {@code Invalid column order. value should be after key. index[...]}。
      */
     public String buildColumnDefinition(DataField field, boolean isKey) {
         StringBuilder builder = new StringBuilder();
         String fieldName = field.getFieldName();
         String fieldType = field.getFieldType();
         builder.append(wrapColumn(fieldName)).append(" ").append(fieldType);
+        if (isKey) {
+            builder.append(" KEY");
+        }
         if (field.getIsNullable() != null && field.getIsNullable() == 0) {
             builder.append(" NOT NULL");
         } else {
@@ -832,6 +844,61 @@ public class DorisConnectionService {
         }
 
         throw new RuntimeException(String.format("表 %s.%s 不存在", database, tableName));
+    }
+
+    /**
+     * 统计指定列的实测取值分布。
+     *
+     * <p>每列一条 {@code SELECT col, COUNT(*) ... GROUP BY col ORDER BY 2 DESC LIMIT n+1} ——
+     * 多取一行用于判定「是否超过枚举上限」：超过即认为不是枚举列，直接丢弃，不返回截断结果，
+     * 避免下游把不完整的取值集合当成完整枚举。
+     *
+     * <p>取值统一用 {@code getString} 读出，不做类型转换，因此对 Doris 与 MySQL 数据源同样适用。
+     * 单列查询失败（权限、类型不可分组等）只跳过该列，不影响其余列。
+     */
+    public List<ColumnValueProfile> profileColumnValues(Long clusterId, String database, String tableName,
+            List<String> columns, int maxDistinct) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        List<ColumnValueProfile> profiles = new ArrayList<>();
+        if (CollectionUtils.isEmpty(columns)) {
+            return profiles;
+        }
+
+        try (Connection connection = getConnection(cluster, database)) {
+            for (String column : columns) {
+                if (!StringUtils.hasText(column)) {
+                    continue;
+                }
+                String sql = String.format(
+                        "SELECT `%s` AS v, COUNT(*) AS c FROM `%s`.`%s` WHERE `%s` IS NOT NULL "
+                                + "GROUP BY `%s` ORDER BY c DESC LIMIT %d",
+                        column, database, tableName, column, column, maxDistinct + 1);
+                try (Statement stmt = connection.createStatement()) {
+                    stmt.setQueryTimeout(COLUMN_PROFILE_TIMEOUT_SECONDS);
+                    try (ResultSet rs = stmt.executeQuery(sql)) {
+                        List<ColumnValueProfile.ColumnValueCount> values = new ArrayList<>();
+                        while (rs.next()) {
+                            values.add(new ColumnValueProfile.ColumnValueCount(rs.getString(1), rs.getLong(2)));
+                        }
+                        if (values.isEmpty() || values.size() > maxDistinct) {
+                            continue;
+                        }
+                        ColumnValueProfile profile = new ColumnValueProfile();
+                        profile.setFieldName(column);
+                        profile.setDistinctCount(values.size());
+                        profile.setValues(values);
+                        profiles.add(profile);
+                    }
+                } catch (SQLException e) {
+                    log.warn("Failed to profile column {}.{}.{}: {}", database, tableName, column, e.getMessage());
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to profile columns for {}.{}", database, tableName, e);
+            throw new RuntimeException("统计字段取值失败: " + e.getMessage(), e);
+        }
+
+        return profiles;
     }
 
     /**

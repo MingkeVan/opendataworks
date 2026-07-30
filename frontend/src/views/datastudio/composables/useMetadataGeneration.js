@@ -5,10 +5,19 @@ import { nl2sqlApi, nl2sqlErrorMessage } from '@/api/nl2sql'
 import { settingsApi } from '@/api/settings'
 import { tableApi } from '@/api/table'
 import { buildFieldPayload } from '../fieldEdit'
-import { buildMetadataPrompt, formatFieldComment, parseMetadataResponse } from '../metadataGeneration'
+import {
+  buildMetadataPrompt,
+  buildObservedValueIndex,
+  filterEnumValuesByObserved,
+  formatFieldComment,
+  parseMetadataResponse
+} from '../metadataGeneration'
 
 // 智能元数据：复用智能问数的发送消息端点发起后台任务，解析助手消息中的格式化内容，
-// 经弹窗复核后采纳，直接走既有表/字段写回接口（不新增后端端点）。
+// 经弹窗复核后采纳，直接走既有表/字段写回接口。
+//
+// 枚举取值不由模型推导：生成前先经 tableApi.profileColumnValues 查该表真实取值，
+// 既进 prompt 也用于写回前过滤，模型给出的清单外取值一律丢弃。
 //
 // 建议结果为内存态：useTabPersistence 只持久化 tab 骨架，刷新页面后需重新生成。
 
@@ -114,13 +123,26 @@ export function useMetadataGeneration({
     throw new Error('生成超时，请稍后重试')
   }
 
-  const buildResult = (tabId, state, parsed) => {
+  // 只有实测取值分布里出现过的枚举值才允许写进描述：模型编造的取值在这里被丢掉
+  const collectColumnValueProfiles = async (state) => {
+    try {
+      const profiles = await tableApi.profileColumnValues(state.table.id, clusterId.value || null)
+      return Array.isArray(profiles) ? profiles : []
+    } catch (error) {
+      console.warn('获取字段实测取值失败，本次不生成枚举', error)
+      return []
+    }
+  }
+
+  const buildResult = (tabId, state, parsed, columnValueProfiles) => {
     const currentByName = new Map((state.fields || []).map((field) => [field.fieldName, field]))
+    const observedByField = buildObservedValueIndex(columnValueProfiles)
     const fields = parsed.fields
       .filter((item) => currentByName.has(item.fieldName))
       .map((item) => {
         const current = currentByName.get(item.fieldName)
-        const suggestedComment = formatFieldComment(item.comment, item.enumValues)
+        const enumValues = filterEnumValuesByObserved(item.enumValues, observedByField.get(item.fieldName))
+        const suggestedComment = formatFieldComment(item.comment, enumValues)
         const currentComment = current?.fieldComment || ''
         return {
           fieldId: current?.id,
@@ -179,6 +201,7 @@ export function useMetadataGeneration({
       }
 
       const relatedTasks = await collectRelatedTasks(state)
+      const columnValueProfiles = await collectColumnValueProfiles(state)
       const prompt = buildMetadataPrompt({
         dbName: state.table.dbName,
         tableName: state.table.tableName,
@@ -193,7 +216,8 @@ export function useMetadataGeneration({
         })),
         upstreamTables: state.lineage?.upstreamTables || [],
         downstreamTables: state.lineage?.downstreamTables || [],
-        relatedTasks
+        relatedTasks,
+        columnValueProfiles
       })
 
       const agentId = await resolveAgentId()
@@ -216,7 +240,7 @@ export function useMetadataGeneration({
       await waitForResult(taskId)
       const parsed = parseMetadataResponse(messageText(await nl2sqlApi.getTaskMessage(taskId)))
 
-      metadataResult.value = buildResult(tabId, state, parsed)
+      metadataResult.value = buildResult(tabId, state, parsed, columnValueProfiles)
       metadataDialogVisible.value = true
       if (
         !metadataResult.value.table.hasRecommendation &&
