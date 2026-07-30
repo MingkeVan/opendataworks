@@ -1,34 +1,9 @@
 <template>
   <div class="meta-section meta-section-fill">
-    <div class="detail-subtabs">
-      <el-radio-group v-model="subTab" size="small">
-        <el-radio-button label="fields">字段信息</el-radio-button>
-        <el-radio-button label="partitions">分区信息</el-radio-button>
-      </el-radio-group>
-    </div>
-
-    <!-- 首次进入后保持挂载，用 v-show 切换：避免来回切子页时重建字段表造成卡顿 -->
-    <DataStudioRightPanelPartitions v-if="partitionsMounted" v-show="subTab === 'partitions'" />
-
-    <section v-show="subTab === 'fields'" class="section-block section-fill">
+    <section class="section-block section-fill">
       <div class="section-header">
-        <div class="section-title">
-          字段定义
-          <el-tooltip content="表描述与字段描述的填写比例" placement="top">
-            <el-tag size="small" effect="plain" class="completeness-tag">元数据完善度 {{ completeness }}%</el-tag>
-          </el-tooltip>
-        </div>
+        <div class="section-title">字段定义</div>
         <div class="section-actions">
-          <el-button
-            v-if="!state.fieldsEditing"
-            size="small"
-            :loading="metadataGenerating"
-            :disabled="isDemoMode || isPlatformMetadataMissing(state.table)"
-            @click="generateMetadata(activeTabId)"
-          >
-            {{ metadataGenerating ? '元数据生成中' : '智能元数据' }}
-          </el-button>
-
           <el-tag
             v-if="state.fieldsEditing && isAggregateTable(state.table)"
             type="warning"
@@ -45,48 +20,6 @@
           >
             主键列不可在线修改
           </el-tag>
-
-          <el-tooltip
-            v-if="!state.fieldsEditing && isPlatformMetadataMissing(state.table)"
-            content="请先同步到平台元数据后再操作"
-            placement="top"
-          >
-            <span>
-              <el-button type="primary" size="small" disabled>编辑</el-button>
-            </span>
-          </el-tooltip>
-          <el-tooltip
-            v-else-if="!state.fieldsEditing && isDorisTable(state.table) && !clusterId"
-            content="请选择 Doris 集群后再编辑"
-            placement="top"
-          >
-            <span>
-              <el-button type="primary" size="small" disabled>编辑</el-button>
-            </span>
-          </el-tooltip>
-          <el-button
-            v-else-if="!state.fieldsEditing"
-            type="primary"
-            size="small"
-            :disabled="isDemoMode"
-            @click="startFieldsEdit(activeTabId)"
-          >
-            编辑
-          </el-button>
-          <template v-else>
-            <el-button size="small" @click="cancelFieldsEdit(activeTabId)" :disabled="state.fieldSubmitting">
-              取消
-            </el-button>
-            <el-button
-              type="primary"
-              size="small"
-              :loading="state.fieldSubmitting"
-              :disabled="isDemoMode"
-              @click="saveFieldsEdit(activeTabId)"
-            >
-              保存修改
-            </el-button>
-          </template>
         </div>
       </div>
 
@@ -246,13 +179,12 @@
 </template>
 
 <script setup>
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject } from 'vue'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { isDemoMode } from '@/demo/runtime'
-import { computeMetadataCompleteness } from '../metadataGeneration'
-import DataStudioRightPanelPartitions from './DataStudioRightPanelPartitions.vue'
 
-// P2-2 F17d：右侧面板「列详情」tab pane 从 DataStudioRightPanel.vue 抽出。
+// P2-2 F17d：右侧面板「列信息」tab pane 从 DataStudioRightPanel.vue 抽出。
+// 编辑/智能元数据等操作已上移到面板头部，这里只负责字段表本身。
 // 共享脚手架样式由父组件的 .meta-tabs :deep() 提供。
 const ctx = inject('dataStudioCtx', null)
 if (!ctx) {
@@ -260,20 +192,14 @@ if (!ctx) {
 }
 
 const {
-  clusterId,
   activeTab,
   tabStates,
   isDorisTable,
-  isPlatformMetadataMissing,
   isAggregateTable,
   getFieldRows,
-  startFieldsEdit,
-  cancelFieldsEdit,
-  saveFieldsEdit,
   addField,
   removeField,
   generateMetadata,
-  metadataGenerating,
 } = ctx
 
 const activeTabId = computed(() => String(activeTab.value || ''))
@@ -283,32 +209,6 @@ const state = computed(() => {
   return tabStates[id] || null
 })
 const fieldRows = computed(() => getFieldRows(activeTabId.value))
-
-// 明细信息子页：字段信息 / 分区信息，按 tab 记忆
-const subTab = computed({
-  get: () => state.value?.metaDetailTab || 'fields',
-  set: (value) => {
-    if (state.value) state.value.metaDetailTab = value
-  },
-})
-
-// 分区面板懒挂载：首次切到分区信息时才创建，之后常驻用 v-show 切换
-const partitionsMounted = ref(subTab.value === 'partitions')
-watch(
-  subTab,
-  (value) => {
-    if (value === 'partitions') partitionsMounted.value = true
-  },
-  { immediate: true }
-)
-
-// 元数据完善度：表描述 + 各字段描述的填写比例，采纳后随字段刷新自动上升
-const completeness = computed(() =>
-  computeMetadataCompleteness({
-    tableComment: state.value?.table?.tableComment,
-    fields: state.value?.fields || [],
-  })
-)
 
 const suggestFor = (fieldName) =>
   (state.value?.metaSuggestion?.fields || []).find((item) => item.fieldName === fieldName)?.suggestedComment || ''
@@ -327,15 +227,6 @@ const isAdopted = (row) => {
 :deep(.columns-table th.el-table__cell) {
   background: #f2f7ff;
   color: var(--text-sub);
-}
-.detail-subtabs {
-  display: flex;
-  align-items: center;
-  flex: none;
-}
-.completeness-tag {
-  margin-left: 8px;
-  font-weight: 400;
 }
 .smart-col-header {
   display: inline-flex;

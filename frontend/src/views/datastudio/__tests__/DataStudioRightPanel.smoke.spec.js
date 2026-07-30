@@ -30,7 +30,7 @@ import DataStudioRightPanel from '../components/DataStudioRightPanel.vue'
 import DataStudioRightPanelBasic from '../components/DataStudioRightPanelBasic.vue'
 import DataStudioRightPanelColumns from '../components/DataStudioRightPanelColumns.vue'
 import DataStudioRightPanelAccess from '../components/DataStudioRightPanelAccess.vue'
-import DataStudioRightPanelPartitions from '../components/DataStudioRightPanelPartitions.vue'
+import DataStudioRightPanelDoris from '../components/DataStudioRightPanelDoris.vue'
 
 const buildCtx = () => {
   const activeTab = ref('t1')
@@ -38,7 +38,6 @@ const buildCtx = () => {
     t1: {
       table: { id: 1, tableName: 'demo_t', dbName: 'db', sourceId: 's1', sourceType: 'DORIS' },
       metaTab: 'basic',
-      metaDetailTab: 'fields',
       metaEditing: false,
       metaSaving: false,
       metaForm: {},
@@ -143,43 +142,80 @@ describe('DataStudioRightPanel mount smoke', () => {
     }
   })
 
-  it('明细信息子页在 字段信息 / 分区信息 之间切换', () => {
+  it('头部操作区随 tab 联动', () => {
     const ctx = buildCtx()
-    ctx.tabStates.t1.fields = [
-      { id: 1, fieldName: 'dt', fieldType: 'date', isPartition: 1, fieldComment: '业务日期' },
-      { id: 2, fieldName: 'amount', fieldType: 'decimal', isPartition: 0, fieldComment: '' },
-    ]
-    ctx.tabStates.t1.table.partitionColumn = 'dt'
-
-    const mountPane = () =>
-      shallowMount(DataStudioRightPanelColumns, {
+    const mountPanel = () =>
+      shallowMount(DataStudioRightPanel, {
         global: {
           provide: { dataStudioCtx: ctx },
-          stubs: { ElScrollbar: { template: '<div><slot /></div>' } },
+          stubs: {
+            DataStudioRightPanelLineage: true,
+            SmartMetadataDialog: true,
+            ElScrollbar: { template: '<div><slot /></div>' },
+          },
           config: { warnHandler: () => {} },
           directives: { loading: {} },
         },
       })
+    const actions = (w) => ({
+      generate: w.find('[data-test="action-generate"]').exists(),
+      edit: w.find('[data-test="action-edit"]').exists(),
+      del: w.find('[data-test="action-delete"]').exists(),
+      copy: w.find('[data-test="action-copy-ddl"]').exists(),
+      cancel: w.find('[data-test="action-cancel"]').exists(),
+      save: w.find('[data-test="action-save"]').exists(),
+    })
 
-    // 默认字段信息，不渲染分区面板
-    let wrapper = mountPane()
-    expect(wrapper.findComponent(DataStudioRightPanelPartitions).exists()).toBe(false)
+    // 表信息：可编辑
+    let wrapper = mountPanel()
+    expect(actions(wrapper)).toMatchObject({ generate: true, edit: true, del: true, copy: false })
     wrapper.unmount()
 
-    // 切到分区信息
-    ctx.tabStates.t1.metaDetailTab = 'partitions'
-    wrapper = mountPane()
-    expect(wrapper.findComponent(DataStudioRightPanelPartitions).exists()).toBe(true)
+    // 变更记录：无可编辑内容
+    ctx.tabStates.t1.metaTab = 'versions'
+    wrapper = mountPanel()
+    expect(actions(wrapper)).toMatchObject({ generate: true, edit: false, del: true })
+    wrapper.unmount()
+
+    // DDL：出现复制，且不可编辑
+    ctx.tabStates.t1.metaTab = 'ddl'
+    wrapper = mountPanel()
+    expect(actions(wrapper)).toMatchObject({ copy: true, edit: false })
+    wrapper.unmount()
+
+    // 列信息编辑态：只剩取消 / 保存
+    ctx.tabStates.t1.metaTab = 'columns'
+    ctx.tabStates.t1.fieldsEditing = true
+    wrapper = mountPanel()
+    expect(actions(wrapper)).toMatchObject({ cancel: true, save: true, generate: false, del: false })
     wrapper.unmount()
   })
 
-  it('分区信息渲染后端返回的分区列表', async () => {
+  it('头部展示库表名', () => {
+    const ctx = buildCtx()
+    const wrapper = shallowMount(DataStudioRightPanel, {
+      global: {
+        provide: { dataStudioCtx: ctx },
+        stubs: {
+          DataStudioRightPanelLineage: true,
+          SmartMetadataDialog: true,
+          ElScrollbar: { template: '<div><slot /></div>' },
+        },
+        config: { warnHandler: () => {} },
+        directives: { loading: {} },
+      },
+    })
+    expect(wrapper.find('.table-name').text()).toBe('db.demo_t')
+    wrapper.unmount()
+  })
+
+  it('Doris信息渲染后端返回的分区列表', async () => {
     listPartitionsMock.mockResolvedValueOnce([
       { partitionName: 'p20260101', range: '[20260101, 20260102)', dataSize: '1.234 GB', rowCount: 1234567, buckets: 10, replicationNum: 3, state: 'NORMAL' },
       { partitionName: 'p20260102', range: '[20260102, 20260103)', dataSize: '2.5 GB', rowCount: null, buckets: 10, replicationNum: 3, state: 'NORMAL' },
     ])
     const ctx = buildCtx()
-    const wrapper = shallowMount(DataStudioRightPanelPartitions, {
+    const wrapper = shallowMount(DataStudioRightPanelDoris, {
       global: {
         provide: { dataStudioCtx: ctx },
         stubs: { ElScrollbar: { template: '<div><slot /></div>' } },
@@ -197,7 +233,7 @@ describe('DataStudioRightPanel mount smoke', () => {
   it('分区列表请求失败时就地提示，不抛出', async () => {
     listPartitionsMock.mockRejectedValueOnce(new Error('获取分区列表失败: 不支持的表类型'))
     const ctx = buildCtx()
-    const wrapper = shallowMount(DataStudioRightPanelPartitions, {
+    const wrapper = shallowMount(DataStudioRightPanelDoris, {
       global: {
         provide: { dataStudioCtx: ctx },
         stubs: { ElScrollbar: { template: '<div><slot /></div>' } },
@@ -216,7 +252,7 @@ describe('DataStudioRightPanel mount smoke', () => {
     listPartitionsMock.mockResolvedValueOnce([{ partitionName: 'p1', dataSize: '1 GB' }])
     const ctx = buildCtx()
     const mountPane = () =>
-      shallowMount(DataStudioRightPanelPartitions, {
+      shallowMount(DataStudioRightPanelDoris, {
         global: {
           provide: { dataStudioCtx: ctx },
           stubs: { ElScrollbar: { template: '<div><slot /></div>' } },

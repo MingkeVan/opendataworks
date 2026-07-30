@@ -91,8 +91,6 @@ export function useStudioTabs({
       },
       metaOriginal: {},
       metaDataDomainOptions: [],
-      // 明细信息子页：fields | partitions
-      metaDetailTab: 'fields',
       // 分区列表缓存（null=未加载过，数组=已加载结果）
       partitionList: null,
       metadataSyncing: false,

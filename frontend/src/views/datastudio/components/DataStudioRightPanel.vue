@@ -3,6 +3,95 @@
     <div v-if="hasTableTab && state" ref="panelShellRef" class="panel-shell" :style="panelShellStyle">
 
       <section class="meta-panel">
+        <header class="table-header">
+          <div class="table-identity">
+            <div class="table-title-row">
+              <span class="table-name" :title="fullTableName">{{ fullTableName }}</span>
+              <el-tag v-if="isDorisTable(state.table)" size="small" type="warning" effect="plain">DORIS</el-tag>
+              <el-tag v-if="state.table.layer" size="small" effect="plain">{{ state.table.layer }}</el-tag>
+              <el-tooltip content="表描述与字段描述的填写比例" placement="top">
+                <el-tag size="small" effect="plain" class="completeness-tag">
+                  元数据完善度 {{ completeness }}%
+                </el-tag>
+              </el-tooltip>
+            </div>
+            <div class="table-comment" :title="state.table.tableComment || ''">
+              {{ state.table.tableComment || '暂无表描述' }}
+            </div>
+          </div>
+
+          <div class="table-actions">
+            <!-- 编辑态只留取消/保存，避免与生成、删除混在一起 -->
+            <template v-if="isEditing">
+              <el-button data-test="action-cancel" size="small" :disabled="isSaving" @click="cancelCurrentEdit">取消</el-button>
+              <el-button
+                data-test="action-save"
+                type="primary"
+                size="small"
+                :loading="isSaving"
+                :disabled="isDemoMode"
+                @click="saveCurrentEdit"
+              >
+                {{ state.metaTab === 'columns' ? '保存修改' : '保存' }}
+              </el-button>
+            </template>
+            <template v-else>
+              <el-button
+                data-test="action-generate"
+                size="small"
+                :loading="metadataGenerating"
+                :disabled="isDemoMode || isPlatformMetadataMissing(state.table)"
+                @click="generateMetadata(activeTabId)"
+              >
+                {{ metadataGenerating ? '元数据生成中' : '智能元数据' }}
+              </el-button>
+
+              <el-button
+                v-if="state.metaTab === 'ddl'"
+                data-test="action-copy-ddl"
+                size="small"
+                :disabled="!state.ddl"
+                @click="copyDdl(activeTabId)"
+              >
+                复制
+              </el-button>
+
+              <el-tooltip v-if="editDisabledReason" :content="editDisabledReason" placement="top">
+                <span>
+                  <el-button data-test="action-edit" type="primary" size="small" disabled>编辑</el-button>
+                </span>
+              </el-tooltip>
+              <el-button
+                v-else-if="canEditCurrentTab"
+                data-test="action-edit"
+                type="primary"
+                size="small"
+                :disabled="isDemoMode"
+                @click="startCurrentEdit"
+              >
+                编辑
+              </el-button>
+
+              <el-tooltip v-if="editDisabledReason" :content="editDisabledReason" placement="top">
+                <span>
+                  <el-button data-test="action-delete" type="danger" plain size="small" disabled>删除</el-button>
+                </span>
+              </el-tooltip>
+              <el-button
+                v-else
+                data-test="action-delete"
+                type="danger"
+                plain
+                size="small"
+                :disabled="isDemoMode"
+                @click="handleDeleteTable"
+              >
+                删除
+              </el-button>
+            </template>
+          </div>
+        </header>
+
         <el-alert
           v-if="isPlatformMetadataMissing(state.table)"
           type="error"
@@ -28,22 +117,23 @@
         </el-alert>
 
         <el-tabs v-model="state.metaTab" class="meta-tabs detail-tabs">
-          <el-tab-pane name="basic" label="基本信息">
+          <el-tab-pane name="basic" label="表信息">
             <DataStudioRightPanelBasic />
           </el-tab-pane>
 
-          <el-tab-pane name="columns" label="明细信息">
+          <el-tab-pane v-if="isDorisTable(state.table)" name="doris" label="Doris信息" lazy>
+            <DataStudioRightPanelDoris />
+          </el-tab-pane>
+
+          <el-tab-pane name="columns" label="列信息">
             <DataStudioRightPanelColumns />
           </el-tab-pane>
 
           <el-tab-pane name="ddl" label="DDL">
-            <div class="meta-section meta-section-fill" v-loading="state.ddlLoading">
+            <div v-loading="state.ddlLoading" class="meta-section meta-section-fill">
               <section class="section-block section-fill">
                 <div class="section-header">
                   <div class="section-title">建表语句</div>
-                  <div class="section-actions">
-                    <el-button size="small" :disabled="!state.ddl" @click="copyDdl(activeTabId)">复制</el-button>
-                  </div>
                 </div>
                 <div class="code-shell">
                   <el-scrollbar class="ddl-scroll">
@@ -59,7 +149,7 @@
             <DataStudioRightPanelAccess />
           </el-tab-pane>
 
-          <el-tab-pane name="versions" label="变更" lazy>
+          <el-tab-pane name="versions" label="变更记录" lazy>
             <div class="meta-section meta-section-fill">
               <section class="section-block section-fill">
                 <div class="section-header">
@@ -107,10 +197,12 @@ import { computed, inject } from 'vue'
 import DataStudioRightPanelLineage from './DataStudioRightPanelLineage.vue'
 import TableVersionHistoryPanel from './TableVersionHistoryPanel.vue'
 import DataStudioRightPanelBasic from './DataStudioRightPanelBasic.vue'
+import DataStudioRightPanelDoris from './DataStudioRightPanelDoris.vue'
 import DataStudioRightPanelColumns from './DataStudioRightPanelColumns.vue'
 import DataStudioRightPanelAccess from './DataStudioRightPanelAccess.vue'
 import SmartMetadataDialog from './SmartMetadataDialog.vue'
 import { isDemoMode } from '@/demo/runtime'
+import { computeMetadataCompleteness } from '../metadataGeneration'
 import { usePanelVerticalResize } from '../composables/usePanelVerticalResize'
 
 const props = defineProps({
@@ -127,16 +219,27 @@ if (!ctx) {
 }
 
 const {
+  clusterId,
   openTabs,
   activeTab,
   tabStates,
+  isDorisTable,
   isPlatformMetadataMissing,
   syncMissingTableMetadata,
   copyDdl,
   goLineage,
   goCreateRelatedTask,
   openTask,
-  openTableTab
+  openTableTab,
+  startMetaEdit,
+  cancelMetaEdit,
+  saveMetaEdit,
+  startFieldsEdit,
+  cancelFieldsEdit,
+  saveFieldsEdit,
+  handleDeleteTable,
+  generateMetadata,
+  metadataGenerating
 } = ctx
 
 const activeTabId = computed(() => String(activeTab.value || ''))
@@ -155,7 +258,7 @@ const rootClass = computed(() => [
 
 const emptyDescription = computed(() => {
   if (activeTabItem.value?.kind === 'query') return '没有可用的对象信息'
-  return '选择表后在此查看基本信息、列详情、DDL 与数据血缘'
+  return '选择表后在此查看表信息、列信息、DDL 与数据血缘'
 })
 
 const hasTableTab = computed(() => {
@@ -167,6 +270,53 @@ const state = computed(() => {
   if (!id) return null
   return tabStates[id] || null
 })
+
+const fullTableName = computed(() => {
+  const table = state.value?.table
+  if (!table) return ''
+  return table.dbName ? `${table.dbName}.${table.tableName}` : String(table.tableName || '')
+})
+
+const completeness = computed(() =>
+  computeMetadataCompleteness({
+    tableComment: state.value?.table?.tableComment,
+    fields: state.value?.fields || [],
+  })
+)
+
+// 头部操作区随 tab 联动：只有「表信息」与「列信息」有可编辑内容
+const canEditCurrentTab = computed(() => ['basic', 'columns'].includes(String(state.value?.metaTab || '')))
+
+const isEditing = computed(() =>
+  state.value?.metaTab === 'columns' ? !!state.value?.fieldsEditing : !!state.value?.metaEditing
+)
+
+const isSaving = computed(() =>
+  state.value?.metaTab === 'columns' ? !!state.value?.fieldSubmitting : !!state.value?.metaSaving
+)
+
+// 与原先各内容块内按钮一致的禁用原因；无原因则可操作
+const editDisabledReason = computed(() => {
+  if (!canEditCurrentTab.value) return ''
+  if (isPlatformMetadataMissing(state.value?.table)) return '请先同步到平台元数据后再操作'
+  if (isDorisTable(state.value?.table) && !clusterId.value) return '请选择 Doris 集群后再操作'
+  return ''
+})
+
+const startCurrentEdit = () => {
+  if (state.value?.metaTab === 'columns') startFieldsEdit(activeTabId.value)
+  else startMetaEdit(activeTabId.value)
+}
+
+const cancelCurrentEdit = () => {
+  if (state.value?.metaTab === 'columns') cancelFieldsEdit(activeTabId.value)
+  else cancelMetaEdit(activeTabId.value)
+}
+
+const saveCurrentEdit = () => {
+  if (state.value?.metaTab === 'columns') saveFieldsEdit(activeTabId.value)
+  else saveMetaEdit(activeTabId.value)
+}
 
 // 右侧面板上下分栏（P2-2 F17b）：拖拽与按 tab 记忆高度
 const {
@@ -372,6 +522,66 @@ const {
   background: var(--panel);
   overflow: hidden;
   min-height: 0;
+  /* 头部与提示按内容高度，tab 区占满剩余空间 */
+  display: flex;
+  flex-direction: column;
+}
+
+.table-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.table-identity {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.table-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.table-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+
+.completeness-tag {
+  font-weight: 400;
+}
+
+.table-comment {
+  font-size: 12px;
+  color: var(--text-sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 620px;
+}
+
+.table-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .metadata-missing-alert {
@@ -426,7 +636,13 @@ const {
 }
 
 .meta-tabs {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+}
+
+.table-header,
+.metadata-missing-alert {
+  flex: none;
 }
 
 :deep(.detail-tabs > .el-tabs__header) {

@@ -1,80 +1,9 @@
 <template>
   <div class="meta-section meta-section-fill">
-    <div class="basic-grid" :class="{ single: !isDorisTable(state.table) }">
+    <div class="basic-grid single">
       <section class="section-block">
         <div class="section-header">
           <div class="section-title">表信息</div>
-          <div class="section-actions">
-            <el-tooltip
-              v-if="!state.metaEditing && isPlatformMetadataMissing(state.table)"
-              content="请先同步到平台元数据后再操作"
-              placement="top"
-            >
-              <span>
-                <el-button type="primary" size="small" disabled>编辑</el-button>
-              </span>
-            </el-tooltip>
-            <el-tooltip
-              v-else-if="!state.metaEditing && isDorisTable(state.table) && !clusterId"
-              content="请选择 Doris 集群后再编辑"
-              placement="top"
-            >
-              <span>
-                <el-button type="primary" size="small" disabled>编辑</el-button>
-              </span>
-            </el-tooltip>
-            <el-button
-              v-else-if="!state.metaEditing"
-              type="primary"
-              size="small"
-              :disabled="isDemoMode"
-              @click="startMetaEdit(activeTabId)"
-            >
-              编辑
-            </el-button>
-
-            <el-tooltip
-              v-if="!state.metaEditing && isPlatformMetadataMissing(state.table)"
-              content="请先同步到平台元数据后再操作"
-              placement="top"
-            >
-              <span>
-                <el-button type="danger" plain size="small" disabled>删除表</el-button>
-              </span>
-            </el-tooltip>
-            <el-tooltip
-              v-else-if="!state.metaEditing && isDorisTable(state.table) && !clusterId"
-              content="请选择 Doris 集群后再删除"
-              placement="top"
-            >
-              <span>
-                <el-button type="danger" plain size="small" disabled>删除表</el-button>
-              </span>
-            </el-tooltip>
-            <el-button
-              v-else-if="!state.metaEditing"
-              type="danger"
-              plain
-              size="small"
-              :disabled="isDemoMode"
-              @click="handleDeleteTable"
-            >
-              删除表
-            </el-button>
-
-            <template v-else>
-              <el-button size="small" @click="cancelMetaEdit(activeTabId)">取消</el-button>
-              <el-button
-                type="primary"
-                size="small"
-                :loading="state.metaSaving"
-                :disabled="isDemoMode"
-                @click="saveMetaEdit(activeTabId)"
-              >
-                保存
-              </el-button>
-            </template>
-          </div>
         </div>
 
         <el-scrollbar class="meta-scroll">
@@ -178,62 +107,6 @@
           </el-descriptions>
         </el-scrollbar>
       </section>
-
-      <section v-if="isDorisTable(state.table)" class="section-block doris-block">
-        <div class="section-header">
-          <div class="section-title">Doris 配置</div>
-          <el-tag size="small" type="warning" effect="plain">DORIS</el-tag>
-        </div>
-
-        <el-scrollbar class="meta-scroll">
-          <el-descriptions :column="1" border size="small" class="meta-descriptions">
-            <el-descriptions-item label="表模型">
-              <span>{{ state.table.tableModel || '-' }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="主键列">
-              <span>{{ state.table.keyColumns || '-' }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="分区字段">
-              <span>{{ state.table.partitionColumn || '-' }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="分桶字段">
-              <span>{{ state.table.distributionColumn || '-' }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="分桶数">
-              <el-input-number
-                v-if="state.metaEditing"
-                v-model="state.metaForm.bucketNum"
-                :min="1"
-                size="small"
-                controls-position="right"
-                class="meta-input"
-              />
-              <span v-else>{{ state.table.bucketNum || '-' }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="副本数">
-              <template v-if="state.metaEditing">
-                <div class="replica-edit">
-                  <el-input-number
-                    v-model="state.metaForm.replicaNum"
-                    :min="1"
-                    size="small"
-                    controls-position="right"
-                    class="meta-input"
-                  />
-                  <span v-if="isReplicaWarning(state.metaForm.replicaNum)" class="replica-warning">
-                    <el-icon><Warning /></el-icon>
-                    建议≥3
-                  </span>
-                </div>
-              </template>
-              <span v-else :class="['replica-value', { 'replica-danger': isReplicaWarning(state.table.replicaNum) }]">
-                <el-icon v-if="isReplicaWarning(state.table.replicaNum)" class="warning-icon"><Warning /></el-icon>
-                {{ state.table.replicaNum || '-' }}
-              </span>
-            </el-descriptions-item>
-          </el-descriptions>
-        </el-scrollbar>
-      </section>
     </div>
   </div>
 
@@ -242,8 +115,6 @@
 
 <script setup>
 import { computed, inject, ref } from 'vue'
-import { Warning } from '@element-plus/icons-vue'
-import { isDemoMode } from '@/demo/runtime'
 import TableTrendDialog from './TableTrendDialog.vue'
 import {
   resolveTableRowCount,
@@ -262,20 +133,12 @@ if (!ctx) {
 }
 
 const {
-  clusterId,
   activeTab,
   tabStates,
   layerOptions,
   businessDomainOptions,
   getMetaDataDomainOptions,
   handleMetaBusinessDomainChange,
-  isDorisTable,
-  isPlatformMetadataMissing,
-  isReplicaWarning,
-  startMetaEdit,
-  cancelMetaEdit,
-  saveMetaEdit,
-  handleDeleteTable,
   formatDateTime,
 } = ctx
 
