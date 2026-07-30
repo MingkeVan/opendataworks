@@ -1,11 +1,8 @@
 <template>
   <div class="meta-section meta-section-fill">
     <div class="basic-grid single">
+      <!-- 不再重复 tab 名「表信息」作为区块标题 -->
       <section class="section-block">
-        <div class="section-header">
-          <div class="section-title">表信息</div>
-        </div>
-
         <el-scrollbar class="meta-scroll">
           <el-descriptions :column="1" border size="small" class="meta-descriptions">
             <el-descriptions-item label="表名">

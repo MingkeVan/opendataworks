@@ -142,10 +142,8 @@
 
           <el-tab-pane name="versions" label="变更记录" lazy>
             <div class="meta-section meta-section-fill">
+              <!-- 不再重复 tab 名「变更记录」作为区块标题 -->
               <section class="section-block section-fill">
-                <div class="section-header">
-                  <div class="section-title">变更记录</div>
-                </div>
                 <el-scrollbar class="meta-scroll">
                   <TableVersionHistoryPanel
                     :table-id="state.table?.id"
