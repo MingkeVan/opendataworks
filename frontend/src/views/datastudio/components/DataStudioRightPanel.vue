@@ -645,9 +645,14 @@ const {
 
 /* 六个 tab 在右栏宽度内排开：原生 item 默认左右各 20px，共占 240px 纯内边距，
    在最窄的 400px 右栏放不下。收到 8px 后 tab 栏约 361px，1280px 视口（右栏取下限
-   400px、可用 378px）也不会出现滚动箭头，且不必再从中间查询区抢宽度。 */
+   400px、可用 378px）也不会出现滚动箭头，且不必再从中间查询区抢宽度。
+   字号取 13px 与本面板的区块标题一致：el-tabs 默认 14px / 40px 行高在这个
+   密集侧栏里偏大（面板内其余文字为 12-13px）。 */
 :deep(.detail-tabs .el-tabs__item) {
   padding: 0 8px;
+  font-size: 13px;
+  height: 34px;
+  line-height: 34px;
 }
 
 :deep(.detail-tabs > .el-tabs__content) {
