@@ -65,6 +65,7 @@ from core.topic_workspace import prepare_topic_workspace
 logger = logging.getLogger(__name__)
 
 _SDK_TURN_PROGRESS_THRESHOLDS = (1000, 3000, 6000, 10000)
+_WORKSPACE_PLANS_DIRECTORY = ".claude/plans"
 
 
 @dataclass
@@ -1012,6 +1013,12 @@ async def _execute_task_stream_local(
         system_prompt=system_prompt,
         model=model,
         cwd=str(project_cwd),
+        # Claude Code otherwise stores plan-mode drafts under
+        # $HOME/.claude/plans, which is intentionally outside the agent
+        # workspace. Keep the runtime-owned plan directory relative to cwd so
+        # plan writes remain inside the workspace boundary in both local and
+        # container execution.
+        settings=json.dumps({"plansDirectory": _WORKSPACE_PLANS_DIRECTORY}),
         setting_sources=setting_sources,
         max_turns=max_turns,
         allowed_tools=allowed_tools,
