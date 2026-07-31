@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -94,6 +95,7 @@ class DataTaskServiceLineageMergeTest {
         existing.setId(TASK_ID);
         existing.setTaskName("task-a");
         existing.setDolphinNodeType("SQL");
+        existing.setTaskSql("insert into dws.a select * from ods.b");
         when(dataTaskMapper.selectById(TASK_ID)).thenReturn(existing);
         // 库里既有血缘：输入 [1,2]，输出 [9]
         stubExistingLineage(Arrays.asList(1L, 2L), Collections.singletonList(9L));
@@ -213,5 +215,58 @@ class DataTaskServiceLineageMergeTest {
         service.update(incomingTask(), Collections.singletonList(3L), null, LineageValidationMode.LENIENT);
 
         verify(taskLineageConsistencyChecker, never()).findHighConfidenceGap(any(), any(), any());
+    }
+
+    /**
+     * 部分更新只携带调用方显式提交的字段，{@code updateById} 也只写非空字段。
+     * 校验必须针对"请求覆盖旧值"后的有效任务，否则只提交 taskName 的更新会因为
+     * dolphinNodeType 为空而被当成非 SQL 任务，直接绕过 SQL 一致性校验。
+     */
+    @Test
+    void partialUpdateStillSeesTaskAsSqlSoStrictCheckRuns() {
+        DataTask partial = new DataTask();
+        partial.setId(TASK_ID);
+        partial.setTaskName("renamed-only");
+        // dolphinNodeType / taskSql 均未提交
+
+        service.update(partial, Collections.singletonList(3L), null, LineageValidationMode.STRICT);
+
+        ArgumentCaptor<DataTask> captor = ArgumentCaptor.forClass(DataTask.class);
+        verify(taskLineageConsistencyChecker).findHighConfidenceGap(captor.capture(), any(), any());
+        assertEquals("SQL", captor.getValue().getDolphinNodeType());
+        assertEquals("insert into dws.a select * from ods.b", captor.getValue().getTaskSql());
+    }
+
+    @Test
+    void partialUpdateWithSubsetInputIsRejectedByStrictCheck() {
+        // 回归：Agent 只提交 {taskName} + 部分 inputTableIds 时，
+        // 旧实现会因为看不到 dolphinNodeType 而放行，随后用子集全量覆盖输入血缘。
+        TaskLineageConsistencyChecker.HighConfidenceGap gap =
+                new TaskLineageConsistencyChecker.HighConfidenceGap();
+        gap.getMissingInputs().add("ods.b(id=2)");
+        when(taskLineageConsistencyChecker.findHighConfidenceGap(any(), any(), any())).thenReturn(gap);
+
+        DataTask partial = new DataTask();
+        partial.setId(TASK_ID);
+        partial.setTaskName("renamed-only");
+
+        assertThrows(RuntimeException.class,
+                () -> service.update(partial, Collections.singletonList(1L), null,
+                        LineageValidationMode.STRICT));
+
+        verify(taskLineageWriteService, never()).replaceTaskLineage(any(), anyList(), anyList());
+    }
+
+    @Test
+    void effectiveTaskViewDoesNotLeakOldValuesBackIntoTheUpdatePayload() {
+        // 有效任务是副本：旧值不能写回请求对象，否则会被 updateById 当成本次提交的变更持久化。
+        DataTask partial = new DataTask();
+        partial.setId(TASK_ID);
+        partial.setTaskName("renamed-only");
+
+        service.update(partial, Collections.singletonList(3L), null, LineageValidationMode.STRICT);
+
+        assertNull(partial.getDolphinNodeType());
+        assertNull(partial.getTaskSql());
     }
 }

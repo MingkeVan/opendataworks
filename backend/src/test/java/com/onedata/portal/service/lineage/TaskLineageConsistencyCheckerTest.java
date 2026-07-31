@@ -249,6 +249,123 @@ class TaskLineageConsistencyCheckerTest {
                 TaskLineageConsistencyChecker.CODE_DEFINITION_DRIFT.equals(issue.getCode())));
     }
 
+    /**
+     * 关系表推导出 7 -> 8 这条边（7 写 tbl 5，8 读 tbl 5）。
+     * 两个节点的 inputTableIds/outputTableIds 都正确，只有 processTaskRelationList 少了这条边。
+     */
+    private DataWorkflow workflowWithTwoTasks(String processTaskRelationList) {
+        DataWorkflow workflow = workflow();
+        workflow.setDefinitionJson("{\"taskDefinitionList\":["
+                + "{\"taskCode\":1007,\"xPlatformTaskMeta\":{\"taskId\":7},"
+                + "\"inputTableIds\":[],\"outputTableIds\":[5]},"
+                + "{\"taskCode\":1008,\"xPlatformTaskMeta\":{\"taskId\":8},"
+                + "\"inputTableIds\":[5],\"outputTableIds\":[6]}],"
+                + "\"processTaskRelationList\":" + processTaskRelationList + "}");
+        return workflow;
+    }
+
+    private void stubTwoTaskWorkflow(DataWorkflow workflow) {
+        DataTask upstream = sqlTask(7L, "upstream");
+        DataTask downstream = sqlTask(8L, "downstream");
+        List<WorkflowTaskRelation> bindings = new ArrayList<>();
+        for (DataTask task : Arrays.asList(upstream, downstream)) {
+            WorkflowTaskRelation binding = new WorkflowTaskRelation();
+            binding.setWorkflowId(workflow.getId());
+            binding.setTaskId(task.getId());
+            bindings.add(binding);
+        }
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(bindings);
+        when(dataTaskMapper.selectBatchIds(any())).thenReturn(Arrays.asList(upstream, downstream));
+        // read: 8 读 5；write: 7 写 5，8 写 6
+        when(tableTaskRelationMapper.selectList(any())).thenReturn(
+                Collections.singletonList(relation(8L, 5L, "read")),
+                Arrays.asList(relation(7L, 5L, "write"), relation(8L, 6L, "write")));
+        stubAnalyze(Collections.emptyList(), Collections.emptyList(),
+                Collections.emptyList(), Collections.emptyList());
+    }
+
+    @Test
+    void definitionDriftDetectsMissingProcessTaskRelationEdge() {
+        // 表数组全对，只有流程边少了一条：这正是发布出去的 DAG 会缺依赖的情况。
+        // 只比对 taskDefinitionList 的 inputTableIds/outputTableIds 是发现不了的。
+        DataWorkflow workflow = workflowWithTwoTasks("[{\"preTaskCode\":0,\"postTaskCode\":1007}]");
+        stubTwoTaskWorkflow(workflow);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        assertTrue(issues.stream().anyMatch(issue ->
+                        TaskLineageConsistencyChecker.CODE_DEFINITION_DRIFT.equals(issue.getCode())
+                                && "workflow.definitionJson.processTaskRelationList".equals(issue.getField())
+                                && issue.getMessage().contains("缺少")),
+                "应报告缺失的任务依赖边，实际问题: " + issues);
+    }
+
+    @Test
+    void definitionDriftAcceptsMatchingProcessTaskRelationEdges() {
+        DataWorkflow workflow = workflowWithTwoTasks(
+                "[{\"preTaskCode\":0,\"postTaskCode\":1007},{\"preTaskCode\":1007,\"postTaskCode\":1008}]");
+        stubTwoTaskWorkflow(workflow);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        assertTrue(issues.stream().noneMatch(issue ->
+                        TaskLineageConsistencyChecker.CODE_DEFINITION_DRIFT.equals(issue.getCode())),
+                "边与表清单都一致时不应报漂移，实际问题: " + issues);
+    }
+
+    @Test
+    void definitionDriftDetectsExtraProcessTaskRelationEdge() {
+        DataWorkflow workflow = workflowWithTwoTasks(
+                "[{\"preTaskCode\":0,\"postTaskCode\":1007},{\"preTaskCode\":1007,\"postTaskCode\":1008},"
+                        + "{\"preTaskCode\":1008,\"postTaskCode\":1007}]");
+        stubTwoTaskWorkflow(workflow);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        assertTrue(issues.stream().anyMatch(issue ->
+                        TaskLineageConsistencyChecker.CODE_DEFINITION_DRIFT.equals(issue.getCode())
+                                && issue.getMessage().contains("不存在的任务依赖边")),
+                "应报告多余的任务依赖边，实际问题: " + issues);
+    }
+
+    @Test
+    void definitionDriftDetectsTaskNodeMissingFromDefinition() {
+        DataWorkflow workflow = workflow();
+        // 定义里只有 7，工作流实际绑定了 7 和 8
+        workflow.setDefinitionJson("{\"taskDefinitionList\":["
+                + "{\"taskCode\":1007,\"xPlatformTaskMeta\":{\"taskId\":7},"
+                + "\"inputTableIds\":[],\"outputTableIds\":[5]}],"
+                + "\"processTaskRelationList\":[]}");
+        stubTwoTaskWorkflow(workflow);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        assertTrue(issues.stream().anyMatch(issue ->
+                        "workflow.definitionJson.taskDefinitionList".equals(issue.getField())
+                                && issue.getMessage().contains("缺少该任务节点")),
+                "应报告定义中缺失的任务节点，实际问题: " + issues);
+    }
+
+    @Test
+    void definitionDriftDetectsTaskNodeNotBoundToWorkflow() {
+        DataWorkflow workflow = workflowWithTwoTasks("[]");
+        DataTask only = sqlTask(7L, "upstream");
+        WorkflowTaskRelation binding = new WorkflowTaskRelation();
+        binding.setWorkflowId(workflow.getId());
+        binding.setTaskId(7L);
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Collections.singletonList(binding));
+        when(dataTaskMapper.selectBatchIds(any())).thenReturn(Collections.singletonList(only));
+        when(tableTaskRelationMapper.selectList(any())).thenReturn(Collections.emptyList());
+        stubAnalyze(Collections.emptyList(), Collections.emptyList(),
+                Collections.emptyList(), Collections.emptyList());
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        assertTrue(issues.stream().anyMatch(issue ->
+                        issue.getMessage().contains("未绑定到该工作流的任务节点")),
+                "应报告定义中多余的任务节点，实际问题: " + issues);
+    }
+
     @Test
     void warnModeNeverReportsBlockingIssues() {
         WorkflowPublishRepairIssue missing = new WorkflowPublishRepairIssue();

@@ -313,7 +313,7 @@ public class DataTaskService {
                 ? outputTableIds
                 : currentLineage.getOutputTableIds();
 
-        validateTask(task, finalInputTableIds, finalOutputTableIds, validationMode);
+        validateTask(task, finalInputTableIds, finalOutputTableIds, validationMode, exists);
 
         WorkflowTaskRelation workflowRelation = workflowTaskRelationMapper.selectOne(
                 Wrappers.<WorkflowTaskRelation>lambdaQuery()
@@ -1352,28 +1352,69 @@ public class DataTaskService {
         return status;
     }
 
-    /**
-     * 校验合并后的最终血缘。
-     *
-     * <p>入参必须是合并结果而非原始请求：只替换一侧时，另一侧为 {@code null} 并不代表被清空。
-     */
     private void validateTask(DataTask task,
             List<Long> finalInputTableIds,
             List<Long> finalOutputTableIds,
             LineageValidationMode validationMode) {
+        validateTask(task, finalInputTableIds, finalOutputTableIds, validationMode, null);
+    }
+
+    /**
+     * 校验合并后的最终血缘。
+     *
+     * <p>血缘入参必须是合并结果而非原始请求：只替换一侧时，另一侧为 {@code null} 并不代表被清空。
+     *
+     * <p>任务字段同理。更新请求只携带调用方显式提交的字段，
+     * 而 {@code updateById} 只写非空字段，因此保存后生效的是"请求覆盖在旧值之上"的结果。
+     * 校验必须针对这个有效任务，否则只提交 {@code taskName} 的部分更新会因为
+     * {@code dolphinNodeType} 为空而被当成非 SQL 任务，直接绕过 SQL 一致性校验。
+     *
+     * @param exists 库中旧值；创建时为 {@code null}
+     */
+    private void validateTask(DataTask task,
+            List<Long> finalInputTableIds,
+            List<Long> finalOutputTableIds,
+            LineageValidationMode validationMode,
+            DataTask exists) {
         if (task == null) {
             throw new IllegalArgumentException("任务不能为空");
         }
+        // dolphinFlag 归一化会写回请求对象本身，必须作用在真实入参上，不能挪到副本里。
         task.setDolphinFlag(normalizeDolphinFlag(task.getDolphinFlag()));
+
+        DataTask effectiveTask = buildEffectiveTaskForValidation(task, exists);
         if (isEmptyTableSelection(finalOutputTableIds)) {
-            if ("SQL".equalsIgnoreCase(task.getDolphinNodeType())) {
+            if ("SQL".equalsIgnoreCase(effectiveTask.getDolphinNodeType())) {
                 throw new IllegalArgumentException("SQL 任务必须至少配置一个输出表");
             }
             throw new IllegalArgumentException("任务必须至少配置一个输出表");
         }
         if (validationMode == LineageValidationMode.STRICT) {
-            validateHighConfidenceLineage(task, finalInputTableIds, finalOutputTableIds);
+            validateHighConfidenceLineage(effectiveTask, finalInputTableIds, finalOutputTableIds);
         }
+    }
+
+    /**
+     * 构造"请求覆盖旧值"后的有效任务视图，仅用于校验。
+     *
+     * <p>只填充校验真正读取的字段。返回副本而非修改入参，避免把旧值意外写回请求对象、
+     * 进而被 {@code updateById} 当成本次提交的变更持久化。
+     */
+    private DataTask buildEffectiveTaskForValidation(DataTask task, DataTask exists) {
+        if (exists == null) {
+            return task;
+        }
+        DataTask effective = new DataTask();
+        effective.setId(task.getId() != null ? task.getId() : exists.getId());
+        effective.setTaskName(StringUtils.hasText(task.getTaskName())
+                ? task.getTaskName() : exists.getTaskName());
+        effective.setDolphinNodeType(StringUtils.hasText(task.getDolphinNodeType())
+                ? task.getDolphinNodeType() : exists.getDolphinNodeType());
+        effective.setTaskSql(StringUtils.hasText(task.getTaskSql())
+                ? task.getTaskSql() : exists.getTaskSql());
+        effective.setDolphinTaskCode(task.getDolphinTaskCode() != null
+                ? task.getDolphinTaskCode() : exists.getDolphinTaskCode());
+        return effective;
     }
 
     /**
@@ -1382,18 +1423,18 @@ public class DataTaskService {
      * <p>只拒绝 SQL 已明确匹配、但最终血缘里没有的表。多余血缘、未匹配、歧义都不拒绝，
      * 否则引用外部表或方言 SQL 的任务会连保存都做不到。
      */
-    private void validateHighConfidenceLineage(DataTask task,
+    private void validateHighConfidenceLineage(DataTask effectiveTask,
             List<Long> finalInputTableIds,
             List<Long> finalOutputTableIds) {
-        TaskLineageConsistencyChecker.HighConfidenceGap gap =
-                taskLineageConsistencyChecker.findHighConfidenceGap(task, finalInputTableIds, finalOutputTableIds);
+        TaskLineageConsistencyChecker.HighConfidenceGap gap = taskLineageConsistencyChecker
+                .findHighConfidenceGap(effectiveTask, finalInputTableIds, finalOutputTableIds);
         if (gap.isEmpty()) {
             return;
         }
         throw new BusinessException(String.format(
                 "任务[%s] 的 SQL 已解析出以下表，但未包含在提交的血缘中：%s。"
                         + "请补全 inputTableIds/outputTableIds 后重试；若只想更新其中一侧，可省略另一侧字段以保留原值。",
-                taskLabel(task),
+                taskLabel(effectiveTask),
                 gap.describe()));
     }
 

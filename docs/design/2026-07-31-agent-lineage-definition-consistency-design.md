@@ -70,10 +70,16 @@ Agent 更新任务时，血缘会被静默清空，链路上有三个独立缺�
 
 `DataTaskService.update()` 执行顺序调整为：
 
-1. 读取已有血缘。
+1. 读取已有任务与已有血缘。
 2. 按侧合并出最终输入 / 输出列表。
-3. 用**最终列表**校验（输出非空；STRICT 模式追加 SQL 高可信校验）。
+3. 用**最终列表**与**有效任务**校验（输出非空；STRICT 模式追加 SQL 高可信校验）。
 4. 校验通过后才更新任务与血缘。
+
+"有效任务"指请求覆盖在库中旧值之上的结果。更新请求只携带调用方显式提交的字段，
+而 `updateById` 只写非空字段，保存后生效的正是这个覆盖结果。校验必须针对它：
+否则只提交 `taskName` 的部分更新会因为 `dolphinNodeType` 为空而被当成非 SQL 任务，
+直接绕过 SQL 一致性校验，随后仍用不完整的列表全量覆盖血缘。
+有效任务是副本，旧值不会写回请求对象，避免被 `updateById` 当成本次提交的变更持久化。
 
 校验失败前不删除任何记录。两侧都省略时完全跳过血缘写入，不做无谓的删除重建。
 
@@ -130,7 +136,15 @@ DataTableService -> TaskLineageWriteService -> WorkflowService
 | `LINEAGE_SQL_RELATION_MISSING` | false | SQL 已匹配但关系表缺失 | block-missing 模式下阻断 |
 | `LINEAGE_RELATION_EXTRA` | false | 关系表存在但 SQL 未推断 | 始终告警 |
 | `LINEAGE_SQL_UNRESOLVED` | false | SQL 存在 unmatched 或 ambiguous | 始终告警 |
-| `LINEAGE_DEFINITION_DRIFT` | true | `definitionJson` 边与关系表推导边不一致 | 不阻断，可走既有元数据修复 |
+| `LINEAGE_DEFINITION_DRIFT` | true | `definitionJson` 与关系表不一致 | 不阻断，可走既有元数据修复 |
+
+定义漂移比对覆盖三个维度，缺一不可：
+
+- `taskDefinitionList` 中每个节点的 `inputTableIds` / `outputTableIds` 与关系表。
+- `processTaskRelationList` 中的任务依赖边与关系表推导出的边（排除 `preTaskCode=0` 的入口边）。
+  只比表清单是不够的：表数组正确、关系列表少边时，发布出去的 DAG 依然缺依赖，
+  而真正决定运行态拓扑的是这份关系列表。
+- 节点集合本身：工作流绑定了但定义中缺失的任务，以及定义中存在但未绑定的任务。
 
 ### 5. 发布时序
 

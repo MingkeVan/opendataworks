@@ -1484,7 +1484,9 @@ const previewPublishAndConfirm = async (row) => {
   if (repairIssues.length) {
     try {
       await ElMessageBox.confirm(
-        buildPublishRepairHtml(preview),
+        // 只把可修复的问题喂给修复弹窗：helper 会渲染传入对象的全部 repairIssues，
+        // 直接传 preview 会让血缘告警在只读提示之外再出现一次，而"修复元数据"根本修不了它们。
+        buildPublishRepairHtml({ ...preview, repairIssues }),
         '检测到可修复元数据问题',
         {
           type: 'warning',

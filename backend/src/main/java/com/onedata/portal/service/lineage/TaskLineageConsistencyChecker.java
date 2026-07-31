@@ -247,20 +247,36 @@ public class TaskLineageConsistencyChecker {
             Map<Long, Set<Long>> readsByTask,
             Map<Long, Set<Long>> writesByTask,
             List<WorkflowPublishRepairIssue> issues) {
-        Map<Long, DefinitionTables> definitionTables = loadDefinitionTables(workflow.getDefinitionJson());
-        if (definitionTables.isEmpty()) {
+        ParsedDefinition definition = parseDefinition(workflow.getDefinitionJson());
+        if (definition == null || definition.getTablesByTaskId().isEmpty()) {
             return;
         }
+
+        Map<Long, DataTask> taskById = new LinkedHashMap<>();
+        for (DataTask task : tasks) {
+            if (task != null && task.getId() != null) {
+                taskById.put(task.getId(), task);
+            }
+        }
+
         for (DataTask task : tasks) {
             if (task == null || task.getId() == null) {
                 continue;
             }
-            DefinitionTables persisted = definitionTables.get(task.getId());
-            if (persisted == null) {
-                continue;
-            }
             Set<Long> reads = readsByTask.getOrDefault(task.getId(), Collections.emptySet());
             Set<Long> writes = writesByTask.getOrDefault(task.getId(), Collections.emptySet());
+            DefinitionTables persisted = definition.getTablesByTaskId().get(task.getId());
+            if (persisted == null) {
+                // 工作流绑定了该任务，定义里却没有对应节点。发布出去会直接少一个节点。
+                issues.add(buildIssue(task,
+                        CODE_DEFINITION_DRIFT,
+                        SEVERITY_WARNING,
+                        true,
+                        "workflow.definitionJson.taskDefinitionList",
+                        String.format("任务[%s] 已绑定到工作流，但工作流定义中缺少该任务节点。",
+                                taskLabel(task))));
+                continue;
+            }
             if (persisted.getInputs().equals(reads) && persisted.getOutputs().equals(writes)) {
                 continue;
             }
@@ -276,35 +292,152 @@ public class TaskLineageConsistencyChecker {
                             reads,
                             writes)));
         }
+
+        for (Long definitionTaskId : definition.getTablesByTaskId().keySet()) {
+            if (taskById.containsKey(definitionTaskId)) {
+                continue;
+            }
+            // 定义里有、工作流没绑定：发布会带上一个已经不属于该工作流的节点。
+            issues.add(buildIssue(null,
+                    CODE_DEFINITION_DRIFT,
+                    SEVERITY_WARNING,
+                    true,
+                    "workflow.definitionJson.taskDefinitionList",
+                    String.format("工作流定义中存在未绑定到该工作流的任务节点(taskId=%s)。", definitionTaskId)));
+        }
+
+        collectDefinitionEdgeDriftIssues(definition, taskById, readsByTask, writesByTask, issues);
     }
 
-    private Map<Long, DefinitionTables> loadDefinitionTables(String definitionJson) {
+    /**
+     * 比较关系表推导出的任务边与定义里的 {@code processTaskRelationList}。
+     *
+     * <p>光比对每个任务的表清单是不够的：表数组正确、但 {@code processTaskRelationList} 少边时，
+     * 发布出去的 DAG 依然缺依赖。真正决定运行态拓扑的是这份关系列表。
+     */
+    private void collectDefinitionEdgeDriftIssues(ParsedDefinition definition,
+            Map<Long, DataTask> taskById,
+            Map<Long, Set<Long>> readsByTask,
+            Map<Long, Set<Long>> writesByTask,
+            List<WorkflowPublishRepairIssue> issues) {
+        Set<String> expectedEdges = new LinkedHashSet<>();
+        Map<String, String> edgeLabels = new LinkedHashMap<>();
+        for (Long downstreamTaskId : taskById.keySet()) {
+            Set<Long> downstreamReads = readsByTask.getOrDefault(downstreamTaskId, Collections.emptySet());
+            if (downstreamReads.isEmpty()) {
+                continue;
+            }
+            for (Long upstreamTaskId : taskById.keySet()) {
+                if (Objects.equals(upstreamTaskId, downstreamTaskId)) {
+                    continue;
+                }
+                Set<Long> upstreamWrites = writesByTask.getOrDefault(upstreamTaskId, Collections.emptySet());
+                if (upstreamWrites.stream().noneMatch(downstreamReads::contains)) {
+                    continue;
+                }
+                Long preCode = definition.getCodeByTaskId().get(upstreamTaskId);
+                Long postCode = definition.getCodeByTaskId().get(downstreamTaskId);
+                if (preCode == null || postCode == null) {
+                    // 节点缺失已在上面单独报告，这里不重复。
+                    continue;
+                }
+                String key = preCode + "->" + postCode;
+                expectedEdges.add(key);
+                edgeLabels.put(key, String.format("%s -> %s",
+                        taskLabel(taskById.get(upstreamTaskId)),
+                        taskLabel(taskById.get(downstreamTaskId))));
+            }
+        }
+
+        Set<String> persistedEdges = definition.getTaskEdges();
+
+        Set<String> missing = new LinkedHashSet<>(expectedEdges);
+        missing.removeAll(persistedEdges);
+        for (String key : missing) {
+            issues.add(buildIssue(null,
+                    CODE_DEFINITION_DRIFT,
+                    SEVERITY_WARNING,
+                    true,
+                    "workflow.definitionJson.processTaskRelationList",
+                    String.format("工作流定义缺少血缘推导出的任务依赖边：%s。", edgeLabels.get(key))));
+        }
+
+        Set<String> extra = new LinkedHashSet<>(persistedEdges);
+        extra.removeAll(expectedEdges);
+        for (String key : extra) {
+            issues.add(buildIssue(null,
+                    CODE_DEFINITION_DRIFT,
+                    SEVERITY_WARNING,
+                    true,
+                    "workflow.definitionJson.processTaskRelationList",
+                    String.format("工作流定义存在血缘中不存在的任务依赖边：taskCode %s。", key)));
+        }
+    }
+
+    private ParsedDefinition parseDefinition(String definitionJson) {
         if (!StringUtils.hasText(definitionJson)) {
-            return Collections.emptyMap();
+            return null;
         }
         try {
             JsonNode root = objectMapper.readTree(definitionJson);
-            JsonNode taskListNode = root == null ? null : root.get("taskDefinitionList");
-            if (taskListNode == null || !taskListNode.isArray()) {
-                return Collections.emptyMap();
+            if (root == null) {
+                return null;
             }
-            Map<Long, DefinitionTables> result = new LinkedHashMap<>();
-            for (JsonNode taskNode : taskListNode) {
-                JsonNode metaNode = taskNode == null ? null : taskNode.get("xPlatformTaskMeta");
-                JsonNode taskIdNode = metaNode == null ? null : metaNode.get("taskId");
-                if (taskIdNode == null || !taskIdNode.canConvertToLong()) {
-                    continue;
+            ParsedDefinition parsed = new ParsedDefinition();
+
+            JsonNode taskListNode = root.get("taskDefinitionList");
+            if (taskListNode != null && taskListNode.isArray()) {
+                for (JsonNode taskNode : taskListNode) {
+                    JsonNode metaNode = taskNode == null ? null : taskNode.get("xPlatformTaskMeta");
+                    JsonNode taskIdNode = metaNode == null ? null : metaNode.get("taskId");
+                    if (taskIdNode == null || !taskIdNode.canConvertToLong()) {
+                        continue;
+                    }
+                    long taskId = taskIdNode.asLong();
+                    DefinitionTables tables = new DefinitionTables();
+                    tables.setInputs(readLongSet(taskNode.get("inputTableIds")));
+                    tables.setOutputs(readLongSet(taskNode.get("outputTableIds")));
+                    parsed.getTablesByTaskId().put(taskId, tables);
+
+                    // 关系列表用的是运行态 taskCode，缺失时 assembler 回退成 taskId。
+                    Long code = readLong(taskNode, "taskCode", "code");
+                    if (code == null || code <= 0) {
+                        code = readLong(metaNode, "dolphinTaskCode");
+                    }
+                    parsed.getCodeByTaskId().put(taskId, code != null && code > 0 ? code : taskId);
                 }
-                DefinitionTables tables = new DefinitionTables();
-                tables.setInputs(readLongSet(taskNode.get("inputTableIds")));
-                tables.setOutputs(readLongSet(taskNode.get("outputTableIds")));
-                result.put(taskIdNode.asLong(), tables);
             }
-            return result;
+
+            JsonNode relationListNode = root.get("processTaskRelationList");
+            if (relationListNode != null && relationListNode.isArray()) {
+                for (JsonNode relationNode : relationListNode) {
+                    Long preCode = readLong(relationNode, "preTaskCode");
+                    Long postCode = readLong(relationNode, "postTaskCode");
+                    // preTaskCode=0 是 Dolphin 表示入口节点的约定，不是血缘推导出的任务边。
+                    if (preCode == null || postCode == null || preCode <= 0 || postCode <= 0) {
+                        continue;
+                    }
+                    parsed.getTaskEdges().add(preCode + "->" + postCode);
+                }
+            }
+            return parsed;
         } catch (Exception ex) {
             log.debug("Failed to parse definitionJson for lineage drift check: {}", ex.getMessage());
-            return Collections.emptyMap();
+            return null;
         }
+    }
+
+    private Long readLong(JsonNode node, String... fields) {
+        if (node == null) {
+            return null;
+        }
+        for (String field : fields) {
+            JsonNode value = node.get(field);
+            if (value != null && value.canConvertToLong()) {
+                return value.asLong();
+            }
+        }
+        return null;
     }
 
     private Set<Long> readLongSet(JsonNode node) {
@@ -476,5 +609,16 @@ public class TaskLineageConsistencyChecker {
     private static class DefinitionTables {
         private Set<Long> inputs = new LinkedHashSet<>();
         private Set<Long> outputs = new LinkedHashSet<>();
+    }
+
+    /**
+     * definitionJson 里与血缘相关的三部分：节点表清单、taskId→taskCode 映射、任务依赖边。
+     */
+    @Data
+    private static class ParsedDefinition {
+        private final Map<Long, DefinitionTables> tablesByTaskId = new LinkedHashMap<>();
+        private final Map<Long, Long> codeByTaskId = new LinkedHashMap<>();
+        /** {@code preTaskCode->postTaskCode}，已排除 preTaskCode=0 的入口边。 */
+        private final Set<String> taskEdges = new LinkedHashSet<>();
     }
 }

@@ -1,6 +1,7 @@
 import {
   buildConsistencyIssueHtml,
   buildPublishPreviewHtml,
+  buildPublishRepairHtml,
   resolvePublishVersionId,
   shouldPromptOnlineAfterDeploy,
   splitRepairIssues
@@ -144,5 +145,24 @@ describe('buildConsistencyIssueHtml', () => {
   it('returns an empty string when there is nothing to show', () => {
     expect(buildConsistencyIssueHtml([], '提示')).toBe('')
     expect(buildConsistencyIssueHtml(null, '提示')).toBe('')
+  })
+})
+
+describe('buildPublishRepairHtml', () => {
+  it('renders exactly the repairIssues it is given, so callers must pre-filter', () => {
+    // 该 helper 不做任何过滤。调用方必须只传可修复的问题，
+    // 否则血缘告警会在只读提示之外，又出现在"修复元数据并重试"弹窗里——而修复动作根本修不了它们。
+    const preview = {
+      repairIssues: [
+        { code: 'PUBLISH_METADATA_REPAIR_RECOMMENDED', repairable: true, field: 'task.datasourceId', message: '缺少 datasourceId' },
+        { code: 'LINEAGE_SQL_RELATION_MISSING', repairable: false, field: 'task.lineage.missing', message: '缺少输入表' }
+      ]
+    }
+    const { repairable } = splitRepairIssues(preview)
+
+    const filtered = buildPublishRepairHtml({ ...preview, repairIssues: repairable })
+
+    expect(filtered).toContain('缺少 datasourceId')
+    expect(filtered).not.toContain('缺少输入表')
   })
 })
