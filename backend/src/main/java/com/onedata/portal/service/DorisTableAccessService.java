@@ -215,17 +215,21 @@ public class DorisTableAccessService {
         }
 
         LocalDate today = LocalDate.now();
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime coldThreshold = now.minusDays(coldDays);
+        LocalDate hotStart = windowStart(today, hotDays);
+        // 冷表阈值是精确时刻，聚合窗口必须回看到它所在的自然日，
+        // 否则阈值当天下午的访问会落在窗口外，把活跃表误判成冷表。
+        LocalDate historyStart = coldThreshold.toLocalDate().isBefore(hotStart)
+                ? coldThreshold.toLocalDate()
+                : hotStart;
         List<DashboardTableAccessAggregate> aggregates = tableAccessDailyMapper.selectDashboardAggregates(
-                new ArrayList<>(clustersWithSummary),
-                windowStart(today, hotDays),
-                windowStart(today, Math.max(coldDays, properties.getSummaryRetentionDays())));
+                new ArrayList<>(clustersWithSummary), hotStart, historyStart);
         Map<String, DashboardTableAccessAggregate> aggregateIndex = new HashMap<>();
         for (DashboardTableAccessAggregate aggregate : aggregates) {
             aggregateIndex.put(key(aggregate.getClusterId(), aggregate.getDbName(), aggregate.getTableName()), aggregate);
         }
 
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime coldThreshold = now.minusDays(coldDays);
         List<DashboardTableAccessItem> hotItems = new ArrayList<>();
         List<DashboardTableAccessItem> coldItems = new ArrayList<>();
         for (DataTable table : tables) {

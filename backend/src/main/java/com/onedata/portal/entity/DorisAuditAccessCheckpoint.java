@@ -1,5 +1,6 @@
 package com.onedata.portal.entity;
 
+import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -10,7 +11,7 @@ import java.time.LocalDateTime;
 @TableName("doris_audit_access_checkpoint")
 public class DorisAuditAccessCheckpoint {
 
-    @TableId
+    @TableId(type = IdType.INPUT)
     private Long clusterId;
 
     private String auditSource;

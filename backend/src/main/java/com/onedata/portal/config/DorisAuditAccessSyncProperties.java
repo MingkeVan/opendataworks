@@ -17,7 +17,6 @@ public class DorisAuditAccessSyncProperties {
     private int safetyLagMinutes = 2;
     private int overlapMinutes = 10;
     private int batchSize = 5_000;
-    private int initialHistoryDays = 90;
     private int summaryRetentionDays = 400;
     private int processedEventRetentionDays = 7;
 }

@@ -87,11 +87,21 @@ public class DorisAuditAccessSyncService {
             }
             auditSourceName = source.qualifiedName();
 
-            LocalDateTime safeUpperBound = LocalDateTime.now().minusMinutes(
+            // 水位必须以审计源自身的时钟为准，否则后端与 Doris 的时区/时钟差会让水位越过尚未读取的事件。
+            LocalDateTime safeUpperBound = queryAuditSourceNow(clusterId).minusMinutes(
                     Math.max(0, properties.getSafetyLagMinutes()));
             DorisAuditAccessCheckpoint checkpoint = checkpointMapper.selectById(clusterId);
             if (checkpoint == null || checkpoint.getWatermarkTime() == null) {
                 checkpoint = initializeCheckpoint(clusterId, source, safeUpperBound);
+            } else if (checkpoint.getWatermarkTime().isAfter(safeUpperBound)) {
+                // 源时钟回拨。继续处理会把水位写回更早的时刻，之后重复扫描；
+                // 去重记录过期后还会重复累计，因此保留游标并显式降级。
+                batchService.markFailure(clusterId, auditSourceName,
+                        "Doris 审计源时间早于已保存水位，疑似时钟回拨，已暂停推进");
+                summaryCache.evictCluster(clusterId);
+                log.warn("Doris audit source clock moved backwards, cluster={}, watermark={}, safeUpperBound={}",
+                        clusterId, checkpoint.getWatermarkTime(), safeUpperBound);
+                return;
             }
 
             boolean wasReady = "READY".equalsIgnoreCase(checkpoint.getSyncStatus());
@@ -185,46 +195,37 @@ public class DorisAuditAccessSyncService {
                 events, daily, users);
     }
 
+    /**
+     * 汇总只做增量累积，不从审计表回填历史。
+     * <p>
+     * 覆盖起点即同步启动时间。已有汇总的最早日期只能证明那天存在一条记录，
+     * 不能证明此后连续完整，因此不用它推导可信覆盖——宁可重新攒满窗口，也不要基于可能有缺口的
+     * 历史给出冷表结论。
+     */
     private DorisAuditAccessCheckpoint initializeCheckpoint(Long clusterId,
             AuditSource source,
-            LocalDateTime safeUpperBound) throws SQLException {
-        LocalDateTime desiredStart = safeUpperBound.minusDays(Math.max(1, properties.getInitialHistoryDays()));
-        LocalDateTime availableStart = queryAvailableStart(clusterId, source, desiredStart, safeUpperBound);
-        LocalDateTime coverageStart = availableStart == null ? safeUpperBound : availableStart;
+            LocalDateTime safeUpperBound) {
         batchService.initializeCheckpoint(
-                clusterId, source.qualifiedName(), coverageStart, coverageStart);
+                clusterId, source.qualifiedName(), safeUpperBound, safeUpperBound);
         return checkpointMapper.selectById(clusterId);
     }
 
-    private LocalDateTime queryAvailableStart(Long clusterId,
-            AuditSource source,
-            LocalDateTime desiredStart,
-            LocalDateTime upperBound) throws SQLException {
-        String timeColumn = wrapIdentifier(source.timeColumn);
-        String olderHistorySql = "SELECT " + timeColumn + " AS event_time FROM "
-                + source.qualifiedName() + " WHERE " + timeColumn + " <= ?"
-                + " ORDER BY " + timeColumn + " DESC LIMIT 1";
-        String availableWindowSql = "SELECT MIN(" + timeColumn + ") AS min_time FROM "
-                + source.qualifiedName() + " WHERE " + timeColumn + " > ? AND " + timeColumn + " <= ?";
-        try (Connection connection = dorisConnectionService.getConnection(clusterId)) {
-            try (PreparedStatement statement = connection.prepareStatement(olderHistorySql)) {
-                statement.setTimestamp(1, Timestamp.valueOf(desiredStart));
-                try (ResultSet resultSet = statement.executeQuery()) {
-                    if (resultSet.next() && parseLocalDateTime(resultSet.getObject("event_time")) != null) {
-                        return desiredStart;
-                    }
-                }
+    private LocalDateTime queryAuditSourceNow(Long clusterId) throws SQLException {
+        try (Connection connection = dorisConnectionService.getConnection(clusterId);
+                Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery("SELECT NOW() AS source_now")) {
+            LocalDateTime sourceNow = resultSet.next()
+                    ? parseLocalDateTime(resultSet.getObject("source_now"))
+                    : null;
+            if (sourceNow == null) {
+                throw new SQLException("无法读取 Doris 审计源当前时间");
             }
-            try (PreparedStatement statement = connection.prepareStatement(availableWindowSql)) {
-                statement.setTimestamp(1, Timestamp.valueOf(desiredStart));
-                statement.setTimestamp(2, Timestamp.valueOf(upperBound));
-                try (ResultSet resultSet = statement.executeQuery()) {
-                    if (!resultSet.next()) {
-                        return null;
-                    }
-                    return parseLocalDateTime(resultSet.getObject("min_time"));
-                }
+            long skewSeconds = Duration.between(LocalDateTime.now(), sourceNow).getSeconds();
+            if (Math.abs(skewSeconds) > Math.max(0, properties.getOverlapMinutes()) * 60L) {
+                log.warn("Doris audit source clock differs from backend, cluster={}, skewSeconds={}",
+                        clusterId, skewSeconds);
             }
+            return sourceNow;
         }
     }
 

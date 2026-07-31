@@ -15,9 +15,11 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collections;
 
@@ -26,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -94,6 +97,22 @@ class DorisTableAccessServiceTest {
         assertEquals("READY", summary.getTableAccessSyncStatus());
         assertFalse(summary.getTableAccessCoverageComplete());
         assertTrue(summary.getLongUnusedTables().isEmpty());
+    }
+
+    @Test
+    void freshlyInitializedClusterReportsIncompleteCoverageInsteadOfColdTables() {
+        // 汇总只做增量累积，不回填历史：上线当天覆盖起点就是当前时间，冷表必须保持沉默直到窗口攒够。
+        when(checkpointMapper.selectList(any())).thenReturn(Collections.singletonList(checkpoint(
+                "READY", LocalDateTime.now(), LocalDateTime.now())));
+        when(dailyMapper.selectDashboardAggregates(anyList(), any(), any()))
+                .thenReturn(Collections.emptyList());
+
+        DashboardTableAccessSummary summary = service.getDashboardAccessSummary(null, 30, 10, 90, 10);
+
+        assertEquals("READY", summary.getTableAccessSyncStatus());
+        assertFalse(summary.getTableAccessCoverageComplete());
+        assertTrue(summary.getLongUnusedTables().isEmpty());
+        assertTrue(summary.getNote().contains("覆盖不足"));
     }
 
     @Test
@@ -177,6 +196,22 @@ class DorisTableAccessServiceTest {
         checkpoint.setCoverageStart(coverageStart);
         checkpoint.setLastSyncedAt(lastSyncedAt);
         return checkpoint;
+    }
+
+    @Test
+    void coldWindowAggregatesFromTheThresholdCalendarDay() {
+        // 冷表阈值是精确时刻，聚合起点必须回看到它所在的自然日，
+        // 否则阈值当天晚些时候的访问会落在窗口外，把活跃表误判成冷表。
+        when(checkpointMapper.selectList(any())).thenReturn(Collections.singletonList(checkpoint(
+                "READY", LocalDateTime.now().minusDays(120), LocalDateTime.now().minusMinutes(5))));
+        when(dailyMapper.selectDashboardAggregates(anyList(), any(), any()))
+                .thenReturn(Collections.emptyList());
+
+        service.getDashboardAccessSummary(null, 30, 10, 90, 10);
+
+        ArgumentCaptor<LocalDate> historyStart = ArgumentCaptor.forClass(LocalDate.class);
+        verify(dailyMapper).selectDashboardAggregates(anyList(), any(), historyStart.capture());
+        assertEquals(LocalDateTime.now().minusDays(90).toLocalDate(), historyStart.getValue());
     }
 
     private DashboardTableAccessAggregate aggregate(Long count, LocalDateTime lastAccess) {

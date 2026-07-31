@@ -36,7 +36,6 @@ doris:
     safety-lag-minutes: ${DORIS_AUDIT_ACCESS_SYNC_SAFETY_LAG_MINUTES:2}
     overlap-minutes: ${DORIS_AUDIT_ACCESS_SYNC_OVERLAP_MINUTES:10}
     batch-size: ${DORIS_AUDIT_ACCESS_SYNC_BATCH_SIZE:5000}
-    initial-history-days: ${DORIS_AUDIT_ACCESS_SYNC_INITIAL_HISTORY_DAYS:90}
     summary-retention-days: ${DORIS_AUDIT_ACCESS_SYNC_SUMMARY_RETENTION_DAYS:400}
     processed-event-retention-days: ${DORIS_AUDIT_ACCESS_SYNC_EVENT_RETENTION_DAYS:7}
 
