@@ -79,7 +79,7 @@ public class WorkflowExecutionService {
         if (!"online".equalsIgnoreCase(workflow.getStatus())) {
             throw new IllegalStateException("工作流未上线，请先上线后再补数");
         }
-        TaskExecutionLog executionLog = createWorkflowExecutionLog(workflowId, "manual");
+        TaskExecutionLog executionLog = createWorkflowExecutionLog(workflowId, "backfill");
         try {
             String triggerId = dolphinSchedulerService.backfillProcessInstance(
                     workflow.getDolphinConfigId(), workflowCode, request);

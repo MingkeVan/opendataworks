@@ -647,12 +647,30 @@ public class DolphinSchedulerService {
                 allLevelDependent,
                 executionOrder);
 
-        String triggerId = data != null ? data.asText() : null;
+        String triggerId = extractWorkflowInstanceId(data);
         if (!StringUtils.hasText(triggerId)) {
             triggerId = "trigger-" + System.currentTimeMillis();
         }
         log.info("Backfill workflow definition {} -> {}", workflowCode, triggerId);
         return triggerId;
+    }
+
+    String extractWorkflowInstanceId(JsonNode data) {
+        if (data == null || data.isNull() || data.isMissingNode()) {
+            return null;
+        }
+        if (data.isValueNode()) {
+            String value = data.asText();
+            return StringUtils.hasText(value) ? value : null;
+        }
+        for (String field : new String[] {
+                "workflowInstanceId", "processInstanceId", "processInstanceCode", "id"
+        }) {
+            if (data.hasNonNull(field) && StringUtils.hasText(data.path(field).asText())) {
+                return data.path(field).asText();
+            }
+        }
+        return null;
     }
 
     public String backfillProcessInstance(Long dolphinConfigId,
@@ -753,7 +771,7 @@ public class DolphinSchedulerService {
         }
         Long projectCode = getProjectCode();
         if (projectCode == null) {
-            return Collections.emptyList();
+            throw new IllegalStateException("Cannot list workflow instances: Project not found");
         }
 
         int targetLimit = Math.min(Math.max(limit, 1), 100);
@@ -790,6 +808,42 @@ public class DolphinSchedulerService {
 
     public List<WorkflowInstanceSummary> listWorkflowInstances(Long dolphinConfigId, Long workflowCode, int limit) {
         return withConfig(dolphinConfigId, () -> listWorkflowInstances(workflowCode, limit));
+    }
+
+    /**
+     * List all task instances belonging to one workflow/process instance.
+     */
+    public List<DolphinTaskInstance> listTaskInstances(Long workflowInstanceId) {
+        if (workflowInstanceId == null || workflowInstanceId <= 0) {
+            return Collections.emptyList();
+        }
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            throw new IllegalStateException("Cannot list task instances: Project not found");
+        }
+
+        List<DolphinTaskInstance> result = new ArrayList<>();
+        int pageNo = 1;
+        int pageSize = 100;
+        int maxPages = 100;
+        while (pageNo <= maxPages) {
+            DolphinPageData<DolphinTaskInstance> page = openApiClient.listTaskInstances(
+                    projectCode, pageNo, pageSize, workflowInstanceId, null);
+            if (page == null || page.getTotalList() == null || page.getTotalList().isEmpty()) {
+                break;
+            }
+            result.addAll(page.getTotalList());
+            if ((page.getTotalPage() > 0 && pageNo >= page.getTotalPage())
+                    || page.getTotalList().size() < pageSize) {
+                break;
+            }
+            pageNo++;
+        }
+        return result;
+    }
+
+    public List<DolphinTaskInstance> listTaskInstances(Long dolphinConfigId, Long workflowInstanceId) {
+        return withConfig(dolphinConfigId, () -> listTaskInstances(workflowInstanceId));
     }
 
     private List<DolphinProcessInstance> collectWorkflowInstances(Long projectCode,

@@ -147,7 +147,9 @@ class WorkflowExecutionServiceTest {
         String triggerId = service.backfillWorkflow(1L, request);
 
         assertEquals("backfill-1", triggerId);
-        verify(taskExecutionLogMapper).insert(any(TaskExecutionLog.class));
+        ArgumentCaptor<TaskExecutionLog> insertCaptor = ArgumentCaptor.forClass(TaskExecutionLog.class);
+        verify(taskExecutionLogMapper).insert(insertCaptor.capture());
+        assertEquals("backfill", insertCaptor.getValue().getTriggerType());
         ArgumentCaptor<TaskExecutionLog> updateCaptor = ArgumentCaptor.forClass(TaskExecutionLog.class);
         verify(taskExecutionLogMapper).updateById(updateCaptor.capture());
         assertEquals("backfill-1", updateCaptor.getValue().getExecutionId());

@@ -655,7 +655,13 @@ public class DolphinOpenApiClient {
             if (data == null) {
                 return null;
             }
-            // Different DS versions expose either processInstanceCode or id
+            // Different DS versions expose different workflow/process instance keys.
+            if (data.hasNonNull("workflowInstanceId")) {
+                return data.path("workflowInstanceId").asLong();
+            }
+            if (data.hasNonNull("processInstanceId")) {
+                return data.path("processInstanceId").asLong();
+            }
             if (data.hasNonNull("processInstanceCode")) {
                 return data.path("processInstanceCode").asLong();
             }
@@ -754,8 +760,54 @@ public class DolphinOpenApiClient {
                     .readValue(data);
         } catch (Exception e) {
             log.warn("Failed to list process instances", e);
-            return new DolphinPageData<>();
+            throw new RuntimeException("Failed to list process instances: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * List task instances for one workflow/process instance.
+     *
+     * <p>DolphinScheduler 3.2 expects {@code processInstanceId}, while 3.4
+     * expects {@code workflowInstanceId}. Unknown query parameters are ignored
+     * by both versions, so both names are sent with the same value.</p>
+     */
+    public DolphinPageData<DolphinTaskInstance> listTaskInstances(long projectCode,
+            int pageNo,
+            int pageSize,
+            Long workflowInstanceId,
+            Long taskCode) {
+        try {
+            String path = String.format("/projects/%d/task-instances", projectCode);
+            MultiValueMap<String, String> query = buildTaskInstanceQuery(
+                    pageNo, pageSize, workflowInstanceId, taskCode);
+            JsonNode data = getWithParams(path, query);
+            if (data == null) {
+                return new DolphinPageData<>();
+            }
+            return objectMapper.readerFor(new TypeReference<DolphinPageData<DolphinTaskInstance>>() {
+            }).readValue(data);
+        } catch (Exception e) {
+            log.warn("Failed to list task instances for workflow instance {}", workflowInstanceId, e);
+            throw new RuntimeException("Failed to list task instances: " + e.getMessage(), e);
+        }
+    }
+
+    static MultiValueMap<String, String> buildTaskInstanceQuery(int pageNo,
+            int pageSize,
+            Long workflowInstanceId,
+            Long taskCode) {
+        MultiValueMap<String, String> query = new LinkedMultiValueMap<>();
+        query.add("pageNo", String.valueOf(pageNo > 0 ? pageNo : 1));
+        query.add("pageSize", String.valueOf(pageSize > 0 ? pageSize : 100));
+        if (workflowInstanceId != null && workflowInstanceId > 0) {
+            String instanceId = String.valueOf(workflowInstanceId);
+            query.add("processInstanceId", instanceId);
+            query.add("workflowInstanceId", instanceId);
+        }
+        if (taskCode != null && taskCode > 0) {
+            query.add("taskCode", String.valueOf(taskCode));
+        }
+        return query;
     }
 
     /**

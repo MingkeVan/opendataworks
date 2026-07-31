@@ -2,8 +2,11 @@ package com.onedata.portal.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.onedata.portal.dto.Result;
+import com.onedata.portal.dto.execution.WorkflowExecutionPage;
+import com.onedata.portal.dto.execution.WorkflowTaskInstanceExecution;
 import com.onedata.portal.entity.TaskExecutionLog;
 import com.onedata.portal.service.TaskExecutionService;
+import com.onedata.portal.service.WorkflowExecutionMonitorService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -24,6 +27,42 @@ import java.util.Map;
 public class TaskExecutionController {
 
     private final TaskExecutionService executionService;
+    private final WorkflowExecutionMonitorService workflowExecutionMonitorService;
+
+    /**
+     * Unified workflow-instance monitor for both platform and Dolphin scheduled
+     * executions. Statistics and records are calculated from the same snapshot.
+     */
+    @GetMapping("/workflow-instances")
+    public Result<WorkflowExecutionPage> getWorkflowInstances(
+            @RequestParam(required = false) Long workflowId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false)
+            @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
+            @RequestParam(required = false)
+            @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime,
+            @RequestParam(defaultValue = "false") boolean refresh,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
+        return Result.success(workflowExecutionMonitorService.listWorkflowInstances(
+                workflowId,
+                status,
+                startTime,
+                endTime,
+                refresh,
+                pageNum,
+                pageSize));
+    }
+
+    /**
+     * Load task instances only when a workflow-instance row is expanded.
+     */
+    @GetMapping("/workflows/{workflowId}/instances/{instanceId}/tasks")
+    public Result<List<WorkflowTaskInstanceExecution>> getWorkflowTaskInstances(
+            @PathVariable Long workflowId,
+            @PathVariable Long instanceId) {
+        return Result.success(workflowExecutionMonitorService.listTaskInstances(workflowId, instanceId));
+    }
 
     /**
      * 查询任务执行历史 (分页)

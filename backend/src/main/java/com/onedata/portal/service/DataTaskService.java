@@ -3,12 +3,13 @@ package com.onedata.portal.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.onedata.portal.dto.DolphinDatasourceOption;
 import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.SqlQueryRequest;
 import com.onedata.portal.dto.SqlQueryResponse;
 import com.onedata.portal.dto.TaskExecutionStatus;
+import com.onedata.portal.dto.dolphin.DolphinTaskInstance;
+import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
 import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
@@ -1065,96 +1066,9 @@ public class DataTaskService {
         if (task == null) {
             return null;
         }
-
-        // 获取最近一次执行记录
-        TaskExecutionLog latestLog = executionLogMapper.selectOne(
-                new LambdaQueryWrapper<TaskExecutionLog>()
-                        .eq(TaskExecutionLog::getTaskId, taskId)
-                        .orderByDesc(TaskExecutionLog::getCreatedAt)
-                        .last("LIMIT 1"));
-
-        TaskExecutionStatus status = new TaskExecutionStatus();
-        status.setTaskId(taskId);
-        status.setDolphinWorkflowCode(task.getDolphinProcessCode());
-        status.setDolphinTaskCode(task.getDolphinTaskCode());
-        status.setDolphinProjectName(resolveWorkflowDisplayName(task));
-
-        if (latestLog != null) {
-            status.setExecutionId(latestLog.getExecutionId());
-            status.setStatus(latestLog.getStatus());
-            status.setStartTime(latestLog.getStartTime());
-            status.setEndTime(latestLog.getEndTime());
-            status.setDurationSeconds(latestLog.getDurationSeconds());
-            status.setErrorMessage(latestLog.getErrorMessage());
-            status.setLogUrl(latestLog.getLogUrl());
-            status.setTriggerType(latestLog.getTriggerType());
-
-            // 如果有 workflow code 和 execution id，尝试从 DolphinScheduler 获取实时状态
-            if (task.getDolphinProcessCode() != null && latestLog.getExecutionId() != null) {
-                try {
-                    JsonNode instanceData = dolphinSchedulerService.getWorkflowInstanceStatus(
-                            task.getDolphinProcessCode(),
-                            latestLog.getExecutionId());
-
-                    if (instanceData != null) {
-                        // 更新状态信息
-                        String state = instanceData.path("state").asText(null);
-                        if (state != null) {
-                            status.setStatus(mapDolphinStateToStatus(state));
-                        }
-
-                        // 更新时间信息
-                        String startTimeStr = instanceData.path("startTime").asText(null);
-                        String endTimeStr = instanceData.path("endTime").asText(null);
-                        if (startTimeStr != null && !startTimeStr.isEmpty()) {
-                            // 时间格式转换根据实际情况调整
-                            status.setStartTime(LocalDateTime.parse(startTimeStr));
-                        }
-                        if (endTimeStr != null && !endTimeStr.isEmpty()) {
-                            status.setEndTime(LocalDateTime.parse(endTimeStr));
-                        }
-                    }
-                } catch (Exception e) {
-                    log.warn("Failed to get real-time status from DolphinScheduler for task {}: {}",
-                            taskId, e.getMessage());
-                }
-            }
-        }
-
-        // 生成 DolphinScheduler Web UI 跳转链接
-        if (task.getDolphinProcessCode() != null) {
-            status.setDolphinWorkflowUrl(
-                    dolphinSchedulerService.getWorkflowDefinitionUrl(task.getDolphinProcessCode()));
-        }
-        if (task.getDolphinTaskCode() != null) {
-            status.setDolphinTaskUrl(dolphinSchedulerService.getTaskDefinitionUrl(task.getDolphinTaskCode()));
-        }
-
-        return status;
-    }
-
-    /**
-     * 将 DolphinScheduler 状态映射到本地状态
-     */
-    private String mapDolphinStateToStatus(String dolphinState) {
-        if (dolphinState == null) {
-            return "pending";
-        }
-        switch (dolphinState.toUpperCase()) {
-            case "RUNNING_EXECUTION":
-            case "SUBMITTED_SUCCESS":
-                return "running";
-            case "SUCCESS":
-                return "success";
-            case "FAILURE":
-            case "FAILED":
-                return "failed";
-            case "STOP":
-            case "KILL":
-                return "killed";
-            default:
-                return "pending";
-        }
+        enrichWorkflowMetadata(Collections.singletonList(task));
+        attachExecutionStatus(Collections.singletonList(task));
+        return task.getExecutionStatus();
     }
 
     /**
@@ -1241,44 +1155,168 @@ public class DataTaskService {
                         .orderByDesc(TaskExecutionLog::getStartTime));
 
         Map<Long, TaskExecutionLog> latestLogByTask = new LinkedHashMap<>();
-        for (TaskExecutionLog log : logs) {
-            if (log.getTaskId() == null) {
+        for (TaskExecutionLog executionLog : logs) {
+            if (executionLog.getTaskId() == null) {
                 continue;
             }
             // 第一条即最新（按开始时间倒序）
-            latestLogByTask.putIfAbsent(log.getTaskId(), log);
+            latestLogByTask.putIfAbsent(executionLog.getTaskId(), executionLog);
         }
 
+        Set<Long> workflowIds = tasks.stream()
+                .map(DataTask::getWorkflowId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<Long, DataWorkflow> workflowById = workflowIds.isEmpty()
+                ? Collections.emptyMap()
+                : dataWorkflowMapper.selectBatchIds(workflowIds).stream()
+                        .collect(Collectors.toMap(DataWorkflow::getId, workflow -> workflow));
+
+        Map<Long, List<DataTask>> deployedTasksByWorkflow = new LinkedHashMap<>();
         for (DataTask task : tasks) {
-            TaskExecutionLog latestLog = latestLogByTask.get(task.getId());
-            task.setExecutionStatus(buildExecutionStatus(latestLog, task));
+            DataWorkflow workflow = workflowById.get(task.getWorkflowId());
+            if (isDeployedTask(task, workflow)) {
+                deployedTasksByWorkflow.computeIfAbsent(workflow.getId(), ignored -> new ArrayList<>()).add(task);
+            } else {
+                task.setExecutionStatus(buildLocalExecutionStatus(latestLogByTask.get(task.getId()), task, workflow));
+            }
+        }
+
+        for (Map.Entry<Long, List<DataTask>> entry : deployedTasksByWorkflow.entrySet()) {
+            DataWorkflow workflow = workflowById.get(entry.getKey());
+            List<DataTask> workflowTasks = entry.getValue();
+            try {
+                List<WorkflowInstanceSummary> workflowInstances = dolphinSchedulerService.listWorkflowInstances(
+                        workflow.getDolphinConfigId(), workflow.getWorkflowCode(), 1);
+                if (workflowInstances.isEmpty()) {
+                    workflowTasks.forEach(task -> task.setExecutionStatus(null));
+                    continue;
+                }
+
+                WorkflowInstanceSummary latestWorkflowInstance = workflowInstances.get(0);
+                List<DolphinTaskInstance> taskInstances = dolphinSchedulerService.listTaskInstances(
+                        workflow.getDolphinConfigId(), latestWorkflowInstance.getInstanceId());
+                Map<Long, DolphinTaskInstance> instanceByTaskCode = taskInstances.stream()
+                        .filter(instance -> instance != null && instance.getTaskCode() != null)
+                        .collect(Collectors.toMap(
+                                DolphinTaskInstance::getTaskCode,
+                                instance -> instance,
+                                this::newerTaskInstance,
+                                LinkedHashMap::new));
+
+                for (DataTask task : workflowTasks) {
+                    DolphinTaskInstance taskInstance = instanceByTaskCode.get(task.getDolphinTaskCode());
+                    task.setExecutionStatus(taskInstance == null
+                            ? buildMissingTaskExecutionStatus(task, workflow, latestWorkflowInstance)
+                            : buildDolphinTaskExecutionStatus(
+                                    task, workflow, latestWorkflowInstance, taskInstance));
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to resolve task instances for workflow {}: {}",
+                        workflow.getId(), ex.getMessage());
+                workflowTasks.forEach(task -> task.setExecutionStatus(
+                        buildUnavailableExecutionStatus(task, workflow)));
+            }
         }
     }
 
-    private TaskExecutionStatus buildExecutionStatus(TaskExecutionLog log, DataTask task) {
-        if (log == null || task == null) {
+    private boolean isDeployedTask(DataTask task, DataWorkflow workflow) {
+        return task != null
+                && workflow != null
+                && workflow.getWorkflowCode() != null
+                && workflow.getWorkflowCode() > 0
+                && task.getDolphinTaskCode() != null
+                && task.getDolphinTaskCode() > 0;
+    }
+
+    private DolphinTaskInstance newerTaskInstance(DolphinTaskInstance left, DolphinTaskInstance right) {
+        if (left.getId() == null) {
+            return right;
+        }
+        if (right.getId() == null) {
+            return left;
+        }
+        return right.getId() > left.getId() ? right : left;
+    }
+
+    private TaskExecutionStatus buildDolphinTaskExecutionStatus(DataTask task,
+            DataWorkflow workflow,
+            WorkflowInstanceSummary workflowInstance,
+            DolphinTaskInstance taskInstance) {
+        TaskExecutionStatus status = buildDolphinStatusBase(task, workflow);
+        LocalDateTime startTime = DolphinExecutionMapper.parseDateTime(taskInstance.getStartTime());
+        LocalDateTime endTime = DolphinExecutionMapper.parseDateTime(taskInstance.getEndTime());
+        status.setExecutionId(taskInstance.getId() == null ? null : String.valueOf(taskInstance.getId()));
+        status.setStatus(DolphinExecutionMapper.mapStatus(taskInstance.getState()));
+        status.setStartTime(startTime);
+        status.setEndTime(endTime);
+        status.setDurationSeconds(DolphinExecutionMapper.durationSeconds(
+                startTime, endTime, taskInstance.getDuration()));
+        status.setLogUrl(taskInstance.getLogPath());
+        status.setTriggerType(DolphinExecutionMapper.mapTriggerType(workflowInstance.getCommandType()));
+        return status;
+    }
+
+    private TaskExecutionStatus buildMissingTaskExecutionStatus(DataTask task,
+            DataWorkflow workflow,
+            WorkflowInstanceSummary workflowInstance) {
+        TaskExecutionStatus status = buildDolphinStatusBase(task, workflow);
+        status.setExecutionId(workflowInstance.getInstanceId() == null
+                ? null
+                : String.valueOf(workflowInstance.getInstanceId()));
+        status.setStatus(DolphinExecutionMapper.isWorkflowActive(workflowInstance.getState())
+                ? "waiting"
+                : "not_run");
+        status.setStartTime(DolphinExecutionMapper.parseDateTime(workflowInstance.getStartTime()));
+        status.setEndTime(DolphinExecutionMapper.parseDateTime(workflowInstance.getEndTime()));
+        status.setTriggerType(DolphinExecutionMapper.mapTriggerType(workflowInstance.getCommandType()));
+        return status;
+    }
+
+    private TaskExecutionStatus buildUnavailableExecutionStatus(DataTask task, DataWorkflow workflow) {
+        TaskExecutionStatus status = buildDolphinStatusBase(task, workflow);
+        status.setStatus("unavailable");
+        return status;
+    }
+
+    private TaskExecutionStatus buildDolphinStatusBase(DataTask task, DataWorkflow workflow) {
+        TaskExecutionStatus status = new TaskExecutionStatus();
+        status.setTaskId(task.getId());
+        status.setDolphinWorkflowCode(workflow.getWorkflowCode());
+        status.setDolphinTaskCode(task.getDolphinTaskCode());
+        status.setDolphinProjectName(workflow.getWorkflowName());
+        try {
+            status.setDolphinWorkflowUrl(dolphinSchedulerService.getWorkflowDefinitionUrl(
+                    workflow.getDolphinConfigId(), workflow.getWorkflowCode()));
+            status.setDolphinTaskUrl(dolphinSchedulerService.getTaskDefinitionUrl(
+                    workflow.getDolphinConfigId(), task.getDolphinTaskCode()));
+        } catch (Exception ex) {
+            log.debug("Failed to build Dolphin links for task {}: {}", task.getId(), ex.getMessage());
+        }
+        return status;
+    }
+
+    private TaskExecutionStatus buildLocalExecutionStatus(TaskExecutionLog executionLog,
+            DataTask task,
+            DataWorkflow workflow) {
+        if (executionLog == null || task == null) {
             return null;
         }
         TaskExecutionStatus status = new TaskExecutionStatus();
         status.setTaskId(task.getId());
-        status.setExecutionId(log.getExecutionId());
-        status.setStatus(log.getStatus());
-        status.setStartTime(log.getStartTime());
-        status.setEndTime(log.getEndTime());
-        status.setDurationSeconds(log.getDurationSeconds());
-        status.setErrorMessage(log.getErrorMessage());
-        status.setLogUrl(log.getLogUrl());
-        status.setTriggerType(log.getTriggerType());
-        status.setDolphinWorkflowCode(task.getDolphinProcessCode());
+        status.setExecutionId(executionLog.getExecutionId());
+        status.setStatus(executionLog.getStatus());
+        status.setStartTime(executionLog.getStartTime());
+        status.setEndTime(executionLog.getEndTime());
+        status.setDurationSeconds(executionLog.getDurationSeconds());
+        status.setErrorMessage(executionLog.getErrorMessage());
+        status.setLogUrl(executionLog.getLogUrl());
+        status.setTriggerType(executionLog.getTriggerType());
+        status.setDolphinWorkflowCode(workflow == null
+                ? task.getDolphinProcessCode()
+                : workflow.getWorkflowCode());
         status.setDolphinTaskCode(task.getDolphinTaskCode());
         status.setDolphinProjectName(resolveWorkflowDisplayName(task));
-        if (task.getDolphinProcessCode() != null) {
-            status.setDolphinWorkflowUrl(
-                    dolphinSchedulerService.getWorkflowDefinitionUrl(task.getDolphinProcessCode()));
-        }
-        if (task.getDolphinTaskCode() != null) {
-            status.setDolphinTaskUrl(dolphinSchedulerService.getTaskDefinitionUrl(task.getDolphinTaskCode()));
-        }
         return status;
     }
 

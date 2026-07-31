@@ -3,57 +3,51 @@
     <el-card class="header-card">
       <template #header>
         <div class="card-header">
-          <span>执行监控</span>
-          <div class="header-actions">
-            <el-button type="primary" :icon="Refresh" @click="refreshData">刷新</el-button>
+          <div>
+            <div class="page-title">执行监控</div>
+            <div class="page-subtitle">统一展示平台触发与 Dolphin 定时产生的工作流实例</div>
           </div>
+          <el-button type="primary" :icon="Refresh" :loading="loading" @click="refreshData">
+            刷新
+          </el-button>
         </div>
       </template>
 
-      <!-- 统计卡片 -->
-      <el-row :gutter="20" class="stats-row">
+      <el-row :gutter="16" class="stats-row">
         <el-col :span="6">
           <div class="stat-card">
-            <div class="stat-icon total">
-              <el-icon><Document /></el-icon>
-            </div>
+            <div class="stat-icon total"><el-icon><Document /></el-icon></div>
             <div class="stat-info">
               <div class="stat-value">{{ statistics.totalExecutions || 0 }}</div>
-              <div class="stat-label">总执行次数</div>
+              <div class="stat-label">当前筛选执行</div>
             </div>
           </div>
         </el-col>
         <el-col :span="6">
           <div class="stat-card">
-            <div class="stat-icon success">
-              <el-icon><CircleCheck /></el-icon>
-            </div>
+            <div class="stat-icon success"><el-icon><CircleCheck /></el-icon></div>
             <div class="stat-info">
               <div class="stat-value">{{ statistics.successCount || 0 }}</div>
-              <div class="stat-label">成功次数</div>
+              <div class="stat-label">成功</div>
               <div class="stat-rate success-rate">{{ statistics.successRate || 0 }}%</div>
             </div>
           </div>
         </el-col>
         <el-col :span="6">
           <div class="stat-card">
-            <div class="stat-icon failed">
-              <el-icon><CircleClose /></el-icon>
-            </div>
+            <div class="stat-icon failed"><el-icon><CircleClose /></el-icon></div>
             <div class="stat-info">
               <div class="stat-value">{{ statistics.failedCount || 0 }}</div>
-              <div class="stat-label">失败次数</div>
+              <div class="stat-label">失败</div>
               <div class="stat-rate failed-rate">{{ statistics.failureRate || 0 }}%</div>
             </div>
           </div>
         </el-col>
         <el-col :span="6">
           <div class="stat-card">
-            <div class="stat-icon duration">
-              <el-icon><Timer /></el-icon>
-            </div>
+            <div class="stat-icon duration"><el-icon><Timer /></el-icon></div>
             <div class="stat-info">
-              <div class="stat-value">{{ statistics.avgDurationSeconds || 0 }}s</div>
+              <div class="stat-value">{{ formatDuration(statistics.avgDurationSeconds) }}</div>
               <div class="stat-label">平均执行时长</div>
             </div>
           </div>
@@ -61,16 +55,24 @@
       </el-row>
     </el-card>
 
-    <!-- 筛选条件 -->
     <el-card class="filter-card">
-      <el-form :inline="true" :model="queryParams" class="filter-form">
-        <el-form-item label="任务ID">
-          <el-input
-            v-model="queryParams.taskId"
-            placeholder="请输入任务ID"
+      <el-form :inline="true" class="filter-form">
+        <el-form-item label="工作流">
+          <el-select
+            v-model="queryParams.workflowId"
+            placeholder="全部工作流"
             clearable
-            style="width: 200px"
-          />
+            filterable
+            :loading="workflowOptionsLoading"
+            style="width: 220px"
+          >
+            <el-option
+              v-for="workflow in workflowOptions"
+              :key="workflow.id"
+              :label="workflow.workflowName"
+              :value="workflow.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="时间范围">
           <el-date-picker
@@ -89,519 +91,326 @@
         </el-form-item>
       </el-form>
 
-      <!-- 快捷筛选 -->
-      <div class="quick-filters">
-        <el-button-group>
-          <el-button
-            :type="activeFilter === 'all' ? 'primary' : ''"
-            @click="handleQuickFilter('all')"
-          >
-            全部
-          </el-button>
-          <el-button
-            :type="activeFilter === 'running' ? 'primary' : ''"
-            @click="handleQuickFilter('running')"
-          >
-            运行中
-          </el-button>
-          <el-button
-            :type="activeFilter === 'failed' ? 'primary' : ''"
-            @click="handleQuickFilter('failed')"
-          >
-            失败
-          </el-button>
-        </el-button-group>
-      </div>
+      <el-button-group>
+        <el-button
+          v-for="filter in quickFilters"
+          :key="filter.value"
+          :type="queryParams.status === filter.value ? 'primary' : ''"
+          @click="handleQuickFilter(filter.value)"
+        >
+          {{ filter.label }}
+        </el-button>
+      </el-button-group>
     </el-card>
 
-    <!-- 执行历史表格 -->
     <el-card class="table-card">
       <el-table
         v-loading="loading"
         :data="executionList"
+        :row-key="getExecutionRowKey"
+        :expand-row-keys="expandedRowKeys"
         stripe
+        empty-text="当前筛选条件下暂无工作流执行记录"
         style="width: 100%"
+        @expand-change="handleExpandChange"
       >
-        <el-table-column prop="id" label="执行ID" width="80" />
-        <el-table-column prop="taskId" label="任务ID" width="100" />
-        <el-table-column prop="executionId" label="实例ID" width="180" />
+        <el-table-column type="expand" width="44">
+          <template #default="{ row }">
+            <div class="task-instance-panel">
+              <el-empty
+                v-if="!row.expandable"
+                description="该记录在提交 Dolphin 前失败，没有任务实例"
+                :image-size="56"
+              />
+              <div v-else-if="taskLoading[getExecutionRowKey(row)]" class="expand-loading">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                正在读取 Dolphin 任务实例…
+              </div>
+              <el-alert
+                v-else-if="taskErrors[getExecutionRowKey(row)]"
+                type="error"
+                :closable="false"
+                show-icon
+              >
+                <template #title>
+                  <span>{{ taskErrors[getExecutionRowKey(row)] }}</span>
+                  <el-button link type="primary" @click="retryLoadTasks(row)">重试</el-button>
+                </template>
+              </el-alert>
+              <el-table
+                v-else
+                :data="taskInstances[getExecutionRowKey(row)] || []"
+                size="small"
+                border
+                empty-text="本次运行没有任务实例"
+              >
+                <el-table-column prop="platformTaskId" label="任务ID" width="90">
+                  <template #default="{ row: task }">{{ task.platformTaskId || '-' }}</template>
+                </el-table-column>
+                <el-table-column prop="taskName" label="任务名称" min-width="180" />
+                <el-table-column prop="status" label="状态" width="110">
+                  <template #default="{ row: task }">
+                    <el-tag :type="getStatusType(task.status)" size="small">
+                      {{ getStatusText(task.status) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="host" label="主机" min-width="150">
+                  <template #default="{ row: task }">{{ task.host || '-' }}</template>
+                </el-table-column>
+                <el-table-column prop="retryTimes" label="重试次数" width="90">
+                  <template #default="{ row: task }">{{ task.retryTimes ?? 0 }}</template>
+                </el-table-column>
+                <el-table-column prop="startTime" label="开始时间" width="170">
+                  <template #default="{ row: task }">{{ formatDateTime(task.startTime) }}</template>
+                </el-table-column>
+                <el-table-column prop="endTime" label="结束时间" width="170">
+                  <template #default="{ row: task }">{{ formatDateTime(task.endTime) }}</template>
+                </el-table-column>
+                <el-table-column prop="durationSeconds" label="时长" width="100">
+                  <template #default="{ row: task }">{{ formatDuration(task.durationSeconds) }}</template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </template>
+        </el-table-column>
 
-        <!-- DolphinScheduler 相关列 -->
-        <el-table-column prop="workflowName" label="工作流名称" width="150" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ row.workflowName || '-' }}
-          </template>
+        <el-table-column prop="workflowName" label="工作流" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="instanceId" label="实例ID" width="130">
+          <template #default="{ row }">{{ row.instanceId || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="workflowCode" label="工作流ID" width="120">
-          <template #default="{ row }">
-            {{ row.workflowCode || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="dolphinInstanceId" label="DS实例ID" width="120">
-          <template #default="{ row }">
-            {{ row.dolphinInstanceId || '-' }}
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="status" label="状态" width="110">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)" size="small">
               {{ getStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="dolphinState" label="DS状态" width="120" show-overflow-tooltip>
-          <template #default="{ row }">
-            <el-tag size="small" effect="plain" v-if="row.dolphinState">
-              {{ row.dolphinState }}
-            </el-tag>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
         <el-table-column prop="triggerType" label="触发方式" width="100">
           <template #default="{ row }">
-            <el-tag size="small" effect="plain">
-              {{ getTriggerTypeText(row.triggerType) }}
-            </el-tag>
+            <el-tag size="small" effect="plain">{{ getTriggerTypeText(row.triggerType) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="startTime" label="开始时间" width="160">
+        <el-table-column prop="source" label="来源" width="100">
           <template #default="{ row }">
-            {{ formatDateTime(row.startTime) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="endTime" label="结束时间" width="160">
-          <template #default="{ row }">
-            {{ formatDateTime(row.endTime) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="durationSeconds" label="执行时长" width="100">
-          <template #default="{ row }">
-            {{ formatDuration(row.durationSeconds) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="host" label="执行主机" width="150" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ row.host || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="rowsOutput" label="输出行数" width="100" />
-        <el-table-column label="操作" width="280" fixed="right">
-          <template #default="{ row }">
-            <el-button
-              link
-              type="primary"
-              size="small"
-              @click="handleViewDetail(row)"
+            <el-tooltip
+              :content="row.executionSource === 'cache' ? 'Dolphin 暂不可用，当前展示缓存数据' : ''"
+              :disabled="row.executionSource !== 'cache'"
             >
-              详情
-            </el-button>
-            <el-button
-              link
-              type="primary"
-              size="small"
-              v-if="!isTerminalStatus(row.status)"
-              :disabled="isDemoMode"
-              @click="handleSyncStatus(row)"
-            >
-              同步状态
-            </el-button>
-            <el-button
-              link
-              type="primary"
-              size="small"
-              v-if="row.workflowInstanceUrl"
-              @click="openDolphinWebUI(row.workflowInstanceUrl)"
-            >
-              DS实例
-            </el-button>
-            <el-button
-              link
-              type="primary"
-              size="small"
-              @click="handleViewLog(row)"
-            >
-              查看日志
-            </el-button>
+              <el-tag :type="row.source === 'platform' ? 'primary' : 'info'" size="small">
+                {{ getExecutionSourceText(row.source) }}
+              </el-tag>
+            </el-tooltip>
           </template>
+        </el-table-column>
+        <el-table-column prop="startTime" label="开始时间" width="170">
+          <template #default="{ row }">{{ formatDateTime(row.startTime) }}</template>
+        </el-table-column>
+        <el-table-column prop="endTime" label="结束时间" width="170">
+          <template #default="{ row }">{{ formatDateTime(row.endTime) }}</template>
+        </el-table-column>
+        <el-table-column prop="durationSeconds" label="时长" width="100">
+          <template #default="{ row }">{{ formatDuration(row.durationSeconds) }}</template>
+        </el-table-column>
+        <el-table-column prop="errorMessage" label="错误信息" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.errorMessage || '-' }}</template>
         </el-table-column>
       </el-table>
 
-      <!-- 分页 - 仅在"全部"模式下显示 -->
       <el-pagination
-        v-if="activeFilter === 'all'"
         v-model:current-page="queryParams.pageNum"
         v-model:page-size="queryParams.pageSize"
         :total="total"
         :page-sizes="[10, 20, 50, 100]"
         layout="total, sizes, prev, pager, next, jumper"
-        @size-change="handleQuery"
-        @current-change="handleQuery"
-        style="margin-top: 20px; justify-content: flex-end"
+        class="pagination"
+        @size-change="loadExecutionList"
+        @current-change="loadExecutionList"
       />
-      <!-- 快捷筛选模式提示 -->
-      <div v-else style="margin-top: 20px; text-align: center; color: #909399;">
-        共 {{ total }} 条记录（快捷筛选模式，不支持分页）
-        <el-button link type="primary" @click="handleQuickFilter('all')" style="margin-left: 10px;">
-          切换到全部模式以使用分页
-        </el-button>
-      </div>
     </el-card>
-
-    <!-- 执行详情对话框 -->
-    <el-dialog
-      v-model="detailDialogVisible"
-      title="执行详情"
-      width="800px"
-    >
-      <el-descriptions :column="2" border v-if="currentExecution">
-        <el-descriptions-item label="执行ID">{{ currentExecution.id }}</el-descriptions-item>
-        <el-descriptions-item label="任务ID">{{ currentExecution.taskId }}</el-descriptions-item>
-        <el-descriptions-item label="实例ID">{{ currentExecution.executionId }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="getStatusType(currentExecution.status)">
-            {{ getStatusText(currentExecution.status) }}
-          </el-tag>
-        </el-descriptions-item>
-
-        <!-- DolphinScheduler 信息 -->
-        <el-descriptions-item label="工作流名称" v-if="currentExecution.workflowName">
-          {{ currentExecution.workflowName }}
-        </el-descriptions-item>
-        <el-descriptions-item label="工作流ID" v-if="currentExecution.workflowCode">
-          {{ currentExecution.workflowCode }}
-        </el-descriptions-item>
-        <el-descriptions-item label="任务代码" v-if="currentExecution.taskCode">
-          {{ currentExecution.taskCode }}
-        </el-descriptions-item>
-        <el-descriptions-item label="DS实例ID" v-if="currentExecution.dolphinInstanceId">
-          {{ currentExecution.dolphinInstanceId }}
-        </el-descriptions-item>
-        <el-descriptions-item label="DS状态" v-if="currentExecution.dolphinState">
-          <el-tag size="small">{{ currentExecution.dolphinState }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="执行主机" v-if="currentExecution.host">
-          {{ currentExecution.host }}
-        </el-descriptions-item>
-        <el-descriptions-item label="运行次数" v-if="currentExecution.runTimes">
-          {{ currentExecution.runTimes }}
-        </el-descriptions-item>
-        <el-descriptions-item label="命令类型" v-if="currentExecution.commandType">
-          {{ currentExecution.commandType }}
-        </el-descriptions-item>
-
-        <el-descriptions-item label="触发方式">
-          {{ getTriggerTypeText(currentExecution.triggerType) }}
-        </el-descriptions-item>
-        <el-descriptions-item label="开始时间">
-          {{ formatDateTime(currentExecution.startTime) }}
-        </el-descriptions-item>
-        <el-descriptions-item label="结束时间">
-          {{ formatDateTime(currentExecution.endTime) }}
-        </el-descriptions-item>
-        <el-descriptions-item label="执行时长">
-          {{ formatDuration(currentExecution.durationSeconds) }}
-        </el-descriptions-item>
-        <el-descriptions-item label="输出行数">
-          {{ currentExecution.rowsOutput || '-' }}
-        </el-descriptions-item>
-
-        <!-- WebUI 链接 -->
-        <el-descriptions-item label="工作流实例" v-if="currentExecution.workflowInstanceUrl">
-          <el-link :href="currentExecution.workflowInstanceUrl" type="primary" target="_blank" :icon="Link">
-            打开DolphinScheduler
-          </el-link>
-        </el-descriptions-item>
-        <el-descriptions-item label="任务定义" v-if="currentExecution.taskDefinitionUrl">
-          <el-link :href="currentExecution.taskDefinitionUrl" type="primary" target="_blank" :icon="Link">
-            查看任务定义
-          </el-link>
-        </el-descriptions-item>
-
-        <el-descriptions-item label="日志URL">
-          <el-link :href="currentExecution.logUrl" type="primary" target="_blank" v-if="currentExecution.logUrl">
-            查看日志
-          </el-link>
-          <span v-else>-</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="错误信息" :span="2" v-if="currentExecution.errorMessage">
-          <el-alert type="error" :closable="false">
-            {{ currentExecution.errorMessage }}
-          </el-alert>
-        </el-descriptions-item>
-      </el-descriptions>
-
-      <template #footer>
-        <el-button @click="detailDialogVisible = false">关闭</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 日志查看对话框 -->
-    <el-dialog
-      v-model="logDialogVisible"
-      title="执行日志"
-      width="900px"
-    >
-      <div class="log-container">
-        <pre class="log-content">{{ executionLog }}</pre>
-      </div>
-
-      <template #footer>
-        <el-button @click="logDialogVisible = false">关闭</el-button>
-        <el-button type="primary" @click="handleRefreshLog">刷新日志</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { onMounted, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import {
-  Refresh,
-  Search,
-  Document,
   CircleCheck,
   CircleClose,
-  Timer,
-  Link
+  Document,
+  Loading,
+  Refresh,
+  Search,
+  Timer
 } from '@element-plus/icons-vue'
+import { getWorkflowExecutionInstances, getWorkflowExecutionTasks } from '@/api/execution'
+import { workflowApi } from '@/api/workflow'
 import {
-  getExecutionHistory,
-  getExecutionDetail,
-  getExecutionStatistics,
-  getFailedExecutions,
-  getRunningExecutions,
-  syncExecutionStatus
-} from '@/api/execution'
-import { isDemoMode, showDemoReadonlyMessage } from '@/demo/runtime'
+  buildWorkflowExecutionParams,
+  getExecutionRowKey,
+  getExecutionSourceText,
+  getTriggerTypeText
+} from './executionMonitorModel'
 
-// 数据定义
 const loading = ref(false)
 const executionList = ref([])
 const total = ref(0)
 const statistics = ref({})
-const activeFilter = ref('all')
 const dateRange = ref([])
+const workflowOptions = ref([])
+const workflowOptionsLoading = ref(false)
+const expandedRowKeys = ref([])
+const taskInstances = reactive({})
+const taskLoading = reactive({})
+const taskErrors = reactive({})
 
 const queryParams = reactive({
-  taskId: null,
+  workflowId: null,
+  status: '',
   pageNum: 1,
-  pageSize: 10,
-  startTime: null,
-  endTime: null
+  pageSize: 10
 })
 
-// 对话框控制
-const detailDialogVisible = ref(false)
-const logDialogVisible = ref(false)
-const currentExecution = ref(null)
-const executionLog = ref('')
+const quickFilters = [
+  { label: '全部', value: '' },
+  { label: '运行中', value: 'running' },
+  { label: '失败', value: 'failed' }
+]
 
-// 页面加载
-onMounted(() => {
-  loadStatistics()
-  loadExecutionList()
-})
-
-// 加载统计信息
-const loadStatistics = async () => {
+const loadWorkflowOptions = async () => {
+  workflowOptionsLoading.value = true
   try {
-    const params = {}
-    if (queryParams.taskId) {
-      params.taskId = queryParams.taskId
-    }
-    if (dateRange.value && dateRange.value.length === 2) {
-      params.startTime = dateRange.value[0]
-      params.endTime = dateRange.value[1]
-    }
-
-    const res = await getExecutionStatistics(params)
-    statistics.value = res
+    const response = await workflowApi.list({ pageNum: 1, pageSize: 200 })
+    workflowOptions.value = response.records || []
   } catch (error) {
-    console.error('Failed to load statistics:', error)
+    console.error('加载工作流选项失败:', error)
+  } finally {
+    workflowOptionsLoading.value = false
   }
 }
 
-// 加载执行列表
-const loadExecutionList = async () => {
+const loadExecutionList = async (refresh = false) => {
   loading.value = true
   try {
-    const params = {
-      pageNum: queryParams.pageNum,
-      pageSize: queryParams.pageSize
-    }
-
-    if (queryParams.taskId) {
-      params.taskId = queryParams.taskId
-    }
-
-    const res = await getExecutionHistory(params)
-    executionList.value = res.records || []
-    total.value = res.total || 0
+    const response = await getWorkflowExecutionInstances(buildWorkflowExecutionParams({
+      ...queryParams,
+      dateRange: dateRange.value,
+      refresh: refresh === true
+    }))
+    executionList.value = response.records || []
+    total.value = response.total || 0
+    statistics.value = response.statistics || {}
+    expandedRowKeys.value = []
   } catch (error) {
-    ElMessage.error('加载执行历史失败: ' + error.message)
+    ElMessage.error(`加载执行监控失败: ${error.message}`)
   } finally {
     loading.value = false
   }
 }
 
-// 快捷筛选
-const handleQuickFilter = async (filter) => {
-  activeFilter.value = filter
-  loading.value = true
-
-  try {
-    if (filter === 'all') {
-      await loadExecutionList()
-    } else if (filter === 'running') {
-      const res = await getRunningExecutions()
-      executionList.value = res || []
-      total.value = executionList.value.length
-    } else if (filter === 'failed') {
-      const res = await getFailedExecutions(100)
-      executionList.value = res || []
-      total.value = executionList.value.length
-    }
-  } catch (error) {
-    ElMessage.error('加载数据失败: ' + error.message)
-  } finally {
-    loading.value = false
-  }
-}
-
-// 查询
 const handleQuery = () => {
   queryParams.pageNum = 1
-
-  // 解析时间范围
-  if (dateRange.value && dateRange.value.length === 2) {
-    queryParams.startTime = dateRange.value[0]
-    queryParams.endTime = dateRange.value[1]
-  } else {
-    queryParams.startTime = null
-    queryParams.endTime = null
-  }
-
-  loadStatistics()
   loadExecutionList()
 }
 
-// 重置
+const handleQuickFilter = (status) => {
+  queryParams.status = status
+  queryParams.pageNum = 1
+  loadExecutionList()
+}
+
 const handleReset = () => {
-  queryParams.taskId = null
+  queryParams.workflowId = null
+  queryParams.status = ''
   queryParams.pageNum = 1
   queryParams.pageSize = 10
-  queryParams.startTime = null
-  queryParams.endTime = null
   dateRange.value = []
-  activeFilter.value = 'all'
-
-  loadStatistics()
   loadExecutionList()
 }
 
-// 刷新数据
 const refreshData = () => {
-  loadStatistics()
-  loadExecutionList()
+  loadExecutionList(true)
 }
 
-// 查看详情
-const handleViewDetail = async (row) => {
-  try {
-    const detail = await getExecutionDetail(row.id)
-    currentExecution.value = detail
-    detailDialogVisible.value = true
-  } catch (error) {
-    ElMessage.error('加载执行详情失败: ' + error.message)
-  }
-}
-
-// 同步状态
-const handleSyncStatus = async (row) => {
-  if (isDemoMode) {
-    showDemoReadonlyMessage('同步执行状态')
+const handleExpandChange = (row, expandedRows) => {
+  const key = getExecutionRowKey(row)
+  const expanded = expandedRows.some(item => getExecutionRowKey(item) === key)
+  if (!expanded) {
+    expandedRowKeys.value = expandedRowKeys.value.filter(item => item !== key)
     return
   }
+  if (!expandedRowKeys.value.includes(key)) {
+    expandedRowKeys.value.push(key)
+  }
+  if (row.expandable && !taskInstances[key] && !taskLoading[key]) {
+    loadTaskInstances(row)
+  }
+}
+
+const loadTaskInstances = async (row) => {
+  const key = getExecutionRowKey(row)
+  taskLoading[key] = true
+  taskErrors[key] = ''
   try {
-    await syncExecutionStatus(row.id)
-    ElMessage.success('状态同步成功')
-    await loadExecutionList()
+    taskInstances[key] = await getWorkflowExecutionTasks(row.workflowId, row.instanceId)
   } catch (error) {
-    ElMessage.error('状态同步失败: ' + error.message)
+    taskErrors[key] = `任务实例加载失败：${error.message}`
+  } finally {
+    taskLoading[key] = false
   }
 }
 
-// 查看日志
-const handleViewLog = (row) => {
-  currentExecution.value = row
-  executionLog.value = '正在加载日志...\n\n暂未实现从 DolphinScheduler 获取日志的功能'
-  logDialogVisible.value = true
+const retryLoadTasks = (row) => {
+  const key = getExecutionRowKey(row)
+  delete taskInstances[key]
+  loadTaskInstances(row)
 }
 
-// 刷新日志
-const handleRefreshLog = () => {
-  executionLog.value = '日志已刷新...\n\n暂未实现从 DolphinScheduler 获取日志的功能'
-}
-
-// 打开 DolphinScheduler WebUI
-const openDolphinWebUI = (url) => {
-  if (url) {
-    window.open(url, '_blank')
-  }
-}
-
-// 工具函数
 const getStatusType = (status) => {
-  const statusMap = {
-    'success': 'success',
-    'failed': 'danger',
-    'running': 'primary',
-    'pending': 'info',
-    'killed': 'warning',
-    'paused': 'warning'
+  const types = {
+    success: 'success',
+    failed: 'danger',
+    running: 'primary',
+    pending: 'info',
+    waiting: 'warning',
+    not_run: 'info',
+    unavailable: 'danger',
+    killed: 'warning',
+    paused: 'warning'
   }
-  return statusMap[status] || 'info'
+  return types[status] || 'info'
 }
 
 const getStatusText = (status) => {
-  const statusMap = {
-    'success': '成功',
-    'failed': '失败',
-    'running': '运行中',
-    'pending': '待执行',
-    'killed': '已终止',
-    'paused': '已暂停'
+  const labels = {
+    success: '成功',
+    failed: '失败',
+    running: '运行中',
+    pending: '待执行',
+    waiting: '等待执行',
+    not_run: '本次未运行',
+    unavailable: '状态不可用',
+    killed: '已终止',
+    paused: '已暂停'
   }
-  return statusMap[status] || status
+  return labels[status] || status || '-'
 }
 
-const getTriggerTypeText = (type) => {
-  const typeMap = {
-    'manual': '手动',
-    'schedule': '调度',
-    'api': 'API'
-  }
-  return typeMap[type] || type
-}
-
-const isTerminalStatus = (status) => {
-  return ['success', 'failed', 'killed'].includes(status)
-}
-
-const formatDateTime = (datetime) => {
-  if (!datetime) return '-'
-  return datetime
-}
+const formatDateTime = (datetime) => datetime || '-'
 
 const formatDuration = (seconds) => {
-  if (!seconds || seconds === 0) return '-'
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
+  const value = Number(seconds)
+  if (!Number.isFinite(value) || value < 0) return '-'
+  if (value < 60) return `${Math.round(value)}s`
+  const minutes = Math.floor(value / 60)
+  const remainingSeconds = Math.round(value % 60)
   return `${minutes}m ${remainingSeconds}s`
 }
+
+onMounted(() => {
+  loadWorkflowOptions()
+  loadExecutionList()
+})
 </script>
 
 <style scoped>
@@ -618,62 +427,64 @@ const formatDuration = (seconds) => {
 
 .card-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
 }
 
-.header-actions {
-  display: flex;
-  gap: 10px;
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.page-subtitle {
+  margin-top: 4px;
+  color: #909399;
+  font-size: 13px;
 }
 
 .stats-row {
-  margin-top: 10px;
+  margin-top: 4px;
 }
 
 .stat-card {
   display: flex;
   align-items: center;
-  padding: 20px;
+  min-height: 88px;
+  padding: 16px;
   background: #f8fafc;
   border-radius: 12px;
-  transition: all 0.3s ease;
-}
-
-.stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.12);
 }
 
 .stat-icon {
-  width: 60px;
-  height: 60px;
   display: flex;
+  width: 52px;
+  height: 52px;
   align-items: center;
   justify-content: center;
+  margin-right: 14px;
   border-radius: 50%;
-  font-size: 28px;
-  margin-right: 15px;
+  font-size: 25px;
 }
 
 .stat-icon.total {
-  background: #fff7e6;
   color: #fa8c16;
+  background: #fff7e6;
 }
 
 .stat-icon.success {
-  background: #f6ffed;
   color: #52c41a;
+  background: #f6ffed;
 }
 
 .stat-icon.failed {
-  background: #fff1f0;
   color: #f5222d;
+  background: #fff1f0;
 }
 
 .stat-icon.duration {
-  background: #e6f7ff;
   color: #1890ff;
+  background: #e6f7ff;
 }
 
 .stat-info {
@@ -681,63 +492,55 @@ const formatDuration = (seconds) => {
 }
 
 .stat-value {
-  font-size: 28px;
-  font-weight: bold;
-  line-height: 1;
   margin-bottom: 5px;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .stat-label {
+  color: #606266;
   font-size: 14px;
-  color: #666;
 }
 
 .stat-rate {
+  margin-top: 4px;
   font-size: 12px;
-  margin-top: 5px;
 }
 
-.stat-rate.success-rate {
+.success-rate {
   color: #52c41a;
 }
 
-.stat-rate.failed-rate {
+.failed-rate {
   color: #f5222d;
 }
 
-.filter-card {
-  margin-top: 20px;
+.filter-card,
+.table-card {
+  margin-top: 18px;
 }
 
 .filter-form {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
-.quick-filters {
+.task-instance-panel {
+  padding: 12px 24px 18px 68px;
+  background: #f8fafc;
+}
+
+.expand-loading {
   display: flex;
-  justify-content: flex-start;
-  margin-top: 10px;
+  align-items: center;
+  justify-content: center;
+  min-height: 90px;
+  gap: 8px;
+  color: #909399;
 }
 
-.table-card {
+.pagination {
+  justify-content: flex-end;
   margin-top: 20px;
-}
-
-.log-container {
-  max-height: 500px;
-  overflow-y: auto;
-  background: #1e1e1e;
-  padding: 15px;
-  border-radius: 8px;
-}
-
-.log-content {
-  color: #d4d4d4;
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  margin: 0;
-  white-space: pre-wrap;
-  word-wrap: break-word;
 }
 </style>
