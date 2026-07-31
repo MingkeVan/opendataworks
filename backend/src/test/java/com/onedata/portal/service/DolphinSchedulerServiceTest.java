@@ -19,6 +19,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -41,7 +42,7 @@ class DolphinSchedulerServiceTest {
 
         DolphinConfig config = new DolphinConfig();
         config.setProjectName("it_project");
-        when(dolphinConfigService.getActiveConfig()).thenReturn(config);
+        lenient().when(dolphinConfigService.getActiveConfig()).thenReturn(config);
     }
 
     @Test
@@ -104,6 +105,17 @@ class DolphinSchedulerServiceTest {
                 null);
 
         assertEquals("NO", payload.get("flag"));
+    }
+
+    @Test
+    void extractsWorkflowInstanceIdAcrossDolphinResponseVariants() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+
+        assertEquals("101", service.extractWorkflowInstanceId(
+                mapper.readTree("{\"processInstanceId\":101}")));
+        assertEquals("102", service.extractWorkflowInstanceId(
+                mapper.readTree("{\"workflowInstanceId\":102}")));
+        assertEquals("103", service.extractWorkflowInstanceId(mapper.readTree("103")));
     }
 
     private DolphinTaskGroup taskGroup(int id, String name, Long projectCode) {

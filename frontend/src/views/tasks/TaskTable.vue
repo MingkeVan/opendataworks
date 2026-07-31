@@ -70,7 +70,6 @@
     >
       <el-table-column prop="id" label="任务ID" width="90" />
       <el-table-column prop="taskName" label="任务名称" width="200" />
-      <el-table-column prop="taskCode" label="任务编码" width="150" />
       <el-table-column prop="taskType" label="类型" width="100">
         <template #default="{ row }">
           <el-tag :type="row.taskType === 'batch' ? 'primary' : 'success'">
@@ -111,7 +110,6 @@
           <span v-else class="text-gray">未执行</span>
         </template>
       </el-table-column>
-      <el-table-column prop="scheduleCron" label="调度配置" width="150" />
       <el-table-column prop="status" label="状态" width="100">
         <template #default="{ row }">
           <el-tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</el-tag>
@@ -125,7 +123,17 @@
       </el-table-column>
       <el-table-column label="上游任务数" width="120">
         <template #default="{ row }">
-          <el-tag size="small" effect="plain" v-if="row.upstreamTaskCount !== undefined && row.upstreamTaskCount !== null">
+          <el-button
+            v-if="canNavigateRelationCount(row, row.upstreamTaskCount)"
+            link
+            type="primary"
+            class="relation-count-link"
+            title="查看当前任务的上游任务"
+            @click.stop="handleRelationCountClick('upstream', row)"
+          >
+            {{ row.upstreamTaskCount }}
+          </el-button>
+          <el-tag size="small" effect="plain" v-else-if="row.upstreamTaskCount !== undefined && row.upstreamTaskCount !== null">
             {{ row.upstreamTaskCount }}
           </el-tag>
           <span v-else>-</span>
@@ -133,13 +141,22 @@
       </el-table-column>
       <el-table-column label="下游任务数" width="120">
         <template #default="{ row }">
-          <el-tag size="small" effect="plain" v-if="row.downstreamTaskCount !== undefined && row.downstreamTaskCount !== null">
+          <el-button
+            v-if="canNavigateRelationCount(row, row.downstreamTaskCount)"
+            link
+            type="primary"
+            class="relation-count-link"
+            title="查看当前任务的下游任务"
+            @click.stop="handleRelationCountClick('downstream', row)"
+          >
+            {{ row.downstreamTaskCount }}
+          </el-button>
+          <el-tag size="small" effect="plain" v-else-if="row.downstreamTaskCount !== undefined && row.downstreamTaskCount !== null">
             {{ row.downstreamTaskCount }}
           </el-tag>
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="owner" label="负责人" width="120" />
       <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" :disabled="isDemoMode" @click="openEditDrawer(row)">编辑</el-button>
@@ -186,6 +203,7 @@ import { taskApi } from '@/api/task'
 import { workflowApi } from '@/api/workflow'
 import { isDemoMode, showDemoReadonlyMessage } from '@/demo/runtime'
 import TaskEditDrawer from '@/components/TaskEditDrawer.vue'
+import { buildRelationCountFilter } from './taskListFilters'
 
 const props = defineProps({
   workflowId: {
@@ -399,6 +417,22 @@ const resetFilters = () => {
   handleFilter()
 }
 
+const canNavigateRelationCount = (row, count) => {
+  return props.showToolbar
+    && props.externalData === null
+    && !row?._isNew
+    && Number(count) > 0
+}
+
+const handleRelationCountClick = (direction, row) => {
+  const relationFilter = buildRelationCountFilter(direction, row?.id)
+  if (!relationFilter) return
+  filters.upstreamTaskId = relationFilter.upstreamTaskId
+  filters.downstreamTaskId = relationFilter.downstreamTaskId
+  pagination.pageNum = 1
+  loadData()
+}
+
 const openCreateDrawer = () => {
   if (isDemoMode) {
     showDemoReadonlyMessage('新建任务')
@@ -485,6 +519,9 @@ const getStatusText = (status) => {
 const getExecutionStatusType = (status) => {
   const types = {
     pending: 'info',
+    waiting: 'warning',
+    not_run: 'info',
+    unavailable: 'danger',
     running: 'warning',
     success: 'success',
     failed: 'danger',
@@ -496,6 +533,9 @@ const getExecutionStatusType = (status) => {
 const getExecutionStatusText = (status) => {
   const texts = {
     pending: '等待中',
+    waiting: '等待执行',
+    not_run: '本次未运行',
+    unavailable: '状态不可用',
     running: '运行中',
     success: '成功',
     failed: '失败',
@@ -593,5 +633,10 @@ defineExpose({
   color: #909399;
 }
 
+.relation-count-link {
+  min-height: auto;
+  padding: 0 8px;
+  font-weight: 600;
+}
 
 </style>

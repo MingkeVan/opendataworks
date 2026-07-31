@@ -57,7 +57,13 @@ public class TaskExecutionLog {
     private String taskDefinitionUrl; // DolphinScheduler WebUI 任务定义链接
 
     @TableField(exist = false)
-    private Integer dolphinInstanceId; // DolphinScheduler 实例ID
+    private Long dolphinInstanceId; // DolphinScheduler 实例ID
+
+    @TableField(exist = false)
+    private Long workflowId; // 平台工作流ID
+
+    @TableField(exist = false)
+    private String executionSource; // dolphin, cache, local
 
     @TableField(exist = false)
     private String dolphinState; // DolphinScheduler 原始状态

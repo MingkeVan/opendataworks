@@ -1942,6 +1942,93 @@ const handleExecutionStats = (params) => {
   }
 }
 
+const getDemoWorkflowExecutions = () => getExecutions().map((execution) => {
+  const workflow = getWorkflows().find((item) => item.workflowName === execution.workflowName)
+  const triggerType = execution.commandType === 'COMPLEMENT_DATA'
+    ? 'backfill'
+    : execution.triggerType
+  return {
+    workflowId: workflow?.id || null,
+    workflowName: execution.workflowName,
+    workflowCode: workflow?.workflowCode || null,
+    instanceId: 900000 + Number(execution.id),
+    localExecutionLogId: execution.id,
+    status: execution.status,
+    dolphinState: execution.status?.toUpperCase(),
+    commandType: execution.commandType,
+    triggerType,
+    source: triggerType === 'manual' || triggerType === 'backfill' ? 'platform' : 'dolphin',
+    executionSource: 'dolphin',
+    startTime: execution.startTime,
+    endTime: execution.endTime,
+    durationSeconds: execution.durationSeconds,
+    errorMessage: execution.errorMessage,
+    expandable: true
+  }
+})
+
+const handleWorkflowExecutionList = (params = {}) => {
+  let records = getDemoWorkflowExecutions()
+  if (params.workflowId) {
+    records = records.filter((item) => Number(item.workflowId) === Number(params.workflowId))
+  }
+  if (params.status) {
+    records = records.filter((item) => item.status === params.status)
+  }
+  if (params.startTime) {
+    records = records.filter((item) => String(item.startTime || '').replace('T', ' ') >= params.startTime)
+  }
+  if (params.endTime) {
+    records = records.filter((item) => String(item.startTime || '').replace('T', ' ') <= params.endTime)
+  }
+  const page = toPaged(records, params.pageNum, params.pageSize)
+  const successCount = records.filter((item) => item.status === 'success').length
+  const failedCount = records.filter((item) => item.status === 'failed').length
+  const durations = records
+    .map((item) => item.durationSeconds)
+    .filter((duration) => typeof duration === 'number')
+  return {
+    ...page,
+    pageNum: Math.max(1, Number(params.pageNum) || 1),
+    pageSize: Math.max(1, Number(params.pageSize) || 10),
+    statistics: {
+      totalExecutions: records.length,
+      successCount,
+      failedCount,
+      runningCount: records.filter((item) => item.status === 'running').length,
+      successRate: records.length ? Number(((successCount / records.length) * 100).toFixed(2)) : 0,
+      failureRate: records.length ? Number(((failedCount / records.length) * 100).toFixed(2)) : 0,
+      avgDurationSeconds: durations.length
+        ? Math.round(durations.reduce((sum, duration) => sum + duration, 0) / durations.length)
+        : 0
+    }
+  }
+}
+
+const handleWorkflowExecutionTasks = (pathname) => {
+  const parts = pathname.split('/')
+  const workflowId = Number(parts[4])
+  const instanceId = Number(parts[6])
+  const parent = getDemoWorkflowExecutions().find((item) => item.instanceId === instanceId)
+  return getTasks()
+    .filter((task) => Number(task.workflowId) === workflowId)
+    .map((task, index) => ({
+      platformTaskId: task.id,
+      dolphinTaskCode: task.dolphinTaskCode || null,
+      taskInstanceId: instanceId * 10 + index + 1,
+      taskName: task.taskName,
+      taskType: task.dolphinNodeType,
+      status: parent?.status || task.executionStatus?.status || 'success',
+      dolphinState: (parent?.status || 'success').toUpperCase(),
+      host: parent?.source === 'platform' ? 'demo-worker-01' : 'demo-worker-02',
+      retryTimes: parent?.status === 'failed' ? 1 : 0,
+      executorName: 'readme',
+      startTime: parent?.startTime || null,
+      endTime: parent?.endTime || null,
+      durationSeconds: parent?.durationSeconds || null
+    }))
+}
+
 const toDashboardDate = (value) => {
   if (!value) return null
   const date = new Date(value)
@@ -2195,6 +2282,14 @@ export const demoAdapter = async (config) => {
 
   if (method === 'get' && pathname === '/v1/executions/statistics') {
     return createResponse(config, handleExecutionStats(params))
+  }
+
+  if (method === 'get' && pathname === '/v1/executions/workflow-instances') {
+    return createResponse(config, handleWorkflowExecutionList(params))
+  }
+
+  if (method === 'get' && pathname.match(/^\/v1\/executions\/workflows\/\d+\/instances\/\d+\/tasks$/)) {
+    return createResponse(config, handleWorkflowExecutionTasks(pathname))
   }
 
   if (method === 'get' && pathname === '/v1/executions/history') {

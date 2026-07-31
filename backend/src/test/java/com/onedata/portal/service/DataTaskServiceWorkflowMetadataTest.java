@@ -1,8 +1,16 @@
 package com.onedata.portal.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.onedata.portal.dto.DolphinDatasourceOption;
+import com.onedata.portal.dto.dolphin.DolphinTaskInstance;
+import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
 import com.onedata.portal.entity.DataTask;
+import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataWorkflow;
+import com.onedata.portal.entity.TableTaskRelation;
+import com.onedata.portal.entity.TaskExecutionLog;
 import com.onedata.portal.entity.WorkflowTaskRelation;
 import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTaskMapper;
@@ -10,6 +18,8 @@ import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -19,6 +29,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -29,12 +40,24 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class DataTaskServiceWorkflowMetadataTest {
+
+    @BeforeAll
+    static void initTableInfo() {
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(), "");
+        TableInfoHelper.initTableInfo(assistant, DataTask.class);
+        TableInfoHelper.initTableInfo(assistant, DataLineage.class);
+        TableInfoHelper.initTableInfo(assistant, DataWorkflow.class);
+        TableInfoHelper.initTableInfo(assistant, TableTaskRelation.class);
+        TableInfoHelper.initTableInfo(assistant, TaskExecutionLog.class);
+        TableInfoHelper.initTableInfo(assistant, WorkflowTaskRelation.class);
+    }
 
     @Mock
     private DataTaskMapper dataTaskMapper;
@@ -366,5 +389,148 @@ class DataTaskServiceWorkflowMetadataTest {
         verify(dolphinSchedulerService, never()).setWorkflowReleaseState(anyLong(), anyString());
         verify(dolphinSchedulerService, never()).deleteWorkflow(anyLong());
         verify(workflowTaskRelationMapper).hardDeleteByTaskId(401L);
+    }
+
+    @Test
+    void listMapsDifferentTaskInstanceStatesWithinOneWorkflowWithoutPerTaskRequests() {
+        DataTask firstTask = deployedTask(1L, "first", 1001L);
+        DataTask secondTask = deployedTask(2L, "second", 1002L);
+        mockTaskPage(Arrays.asList(firstTask, secondTask));
+
+        WorkflowTaskRelation firstRelation = relation(1L, 10L);
+        WorkflowTaskRelation secondRelation = relation(2L, 10L);
+        when(workflowTaskRelationMapper.selectList(any()))
+                .thenReturn(Arrays.asList(firstRelation, secondRelation));
+
+        DataWorkflow workflow = deployedWorkflow(10L, 20L, 3001L);
+        when(dataWorkflowMapper.selectBatchIds(any())).thenReturn(Collections.singletonList(workflow));
+        when(executionLogMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        WorkflowInstanceSummary workflowInstance = WorkflowInstanceSummary.builder()
+                .instanceId(9001L)
+                .state("FAILURE")
+                .commandType("SCHEDULER")
+                .startTime("2026-07-31 09:00:00")
+                .endTime("2026-07-31 09:05:00")
+                .build();
+        when(dolphinSchedulerService.listWorkflowInstances(20L, 3001L, 1))
+                .thenReturn(Collections.singletonList(workflowInstance));
+
+        DolphinTaskInstance firstInstance = taskInstance(8001L, 1001L, "SUCCESS");
+        DolphinTaskInstance secondInstance = taskInstance(8002L, 1002L, "FAILURE");
+        when(dolphinSchedulerService.listTaskInstances(20L, 9001L))
+                .thenReturn(Arrays.asList(firstInstance, secondInstance));
+
+        Page<DataTask> result = dataTaskService.list(
+                1, 20, null, null, null, null, null, null, null);
+
+        assertEquals("success", result.getRecords().get(0).getExecutionStatus().getStatus());
+        assertEquals("failed", result.getRecords().get(1).getExecutionStatus().getStatus());
+        assertEquals("schedule", result.getRecords().get(0).getExecutionStatus().getTriggerType());
+        verify(dolphinSchedulerService, times(1)).listWorkflowInstances(20L, 3001L, 1);
+        verify(dolphinSchedulerService, times(1)).listTaskInstances(20L, 9001L);
+    }
+
+    @Test
+    void listMarksMissingTaskWaitingForActiveWorkflow() {
+        assertMissingTaskStatus("RUNNING_EXECUTION", "waiting");
+    }
+
+    @Test
+    void listMarksMissingTaskNotRunForTerminalWorkflow() {
+        assertMissingTaskStatus("SUCCESS", "not_run");
+    }
+
+    @Test
+    void listMarksTaskStatusUnavailableWhenTaskInstanceQueryFails() {
+        DataTask task = deployedTask(4L, "unavailable", 1004L);
+        mockTaskPage(Collections.singletonList(task));
+        when(workflowTaskRelationMapper.selectList(any()))
+                .thenReturn(Collections.singletonList(relation(4L, 12L)));
+        DataWorkflow workflow = deployedWorkflow(12L, 22L, 3003L);
+        when(dataWorkflowMapper.selectBatchIds(any())).thenReturn(Collections.singletonList(workflow));
+        when(executionLogMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(dolphinSchedulerService.listWorkflowInstances(22L, 3003L, 1))
+                .thenReturn(Collections.singletonList(WorkflowInstanceSummary.builder()
+                        .instanceId(9003L)
+                        .state("RUNNING_EXECUTION")
+                        .build()));
+        when(dolphinSchedulerService.listTaskInstances(22L, 9003L))
+                .thenThrow(new RuntimeException("offline"));
+
+        Page<DataTask> result = dataTaskService.list(
+                1, 20, null, null, null, null, null, null, null);
+
+        assertEquals("unavailable", result.getRecords().get(0).getExecutionStatus().getStatus());
+    }
+
+    private void assertMissingTaskStatus(String workflowState, String expectedStatus) {
+        DataTask task = deployedTask(3L, "missing", 1003L);
+        mockTaskPage(Collections.singletonList(task));
+        when(workflowTaskRelationMapper.selectList(any()))
+                .thenReturn(Collections.singletonList(relation(3L, 11L)));
+        DataWorkflow workflow = deployedWorkflow(11L, 21L, 3002L);
+        when(dataWorkflowMapper.selectBatchIds(any())).thenReturn(Collections.singletonList(workflow));
+        when(executionLogMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(dolphinSchedulerService.listWorkflowInstances(21L, 3002L, 1))
+                .thenReturn(Collections.singletonList(WorkflowInstanceSummary.builder()
+                        .instanceId(9002L)
+                        .state(workflowState)
+                        .commandType("START_PROCESS")
+                        .startTime("2026-07-31 10:00:00")
+                        .build()));
+        when(dolphinSchedulerService.listTaskInstances(21L, 9002L))
+                .thenReturn(Collections.emptyList());
+
+        Page<DataTask> result = dataTaskService.list(
+                1, 20, null, null, null, null, null, null, null);
+
+        assertEquals(expectedStatus, result.getRecords().get(0).getExecutionStatus().getStatus());
+    }
+
+    @SuppressWarnings("unchecked")
+    private void mockTaskPage(List<DataTask> tasks) {
+        when(dataTaskMapper.selectPage(any(Page.class), any())).thenAnswer(invocation -> {
+            Page<DataTask> page = invocation.getArgument(0);
+            page.setRecords(tasks);
+            page.setTotal(tasks.size());
+            return page;
+        });
+    }
+
+    private DataTask deployedTask(Long id, String name, Long taskCode) {
+        DataTask task = new DataTask();
+        task.setId(id);
+        task.setTaskName(name);
+        task.setDolphinTaskCode(taskCode);
+        return task;
+    }
+
+    private WorkflowTaskRelation relation(Long taskId, Long workflowId) {
+        WorkflowTaskRelation relation = new WorkflowTaskRelation();
+        relation.setTaskId(taskId);
+        relation.setWorkflowId(workflowId);
+        relation.setUpstreamTaskCount(0);
+        relation.setDownstreamTaskCount(0);
+        return relation;
+    }
+
+    private DataWorkflow deployedWorkflow(Long id, Long configId, Long workflowCode) {
+        DataWorkflow workflow = new DataWorkflow();
+        workflow.setId(id);
+        workflow.setDolphinConfigId(configId);
+        workflow.setWorkflowCode(workflowCode);
+        workflow.setWorkflowName("workflow-" + id);
+        return workflow;
+    }
+
+    private DolphinTaskInstance taskInstance(Long instanceId, Long taskCode, String state) {
+        DolphinTaskInstance instance = new DolphinTaskInstance();
+        instance.setId(instanceId);
+        instance.setTaskCode(taskCode);
+        instance.setState(state);
+        instance.setStartTime("2026-07-31 09:00:00");
+        instance.setEndTime("2026-07-31 09:01:00");
+        return instance;
     }
 }

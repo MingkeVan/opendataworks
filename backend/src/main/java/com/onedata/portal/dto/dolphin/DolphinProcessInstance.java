@@ -1,6 +1,7 @@
 package com.onedata.portal.dto.dolphin;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import lombok.Data;
 
 /**
@@ -11,8 +12,11 @@ import lombok.Data;
 public class DolphinProcessInstance {
 
     private Long id;
+    @JsonAlias("workflowDefinitionCode")
     private Long processDefinitionCode;
+    @JsonAlias("workflowDefinitionName")
     private String processDefinitionName;
+    @JsonAlias("workflowDefinitionVersion")
     private Integer processDefinitionVersion;
     private String state;
     private String startTime;

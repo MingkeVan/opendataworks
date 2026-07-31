@@ -118,7 +118,7 @@ public class TaskExecutionService {
 
                         // 提取并设置 DolphinScheduler 实例信息到直接字段
                         if (instanceDetail.has("instanceId")) {
-                            log.setDolphinInstanceId(instanceDetail.path("instanceId").asInt());
+                            log.setDolphinInstanceId(instanceDetail.path("instanceId").asLong());
                         }
 
                         String dolphinState = instanceDetail.path("state").asText();
