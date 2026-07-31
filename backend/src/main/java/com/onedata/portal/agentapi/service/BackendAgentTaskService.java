@@ -6,13 +6,11 @@ import com.onedata.portal.agentapi.scope.AgentDataScopeContext;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.exception.BusinessException;
 import com.onedata.portal.service.DataTaskService;
+import com.onedata.portal.service.lineage.LineageValidationMode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-
-import java.util.Collections;
-import java.util.List;
 
 /**
  * Agent-facing task write API, delegating to {@link DataTaskService}. Tasks are
@@ -33,7 +31,11 @@ public class BackendAgentTaskService implements AgentTaskService {
         DataTask task = toTask(request);
         validateDataScope(task);
         applyAuditDefaults(task, operator, true);
-        return dataTaskService.create(task, nullSafe(request.getInputTableIds()), nullSafe(request.getOutputTableIds()));
+        return dataTaskService.create(
+                task,
+                request.getInputTableIds(),
+                request.getOutputTableIds(),
+                LineageValidationMode.STRICT);
     }
 
     @Override
@@ -55,7 +57,13 @@ public class BackendAgentTaskService implements AgentTaskService {
         }
         validateDataScope(task);
         applyAuditDefaults(task, operator, false);
-        return dataTaskService.update(task, nullSafe(request.getInputTableIds()), nullSafe(request.getOutputTableIds()));
+        // 血缘列表原样下传，不做 null -> emptyList 转换：
+        // null 表示"本次未提供该侧血缘，保留原值"，一旦转成空列表就等于静默清空。
+        return dataTaskService.update(
+                task,
+                request.getInputTableIds(),
+                request.getOutputTableIds(),
+                LineageValidationMode.STRICT);
     }
 
     @Override
@@ -90,10 +98,6 @@ public class BackendAgentTaskService implements AgentTaskService {
         if (creating && !StringUtils.hasText(task.getStatus())) {
             task.setStatus("draft");
         }
-    }
-
-    private List<Long> nullSafe(List<Long> ids) {
-        return ids == null ? Collections.emptyList() : ids;
     }
 
     private void validateDataScope(DataTask task) {

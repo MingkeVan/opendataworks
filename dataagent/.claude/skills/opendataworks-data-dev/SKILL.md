@@ -46,7 +46,8 @@ tools: [Bash, Read]
 
 1. **SQL 生成 / 润色**
    - 生成前用 `portal_search_tables` / `portal_get_table_ddl` 核实库、表、字段，不臆造表名或字段。
-   - 润色或落任务前，先 `portal_analyze_sql` 识别输入/输出表与操作类型；据此推荐 `inputTableIds` / `outputTableIds`。
+   - 润色或落任务前，先 `portal_analyze_sql` 识别输入/输出表与操作类型；据此推荐 `input_table_ids` / `output_table_ids`。
+   - 血缘字段是**全量列表**：创建时两侧都必须显式提供；更新时省略某侧表示保留原值，传数组表示整体替换该侧。只改一侧就省略另一侧，绝不要回传不完整的列表，漏掉的表 ID 会被删除。详见 `reference/10-task-fields.md`。
    - 常见加工场景(每日增量/全量快照/聚合/关联拉宽/upsert)可参照 `reference/50-sql-scenarios.md` 的模板起手，再按真实表结构改写。
    - 含写操作的 SQL（INSERT/UPDATE/INSERT OVERWRITE 等）只允许写进任务定义，**不要**用只读查询工具试跑。
 

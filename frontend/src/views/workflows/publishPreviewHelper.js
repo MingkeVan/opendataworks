@@ -296,6 +296,48 @@ export const buildPublishRepairHtml = (preview) => {
   `
 }
 
+/**
+ * 把预检问题拆成两类。
+ *
+ * repairable: 能被"修复元数据"动作解决的问题，走原有修复流程。
+ * advisory:   repairable=false 的问题（例如血缘一致性告警）。修复动作解决不了它们，
+ *             因此不能进"修复元数据并重试"弹窗，只做只读提示。
+ *             真正需要阻断时由服务端置 canPublish=false，走 errors 分支。
+ */
+export const splitRepairIssues = (preview) => {
+  const issues = Array.isArray(preview?.repairIssues) ? preview.repairIssues : []
+  return {
+    repairable: issues.filter((issue) => issue?.repairable !== false),
+    advisory: issues.filter((issue) => issue?.repairable === false)
+  }
+}
+
+const renderIssueLine = (issue) => {
+  const task = issue?.taskName || issue?.taskCode
+    ? `${issue?.taskName || '-'} (${issue?.taskCode ?? '-'})`
+    : '-'
+  return `<li>${escapeHtml(task)}：${escapeHtml(issue?.message || issue?.field || '-')}</li>`
+}
+
+/**
+ * 只读告警列表，用于 repairable=false 的一致性问题和导出时的问题提示。
+ */
+export const buildConsistencyIssueHtml = (issues, intro) => {
+  const list = Array.isArray(issues) ? issues : []
+  if (!list.length) return ''
+  const rendered = list.slice(0, MAX_RENDER_COUNT).map(renderIssueLine).join('')
+  const remain = list.length - MAX_RENDER_COUNT
+  const more = remain > 0 ? `<li>... 另有 ${remain} 项</li>` : ''
+  return `
+    <div style="max-height: 60vh; overflow: auto; padding-right: 8px;">
+      <div>${escapeHtml(intro || '')}</div>
+      <ul style="margin: 8px 0 0 16px; line-height: 1.6; font-size: 12px; color: #606266;">
+        ${rendered}${more}
+      </ul>
+    </div>
+  `
+}
+
 export const firstPreviewErrorMessage = (preview) => {
   const first = Array.isArray(preview?.errors) ? preview.errors[0] : null
   return first?.message || '发布预检未通过'

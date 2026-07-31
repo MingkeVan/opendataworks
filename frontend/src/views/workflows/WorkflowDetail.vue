@@ -832,7 +832,9 @@ import WorkflowBackfillDialog from './WorkflowBackfillDialog.vue'
 import WorkflowVersionComparePanel from './WorkflowVersionComparePanel.vue'
 import WorkflowPublishPreviewDialog from './WorkflowPublishPreviewDialog.vue'
 import {
+  buildConsistencyIssueHtml,
   buildPublishRepairHtml,
+  splitRepairIssues,
   firstPreviewErrorMessage,
   isDialogCancel,
   resolvePublishVersionId,
@@ -1426,6 +1428,25 @@ const handleExportJson = async (row) => {
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(link.href)
+    // 一致性问题只提示不阻断：坏定义恰恰是最需要导出来排查的。
+    const consistencyIssues = Array.isArray(result?.consistencyIssues) ? result.consistencyIssues : []
+    if (consistencyIssues.length) {
+      ElMessage.success('导出成功')
+      await ElMessageBox.alert(
+        buildConsistencyIssueHtml(
+          consistencyIssues,
+          '文件已下载。导出的定义存在以下血缘一致性问题，导入到其他环境前建议先修复。'
+        ),
+        '导出完成，但检测到血缘一致性问题',
+        {
+          type: 'warning',
+          customClass: 'workflow-publish-message-box',
+          confirmButtonText: '知道了',
+          dangerouslyUseHTMLString: true
+        }
+      )
+      return
+    }
     ElMessage.success('导出成功')
   } catch (error) {
     console.error('导出工作流 JSON 失败', error)
@@ -1442,9 +1463,24 @@ const previewPublishAndConfirm = async (row) => {
     ElMessage.error(firstPreviewErrorMessage(preview))
     return false
   }
-  const repairIssues = Array.isArray(preview?.repairIssues)
-    ? preview.repairIssues.filter(issue => issue?.repairable !== false)
-    : []
+  const { repairable: repairIssues, advisory: advisoryIssues } = splitRepairIssues(preview)
+  if (advisoryIssues.length) {
+    // repairable=false 的问题（血缘一致性告警）修复动作解决不了，只做只读提示后继续。
+    // 需要真正阻断时服务端会置 canPublish=false，已在上面的 errors 分支拦下。
+    await ElMessageBox.alert(
+      buildConsistencyIssueHtml(
+        advisoryIssues,
+        '检测到血缘一致性问题。发布不会被阻断，但建议打开相关任务，按 SQL 分析结果补齐血缘后重新保存。'
+      ),
+      '血缘一致性提醒',
+      {
+        type: 'warning',
+        customClass: 'workflow-publish-message-box',
+        confirmButtonText: '知道了',
+        dangerouslyUseHTMLString: true
+      }
+    )
+  }
   if (repairIssues.length) {
     try {
       await ElMessageBox.confirm(
@@ -1472,9 +1508,7 @@ const previewPublishAndConfirm = async (row) => {
         ElMessage.error(firstPreviewErrorMessage(preview))
         return false
       }
-      const unresolvedRepairIssues = Array.isArray(preview?.repairIssues)
-        ? preview.repairIssues.filter(issue => issue?.repairable !== false)
-        : []
+      const { repairable: unresolvedRepairIssues } = splitRepairIssues(preview)
       if (unresolvedRepairIssues.length) {
         const unresolvedFields = unresolvedRepairIssues
           .map(issue => issue?.field)

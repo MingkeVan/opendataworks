@@ -22,6 +22,7 @@ import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DorisClusterMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
+import com.onedata.portal.service.lineage.TaskLineageWriteService;
 import com.onedata.portal.service.table.TableEngineHandler;
 import com.onedata.portal.service.table.TableEngineHandlerRegistry;
 import com.onedata.portal.util.DatasourceType;
@@ -56,6 +57,7 @@ public class DataTableService {
     private final DorisClusterMapper dorisClusterMapper;
     private final TableEngineHandlerRegistry tableEngineHandlerRegistry;
     private final TableMetadataVersionService tableMetadataVersionService;
+    private final TaskLineageWriteService taskLineageWriteService;
 
     /**
      * 分页查询表列表
@@ -418,6 +420,10 @@ public class DataTableService {
      */
     @Transactional
     public void purgeTableMetadata(Long tableId) {
+        // 必须在删除关系之前收集受影响的工作流：删完就查不到归属了。
+        Set<Long> affectedTaskIds = taskLineageWriteService.findTaskIdsByTableId(tableId);
+        Set<Long> affectedWorkflowIds = taskLineageWriteService.findWorkflowIdsByTaskIds(affectedTaskIds);
+
         dataFieldMapper.delete(new LambdaQueryWrapper<DataField>()
                 .eq(DataField::getTableId, tableId));
         tableTaskRelationMapper.delete(new LambdaQueryWrapper<TableTaskRelation>()
@@ -427,7 +433,10 @@ public class DataTableService {
         dataLineageMapper.delete(new LambdaQueryWrapper<DataLineage>()
                 .eq(DataLineage::getDownstreamTableId, tableId));
         dataTableMapper.deleteById(tableId);
-        log.info("Purged table metadata, tableId={}", tableId);
+
+        // 删表会让引用它的任务少掉一条边，definitionJson 必须同步重建，否则会留下指向已删表的孤边。
+        taskLineageWriteService.refreshWorkflowDefinitions(affectedWorkflowIds, null);
+        log.info("Purged table metadata, tableId={}, refreshedWorkflows={}", tableId, affectedWorkflowIds);
     }
 
     /**

@@ -41,6 +41,9 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import com.onedata.portal.dto.workflow.WorkflowPublishRepairIssue;
+import com.onedata.portal.service.lineage.TaskLineageConsistencyChecker;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -101,6 +104,9 @@ class WorkflowPublishServiceTest {
         TableInfoHelper.initTableInfo(assistant, WorkflowTaskRelation.class);
         TableInfoHelper.initTableInfo(assistant, TableTaskRelation.class);
     }
+
+    @Mock
+    private com.onedata.portal.service.lineage.TaskLineageConsistencyChecker lineageConsistencyChecker;
 
     @BeforeEach
     void setUp() {
@@ -1001,6 +1007,111 @@ class WorkflowPublishServiceTest {
                 .anyMatch(item -> "task.datasourceId".equals(item.getField())));
     }
 
+    @Test
+    void previewSurfacesConsistencyIssuesInRepairIssuesWithoutBlockingInWarnMode() {
+        DataWorkflow workflow = workflow(1L, 5001L, 101L);
+        mockPreviewInputs(workflow);
+        when(dataWorkflowMapper.selectById(1L)).thenReturn(workflow);
+        when(runtimeDiffService.buildDiff(any(), any())).thenReturn(noiseOnlyDiff());
+        WorkflowPublishRepairIssue missing = new WorkflowPublishRepairIssue();
+        missing.setCode(TaskLineageConsistencyChecker.CODE_SQL_RELATION_MISSING);
+        missing.setRepairable(false);
+        missing.setMessage("缺少输入表");
+        when(lineageConsistencyChecker.checkWorkflow(any(), eq(true)))
+                .thenReturn(new java.util.ArrayList<>(java.util.Collections.singletonList(missing)));
+        when(lineageConsistencyChecker.hasBlockingIssue(any())).thenReturn(false);
+
+        WorkflowPublishPreviewResponse preview = service.previewPublish(1L);
+
+        // warn 模式：问题可见，但不夺走既有工作流的发布能力。
+        assertTrue(preview.getRepairIssues().stream().anyMatch(issue ->
+                TaskLineageConsistencyChecker.CODE_SQL_RELATION_MISSING.equals(issue.getCode())));
+        assertTrue(Boolean.TRUE.equals(preview.getCanPublish()));
+        assertTrue(preview.getErrors().isEmpty());
+    }
+
+    @Test
+    void previewSetsCanPublishFalseWhenBlockingModeFindsMissingLineage() {
+        DataWorkflow workflow = workflow(1L, 5001L, 101L);
+        mockPreviewInputs(workflow);
+        when(dataWorkflowMapper.selectById(1L)).thenReturn(workflow);
+        when(runtimeDiffService.buildDiff(any(), any())).thenReturn(noiseOnlyDiff());
+        WorkflowPublishRepairIssue missing = new WorkflowPublishRepairIssue();
+        missing.setCode(TaskLineageConsistencyChecker.CODE_SQL_RELATION_MISSING);
+        missing.setRepairable(false);
+        missing.setMessage("缺少输入表");
+        when(lineageConsistencyChecker.checkWorkflow(any(), eq(true)))
+                .thenReturn(new java.util.ArrayList<>(java.util.Collections.singletonList(missing)));
+        when(lineageConsistencyChecker.hasBlockingIssue(any())).thenReturn(true);
+
+        WorkflowPublishPreviewResponse preview = service.previewPublish(1L);
+
+        // 走 errors 才能让两个前端入口既有的 canPublish 门禁生效。
+        assertTrue(Boolean.FALSE.equals(preview.getCanPublish()));
+        assertTrue(preview.getErrors().stream().anyMatch(issue ->
+                TaskLineageConsistencyChecker.CODE_SQL_RELATION_MISSING.equals(issue.getCode())));
+    }
+
+    @Test
+    void deployRecheckBlocksMissingLineageEvenWhenPreviewWasBypassed() {
+        DataWorkflow workflow = workflow(1L, null, 101L);
+        mockPreviewInputs(workflow);
+        when(dataWorkflowMapper.selectById(1L)).thenReturn(workflow);
+        when(workflowService.syncCurrentVersion(1L, "tester", "publish_auto_save")).thenReturn(workflow);
+        WorkflowPublishRepairIssue missing = new WorkflowPublishRepairIssue();
+        missing.setCode(TaskLineageConsistencyChecker.CODE_SQL_RELATION_MISSING);
+        missing.setRepairable(false);
+        missing.setMessage("缺少输入表");
+        when(lineageConsistencyChecker.checkWorkflow(any(), eq(false)))
+                .thenReturn(new java.util.ArrayList<>(java.util.Collections.singletonList(missing)));
+        when(lineageConsistencyChecker.hasBlockingIssue(any())).thenReturn(true);
+
+        WorkflowPublishRequest request = new WorkflowPublishRequest();
+        request.setOperation("deploy");
+        request.setRequireApproval(false);
+        request.setOperator("tester");
+        request.setConfirmDiff(true);
+
+        assertThrows(IllegalStateException.class, () -> service.publish(1L, request));
+        // 部署前就被拦下，不应触达 Dolphin。
+        verify(workflowDeployService, never()).deploy(any());
+    }
+
+    @Test
+    void deployRecheckSkipsDefinitionDriftBecauseSyncAlreadyRebuiltIt() {
+        DataWorkflow workflow = workflow(1L, null, 101L);
+        WorkflowVersion version = version(101L, 3);
+        mockPreviewInputs(workflow);
+        when(dataWorkflowMapper.selectById(1L)).thenReturn(workflow);
+        when(workflowService.syncCurrentVersion(1L, "tester", "publish_auto_save")).thenReturn(workflow);
+        when(workflowVersionMapper.selectById(101L)).thenReturn(version);
+        when(runtimeDiffService.buildDiff(any(), any())).thenReturn(noiseOnlyDiff());
+        WorkflowPublishRepairIssue drift = new WorkflowPublishRepairIssue();
+        drift.setCode(TaskLineageConsistencyChecker.CODE_DEFINITION_DRIFT);
+        drift.setRepairable(true);
+        when(lineageConsistencyChecker.checkWorkflow(any(), eq(true)))
+                .thenReturn(new java.util.ArrayList<>(java.util.Collections.singletonList(drift)));
+        when(lineageConsistencyChecker.checkWorkflow(any(), eq(false)))
+                .thenReturn(new java.util.ArrayList<>());
+        when(lineageConsistencyChecker.hasBlockingIssue(any())).thenReturn(false);
+        WorkflowDeployService.DeploymentResult result =
+                new WorkflowDeployService.DeploymentResult(90003L, 11L, 1, false);
+        when(workflowDeployService.deploy(eq(workflow))).thenReturn(result);
+
+        WorkflowPublishRequest request = new WorkflowPublishRequest();
+        request.setOperation("deploy");
+        request.setRequireApproval(false);
+        request.setOperator("tester");
+        request.setConfirmDiff(true);
+
+        WorkflowPublishRecord record = service.publish(1L, request);
+
+        // 定义漂移不会阻断 deploy：syncCurrentVersion 已经按关系表重建了 definitionJson。
+        assertEquals("success", record.getStatus());
+        // 阻断性复检必须传 includeDefinitionDrift=false。
+        verify(lineageConsistencyChecker).checkWorkflow(any(), eq(false));
+    }
+
     private WorkflowPublishService buildPreviewServiceWithRealDiff() {
         return new WorkflowPublishService(
                 publishRecordMapper,
@@ -1014,6 +1125,7 @@ class WorkflowPublishServiceTest {
                 workflowDeployService,
                 dolphinSchedulerService,
                 workflowService,
+                lineageConsistencyChecker,
                 new com.fasterxml.jackson.databind.ObjectMapper());
     }
 

@@ -6,20 +6,26 @@ import com.onedata.portal.agentapi.service.BackendAgentTaskService;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.exception.BusinessException;
 import com.onedata.portal.service.DataTaskService;
+import com.onedata.portal.service.lineage.LineageValidationMode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -68,7 +74,7 @@ class BackendAgentTaskServiceTest {
         service().updateTask(7L, request, "agent-operator");
 
         ArgumentCaptor<DataTask> captor = ArgumentCaptor.forClass(DataTask.class);
-        verify(dataTaskService).update(captor.capture(), any(), any());
+        verify(dataTaskService).update(captor.capture(), any(), any(), eq(LineageValidationMode.STRICT));
         assertEquals(42L, captor.getValue().getWorkflowId());
     }
 
@@ -82,7 +88,54 @@ class BackendAgentTaskServiceTest {
         service().updateTask(7L, request, "agent-operator");
 
         ArgumentCaptor<DataTask> captor = ArgumentCaptor.forClass(DataTask.class);
-        verify(dataTaskService).update(captor.capture(), any(), any());
+        verify(dataTaskService).update(captor.capture(), any(), any(), eq(LineageValidationMode.STRICT));
         assertNull(captor.getValue().getWorkflowId());
+    }
+
+    @Test
+    void updateTaskPassesNullLineageThroughSoExistingLineageIsKept() {
+        // 回归：此前 nullSafe() 把 null 转成 emptyList，DataTaskService.update()
+        // 会据此把该侧血缘整体删除。null 必须原样下传，才能表达"本次未提供，保留原值"。
+        AgentTaskUpsertRequest request = new AgentTaskUpsertRequest();
+        request.setTask(new LinkedHashMap<>());
+        request.setInputTableIds(null);
+        request.setOutputTableIds(null);
+
+        service().updateTask(7L, request, "agent-operator");
+
+        ArgumentCaptor<List<Long>> inputs = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<Long>> outputs = ArgumentCaptor.forClass(List.class);
+        verify(dataTaskService).update(any(), inputs.capture(), outputs.capture(),
+                eq(LineageValidationMode.STRICT));
+        assertNull(inputs.getValue());
+        assertNull(outputs.getValue());
+    }
+
+    @Test
+    void updateTaskPassesExplicitEmptyListThroughAsClearIntent() {
+        AgentTaskUpsertRequest request = new AgentTaskUpsertRequest();
+        request.setTask(new LinkedHashMap<>());
+        request.setInputTableIds(Collections.emptyList());
+        request.setOutputTableIds(null);
+
+        service().updateTask(7L, request, "agent-operator");
+
+        ArgumentCaptor<List<Long>> inputs = ArgumentCaptor.forClass(List.class);
+        verify(dataTaskService).update(any(), inputs.capture(), any(),
+                eq(LineageValidationMode.STRICT));
+        assertNotNull(inputs.getValue());
+        assertTrue(inputs.getValue().isEmpty());
+    }
+
+    @Test
+    void createTaskUsesStrictValidation() {
+        AgentTaskUpsertRequest request = new AgentTaskUpsertRequest();
+        request.setTask(new LinkedHashMap<>());
+        request.setInputTableIds(Collections.singletonList(1L));
+        request.setOutputTableIds(Collections.singletonList(2L));
+
+        service().createTask(request, "agent-operator");
+
+        verify(dataTaskService).create(any(), any(), any(), eq(LineageValidationMode.STRICT));
     }
 }

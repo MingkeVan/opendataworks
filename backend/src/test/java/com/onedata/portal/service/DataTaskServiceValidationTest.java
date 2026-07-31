@@ -7,6 +7,9 @@ import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
+import com.onedata.portal.service.lineage.LineageValidationMode;
+import com.onedata.portal.service.lineage.TaskLineageConsistencyChecker;
+import com.onedata.portal.service.lineage.TaskLineageWriteService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -52,6 +55,12 @@ class DataTaskServiceValidationTest {
     @Mock
     private WorkflowService workflowService;
 
+    @Mock
+    private TaskLineageWriteService taskLineageWriteService;
+
+    @Mock
+    private TaskLineageConsistencyChecker taskLineageConsistencyChecker;
+
     @InjectMocks
     private DataTaskService dataTaskService;
 
@@ -63,7 +72,8 @@ class DataTaskServiceValidationTest {
                 "validateTask",
                 task,
                 Collections.emptyList(),
-                Collections.singletonList(100L)));
+                Collections.singletonList(100L),
+                LineageValidationMode.LENIENT));
     }
 
     @Test
@@ -75,7 +85,8 @@ class DataTaskServiceValidationTest {
                         "validateTask",
                         task,
                         Collections.singletonList(100L),
-                        Collections.emptyList()));
+                        Collections.emptyList(),
+                        LineageValidationMode.LENIENT));
     }
 
     @Test
@@ -87,7 +98,8 @@ class DataTaskServiceValidationTest {
                 "validateTask",
                 task,
                 Collections.singletonList(100L),
-                Collections.singletonList(200L)));
+                Collections.singletonList(200L),
+                LineageValidationMode.LENIENT));
     }
 
     @Test
@@ -119,7 +131,8 @@ class DataTaskServiceValidationTest {
                         "validateTask",
                         task,
                         Collections.singletonList(100L),
-                        Collections.emptyList()));
+                        Collections.emptyList(),
+                        LineageValidationMode.LENIENT));
     }
 
     @Test
@@ -132,7 +145,8 @@ class DataTaskServiceValidationTest {
                         "validateTask",
                         task,
                         Collections.singletonList(100L),
-                        Collections.emptyList()));
+                        Collections.emptyList(),
+                        LineageValidationMode.LENIENT));
     }
 
     @Test
@@ -143,7 +157,8 @@ class DataTaskServiceValidationTest {
                 "validateTask",
                 task,
                 Collections.singletonList(100L),
-                Collections.singletonList(200L)));
+                Collections.singletonList(200L),
+                LineageValidationMode.LENIENT));
     }
 
     private DataTask sqlTask() {

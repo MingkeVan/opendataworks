@@ -88,6 +88,11 @@ workflow:
   runtime-sync:
     enabled: true
     ingest-mode: export_only
+  lineage-consistency:
+    # warn: 只提示，不改变既有工作流的发布能力（默认）
+    # block-missing: 仅阻断 SQL 已明确匹配但关系表缺失的情况
+    # 切换前先用 GET /v1/workflows/{id}/lineage-consistency 扫描存量
+    enforcement-mode: ${WORKFLOW_LINEAGE_CONSISTENCY_MODE:warn}
 
 agent:
   api:

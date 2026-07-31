@@ -4,14 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.onedata.portal.dto.SqlTableAnalyzeResponse;
 import com.onedata.portal.dto.SqlTableMatchResponse;
 import com.onedata.portal.dto.SqlTableMatchResponse.MatchedTable;
-import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.DorisCluster;
-import com.onedata.portal.entity.TableTaskRelation;
-import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTableMapper;
 import com.onedata.portal.mapper.DorisClusterMapper;
-import com.onedata.portal.mapper.TableTaskRelationMapper;
+import com.onedata.portal.service.lineage.TaskLineageWriteService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.JSQLParserException;
@@ -90,9 +87,8 @@ public class SqlTableMatcherService {
     );
 
     private final DataTableMapper dataTableMapper;
-    private final TableTaskRelationMapper tableTaskRelationMapper;
-    private final DataLineageMapper dataLineageMapper;
     private final DorisClusterMapper dorisClusterMapper;
+    private final TaskLineageWriteService taskLineageWriteService;
 
     /**
      * 解析 SQL 返回增强结果
@@ -177,41 +173,27 @@ public class SqlTableMatcherService {
         SqlTableAnalyzeResponse analyzeResponse = analyze(sql, "SQL");
         SqlTableMatchResponse response = toLegacyResponse(analyzeResponse);
 
-        // 清理旧数据
-        tableTaskRelationMapper.delete(
-            new LambdaQueryWrapper<TableTaskRelation>()
-                .eq(TableTaskRelation::getTaskId, taskId)
-        );
-        dataLineageMapper.delete(
-            new LambdaQueryWrapper<DataLineage>()
-                .eq(DataLineage::getTaskId, taskId)
-        );
+        List<Long> inputTableIds = collectMatchedTableIds(analyzeResponse.getInputRefs());
+        List<Long> outputTableIds = collectMatchedTableIds(analyzeResponse.getOutputRefs());
 
-        for (SqlTableAnalyzeResponse.TableRefMatch input : analyzeResponse.getInputRefs()) {
-            if (!"matched".equals(input.getMatchStatus()) || input.getChosenTable() == null) {
-                continue;
-            }
-            Long tableId = input.getChosenTable().getTableId();
-            if (tableId == null) {
-                continue;
-            }
-            insertRelation(taskId, tableId, "read");
-            insertLineage(taskId, tableId, null, "input");
-        }
-
-        for (SqlTableAnalyzeResponse.TableRefMatch output : analyzeResponse.getOutputRefs()) {
-            if (!"matched".equals(output.getMatchStatus()) || output.getChosenTable() == null) {
-                continue;
-            }
-            Long tableId = output.getChosenTable().getTableId();
-            if (tableId == null) {
-                continue;
-            }
-            insertRelation(taskId, tableId, "write");
-            insertLineage(taskId, null, tableId, "output");
-        }
+        // 走统一写入口：这里此前直接操作两张表，既不刷新工作流拓扑也不重建 definitionJson，
+        // 是 definitionJson 与关系表漂移的旁路来源之一。
+        taskLineageWriteService.replaceTaskLineageAndRefresh(taskId, inputTableIds, outputTableIds, null);
 
         return response;
+    }
+
+    private List<Long> collectMatchedTableIds(List<SqlTableAnalyzeResponse.TableRefMatch> refs) {
+        if (refs == null) {
+            return Collections.emptyList();
+        }
+        return refs.stream()
+                .filter(Objects::nonNull)
+                .filter(ref -> "matched".equals(ref.getMatchStatus()))
+                .filter(ref -> ref.getChosenTable() != null && ref.getChosenTable().getTableId() != null)
+                .map(ref -> ref.getChosenTable().getTableId())
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     private void extractWithAst(String sql, Map<Direction, LinkedHashMap<String, TableReference>> collector)
@@ -751,26 +733,6 @@ public class SqlTableMatcherService {
         String db = normalizeIdentifier(database);
         String tb = normalizeIdentifier(table);
         return direction.name() + ":" + (StringUtils.hasText(db) ? db + "." : "") + tb;
-    }
-
-    private void insertRelation(Long taskId, Long tableId, String relationType) {
-        if (taskId == null || tableId == null) {
-            return;
-        }
-        TableTaskRelation relation = new TableTaskRelation();
-        relation.setTaskId(taskId);
-        relation.setTableId(tableId);
-        relation.setRelationType(relationType);
-        tableTaskRelationMapper.insert(relation);
-    }
-
-    private void insertLineage(Long taskId, Long upstreamId, Long downstreamId, String lineageType) {
-        DataLineage lineage = new DataLineage();
-        lineage.setTaskId(taskId);
-        lineage.setUpstreamTableId(upstreamId);
-        lineage.setDownstreamTableId(downstreamId);
-        lineage.setLineageType(lineageType);
-        dataLineageMapper.insert(lineage);
     }
 
     private Object invoke(Object target, String methodName) {

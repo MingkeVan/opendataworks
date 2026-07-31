@@ -67,6 +67,9 @@ class DataTableServiceTest {
 
     private DataTableService service;
 
+    @Mock
+    private com.onedata.portal.service.lineage.TaskLineageWriteService taskLineageWriteService;
+
     @BeforeEach
     void setUp() {
         service = new DataTableService(
@@ -78,7 +81,8 @@ class DataTableServiceTest {
                 dataLineageMapper,
                 dorisClusterMapper,
                 tableEngineHandlerRegistry,
-                tableMetadataVersionService);
+                tableMetadataVersionService,
+                taskLineageWriteService);
     }
 
     @Test
@@ -248,6 +252,24 @@ class DataTableServiceTest {
         field.setFieldName(name);
         field.setFieldType(type);
         return field;
+    }
+
+    @Test
+    void purgeCollectsAffectedWorkflowsBeforeDeleteAndRefreshesDefinitionOnce() {
+        // 删表会让引用它的任务少掉一条边，definitionJson 必须同步重建；
+        // 受影响工作流只能在删除关系之前收集，删完就查不到归属了。
+        java.util.Set<Long> taskIds = new java.util.LinkedHashSet<>(java.util.Arrays.asList(1L, 2L));
+        java.util.Set<Long> workflowIds = new java.util.LinkedHashSet<>(java.util.Arrays.asList(10L));
+        when(taskLineageWriteService.findTaskIdsByTableId(5L)).thenReturn(taskIds);
+        when(taskLineageWriteService.findWorkflowIdsByTaskIds(taskIds)).thenReturn(workflowIds);
+
+        service.purgeTableMetadata(5L);
+
+        org.mockito.InOrder inOrder = org.mockito.Mockito.inOrder(
+                taskLineageWriteService, dataTableMapper);
+        inOrder.verify(taskLineageWriteService).findTaskIdsByTableId(5L);
+        inOrder.verify(dataTableMapper).deleteById(5L);
+        inOrder.verify(taskLineageWriteService).refreshWorkflowDefinitions(workflowIds, null);
     }
 
     private DorisCluster cluster(Long id, String sourceType) {

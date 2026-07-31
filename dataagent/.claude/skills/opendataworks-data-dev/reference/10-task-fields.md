@@ -24,10 +24,27 @@
 
 ## 血缘字段（与 task 平级）
 
-- `inputTableIds`: 输入表 ID 列表（来自 `portal_analyze_sql` 的输入表）。
-- `outputTableIds`: 输出表 ID 列表（来自 analyze 的输出表）。
+- `input_table_ids`: 输入表 ID 列表（来自 `portal_analyze_sql` 的输入表）。
+- `output_table_ids`: 输出表 ID 列表（来自 analyze 的输出表）。
 
-血缘 ID 必填以保证影响分析与血缘图正确；用 `portal_search_tables` 把表名解析为表 ID。
+用 `portal_search_tables` 把表名解析为表 ID。
+
+### 全量列表语义
+
+这两个字段是**全量列表，不是增量**。后端按传入内容整体替换该侧血缘。
+
+| 传法 | `portal_create_task` | `portal_update_task` |
+| --- | --- | --- |
+| 省略字段 | 不允许，两个字段都必须显式提供 | 保留该侧原有血缘 |
+| `[]` | 输入可以为 `[]`；输出不允许 | 清空该侧；输出仍不允许清空 |
+| 非空数组 | 全量写入 | 全量替换该侧 |
+
+要点：
+
+- **只想改一侧就省略另一侧**，不要为了凑参数而回传一个不完整的列表——漏掉的表 ID 会被删除。
+- 更新前不确定现有血缘时，先 `portal_get_task` 读取，或者直接省略该字段。
+- SQL 任务保存时后端会用 `portal_analyze_sql` 的高可信匹配结果做校验：SQL 里已明确解析出的表如果不在最终血缘中，保存会被拒绝并列出缺失的表。按提示补齐后重试即可。
+- 未匹配（unmatched）和歧义（ambiguous）的表不会阻断保存，只在发布预检里提示。
 
 ## 本期范围
 
