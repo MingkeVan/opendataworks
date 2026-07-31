@@ -33,6 +33,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -236,6 +238,55 @@ class DataTaskServiceWorkflowMetadataTest {
     }
 
     @Test
+    void createShouldReleaseTaskCodeHeldByPreviouslyDeletedTask() {
+        DataTask input = new DataTask();
+        input.setTaskName("recreated-task");
+        input.setTaskCode("reusable-task-code");
+        input.setEngine("dolphin");
+        input.setDolphinNodeType("SQL");
+        input.setTaskSql("insert into dwd.t2 select * from ods.t2");
+        input.setOwner("tester");
+        input.setDolphinTaskCode(7001L);
+        input.setDolphinTaskVersion(1);
+        input.setDolphinFlag("YES");
+        input.setPriority(5);
+        input.setRetryTimes(1);
+        input.setRetryInterval(1);
+        input.setTimeoutSeconds(60);
+
+        DataTask deletedTask = new DataTask();
+        deletedTask.setId(77L);
+        deletedTask.setTaskName("recreated-task");
+        deletedTask.setTaskCode("reusable-task-code");
+        deletedTask.setDeleted(1);
+
+        when(dataTaskMapper.selectCount(any())).thenReturn(0L);
+        when(dataTaskMapper.selectOne(any())).thenReturn(null);
+        when(dataTaskMapper.selectDeletedByTaskCode("reusable-task-code")).thenReturn(deletedTask);
+        when(dataTaskMapper.archiveUniqueIdentity(
+                77L,
+                "reusable-task-code__deleted_77",
+                "recreated-task__deleted_77")).thenReturn(1);
+        when(dataTaskMapper.insert(input)).thenAnswer(invocation -> {
+            input.setId(301L);
+            return 1;
+        });
+        when(dataTaskMapper.selectById(301L)).thenReturn(input);
+
+        DataTask result = dataTaskService.create(
+                input,
+                Collections.emptyList(),
+                Collections.singletonList(32L));
+
+        assertEquals(301L, result.getId());
+        verify(dataTaskMapper).archiveUniqueIdentity(
+                77L,
+                "reusable-task-code__deleted_77",
+                "recreated-task__deleted_77");
+        verify(dataTaskMapper).insert(input);
+    }
+
+    @Test
     void createDataXTaskWithoutDatasourceShouldSucceed() {
         DataTask input = new DataTask();
         input.setTaskName("task-create-datax-no-datasource");
@@ -374,9 +425,14 @@ class DataTaskServiceWorkflowMetadataTest {
         DataTask task = new DataTask();
         task.setId(401L);
         task.setTaskName("task-delete-no-dolphin");
+        task.setTaskCode("task-delete-no-dolphin");
         task.setDolphinProcessCode(123456L);
         when(dataTaskMapper.selectById(401L)).thenReturn(task);
 
+        when(dataTaskMapper.archiveUniqueIdentity(
+                401L,
+                "task-delete-no-dolphin__deleted_401",
+                "task-delete-no-dolphin__deleted_401")).thenReturn(1);
         when(dataLineageMapper.delete(any())).thenReturn(2);
         when(tableTaskRelationMapper.hardDeleteByTaskId(401L)).thenReturn(1);
         when(workflowTaskRelationMapper.hardDeleteByTaskId(401L)).thenReturn(1);
@@ -389,6 +445,44 @@ class DataTaskServiceWorkflowMetadataTest {
         verify(dolphinSchedulerService, never()).setWorkflowReleaseState(anyLong(), anyString());
         verify(dolphinSchedulerService, never()).deleteWorkflow(anyLong());
         verify(workflowTaskRelationMapper).hardDeleteByTaskId(401L);
+    }
+
+    @Test
+    void deletingRecreatedTaskShouldUseDistinctArchivedUniqueKeys() {
+        String longIdentity = String.join("", Collections.nCopies(100, "x"));
+        DataTask firstTask = new DataTask();
+        firstTask.setId(501L);
+        firstTask.setTaskName(longIdentity);
+        firstTask.setTaskCode(longIdentity);
+
+        DataTask recreatedTask = new DataTask();
+        recreatedTask.setId(502L);
+        recreatedTask.setTaskName(longIdentity);
+        recreatedTask.setTaskCode(longIdentity);
+
+        when(dataTaskMapper.selectById(501L)).thenReturn(firstTask);
+        when(dataTaskMapper.selectById(502L)).thenReturn(recreatedTask);
+        when(dataTaskMapper.archiveUniqueIdentity(anyLong(), anyString(), anyString())).thenReturn(1);
+        when(dataTaskMapper.deleteById(anyLong())).thenReturn(1);
+
+        dataTaskService.delete(501L);
+        dataTaskService.delete(502L);
+
+        ArgumentCaptor<String> codeCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> nameCaptor = ArgumentCaptor.forClass(String.class);
+        verify(dataTaskMapper, times(2)).archiveUniqueIdentity(
+                anyLong(), codeCaptor.capture(), nameCaptor.capture());
+
+        assertNotEquals(codeCaptor.getAllValues().get(0), codeCaptor.getAllValues().get(1));
+        assertNotEquals(nameCaptor.getAllValues().get(0), nameCaptor.getAllValues().get(1));
+        assertTrue(codeCaptor.getAllValues().get(0).endsWith("__deleted_501"));
+        assertTrue(codeCaptor.getAllValues().get(1).endsWith("__deleted_502"));
+        assertTrue(nameCaptor.getAllValues().get(0).endsWith("__deleted_501"));
+        assertTrue(nameCaptor.getAllValues().get(1).endsWith("__deleted_502"));
+        assertEquals(100, codeCaptor.getAllValues().get(0).length());
+        assertEquals(100, codeCaptor.getAllValues().get(1).length());
+        assertEquals(100, nameCaptor.getAllValues().get(0).length());
+        assertEquals(100, nameCaptor.getAllValues().get(1).length());
     }
 
     @Test
