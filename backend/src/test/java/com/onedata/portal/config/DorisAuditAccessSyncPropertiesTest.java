@@ -16,6 +16,7 @@ class DorisAuditAccessSyncPropertiesTest {
         assertEquals(2, properties.getSafetyLagMinutes());
         assertEquals(10, properties.getOverlapMinutes());
         assertEquals(5_000, properties.getBatchSize());
-        assertEquals(90, properties.getInitialHistoryDays());
+        assertEquals(400, properties.getSummaryRetentionDays());
+        assertEquals(7, properties.getProcessedEventRetentionDays());
     }
 }

@@ -4,10 +4,14 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -29,6 +33,19 @@ public class DorisAuditSqlTableParser {
     private static final Pattern DELETE_FROM_PATTERN = Pattern.compile(
             "\\bDELETE\\s+FROM\\s+(?:`?([a-zA-Z0-9_]+)`?\\.)?`?([a-zA-Z0-9_]+)`?",
             Pattern.CASE_INSENSITIVE);
+
+    /**
+     * 系统库不是业务资产。审计库尤其重要：同步任务每轮都要查询审计表，
+     * 若不排除，审计表会把自己写成永久热点并持续放大汇总表体积。
+     */
+    private static final Set<String> SYSTEM_SCHEMAS = Collections.unmodifiableSet(
+            new HashSet<>(Arrays.asList(
+                    "information_schema",
+                    "__internal_schema",
+                    "doris_audit_db__",
+                    "mysql",
+                    "sys",
+                    "performance_schema")));
 
     public List<AuditTableReference> parse(String sql, String defaultDatabase) {
         if (!StringUtils.hasText(sql)) {
@@ -58,7 +75,7 @@ public class DorisAuditSqlTableParser {
             if (!StringUtils.hasText(database)) {
                 database = normalize(defaultDatabase);
             }
-            if (!StringUtils.hasText(database)) {
+            if (!StringUtils.hasText(database) || SYSTEM_SCHEMAS.contains(database)) {
                 continue;
             }
             String key = database + "." + table;

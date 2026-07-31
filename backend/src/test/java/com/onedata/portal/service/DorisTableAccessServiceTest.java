@@ -97,6 +97,22 @@ class DorisTableAccessServiceTest {
     }
 
     @Test
+    void freshlyInitializedClusterReportsIncompleteCoverageInsteadOfColdTables() {
+        // 汇总只做增量累积，不回填历史：上线当天覆盖起点就是当前时间，冷表必须保持沉默直到窗口攒够。
+        when(checkpointMapper.selectList(any())).thenReturn(Collections.singletonList(checkpoint(
+                "READY", LocalDateTime.now(), LocalDateTime.now())));
+        when(dailyMapper.selectDashboardAggregates(anyList(), any(), any()))
+                .thenReturn(Collections.emptyList());
+
+        DashboardTableAccessSummary summary = service.getDashboardAccessSummary(null, 30, 10, 90, 10);
+
+        assertEquals("READY", summary.getTableAccessSyncStatus());
+        assertFalse(summary.getTableAccessCoverageComplete());
+        assertTrue(summary.getLongUnusedTables().isEmpty());
+        assertTrue(summary.getNote().contains("覆盖不足"));
+    }
+
+    @Test
     void completeReadyCoverageMarksOldNeverAccessedTableAsCold() {
         when(checkpointMapper.selectList(any())).thenReturn(Collections.singletonList(checkpoint(
                 "READY", LocalDateTime.now().minusDays(120), LocalDateTime.now().minusMinutes(5))));

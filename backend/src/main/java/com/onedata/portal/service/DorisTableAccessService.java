@@ -215,10 +215,11 @@ public class DorisTableAccessService {
         }
 
         LocalDate today = LocalDate.now();
+        // 只扫描冷表判断所需的窗口：更早的访问记录不会改变冷热分类，仅影响“最后访问时间”的展示精度。
         List<DashboardTableAccessAggregate> aggregates = tableAccessDailyMapper.selectDashboardAggregates(
                 new ArrayList<>(clustersWithSummary),
                 windowStart(today, hotDays),
-                windowStart(today, Math.max(coldDays, properties.getSummaryRetentionDays())));
+                windowStart(today, Math.max(hotDays, coldDays)));
         Map<String, DashboardTableAccessAggregate> aggregateIndex = new HashMap<>();
         for (DashboardTableAccessAggregate aggregate : aggregates) {
             aggregateIndex.put(key(aggregate.getClusterId(), aggregate.getDbName(), aggregate.getTableName()), aggregate);

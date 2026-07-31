@@ -36,6 +36,31 @@ class DorisAuditSqlTableParserTest {
     }
 
     @Test
+    void dropsAuditSourceSoSyncDoesNotCountItself() {
+        List<AuditTableReference> internalSchema = parser.parse(
+                "SELECT `time`, stmt FROM `__internal_schema`.`audit_log` WHERE `time` > '2026-07-30'",
+                "dwd");
+        List<AuditTableReference> legacyAuditDb = parser.parse(
+                "SELECT stmt FROM doris_audit_db__.doris_audit_tbl__ LIMIT 1", "dwd");
+
+        assertTrue(internalSchema.isEmpty());
+        assertTrue(legacyAuditDb.isEmpty());
+    }
+
+    @Test
+    void dropsSystemSchemasButKeepsBusinessTablesInTheSameStatement() {
+        List<AuditTableReference> references = parser.parse(
+                "SELECT t.name FROM information_schema.tables t "
+                        + "JOIN mysql.user u ON u.name = t.name "
+                        + "JOIN dwd.orders o ON o.id = t.id",
+                "dwd");
+
+        assertEquals(1, references.size());
+        assertEquals("dwd", references.get(0).getDatabaseName());
+        assertEquals("orders", references.get(0).getTableName());
+    }
+
+    @Test
     void usesDefaultDatabaseAndClassifiesUpdateAndDeleteAsWrites() {
         List<AuditTableReference> references = parser.parse(
                 "UPDATE orders SET status = 1; DELETE FROM order_items WHERE id = 2",

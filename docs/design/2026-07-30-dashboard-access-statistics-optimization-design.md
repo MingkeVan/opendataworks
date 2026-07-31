@@ -82,3 +82,39 @@ Dashboard 的完整覆盖窗口为 90 天；单表统计为 `max(30, recentDays,
 Flyway 只创建门户 MySQL 表，不连接 Doris。应用启动后由后台任务逐步回填。迁移为加法式；回退旧应用时新增表可以保留。
 
 当前部署为单后端实例。若未来横向扩容，必须先引入集群级同步租约或调度 Leader。
+
+## 后续修正（2026-07-31）
+
+首次实现落地后的评审发现若干正确性与成本问题，按“不加表、不加迁移、不改接口”的原则做最小修正。
+
+### 取消历史回填，只做增量累积
+
+原实现启动时按 `initial-history-days`（默认 90 天）回溯审计表，并用两条探测查询确定可用起点。这是本特性对客户 Doris 唯一的重查询，且 Doris `audit_log` 自身的分区保留期通常远短于 90 天，实际回填量本来就有限。
+
+现在覆盖起点即同步启动时间，`BACKFILLING` 退化为首轮几秒内的过渡态。冷热判断仍由 `coverageStart` 门控自动生效：约 30 天后热点排名可用，约 90 天后冷表结论开启，期间界面显示覆盖起点与暂停原因。
+
+`initial-history-days` 属性、对应环境变量与 `queryAvailableStart()` 一并删除。副作用是每轮最多消费 10 分钟的审计日志，单轮执行预算与批量写入不再是瓶颈。
+
+checkpoint 被重置但汇总仍在时，覆盖起点取 `table_access_daily` 中该集群的最早日期，避免重新空等一个完整窗口。
+
+### 水位改用审计源时钟
+
+安全上界原本取后端 JVM 的 `LocalDateTime.now()`，与审计表中的挂钟时间比较。后端与 Doris FE 之间的时区或时钟差一旦超过 overlap 窗口，水位会越过尚未读取的事件且永不回头，属于静默丢数据。
+
+现在每轮在同一集群上执行一次 `SELECT NOW()`，以审计源自身的时间减去安全延迟作为上界；偏差超过 overlap 窗口时记录告警。使用不带精度参数的 `NOW()` 以覆盖较老的 Doris 版本。
+
+### 解析阶段排除系统库
+
+`DorisAuditSqlTableParser` 丢弃 `information_schema`、`__internal_schema`、`doris_audit_db__`、`mysql`、`sys`、`performance_schema` 下的引用。两种已知审计源布局都位于上述库中，因此同步任务不会再把自己每轮的审计查询写成永久热点。
+
+### Dashboard 聚合窗口收敛
+
+原查询按 `max(coldDays, summary-retention-days)` 回看约 400 天。更早的访问记录不会改变冷热分类：窗口内无记录的表 `lastAccessTime` 为空，随后回退到建表时间判断，结论一致。窗口改为 `max(hotDays, coldDays)`，代价仅是极冷表的“最后访问时间”展示为空。
+
+### 关闭同步不再停止数据清理
+
+清理任务原先与同步任务共用一个 `@ConditionalOnProperty` bean，`DORIS_AUDIT_ACCESS_SYNC_ENABLED=false` 会连保留期一起停掉。现在 bean 无条件注册，仅在同步方法内部按开关短路，清理照常执行。同步入口补充顶层异常边界。
+
+### 其他
+
+`DorisAuditAccessCheckpoint` 的主键显式声明为 `IdType.INPUT`，与仓库内其他非自增主键实体一致。

@@ -7,6 +7,7 @@ import com.onedata.portal.entity.TableAccessDaily;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -35,6 +36,9 @@ public interface TableAccessDailyMapper {
             @Param("clusterIds") List<Long> clusterIds,
             @Param("hotStart") LocalDate hotStart,
             @Param("historyStart") LocalDate historyStart);
+
+    @Select("SELECT MIN(access_date) FROM table_access_daily WHERE cluster_id = #{clusterId}")
+    LocalDate selectEarliestAccessDate(@Param("clusterId") Long clusterId);
 
     @Delete("DELETE FROM table_access_daily WHERE access_date < #{threshold}")
     int deleteBefore(@Param("threshold") LocalDate threshold);
