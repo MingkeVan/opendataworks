@@ -115,14 +115,18 @@ class DorisAuditAccessBatchServiceTest {
     }
 
     @Test
-    void markFailureKeepsWatermarkSoTheNextRunResumesFromTheSameCursor() {
+    void markFailureKeepsWatermarkButRestartsTrustedCoverage() {
+        // 恢复时不重扫 overlap，故障期间可能已漏事件；保留旧覆盖起点会让追平后的 READY
+        // 把带缺口的区间当成连续 90 天，从而输出错误冷表。
         DorisAuditAccessBatchService service = new DorisAuditAccessBatchService(
                 processedEventMapper, dailyMapper, userDailyMapper, checkpointMapper);
         LocalDateTime watermark = LocalDateTime.now().minusMinutes(30);
+        LocalDateTime before = LocalDateTime.now();
         DorisAuditAccessCheckpoint existing = new DorisAuditAccessCheckpoint();
         existing.setClusterId(1L);
         existing.setSyncStatus("READY");
         existing.setWatermarkTime(watermark);
+        existing.setCoverageStart(LocalDateTime.now().minusDays(120));
         existing.setLastSyncedAt(LocalDateTime.now().minusMinutes(10));
         when(checkpointMapper.selectById(1L)).thenReturn(existing);
 
@@ -133,6 +137,7 @@ class DorisAuditAccessBatchServiceTest {
         verify(checkpointMapper).updateById(captor.capture());
         assertEquals(watermark, captor.getValue().getWatermarkTime());
         assertEquals("DEGRADED", captor.getValue().getSyncStatus());
+        assertTrue(!captor.getValue().getCoverageStart().isBefore(before));
     }
 
     private DorisAuditAccessBatchService service() {

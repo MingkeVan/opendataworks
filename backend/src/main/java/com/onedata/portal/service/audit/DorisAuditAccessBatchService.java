@@ -83,7 +83,11 @@ public class DorisAuditAccessBatchService {
     }
 
     /**
-     * 记录同步失败。水位与覆盖起点保持不变，下一轮从原游标继续。
+     * 记录同步失败。水位保留，下一轮从原游标继续；可信覆盖范围重新累计。
+     * <p>
+     * 恢复时不重扫 overlap 窗口，故障期间可能已经漏掉迟到的事件，
+     * 保留旧的覆盖起点会让追平后的 {@code READY} 把带缺口的区间当成连续 90 天，进而给出错误的冷表结论。
+     * 代价是一次故障会让冷表暂停一个完整窗口，对非核心统计而言这比引入额外状态更划算。
      */
     @Transactional
     public void markFailure(Long clusterId, String auditSource, String error) {
@@ -101,6 +105,7 @@ public class DorisAuditAccessBatchService {
         if (StringUtils.hasText(auditSource)) {
             checkpoint.setAuditSource(auditSource);
         }
+        checkpoint.setCoverageStart(LocalDateTime.now());
         checkpoint.setSyncStatus(checkpoint.getLastSyncedAt() == null ? "UNAVAILABLE" : "DEGRADED");
         checkpoint.setLastError(truncate(error, 1000));
         checkpointMapper.updateById(checkpoint);
