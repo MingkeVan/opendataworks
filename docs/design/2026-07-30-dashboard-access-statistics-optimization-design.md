@@ -95,7 +95,9 @@ Flyway 只创建门户 MySQL 表，不连接 Doris。应用启动后由后台任
 
 `initial-history-days` 属性、对应环境变量与 `queryAvailableStart()` 一并删除。副作用是每轮最多消费 10 分钟的审计日志，单轮执行预算与批量写入不再是瓶颈。
 
-checkpoint 被重置但汇总仍在时，覆盖起点取 `table_access_daily` 中该集群的最早日期，避免重新空等一个完整窗口。
+checkpoint 丢失时一律从当前安全上界重新开始。汇总表的最早日期只能证明那天存在一条记录，不能证明此后连续完整；据此声明覆盖会把中间未汇总的区间当成已覆盖，并可能给出不可靠的冷表结论。宁可重新攒满窗口。
+
+升级前已处于 `BACKFILLING` 且水位落后超过一个 overlap 窗口的 checkpoint，会被一次性转换为纯增量：覆盖起点与水位一并重置到当前安全上界。已落库的汇总仍保留并计入热点，但不再享有覆盖声明。已经追平过的集群（`READY`）不满足该条件，正常运行不会被误重置。
 
 ### 水位改用审计源时钟
 
@@ -103,17 +105,33 @@ checkpoint 被重置但汇总仍在时，覆盖起点取 `table_access_daily` �
 
 现在每轮在同一集群上执行一次 `SELECT NOW()`，以审计源自身的时间减去安全延迟作为上界；偏差超过 overlap 窗口时记录告警。使用不带精度参数的 `NOW()` 以覆盖较老的 Doris 版本。
 
+水位保持单调：当源时间早于已保存水位（时钟回拨）时保留原游标并直接降级返回，不写回更早的水位。否则空批次会把水位回退，之后重复扫描；去重记录过期后还会重复累计。
+
 ### 解析阶段排除系统库
 
 `DorisAuditSqlTableParser` 丢弃 `information_schema`、`__internal_schema`、`doris_audit_db__`、`mysql`、`sys`、`performance_schema` 下的引用。两种已知审计源布局都位于上述库中，因此同步任务不会再把自己每轮的审计查询写成永久热点。
 
 ### Dashboard 聚合窗口收敛
 
-原查询按 `max(coldDays, summary-retention-days)` 回看约 400 天。更早的访问记录不会改变冷热分类：窗口内无记录的表 `lastAccessTime` 为空，随后回退到建表时间判断，结论一致。窗口改为 `max(hotDays, coldDays)`，代价仅是极冷表的“最后访问时间”展示为空。
+原查询按 `max(coldDays, summary-retention-days)` 回看约 400 天。更早的访问记录不会改变冷热分类：窗口内无记录的表 `lastAccessTime` 为空，随后回退到建表时间判断，结论一致。窗口改为热点自然日窗口与冷表阈值所在自然日中较早的一个，代价仅是极冷表的“最后访问时间”展示为空。
+
+冷表阈值是精确时刻而非自然日，因此聚合起点必须取 `coldThreshold.toLocalDate()`：若按 `today - coldDays + 1` 取整，阈值当天晚些时候发生的访问会落在窗口外，把活跃表误判成冷表。
 
 ### 关闭同步不再停止数据清理
 
 清理任务原先与同步任务共用一个 `@ConditionalOnProperty` bean，`DORIS_AUDIT_ACCESS_SYNC_ENABLED=false` 会连保留期一起停掉。现在 bean 无条件注册，仅在同步方法内部按开关短路，清理照常执行。同步入口补充顶层异常边界。
+
+### 失败不再覆盖同步阶段
+
+`markFailure` 原先把 `sync_status` 改写为 `DEGRADED`/`UNAVAILABLE`，失败前所处阶段随之丢失。恢复时 `wasReady` 为假，既不会减去 overlap 窗口重扫（故障期间迟到的事件永久漏掉），成功批次又会被标记回 `BACKFILLING`，界面状态错误降级。
+
+现在 `sync_status` 只表示同步阶段，失败信息单独记在 `last_error` 上；对外的 `DEGRADED`/`UNAVAILABLE` 由读取侧按 `last_error` 与 `last_synced_at` 推导。成功批次会清空 `last_error`，状态随之恢复。无需新增列，旧数据中直接写着 `DEGRADED` 的 checkpoint 仍按原样展示。
+
+### 解析范围的边界
+
+系统库与审计源之外，解析器还屏蔽字符串字面量与注释，并排除 CTE 名称（仅限无库名限定的引用，带库名的同名表仍视为真实资产）。
+
+未采用“按元数据表 allow-list 在摄入期过滤”：过滤发生在摄入期意味着只有事件消费时已纳管的表才有历史，之后纳管的存量表会因缺少汇总而回退到建表时间判断，被误报为长期未用表，且审计日志过期后无法自愈。在线查询仍然只返回 `data_table` 中的资产，残留行不会出现在界面上。
 
 ### 其他
 

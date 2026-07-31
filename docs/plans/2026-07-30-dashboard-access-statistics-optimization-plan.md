@@ -40,20 +40,23 @@
 ### 改动文件
 
 - `backend/src/main/java/com/onedata/portal/service/audit/DorisAuditAccessSyncService.java`
-  - 删除 `queryAvailableStart()`，`initializeCheckpoint()` 改为增量起点并在已有汇总时沿用最早日期
+  - 删除 `queryAvailableStart()`，`initializeCheckpoint()` 一律从当前安全上界开始
   - 新增 `queryAuditSourceNow()`，安全上界改用审计源时钟并记录时钟偏差
-- `backend/src/main/java/com/onedata/portal/service/audit/DorisAuditSqlTableParser.java`：系统库 deny-list
-- `backend/src/main/java/com/onedata/portal/service/DorisTableAccessService.java`：Dashboard 聚合窗口收敛为 `max(hotDays, coldDays)`
-- `backend/src/main/java/com/onedata/portal/mapper/TableAccessDailyMapper.java`：新增 `selectEarliestAccessDate`
+  - 新增时钟回拨保护：源时间早于已保存水位时保留游标并降级返回
+  - 新增 `isStaleBackfill()` / `adoptIncrementalOnly()`：一次性转换遗留 `BACKFILLING` checkpoint
+- `backend/src/main/java/com/onedata/portal/service/audit/DorisAuditSqlTableParser.java`：系统库 deny-list、字符串与注释屏蔽、CTE 名称排除
+- `backend/src/main/java/com/onedata/portal/service/DorisTableAccessService.java`：聚合窗口收敛并对齐冷表阈值所在自然日；新增 `effectiveStatus()` 从 `last_error` 推导降级状态
+- `backend/src/main/java/com/onedata/portal/service/audit/DorisAuditAccessBatchService.java`：`markFailure` 保留同步阶段，失败信息只记入 `last_error`
 - `backend/src/main/java/com/onedata/portal/scheduled/DorisAuditAccessSyncTask.java`：清理任务无条件注册，同步入口加异常边界
 - `backend/src/main/java/com/onedata/portal/entity/DorisAuditAccessCheckpoint.java`：`IdType.INPUT`
 - `backend/src/main/java/com/onedata/portal/config/DorisAuditAccessSyncProperties.java`、`application.yml`、`deploy/.env.example`：删除 `initial-history-days`
 
 ### 验证
 
-- 定向后端测试 21 项通过：`mvn -pl backend -am -Dtest=DorisAuditSqlTableParserTest,DorisAuditAccessSyncPropertiesTest,DorisTableAccessServiceTest,DorisAuditAccessBatchServiceTest,DorisAuditAccessSyncTaskTest -Dsurefire.failIfNoSpecifiedTests=false test`
+- 定向后端测试 32 项通过：`mvn -pl backend -am -Dtest=DorisAuditSqlTableParserTest,DorisAuditAccessSyncPropertiesTest,DorisTableAccessServiceTest,DorisAuditAccessBatchServiceTest,DorisAuditAccessSyncTaskTest,DorisAuditAccessSyncServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`
 - 后端打包通过：`mvn -pl backend -am -DskipTests package`
-- 新增用例：审计源与系统库被丢弃、同语句中的业务表保留、首日覆盖不足时冷表沉默、关闭同步后清理仍执行、同步异常不逃逸到调度线程
+- 新增用例：审计源与系统库被丢弃、同语句中的业务表保留、CTE 名称排除但保留其来源表与同名限定表、字符串与注释中的表名被忽略、首日覆盖不足时冷表沉默、关闭同步后清理仍执行、同步异常不逃逸到调度线程
+- 新增用例：冷表聚合起点对齐阈值自然日、`last_error` 推导 DEGRADED 且不覆盖阶段、错误清空后恢复 READY、`markFailure` 保留阶段、遗留回填被转换而已追平集群不被重置
 - 未执行：真实 Doris 集群上的增量消费与 `SELECT NOW()` 时钟校验，需在具备审计表的环境中补做
 
 ### 回退

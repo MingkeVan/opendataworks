@@ -61,6 +61,42 @@ class DorisAuditSqlTableParserTest {
     }
 
     @Test
+    void ignoresCteNamesButKeepsTheirSourceTables() {
+        List<AuditTableReference> references = parser.parse(
+                "WITH recent AS (SELECT * FROM dwd.orders), "
+                        + "ranked AS (SELECT * FROM recent) "
+                        + "SELECT * FROM ranked JOIN recent ON 1 = 1",
+                "dwd");
+
+        assertEquals(1, references.size());
+        assertEquals("dwd", references.get(0).getDatabaseName());
+        assertEquals("orders", references.get(0).getTableName());
+    }
+
+    @Test
+    void keepsQualifiedTableThatSharesNameWithCte() {
+        List<AuditTableReference> references = parser.parse(
+                "WITH orders AS (SELECT 1) SELECT * FROM dwd.orders", "ads");
+
+        assertEquals(1, references.size());
+        assertEquals("dwd", references.get(0).getDatabaseName());
+        assertEquals("orders", references.get(0).getTableName());
+    }
+
+    @Test
+    void ignoresTableTokensInsideStringLiteralsAndComments() {
+        List<AuditTableReference> references = parser.parse(
+                "SELECT 'copied from dwd.ghost_one' AS note, \"join dwd.ghost_two\" AS other "
+                        + "-- from dwd.ghost_three\n"
+                        + "/* join dwd.ghost_four */ "
+                        + "FROM dwd.orders",
+                "dwd");
+
+        assertEquals(1, references.size());
+        assertEquals("orders", references.get(0).getTableName());
+    }
+
+    @Test
     void usesDefaultDatabaseAndClassifiesUpdateAndDeleteAsWrites() {
         List<AuditTableReference> references = parser.parse(
                 "UPDATE orders SET status = 1; DELETE FROM order_items WHERE id = 2",

@@ -215,18 +215,21 @@ public class DorisTableAccessService {
         }
 
         LocalDate today = LocalDate.now();
-        // 只扫描冷表判断所需的窗口：更早的访问记录不会改变冷热分类，仅影响“最后访问时间”的展示精度。
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime coldThreshold = now.minusDays(coldDays);
+        LocalDate hotStart = windowStart(today, hotDays);
+        // 冷表阈值是精确时刻，聚合窗口必须回看到它所在的自然日，
+        // 否则阈值当天下午的访问会落在窗口外，把活跃表误判成冷表。
+        LocalDate historyStart = coldThreshold.toLocalDate().isBefore(hotStart)
+                ? coldThreshold.toLocalDate()
+                : hotStart;
         List<DashboardTableAccessAggregate> aggregates = tableAccessDailyMapper.selectDashboardAggregates(
-                new ArrayList<>(clustersWithSummary),
-                windowStart(today, hotDays),
-                windowStart(today, Math.max(hotDays, coldDays)));
+                new ArrayList<>(clustersWithSummary), hotStart, historyStart);
         Map<String, DashboardTableAccessAggregate> aggregateIndex = new HashMap<>();
         for (DashboardTableAccessAggregate aggregate : aggregates) {
             aggregateIndex.put(key(aggregate.getClusterId(), aggregate.getDbName(), aggregate.getTableName()), aggregate);
         }
 
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime coldThreshold = now.minusDays(coldDays);
         List<DashboardTableAccessItem> hotItems = new ArrayList<>();
         List<DashboardTableAccessItem> coldItems = new ArrayList<>();
         for (DataTable table : tables) {
@@ -282,11 +285,27 @@ public class DorisTableAccessService {
             return stateFromCheckpoint("UNAVAILABLE", null, requiredDays, now,
                     "尚无 Doris 审计访问汇总数据。");
         }
-        String status = StringUtils.hasText(checkpoint.getSyncStatus())
-                ? checkpoint.getSyncStatus().toUpperCase(Locale.ROOT)
-                : "UNAVAILABLE";
+        String status = effectiveStatus(checkpoint);
         String note = buildNote(status, checkpoint, requiredDays, now);
         return stateFromCheckpoint(status, checkpoint, requiredDays, now, note);
+    }
+
+    /**
+     * 对外状态。
+     * <p>
+     * {@code sync_status} 保存的是同步阶段，供恢复时判断是否需要重扫 overlap 窗口；
+     * 失败信息单独记在 {@code last_error} 上，因此降级状态在这里推导，而不是覆盖阶段。
+     */
+    private String effectiveStatus(DorisAuditAccessCheckpoint checkpoint) {
+        if (checkpoint == null) {
+            return "UNAVAILABLE";
+        }
+        if (StringUtils.hasText(checkpoint.getLastError())) {
+            return checkpoint.getLastSyncedAt() == null ? "UNAVAILABLE" : "DEGRADED";
+        }
+        return StringUtils.hasText(checkpoint.getSyncStatus())
+                ? checkpoint.getSyncStatus().toUpperCase(Locale.ROOT)
+                : "UNAVAILABLE";
     }
 
     private AccessState buildOverallState(List<Long> clusterIds,
@@ -304,12 +323,13 @@ public class DorisTableAccessService {
         }
         boolean missingCluster = clusterIds.stream().anyMatch(id -> !checkpoints.containsKey(id));
         Collection<DorisAuditAccessCheckpoint> values = checkpoints.values();
+        Set<String> statuses = values.stream().map(this::effectiveStatus).collect(Collectors.toSet());
         String status;
-        if (missingCluster || values.stream().anyMatch(item -> "UNAVAILABLE".equalsIgnoreCase(item.getSyncStatus()))) {
+        if (missingCluster || statuses.contains("UNAVAILABLE")) {
             status = values.stream().anyMatch(item -> item.getLastSyncedAt() != null) ? "DEGRADED" : "UNAVAILABLE";
-        } else if (values.stream().anyMatch(item -> "DEGRADED".equalsIgnoreCase(item.getSyncStatus()))) {
+        } else if (statuses.contains("DEGRADED")) {
             status = "DEGRADED";
-        } else if (values.stream().anyMatch(item -> "BACKFILLING".equalsIgnoreCase(item.getSyncStatus()))) {
+        } else if (statuses.contains("BACKFILLING")) {
             status = "BACKFILLING";
         } else {
             status = "READY";

@@ -93,9 +93,20 @@ public class DorisAuditAccessSyncService {
             DorisAuditAccessCheckpoint checkpoint = checkpointMapper.selectById(clusterId);
             if (checkpoint == null || checkpoint.getWatermarkTime() == null) {
                 checkpoint = initializeCheckpoint(clusterId, source, safeUpperBound);
+            } else if (checkpoint.getWatermarkTime().isAfter(safeUpperBound)) {
+                // 源时钟回拨。继续处理会把水位写回更早的时刻，之后重复扫描；
+                // 去重记录过期后还会重复累计，因此保留游标并显式降级。
+                batchService.markFailure(clusterId, auditSourceName,
+                        "Doris 审计源时间早于已保存水位，疑似时钟回拨，已暂停推进");
+                summaryCache.evictCluster(clusterId);
+                log.warn("Doris audit source clock moved backwards, cluster={}, watermark={}, safeUpperBound={}",
+                        clusterId, checkpoint.getWatermarkTime(), safeUpperBound);
+                return;
+            } else if (isStaleBackfill(checkpoint, safeUpperBound)) {
+                checkpoint = adoptIncrementalOnly(clusterId, source, checkpoint, safeUpperBound);
             }
 
-            boolean wasReady = "READY".equalsIgnoreCase(checkpoint.getSyncStatus());
+            boolean wasReady = hasTrustedWatermark(checkpoint);
             LocalDateTime localCursorTime = wasReady
                     ? checkpoint.getWatermarkTime().minusMinutes(Math.max(0, properties.getOverlapMinutes()))
                     : checkpoint.getWatermarkTime();
@@ -189,19 +200,53 @@ public class DorisAuditAccessSyncService {
     /**
      * 汇总只做增量累积，不从审计表回填历史。
      * <p>
-     * 覆盖起点即同步启动时间，冷表判断由 {@code coverageStart} 门控，等窗口攒够后自动生效。
-     * 已有汇总存在时（例如 checkpoint 被重置）沿用其最早日期，避免白白重新等待一个完整窗口。
+     * 覆盖起点即同步启动时间。已有汇总的最早日期只能证明那天存在一条记录，
+     * 不能证明此后连续完整，因此不用它推导可信覆盖——宁可重新攒满窗口，也不要基于可能有缺口的
+     * 历史给出冷表结论。
      */
     private DorisAuditAccessCheckpoint initializeCheckpoint(Long clusterId,
             AuditSource source,
             LocalDateTime safeUpperBound) {
-        LocalDate earliestSummary = tableAccessDailyMapper.selectEarliestAccessDate(clusterId);
-        LocalDateTime coverageStart = earliestSummary == null
-                ? safeUpperBound
-                : earliestSummary.atStartOfDay();
         batchService.initializeCheckpoint(
-                clusterId, source.qualifiedName(), coverageStart, safeUpperBound);
+                clusterId, source.qualifiedName(), safeUpperBound, safeUpperBound);
         return checkpointMapper.selectById(clusterId);
+    }
+
+    /**
+     * 升级前遗留的 90 天回填 checkpoint：水位远落后于安全上界且尚未取得可信水位。
+     * <p>
+     * 已经追平过的集群（{@code READY}）永远不满足该条件，因此正常运行的集群不会被误重置。
+     */
+    boolean isStaleBackfill(DorisAuditAccessCheckpoint checkpoint, LocalDateTime safeUpperBound) {
+        return !hasTrustedWatermark(checkpoint)
+                && checkpoint.getWatermarkTime()
+                .isBefore(safeUpperBound.minusMinutes(Math.max(1, properties.getOverlapMinutes())));
+    }
+
+    /**
+     * 放弃未完成的历史回填，改为从当前安全上界开始纯增量累积。
+     * <p>
+     * 已落库的汇总仍然保留并计入热点，但覆盖起点重置为当前时刻：只有真正连续消费过的区间才配得上覆盖声明。
+     */
+    private DorisAuditAccessCheckpoint adoptIncrementalOnly(Long clusterId,
+            AuditSource source,
+            DorisAuditAccessCheckpoint checkpoint,
+            LocalDateTime safeUpperBound) {
+        log.info("Dropping unfinished Doris audit backfill, cluster={}, watermark={}, coverageStart={}",
+                clusterId, checkpoint.getWatermarkTime(), checkpoint.getCoverageStart());
+        batchService.initializeCheckpoint(
+                clusterId, source.qualifiedName(), safeUpperBound, safeUpperBound);
+        return checkpointMapper.selectById(clusterId);
+    }
+
+    /**
+     * 水位是否已经追平过审计源。
+     * <p>
+     * {@code markFailure} 不再覆盖 {@code sync_status}，因此这里读到的仍是失败前所处阶段：
+     * 故障恢复时能正确减去 overlap 窗口重扫，不会漏掉故障期间迟到的事件。
+     */
+    private boolean hasTrustedWatermark(DorisAuditAccessCheckpoint checkpoint) {
+        return "READY".equalsIgnoreCase(checkpoint.getSyncStatus());
     }
 
     private LocalDateTime queryAuditSourceNow(Long clusterId) throws SQLException {

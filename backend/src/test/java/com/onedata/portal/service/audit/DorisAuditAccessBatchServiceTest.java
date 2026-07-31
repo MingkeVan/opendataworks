@@ -114,6 +114,26 @@ class DorisAuditAccessBatchServiceTest {
         org.junit.jupiter.api.Assertions.assertNull(captor.getValue().getLastSyncedAt());
     }
 
+    @Test
+    void markFailureRecordsErrorWithoutLosingTheSyncPhase() {
+        // 阶段丢失会让恢复时跳过 overlap 重扫，故障期间迟到的事件将永久漏掉。
+        DorisAuditAccessBatchService service = new DorisAuditAccessBatchService(
+                processedEventMapper, dailyMapper, userDailyMapper, checkpointMapper);
+        DorisAuditAccessCheckpoint existing = new DorisAuditAccessCheckpoint();
+        existing.setClusterId(1L);
+        existing.setSyncStatus("READY");
+        existing.setLastSyncedAt(LocalDateTime.now().minusMinutes(10));
+        when(checkpointMapper.selectById(1L)).thenReturn(existing);
+
+        service.markFailure(1L, "audit", "Doris connection refused");
+
+        ArgumentCaptor<DorisAuditAccessCheckpoint> captor =
+                ArgumentCaptor.forClass(DorisAuditAccessCheckpoint.class);
+        verify(checkpointMapper).updateById(captor.capture());
+        assertEquals("READY", captor.getValue().getSyncStatus());
+        assertEquals("Doris connection refused", captor.getValue().getLastError());
+    }
+
     private DorisAuditAccessBatchService service() {
         when(checkpointMapper.selectById(1L)).thenReturn(new DorisAuditAccessCheckpoint());
         return new DorisAuditAccessBatchService(
