@@ -58,7 +58,11 @@ public class DataTaskService {
     private static final int DEFAULT_TASK_TIMEOUT_SECONDS = 60;
     private static final String DEFAULT_DOLPHIN_FLAG = "YES";
     private static final String DEFAULT_OPERATOR = "system";
-    private static final int MAX_TASK_IDENTITY_LENGTH = 100;
+    // Keep aligned with data_task.task_name VARCHAR(100) in V1__init.sql.
+    private static final int MAX_TASK_NAME_LENGTH = 100;
+    // Keep aligned with data_task.task_code VARCHAR(100) in V1__init.sql.
+    private static final int MAX_TASK_CODE_LENGTH = 100;
+    private static final int MAX_ARCHIVED_CODE_ATTEMPTS = 1000;
     private static final String DELETED_IDENTITY_SUFFIX = "__deleted_";
 
     private final DataTaskMapper dataTaskMapper;
@@ -937,7 +941,10 @@ public class DataTaskService {
             return;
         }
 
-        archiveUniqueIdentity(task);
+        if (!archiveUniqueIdentity(task)) {
+            log.info("Task was already deleted while archiving identity: taskId={}", id);
+            return;
+        }
 
         // 删除血缘关系
         dataLineageMapper.delete(
@@ -966,37 +973,60 @@ public class DataTaskService {
      * {@code uk_task_name(task_name, deleted)} 上发生冲突，也不会继续占用
      * {@code uk_task_code(task_code)}。</p>
      */
-    private void archiveUniqueIdentity(DataTask task) {
+    private boolean archiveUniqueIdentity(DataTask task) {
         if (task == null || task.getId() == null) {
-            return;
+            return false;
         }
-        String archivedTaskCode = buildArchivedIdentity(task.getTaskCode(), task.getId());
-        String archivedTaskName = buildArchivedIdentity(task.getTaskName(), task.getId());
+        String originalTaskCode = task.getTaskCode();
+        String originalTaskName = task.getTaskName();
+        String suffix = DELETED_IDENTITY_SUFFIX + task.getId();
+        String archivedTaskCode = buildAvailableArchivedTaskCode(originalTaskCode, task.getId());
+        String archivedTaskName = buildArchivedIdentity(
+                originalTaskName, suffix, MAX_TASK_NAME_LENGTH);
+        int expectedDeleted = Objects.equals(task.getDeleted(), 1) ? 1 : 0;
         int updated = dataTaskMapper.archiveUniqueIdentity(
-                task.getId(), archivedTaskCode, archivedTaskName);
+                task.getId(), archivedTaskCode, archivedTaskName, expectedDeleted);
         if (updated == 0) {
-            log.debug("Task identity was already archived or removed: taskId={}", task.getId());
+            return false;
         }
+        log.info("Archived task identity: taskId={}, taskCode={} -> {}, taskName={} -> {}",
+                task.getId(), originalTaskCode, archivedTaskCode, originalTaskName, archivedTaskName);
         task.setTaskCode(archivedTaskCode);
         task.setTaskName(archivedTaskName);
+        return true;
     }
 
     /**
-     * 兼容修复前已逻辑删除的数据：创建任务时按需释放仍占用原编码的历史记录。
+     * 单层兼容修复：仅当创建请求命中修复前遗留的已删除编码时归档该记录。
+     *
+     * <p>工作流导入/同步仍保留其“包含删除记录分配新编码”的既有策略；
+     * 普通任务创建则复用用户明确提交的编码，避免全量数据迁移。</p>
      */
     private void releaseDeletedTaskCode(String taskCode) {
         if (!StringUtils.hasText(taskCode)) {
             return;
         }
         DataTask deletedTask = dataTaskMapper.selectDeletedByTaskCode(taskCode);
-        if (deletedTask != null) {
-            archiveUniqueIdentity(deletedTask);
+        if (deletedTask != null && !archiveUniqueIdentity(deletedTask)) {
+            throw new BusinessException("任务编码已存在: " + taskCode);
         }
     }
 
-    private String buildArchivedIdentity(String original, Long taskId) {
-        String suffix = DELETED_IDENTITY_SUFFIX + taskId;
-        int maxPrefixLength = Math.max(0, MAX_TASK_IDENTITY_LENGTH - suffix.length());
+    private String buildAvailableArchivedTaskCode(String original, Long taskId) {
+        for (int attempt = 1; attempt <= MAX_ARCHIVED_CODE_ATTEMPTS; attempt++) {
+            String suffix = DELETED_IDENTITY_SUFFIX + taskId
+                    + (attempt == 1 ? "" : "_" + attempt);
+            String candidate = buildArchivedIdentity(original, suffix, MAX_TASK_CODE_LENGTH);
+            Long count = dataTaskMapper.countByTaskCodeIncludingDeleted(candidate);
+            if (count == null || count == 0) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException("无法生成唯一的任务归档编码: taskId=" + taskId);
+    }
+
+    private String buildArchivedIdentity(String original, String suffix, int maxLength) {
+        int maxPrefixLength = Math.max(0, maxLength - suffix.length());
         String prefix = StringUtils.hasText(original) ? original : "task";
         int codePointCount = prefix.codePointCount(0, prefix.length());
         if (codePointCount > maxPrefixLength) {

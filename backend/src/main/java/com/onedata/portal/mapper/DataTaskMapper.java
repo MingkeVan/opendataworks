@@ -21,8 +21,9 @@ public interface DataTaskMapper extends BaseMapper<DataTask> {
     DataTask selectDeletedByTaskCode(@Param("taskCode") String taskCode);
 
     @Update("UPDATE data_task SET task_code = #{taskCode}, task_name = #{taskName}, "
-            + "updated_at = CURRENT_TIMESTAMP WHERE id = #{id}")
+            + "updated_at = CURRENT_TIMESTAMP WHERE id = #{id} AND deleted = #{expectedDeleted}")
     int archiveUniqueIdentity(@Param("id") Long id,
             @Param("taskCode") String taskCode,
-            @Param("taskName") String taskName);
+            @Param("taskName") String taskName,
+            @Param("expectedDeleted") Integer expectedDeleted);
 }
