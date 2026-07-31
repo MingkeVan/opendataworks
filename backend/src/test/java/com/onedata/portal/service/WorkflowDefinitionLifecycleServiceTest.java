@@ -79,6 +79,9 @@ class WorkflowDefinitionLifecycleServiceTest {
 
     private WorkflowDefinitionLifecycleService service;
 
+    @Mock
+    private com.onedata.portal.service.lineage.TaskLineageConsistencyChecker lineageConsistencyChecker;
+
     @BeforeEach
     void setUp() {
         service = new WorkflowDefinitionLifecycleService(
@@ -87,6 +90,7 @@ class WorkflowDefinitionLifecycleServiceTest {
                 dolphinSchedulerService,
                 dataTaskService,
                 workflowService,
+                lineageConsistencyChecker,
                 dataWorkflowMapper,
                 dataTaskMapper,
                 workflowVersionMapper,

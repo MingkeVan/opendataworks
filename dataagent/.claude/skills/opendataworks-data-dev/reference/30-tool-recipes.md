@@ -48,7 +48,23 @@ portal_create_task {
   output_table_ids: [<来自 analyze>]
 }
 ```
-更新：`portal_update_task {task_id, task, input_table_ids, output_table_ids}`（仅 draft）。
+创建时两个血缘字段都必须显式给出；无输入表就传 `[]`，输出表至少一个。
+
+更新：`portal_update_task {task_id, task, input_table_ids?, output_table_ids?}`（仅 draft）。
+
+血缘字段是**全量列表**：省略表示保留原值，传数组表示整体替换该侧。只改一侧时省略另一侧，
+不要回传不完整的列表——漏掉的表 ID 会被删除。
+
+```
+# 只改 SQL，不动血缘
+portal_update_task { task_id, task: {...} }
+
+# 只重写输入表，输出保持不变
+portal_update_task { task_id, task: {...}, input_table_ids: [<全部输入>] }
+```
+
+SQL 任务保存时后端会校验 `portal_analyze_sql` 的高可信匹配：SQL 中已明确解析出的表
+必须出现在最终血缘里，否则保存被拒并列出缺失表，按提示补齐后重试。
 
 ## 4. 组装工作流（draft）
 

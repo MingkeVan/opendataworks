@@ -131,8 +131,8 @@ class CreateTaskInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task: dict[str, Any] = Field(..., description="任务定义(对齐平台 DataTask 字段,如 taskName/dolphinNodeType/taskSql/datasourceName)")
-    input_table_ids: list[int] = Field(default_factory=list, description="输入表 ID 列表(维护血缘)")
-    output_table_ids: list[int] = Field(default_factory=list, description="输出表 ID 列表(维护血缘)")
+    input_table_ids: list[int] = Field(..., description="输入表 ID 列表(维护血缘);无输入表时显式传 []")
+    output_table_ids: list[int] = Field(..., description="输出表 ID 列表(维护血缘);至少一个")
 
 
 class UpdateTaskInput(BaseModel):
@@ -140,8 +140,14 @@ class UpdateTaskInput(BaseModel):
 
     task_id: int = Field(..., description="任务 ID")
     task: dict[str, Any] = Field(..., description="任务定义(仅 draft 状态可更新)")
-    input_table_ids: list[int] = Field(default_factory=list)
-    output_table_ids: list[int] = Field(default_factory=list)
+    input_table_ids: list[int] | None = Field(
+        default=None,
+        description="输入表 ID 全量列表;省略表示保留原有输入血缘,传数组表示全量替换,传 [] 表示清空",
+    )
+    output_table_ids: list[int] | None = Field(
+        default=None,
+        description="输出表 ID 全量列表;省略表示保留原有输出血缘,传数组表示全量替换;不可清空",
+    )
 
 
 class TaskIdInput(BaseModel):
@@ -352,7 +358,7 @@ def build_mcp_server(service: PortalToolService) -> FastMCP:
         annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
     )
     async def portal_create_task(params: CreateTaskInput) -> dict[str, Any]:
-        """Create a draft data-development task (e.g. a SQL task). Requires input/output table ids for lineage."""
+        """Create a draft data-development task (e.g. a SQL task). Both input_table_ids and output_table_ids must be provided explicitly; pass [] for no inputs, and at least one output id."""
         return await service.create_task(
             {
                 "task": params.task,
@@ -366,15 +372,15 @@ def build_mcp_server(service: PortalToolService) -> FastMCP:
         annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
     )
     async def portal_update_task(params: UpdateTaskInput) -> dict[str, Any]:
-        """Update a draft task definition."""
-        return await service.update_task(
-            params.task_id,
-            {
-                "task": params.task,
-                "inputTableIds": params.input_table_ids,
-                "outputTableIds": params.output_table_ids,
-            },
-        )
+        """Update a draft task definition. Lineage lists are full replacements: omit a side to keep its existing lineage, pass a full array to replace it. Never pass a partial list — omitted table ids are deleted."""
+        payload: dict[str, Any] = {"task": params.task}
+        # 只把显式提供的血缘放进 payload。省略的字段必须在 JSON 中真正缺席，
+        # 后端据此区分"保留原值"与"清空"；发成 [] 会被理解成清空该侧血缘。
+        if "input_table_ids" in params.model_fields_set:
+            payload["inputTableIds"] = params.input_table_ids
+        if "output_table_ids" in params.model_fields_set:
+            payload["outputTableIds"] = params.output_table_ids
+        return await service.update_task(params.task_id, payload)
 
     @mcp.tool(
         name="portal_get_task",

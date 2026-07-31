@@ -5,11 +5,11 @@ import com.onedata.auth.annotation.RequireAuth;
 import com.onedata.auth.context.UserContextHolder;
 import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
+import com.onedata.portal.dto.task.TaskLineageResponse;
 import com.onedata.portal.dto.TaskExecutionStatus;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.service.DataTaskService;
 import com.onedata.portal.service.DolphinSchedulerService;
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -168,13 +168,4 @@ public class DataTaskController {
         private List<Long> outputTableIds;
     }
 
-    /**
-     * 任务血缘关系响应
-     */
-    @Data
-    @AllArgsConstructor
-    public static class TaskLineageResponse {
-        private List<Long> inputTableIds;
-        private List<Long> outputTableIds;
-    }
 }

@@ -26,6 +26,7 @@ import com.onedata.portal.entity.WorkflowVersion;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
+import com.onedata.portal.service.lineage.TaskLineageConsistencyChecker;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -72,6 +73,7 @@ public class WorkflowDefinitionLifecycleService {
     private final DolphinSchedulerService dolphinSchedulerService;
     private final DataTaskService dataTaskService;
     private final WorkflowService workflowService;
+    private final TaskLineageConsistencyChecker lineageConsistencyChecker;
     private final DataWorkflowMapper dataWorkflowMapper;
     private final DataTaskMapper dataTaskMapper;
     private final WorkflowVersionMapper workflowVersionMapper;
@@ -156,6 +158,10 @@ public class WorkflowDefinitionLifecycleService {
         WorkflowExportJsonResponse response = new WorkflowExportJsonResponse();
         response.setFileName(buildExportFileName(workflow));
         response.setContent(content);
+        // 附带一致性问题但不阻断：buildDefinitionJsonForExport 已经保证有定义就原样导出、
+        // 不会在导出阶段重写，这里只负责让用户知道导出的定义可能有问题。
+        response.setConsistencyIssues(lineageConsistencyChecker.checkWorkflow(
+                dataWorkflowMapper.selectById(workflowId), true));
         return response;
     }
 

@@ -1,5 +1,5 @@
 {
-  "description": "SQL 数据任务创建模板(portal_create_task 的 task 字段)。占位符用 <> 标注,填写前替换。",
+  "description": "SQL 数据任务创建模板(portal_create_task 的 task 字段)。占位符用 <> 标注,填写前替换。input_table_ids/output_table_ids 是全量列表,创建时必须显式填写,output_table_ids 至少一个,留空会被后端拒绝。",
   "task": {
     "taskName": "<dwd_layer_table_di>",
     "taskType": "batch",
@@ -16,6 +16,6 @@
     "retryInterval": 60,
     "status": "draft"
   },
-  "input_table_ids": [],
-  "output_table_ids": []
+  "input_table_ids": ["<来自 portal_analyze_sql 的全部输入表 ID,无输入表时保留空数组>"],
+  "output_table_ids": ["<来自 portal_analyze_sql 的输出表 ID,至少一个>"]
 }

@@ -173,3 +173,92 @@ def test_operator_contextvar_propagates_into_request_headers(monkeypatch):
     finally:
         reset()
     assert scope_context.get_operator_header() == ""
+
+
+async def _call_tool(mcp, name, arguments):
+    """Invoke a registered MCP tool by name with raw arguments."""
+    tools = {t.name: t for t in await mcp.list_tools()}
+    assert name in tools, f"missing tool {name}"
+    # Registered tools take a single `params` model, so raw args nest under it.
+    return await mcp._tool_manager.call_tool(name, {"params": arguments})
+
+
+@pytest.mark.anyio
+async def test_update_task_omitting_lineage_leaves_keys_absent():
+    """Omitted lineage must be truly absent from the JSON payload.
+
+    The backend distinguishes null ("keep existing lineage") from [] ("clear
+    that side"). Sending [] for an omitted field silently wipes lineage, which
+    is the bug this contract prevents.
+    """
+    backend = RecordingBackend()
+    mcp = build_mcp_server(PortalToolService(backend))
+
+    await _call_tool(mcp, "portal_update_task", {"task_id": 7, "task": {"taskName": "t"}})
+
+    name, args, _ = backend.calls[-1]
+    assert name == "update_task"
+    payload = args[1]
+    assert "inputTableIds" not in payload
+    assert "outputTableIds" not in payload
+
+
+@pytest.mark.anyio
+async def test_update_task_keeps_explicit_empty_list_as_clear_intent():
+    backend = RecordingBackend()
+    mcp = build_mcp_server(PortalToolService(backend))
+
+    await _call_tool(
+        mcp,
+        "portal_update_task",
+        {"task_id": 7, "task": {"taskName": "t"}, "input_table_ids": []},
+    )
+
+    payload = backend.calls[-1][1][1]
+    assert payload["inputTableIds"] == []
+    # the untouched side must stay absent, not become []
+    assert "outputTableIds" not in payload
+
+
+@pytest.mark.anyio
+async def test_update_task_forwards_explicit_lists_as_full_replacement():
+    backend = RecordingBackend()
+    mcp = build_mcp_server(PortalToolService(backend))
+
+    await _call_tool(
+        mcp,
+        "portal_update_task",
+        {
+            "task_id": 7,
+            "task": {"taskName": "t"},
+            "input_table_ids": [1, 2],
+            "output_table_ids": [9],
+        },
+    )
+
+    payload = backend.calls[-1][1][1]
+    assert payload["inputTableIds"] == [1, 2]
+    assert payload["outputTableIds"] == [9]
+
+
+def test_update_task_lineage_fields_are_optional():
+    from portal_mcp.app import UpdateTaskInput
+
+    inp = UpdateTaskInput(task_id=7, task={"taskName": "t"})
+    assert inp.input_table_ids is None
+    assert inp.output_table_ids is None
+    assert "input_table_ids" not in inp.model_fields_set
+
+
+def test_create_task_requires_both_lineage_fields():
+    from portal_mcp.app import CreateTaskInput
+
+    # Creation has no prior lineage to fall back on, so both sides must be stated.
+    with pytest.raises(ValidationError):
+        CreateTaskInput(task={"taskName": "t"})
+    with pytest.raises(ValidationError):
+        CreateTaskInput(task={"taskName": "t"}, input_table_ids=[1])
+
+    ok = CreateTaskInput(task={"taskName": "t"}, input_table_ids=[], output_table_ids=[9])
+    assert ok.input_table_ids == []
+    assert ok.output_table_ids == [9]

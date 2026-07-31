@@ -19,6 +19,8 @@ import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
+import com.onedata.portal.service.lineage.TaskLineageConsistencyChecker;
+import com.onedata.portal.service.lineage.TaskLineageWriteService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -93,6 +95,12 @@ class DataTaskServiceWorkflowMetadataTest {
     @Mock
     private WorkflowService workflowService;
 
+    @Mock
+    private TaskLineageWriteService taskLineageWriteService;
+
+    @Mock
+    private TaskLineageConsistencyChecker taskLineageConsistencyChecker;
+
     @InjectMocks
     private DataTaskService dataTaskService;
 
@@ -125,6 +133,24 @@ class DataTaskServiceWorkflowMetadataTest {
         assertEquals(3, result.getDownstreamTaskCount());
     }
 
+    /**
+     * 省略血缘参数时，update() 会读取库里的既有血缘作为最终值。
+     * 已落库的任务必然带输出表（创建时就强制了），这里如实模拟。
+     */
+    private void stubExistingLineage(Long taskId, Long inputTableId, Long outputTableId) {
+        DataLineage input = new DataLineage();
+        input.setTaskId(taskId);
+        input.setUpstreamTableId(inputTableId);
+        input.setLineageType("input");
+        DataLineage output = new DataLineage();
+        output.setTaskId(taskId);
+        output.setDownstreamTableId(outputTableId);
+        output.setLineageType("output");
+        when(dataLineageMapper.selectList(any())).thenReturn(
+                Collections.singletonList(input),
+                Collections.singletonList(output));
+    }
+
     @Test
     void updateClearingWorkflowIdRemovesRelationAndRefreshesPreviousWorkflow() {
         DataTask existing = new DataTask();
@@ -143,8 +169,7 @@ class DataTaskServiceWorkflowMetadataTest {
         when(dataTaskMapper.selectById(1L)).thenReturn(existing);
         when(workflowTaskRelationMapper.selectOne(any())).thenReturn(relation);
         when(dataTaskMapper.updateById(updatePayload)).thenReturn(1);
-        when(dataLineageMapper.delete(any())).thenReturn(0);
-        when(tableTaskRelationMapper.hardDeleteByTaskId(1L)).thenReturn(1);
+        stubExistingLineage(1L, 11L, 12L);
 
         dataTaskService.update(updatePayload, null, null);
 
@@ -398,8 +423,7 @@ class DataTaskServiceWorkflowMetadataTest {
         when(dataTaskMapper.selectById(301L)).thenReturn(existing, persisted, persisted);
         when(workflowTaskRelationMapper.selectOne(any())).thenReturn(null);
         when(dataTaskMapper.updateById(updatePayload)).thenReturn(1);
-        when(dataLineageMapper.delete(any())).thenReturn(0);
-        when(tableTaskRelationMapper.hardDeleteByTaskId(301L)).thenReturn(1);
+        stubExistingLineage(301L, 31L, 32L);
 
         DataTask result = dataTaskService.update(updatePayload, null, null);
 
@@ -474,8 +498,6 @@ class DataTaskServiceWorkflowMetadataTest {
                 "task-delete-no-dolphin__deleted_401",
                 "task-delete-no-dolphin__deleted_401",
                 0)).thenReturn(1);
-        when(dataLineageMapper.delete(any())).thenReturn(2);
-        when(tableTaskRelationMapper.hardDeleteByTaskId(401L)).thenReturn(1);
         when(workflowTaskRelationMapper.hardDeleteByTaskId(401L)).thenReturn(1);
         when(dataTaskMapper.deleteById(401L)).thenReturn(1);
 

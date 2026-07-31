@@ -24,6 +24,10 @@ import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
+import com.onedata.portal.dto.task.TaskLineageResponse;
+import com.onedata.portal.service.lineage.LineageValidationMode;
+import com.onedata.portal.service.lineage.TaskLineageConsistencyChecker;
+import com.onedata.portal.service.lineage.TaskLineageWriteService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -75,6 +79,8 @@ public class DataTaskService {
     private final DataQueryService dataQueryService;
     private final DorisClusterService dorisClusterService;
     private final WorkflowService workflowService;
+    private final TaskLineageWriteService taskLineageWriteService;
+    private final TaskLineageConsistencyChecker taskLineageConsistencyChecker;
 
     /**
      * 分页查询任务列表
@@ -201,7 +207,18 @@ public class DataTaskService {
      */
     @Transactional
     public DataTask create(DataTask task, List<Long> inputTableIds, List<Long> outputTableIds) {
-        validateTask(task, inputTableIds, outputTableIds);
+        return create(task, inputTableIds, outputTableIds, LineageValidationMode.LENIENT);
+    }
+
+    /**
+     * 创建任务。创建时血缘没有"原值"可保留，两侧都按传入值处理，输出必须至少一个。
+     */
+    @Transactional
+    public DataTask create(DataTask task,
+            List<Long> inputTableIds,
+            List<Long> outputTableIds,
+            LineageValidationMode validationMode) {
+        validateTask(task, inputTableIds, outputTableIds, validationMode);
 
         // 检查任务名称是否已存在
         if (isTaskNameExists(task.getTaskName())) {
@@ -223,29 +240,8 @@ public class DataTaskService {
         dataTaskMapper.insert(task);
         log.info("Created task: {}", task.getTaskName());
 
-        // 创建血缘关系
-        if (inputTableIds != null) {
-            for (Long tableId : inputTableIds) {
-                DataLineage lineage = new DataLineage();
-                lineage.setTaskId(task.getId());
-                lineage.setUpstreamTableId(tableId);
-                lineage.setLineageType("input");
-                dataLineageMapper.insert(lineage);
-            }
-        }
-
-        if (outputTableIds != null) {
-            for (Long tableId : outputTableIds) {
-                DataLineage lineage = new DataLineage();
-                lineage.setTaskId(task.getId());
-                lineage.setDownstreamTableId(tableId);
-                lineage.setLineageType("output");
-                dataLineageMapper.insert(lineage);
-            }
-        }
-
-        // 维护表与任务的关联关系
-        saveTableTaskRelations(task.getId(), inputTableIds, outputTableIds);
+        // 血缘与表任务关系走统一写入口，保证与工作流定义同源
+        taskLineageWriteService.replaceTaskLineage(task.getId(), inputTableIds, outputTableIds);
 
         // 如果提供了 wokflowId，建立工作流关联
         if (task.getWorkflowId() != null) {
@@ -273,15 +269,51 @@ public class DataTaskService {
     }
 
     /**
-     * 更新任务
+     * 更新任务（宽松校验）
      */
     @Transactional
     public DataTask update(DataTask task, List<Long> inputTableIds, List<Long> outputTableIds) {
-        validateTask(task, inputTableIds, outputTableIds);
+        return update(task, inputTableIds, outputTableIds, LineageValidationMode.LENIENT);
+    }
+
+    /**
+     * 更新任务。
+     *
+     * <p>血缘按侧独立合并，语义固定为：
+     * <ul>
+     *   <li>{@code null}（字段省略）：保留原值</li>
+     *   <li>{@code []}：清空该侧</li>
+     *   <li>非空数组：全量替换该侧</li>
+     * </ul>
+     *
+     * <p>执行顺序是"读取已有血缘 → 按侧合并 → 校验最终列表 → 写入"。校验失败前不删除任何记录，
+     * 避免出现"校验抛错但血缘已被清空"的中间态。
+     */
+    @Transactional
+    public DataTask update(DataTask task,
+            List<Long> inputTableIds,
+            List<Long> outputTableIds,
+            LineageValidationMode validationMode) {
+        if (task == null) {
+            throw new IllegalArgumentException("任务不能为空");
+        }
         DataTask exists = dataTaskMapper.selectById(task.getId());
         if (exists == null) {
             throw new BusinessException("任务不存在");
         }
+
+        // 先按侧合并出最终血缘，再用最终结果校验。
+        // 只传一侧时，另一侧必须沿用库里的既有值，否则"只替换输入"会被误判成"输出为空"。
+        boolean lineageProvided = inputTableIds != null || outputTableIds != null;
+        TaskLineageResponse currentLineage = getTaskLineage(task.getId());
+        List<Long> finalInputTableIds = inputTableIds != null
+                ? inputTableIds
+                : currentLineage.getInputTableIds();
+        List<Long> finalOutputTableIds = outputTableIds != null
+                ? outputTableIds
+                : currentLineage.getOutputTableIds();
+
+        validateTask(task, finalInputTableIds, finalOutputTableIds, validationMode, exists);
 
         WorkflowTaskRelation workflowRelation = workflowTaskRelationMapper.selectOne(
                 Wrappers.<WorkflowTaskRelation>lambdaQuery()
@@ -300,54 +332,16 @@ public class DataTaskService {
         dataTaskMapper.updateById(task);
         log.info("Updated task: {}", task.getTaskName());
 
-        // 删除旧的血缘关系
-        dataLineageMapper.delete(
-                new LambdaQueryWrapper<DataLineage>()
-                        .eq(DataLineage::getTaskId, task.getId()));
-
-        clearTableTaskRelations(task.getId());
-
-        // 创建新的输入血缘关系
-        if (inputTableIds != null) {
-            for (Long tableId : inputTableIds) {
-                DataLineage lineage = new DataLineage();
-                lineage.setTaskId(task.getId());
-                lineage.setUpstreamTableId(tableId);
-                lineage.setLineageType("input");
-                dataLineageMapper.insert(lineage);
-            }
+        // 两侧都省略时完全跳过血缘写入，避免无谓的删除重建。
+        if (lineageProvided) {
+            taskLineageWriteService.replaceTaskLineage(task.getId(), finalInputTableIds, finalOutputTableIds);
         }
-
-        // 创建新的输出血缘关系
-        if (outputTableIds != null) {
-            for (Long tableId : outputTableIds) {
-                DataLineage lineage = new DataLineage();
-                lineage.setTaskId(task.getId());
-                lineage.setDownstreamTableId(tableId);
-                lineage.setLineageType("output");
-                dataLineageMapper.insert(lineage);
-            }
-        }
-
-        saveTableTaskRelations(task.getId(), inputTableIds, outputTableIds);
 
         syncWorkflowRelation(task.getId(), task.getWorkflowId(), workflowRelation, previousWorkflowId);
 
         normalizeTaskMetadataOnPersist(task.getId(), task.getWorkflowId(), previousWorkflowId, task.getOwner());
         DataTask persisted = dataTaskMapper.selectById(task.getId());
         return persisted != null ? persisted : task;
-    }
-
-    /**
-     * 更新任务（仅基本信息，不更新血缘）
-     * 
-     * @deprecated 使用 update(DataTask, List<Long>, List<Long>) 代替
-     */
-    @Deprecated
-    @Transactional
-    public DataTask update(DataTask task) {
-        com.onedata.portal.controller.DataTaskController.TaskLineageResponse lineage = getTaskLineage(task.getId());
-        return update(task, lineage.getInputTableIds(), lineage.getOutputTableIds());
     }
 
     /**
@@ -947,11 +941,7 @@ public class DataTaskService {
         }
 
         // 删除血缘关系
-        dataLineageMapper.delete(
-                new LambdaQueryWrapper<DataLineage>()
-                        .eq(DataLineage::getTaskId, id));
-
-        clearTableTaskRelations(id);
+        taskLineageWriteService.clearTaskLineage(id);
 
         // 删除工作流任务关联关系
         workflowTaskRelationMapper.hardDeleteByTaskId(id);
@@ -1036,38 +1026,6 @@ public class DataTaskService {
         return prefix + suffix;
     }
 
-    private void saveTableTaskRelations(Long taskId, List<Long> inputTableIds, List<Long> outputTableIds) {
-        if (taskId == null) {
-            return;
-        }
-
-        if (inputTableIds != null) {
-            LinkedHashSet<Long> uniqueInputs = inputTableIds.stream()
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toCollection(LinkedHashSet::new));
-            for (Long tableId : uniqueInputs) {
-                TableTaskRelation relation = new TableTaskRelation();
-                relation.setTaskId(taskId);
-                relation.setTableId(tableId);
-                relation.setRelationType("read");
-                tableTaskRelationMapper.insert(relation);
-            }
-        }
-
-        if (outputTableIds != null) {
-            LinkedHashSet<Long> uniqueOutputs = outputTableIds.stream()
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toCollection(LinkedHashSet::new));
-            for (Long tableId : uniqueOutputs) {
-                TableTaskRelation relation = new TableTaskRelation();
-                relation.setTaskId(taskId);
-                relation.setTableId(tableId);
-                relation.setRelationType("write");
-                tableTaskRelationMapper.insert(relation);
-            }
-        }
-    }
-
     private void syncWorkflowRelation(Long taskId,
             Long workflowId,
             WorkflowTaskRelation workflowRelation,
@@ -1114,14 +1072,6 @@ public class DataTaskService {
         if (previousWorkflowId != null && !previousWorkflowId.equals(workflowId)) {
             workflowService.refreshTaskRelations(previousWorkflowId);
         }
-    }
-
-    private void clearTableTaskRelations(Long taskId) {
-        if (taskId == null) {
-            return;
-        }
-        // 使用物理删除以避免逻辑删除记录命中唯一索引(uk_table_task)
-        tableTaskRelationMapper.hardDeleteByTaskId(taskId);
     }
 
     private String resolveWorkflowDisplayName(DataTask task) {
@@ -1193,7 +1143,7 @@ public class DataTaskService {
     /**
      * 获取任务的血缘关系（输入表和输出表ID列表）
      */
-    public com.onedata.portal.controller.DataTaskController.TaskLineageResponse getTaskLineage(Long taskId) {
+    public TaskLineageResponse getTaskLineage(Long taskId) {
         // 获取输入表
         List<DataLineage> inputLineages = dataLineageMapper.selectList(
                 new LambdaQueryWrapper<DataLineage>()
@@ -1214,9 +1164,7 @@ public class DataTaskService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
-        return new com.onedata.portal.controller.DataTaskController.TaskLineageResponse(
-                inputTableIds,
-                outputTableIds);
+        return new TaskLineageResponse(inputTableIds, outputTableIds);
     }
 
     private void attachExecutionStatus(List<DataTask> tasks) {
@@ -1402,18 +1350,90 @@ public class DataTaskService {
         return status;
     }
 
-    private void validateTask(DataTask task, List<Long> inputTableIds, List<Long> outputTableIds) {
+    private void validateTask(DataTask task,
+            List<Long> finalInputTableIds,
+            List<Long> finalOutputTableIds,
+            LineageValidationMode validationMode) {
+        validateTask(task, finalInputTableIds, finalOutputTableIds, validationMode, null);
+    }
+
+    /**
+     * 校验合并后的最终血缘。
+     *
+     * <p>血缘入参必须是合并结果而非原始请求：只替换一侧时，另一侧为 {@code null} 并不代表被清空。
+     *
+     * <p>任务字段同理。更新请求只携带调用方显式提交的字段，
+     * 而 {@code updateById} 只写非空字段，因此保存后生效的是"请求覆盖在旧值之上"的结果。
+     * 校验必须针对这个有效任务，否则只提交 {@code taskName} 的部分更新会因为
+     * {@code dolphinNodeType} 为空而被当成非 SQL 任务，直接绕过 SQL 一致性校验。
+     *
+     * @param exists 库中旧值；创建时为 {@code null}
+     */
+    private void validateTask(DataTask task,
+            List<Long> finalInputTableIds,
+            List<Long> finalOutputTableIds,
+            LineageValidationMode validationMode,
+            DataTask exists) {
         if (task == null) {
             throw new IllegalArgumentException("任务不能为空");
         }
+        // dolphinFlag 归一化会写回请求对象本身，必须作用在真实入参上，不能挪到副本里。
         task.setDolphinFlag(normalizeDolphinFlag(task.getDolphinFlag()));
-        boolean enforceLineage = task.getId() == null || inputTableIds != null || outputTableIds != null;
-        if (enforceLineage && isEmptyTableSelection(outputTableIds)) {
-            if ("SQL".equalsIgnoreCase(task.getDolphinNodeType())) {
+
+        DataTask effectiveTask = buildEffectiveTaskForValidation(task, exists);
+        if (isEmptyTableSelection(finalOutputTableIds)) {
+            if ("SQL".equalsIgnoreCase(effectiveTask.getDolphinNodeType())) {
                 throw new IllegalArgumentException("SQL 任务必须至少配置一个输出表");
             }
             throw new IllegalArgumentException("任务必须至少配置一个输出表");
         }
+        if (validationMode == LineageValidationMode.STRICT) {
+            validateHighConfidenceLineage(effectiveTask, finalInputTableIds, finalOutputTableIds);
+        }
+    }
+
+    /**
+     * 构造"请求覆盖旧值"后的有效任务视图，仅用于校验。
+     *
+     * <p>只填充校验真正读取的字段。返回副本而非修改入参，避免把旧值意外写回请求对象、
+     * 进而被 {@code updateById} 当成本次提交的变更持久化。
+     */
+    private DataTask buildEffectiveTaskForValidation(DataTask task, DataTask exists) {
+        if (exists == null) {
+            return task;
+        }
+        DataTask effective = new DataTask();
+        effective.setId(task.getId() != null ? task.getId() : exists.getId());
+        effective.setTaskName(StringUtils.hasText(task.getTaskName())
+                ? task.getTaskName() : exists.getTaskName());
+        effective.setDolphinNodeType(StringUtils.hasText(task.getDolphinNodeType())
+                ? task.getDolphinNodeType() : exists.getDolphinNodeType());
+        effective.setTaskSql(StringUtils.hasText(task.getTaskSql())
+                ? task.getTaskSql() : exists.getTaskSql());
+        effective.setDolphinTaskCode(task.getDolphinTaskCode() != null
+                ? task.getDolphinTaskCode() : exists.getDolphinTaskCode());
+        return effective;
+    }
+
+    /**
+     * STRICT 模式下的 SQL 高可信缺失校验。
+     *
+     * <p>只拒绝 SQL 已明确匹配、但最终血缘里没有的表。多余血缘、未匹配、歧义都不拒绝，
+     * 否则引用外部表或方言 SQL 的任务会连保存都做不到。
+     */
+    private void validateHighConfidenceLineage(DataTask effectiveTask,
+            List<Long> finalInputTableIds,
+            List<Long> finalOutputTableIds) {
+        TaskLineageConsistencyChecker.HighConfidenceGap gap = taskLineageConsistencyChecker
+                .findHighConfidenceGap(effectiveTask, finalInputTableIds, finalOutputTableIds);
+        if (gap.isEmpty()) {
+            return;
+        }
+        throw new BusinessException(String.format(
+                "任务[%s] 的 SQL 已解析出以下表，但未包含在提交的血缘中：%s。"
+                        + "请补全 inputTableIds/outputTableIds 后重试；若只想更新其中一侧，可省略另一侧字段以保留原值。",
+                taskLabel(effectiveTask),
+                gap.describe()));
     }
 
     private boolean isEmptyTableSelection(List<Long> tableIds) {

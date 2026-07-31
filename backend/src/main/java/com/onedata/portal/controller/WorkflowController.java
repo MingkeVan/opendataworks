@@ -6,6 +6,7 @@ import com.onedata.portal.dto.Result;
 import com.onedata.portal.dto.workflow.WorkflowApprovalRequest;
 import com.onedata.portal.dto.workflow.WorkflowBackfillRequest;
 import com.onedata.portal.dto.workflow.WorkflowExportJsonResponse;
+import com.onedata.portal.dto.workflow.WorkflowLineageConsistencyResponse;
 import com.onedata.portal.dto.workflow.WorkflowImportCommitRequest;
 import com.onedata.portal.dto.workflow.WorkflowImportCommitResponse;
 import com.onedata.portal.dto.workflow.WorkflowImportPreviewRequest;
@@ -31,6 +32,7 @@ import com.onedata.portal.service.WorkflowPublishService;
 import com.onedata.portal.service.WorkflowDefinitionLifecycleService;
 import com.onedata.portal.service.WorkflowScheduleService;
 import com.onedata.portal.service.WorkflowService;
+import com.onedata.portal.service.lineage.TaskLineageConsistencyChecker;
 import com.onedata.portal.service.WorkflowVersionOperationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -48,6 +50,7 @@ public class WorkflowController {
     private final WorkflowScheduleService workflowScheduleService;
     private final WorkflowVersionOperationService workflowVersionOperationService;
     private final WorkflowDefinitionLifecycleService workflowDefinitionLifecycleService;
+    private final TaskLineageConsistencyChecker lineageConsistencyChecker;
 
     @GetMapping
     public Result<PageResult<DataWorkflow>> list(WorkflowQueryRequest request) {
@@ -121,6 +124,15 @@ public class WorkflowController {
     @GetMapping("/{id}/export-json")
     public Result<WorkflowExportJsonResponse> exportJson(@PathVariable Long id) {
         return Result.success(workflowDefinitionLifecycleService.exportJson(id));
+    }
+
+    /**
+     * 只读血缘一致性报告。用于在切换 {@code workflow.lineage-consistency.enforcement-mode}
+     * 之前扫描存量工作流，确认阻断范围。
+     */
+    @GetMapping("/{id}/lineage-consistency")
+    public Result<WorkflowLineageConsistencyResponse> lineageConsistency(@PathVariable Long id) {
+        return Result.success(lineageConsistencyChecker.report(id));
     }
 
     @PostMapping("/{id}/publish")

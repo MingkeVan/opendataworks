@@ -11,6 +11,7 @@ import com.onedata.portal.dto.DolphinTaskGroupOption;
 import com.onedata.portal.dto.workflow.WorkflowApprovalRequest;
 import com.onedata.portal.dto.workflow.WorkflowPublishPreviewResponse;
 import com.onedata.portal.dto.workflow.WorkflowPublishRepairIssue;
+import com.onedata.portal.service.lineage.TaskLineageConsistencyChecker;
 import com.onedata.portal.dto.workflow.WorkflowPublishRepairRequest;
 import com.onedata.portal.dto.workflow.WorkflowPublishRepairResponse;
 import com.onedata.portal.dto.workflow.WorkflowPublishRequest;
@@ -97,6 +98,7 @@ public class WorkflowPublishService {
     private final WorkflowDeployService workflowDeployService;
     private final DolphinSchedulerService dolphinSchedulerService;
     private final WorkflowService workflowService;
+    private final TaskLineageConsistencyChecker lineageConsistencyChecker;
     private final ObjectMapper objectMapper;
 
     public WorkflowPublishPreviewResponse previewPublish(Long workflowId) {
@@ -133,7 +135,7 @@ public class WorkflowPublishService {
                 : repairDefinitionMetadataFromCatalog(workflow, operator, response);
         workflowService.normalizeAndPersistMetadata(workflowId, operator);
         DataWorkflow repairedWorkflow = dataWorkflowMapper.selectById(workflowId);
-        ensureBlockingRepairIssuesResolved(repairedWorkflow);
+        ensureBlockingRepairIssuesResolved(repairedWorkflow, BlockingCheckScenario.METADATA_REPAIR);
         response.setUpdatedTaskCount(updatedTaskCount);
         response.setRepaired(workflowChanged || updatedTaskCount > 0 || definitionChanged);
         return response;
@@ -151,6 +153,8 @@ public class WorkflowPublishService {
         }
         if ("deploy".equals(operation)) {
             workflow = workflowService.syncCurrentVersion(workflowId, request.getOperator(), "publish_auto_save");
+            // preview 可能被绕过（平台侧没有 previewToken 校验），因此在真正部署前再复检一次。
+            ensureBlockingRepairIssuesResolved(workflow, BlockingCheckScenario.PUBLISH_DEPLOY);
         }
         Long versionId = resolvePublishVersionId(workflow, request);
         WorkflowVersion version = versionId == null ? null : workflowVersionMapper.selectById(versionId);
@@ -270,7 +274,28 @@ public class WorkflowPublishService {
         }
         // 发布确认负责承载正常定义差异；修复元数据仅保留真实的元数据缺失问题，
         // 避免把 SQL / 调度等合理发布变更误判成“先修复元数据”。
-        response.setRepairIssues(buildPublishMetadataRepairIssues(workflow, platformDefinition));
+        List<WorkflowPublishRepairIssue> repairIssues =
+                new ArrayList<>(buildPublishMetadataRepairIssues(workflow, platformDefinition));
+        // preview 阶段 definitionJson 尚未被 syncCurrentVersion 重建，定义漂移在这里是有效信号。
+        List<WorkflowPublishRepairIssue> consistencyIssues =
+                lineageConsistencyChecker.checkWorkflow(workflow, true);
+        repairIssues.addAll(consistencyIssues);
+        response.setRepairIssues(repairIssues);
+
+        // block-missing 模式下，高可信缺失同时写入 errors 并置 canPublish=false，
+        // 让两个前端入口既有的 canPublish 门禁直接生效，无需各自新增拦截分支。
+        if (lineageConsistencyChecker.hasBlockingIssue(consistencyIssues)) {
+            for (WorkflowPublishRepairIssue issue : consistencyIssues) {
+                if (!TaskLineageConsistencyChecker.CODE_SQL_RELATION_MISSING.equals(issue.getCode())) {
+                    continue;
+                }
+                RuntimeSyncIssue error = RuntimeSyncIssue.error(issue.getCode(), issue.getMessage());
+                error.setWorkflowCode(workflow.getWorkflowCode());
+                error.setWorkflowName(workflow.getWorkflowName());
+                response.getErrors().add(error);
+            }
+        }
+
         RuntimeDiffSummary diffSummary = normalizePublishDiffSummary(rawDiffSummary);
         response.setDiffSummary(diffSummary);
         response.setRequireConfirm(diffSummary != null && Boolean.TRUE.equals(diffSummary.getChanged()));
@@ -1159,7 +1184,14 @@ public class WorkflowPublishService {
         return true;
     }
 
-    private void ensureBlockingRepairIssuesResolved(DataWorkflow workflow) {
+    /**
+     * 按场景复检阻断性问题。
+     *
+     * <p>{@link BlockingCheckScenario#METADATA_REPAIR} 只检查该修复动作本身能够解决的必填元数据；
+     * {@link BlockingCheckScenario#PUBLISH_DEPLOY} 额外检查 SQL 与关系表的高可信缺失，
+     * 保证平台与 Agent 即使绕过 preview，实际 deploy 仍会被拦住。
+     */
+    private void ensureBlockingRepairIssuesResolved(DataWorkflow workflow, BlockingCheckScenario scenario) {
         if (workflow == null) {
             return;
         }
@@ -1168,6 +1200,17 @@ public class WorkflowPublishService {
                 buildPlatformDefinition(workflow)).stream()
                 .filter(this::isBlockingRepairIssue)
                 .collect(Collectors.toList());
+        if (scenario == BlockingCheckScenario.PUBLISH_DEPLOY) {
+            // deploy 已经先执行 syncCurrentVersion()，definitionJson 必然与关系表一致，
+            // 此时再比对定义漂移只会拦下 deploy 本来就会修好的工作流，因此显式排除。
+            List<WorkflowPublishRepairIssue> consistencyIssues =
+                    lineageConsistencyChecker.checkWorkflow(workflow, false);
+            if (lineageConsistencyChecker.hasBlockingIssue(consistencyIssues)) {
+                consistencyIssues.stream()
+                        .filter(issue -> TaskLineageConsistencyChecker.CODE_SQL_RELATION_MISSING.equals(issue.getCode()))
+                        .forEach(unresolvedIssues::add);
+            }
+        }
         if (unresolvedIssues.isEmpty()) {
             return;
         }
@@ -1179,7 +1222,19 @@ public class WorkflowPublishService {
         String summary = details.isEmpty()
                 ? "请检查任务 datasourceId/taskGroupId"
                 : details;
-        throw new IllegalStateException("元数据修复未完成，仍存在必填 ID 字段缺失: " + summary);
+        throw new IllegalStateException(scenario == BlockingCheckScenario.PUBLISH_DEPLOY
+                ? "发布前校验未通过: " + summary
+                : "元数据修复未完成，仍存在必填 ID 字段缺失: " + summary);
+    }
+
+    /**
+     * 阻断性复检的调用场景。
+     */
+    private enum BlockingCheckScenario {
+        /** 元数据修复动作之后的自检。 */
+        METADATA_REPAIR,
+        /** 实际 deploy 之前的服务端复检。 */
+        PUBLISH_DEPLOY
     }
 
     private boolean isBlockingRepairIssue(WorkflowPublishRepairIssue issue) {
