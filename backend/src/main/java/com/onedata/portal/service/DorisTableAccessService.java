@@ -285,27 +285,11 @@ public class DorisTableAccessService {
             return stateFromCheckpoint("UNAVAILABLE", null, requiredDays, now,
                     "尚无 Doris 审计访问汇总数据。");
         }
-        String status = effectiveStatus(checkpoint);
-        String note = buildNote(status, checkpoint, requiredDays, now);
-        return stateFromCheckpoint(status, checkpoint, requiredDays, now, note);
-    }
-
-    /**
-     * 对外状态。
-     * <p>
-     * {@code sync_status} 保存的是同步阶段，供恢复时判断是否需要重扫 overlap 窗口；
-     * 失败信息单独记在 {@code last_error} 上，因此降级状态在这里推导，而不是覆盖阶段。
-     */
-    private String effectiveStatus(DorisAuditAccessCheckpoint checkpoint) {
-        if (checkpoint == null) {
-            return "UNAVAILABLE";
-        }
-        if (StringUtils.hasText(checkpoint.getLastError())) {
-            return checkpoint.getLastSyncedAt() == null ? "UNAVAILABLE" : "DEGRADED";
-        }
-        return StringUtils.hasText(checkpoint.getSyncStatus())
+        String status = StringUtils.hasText(checkpoint.getSyncStatus())
                 ? checkpoint.getSyncStatus().toUpperCase(Locale.ROOT)
                 : "UNAVAILABLE";
+        String note = buildNote(status, checkpoint, requiredDays, now);
+        return stateFromCheckpoint(status, checkpoint, requiredDays, now, note);
     }
 
     private AccessState buildOverallState(List<Long> clusterIds,
@@ -323,13 +307,12 @@ public class DorisTableAccessService {
         }
         boolean missingCluster = clusterIds.stream().anyMatch(id -> !checkpoints.containsKey(id));
         Collection<DorisAuditAccessCheckpoint> values = checkpoints.values();
-        Set<String> statuses = values.stream().map(this::effectiveStatus).collect(Collectors.toSet());
         String status;
-        if (missingCluster || statuses.contains("UNAVAILABLE")) {
+        if (missingCluster || values.stream().anyMatch(item -> "UNAVAILABLE".equalsIgnoreCase(item.getSyncStatus()))) {
             status = values.stream().anyMatch(item -> item.getLastSyncedAt() != null) ? "DEGRADED" : "UNAVAILABLE";
-        } else if (statuses.contains("DEGRADED")) {
+        } else if (values.stream().anyMatch(item -> "DEGRADED".equalsIgnoreCase(item.getSyncStatus()))) {
             status = "DEGRADED";
-        } else if (statuses.contains("BACKFILLING")) {
+        } else if (values.stream().anyMatch(item -> "BACKFILLING".equalsIgnoreCase(item.getSyncStatus()))) {
             status = "BACKFILLING";
         } else {
             status = "READY";

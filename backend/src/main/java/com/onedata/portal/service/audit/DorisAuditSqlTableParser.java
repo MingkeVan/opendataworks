@@ -108,8 +108,11 @@ public class DorisAuditSqlTableParser {
             chars[index] = ' ';
             index++;
             if (current == quote) {
-                // 连续两个引号是转义，仍在字面量内部。
+                // 连续两个引号是转义，必须一并吃掉；只跳过前一个会让字面量提前结束，
+                // 残留的引号再开启一段新“字面量”，把后面真正的表引用整段吞掉。
                 if (index < chars.length && chars[index] == quote) {
+                    chars[index] = ' ';
+                    index++;
                     continue;
                 }
                 return index;

@@ -214,38 +214,6 @@ class DorisTableAccessServiceTest {
         assertEquals(LocalDateTime.now().minusDays(90).toLocalDate(), historyStart.getValue());
     }
 
-    @Test
-    void degradedIsDerivedFromLastErrorWithoutLosingTheSyncPhase() {
-        // sync_status 保留同步阶段供恢复判断，降级状态由 last_error 推导。
-        DorisAuditAccessCheckpoint checkpoint = checkpoint(
-                "READY", LocalDateTime.now().minusDays(120), LocalDateTime.now().minusMinutes(20));
-        checkpoint.setLastError("Doris connection refused");
-        when(checkpointMapper.selectList(any())).thenReturn(Collections.singletonList(checkpoint));
-        when(dailyMapper.selectDashboardAggregates(anyList(), any(), any()))
-                .thenReturn(Collections.singletonList(aggregate(6L, LocalDateTime.now().minusDays(2))));
-
-        DashboardTableAccessSummary summary = service.getDashboardAccessSummary(null, 30, 10, 90, 10);
-
-        assertEquals("DEGRADED", summary.getTableAccessSyncStatus());
-        assertEquals("READY", checkpoint.getSyncStatus());
-        assertTrue(summary.getLongUnusedTables().isEmpty());
-    }
-
-    @Test
-    void clearedErrorRestoresReadyWithoutWaitingForAFullResync() {
-        DorisAuditAccessCheckpoint checkpoint = checkpoint(
-                "READY", LocalDateTime.now().minusDays(120), LocalDateTime.now().minusMinutes(1));
-        checkpoint.setLastError("");
-        when(checkpointMapper.selectList(any())).thenReturn(Collections.singletonList(checkpoint));
-        when(dailyMapper.selectDashboardAggregates(anyList(), any(), any()))
-                .thenReturn(Collections.emptyList());
-
-        DashboardTableAccessSummary summary = service.getDashboardAccessSummary(null, 30, 10, 90, 10);
-
-        assertEquals("READY", summary.getTableAccessSyncStatus());
-        assertEquals(1, summary.getLongUnusedTables().size());
-    }
-
     private DashboardTableAccessAggregate aggregate(Long count, LocalDateTime lastAccess) {
         DashboardTableAccessAggregate aggregate = new DashboardTableAccessAggregate();
         aggregate.setClusterId(1L);

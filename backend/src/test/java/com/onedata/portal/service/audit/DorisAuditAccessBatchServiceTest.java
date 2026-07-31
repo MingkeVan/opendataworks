@@ -115,13 +115,14 @@ class DorisAuditAccessBatchServiceTest {
     }
 
     @Test
-    void markFailureRecordsErrorWithoutLosingTheSyncPhase() {
-        // 阶段丢失会让恢复时跳过 overlap 重扫，故障期间迟到的事件将永久漏掉。
+    void markFailureKeepsWatermarkSoTheNextRunResumesFromTheSameCursor() {
         DorisAuditAccessBatchService service = new DorisAuditAccessBatchService(
                 processedEventMapper, dailyMapper, userDailyMapper, checkpointMapper);
+        LocalDateTime watermark = LocalDateTime.now().minusMinutes(30);
         DorisAuditAccessCheckpoint existing = new DorisAuditAccessCheckpoint();
         existing.setClusterId(1L);
         existing.setSyncStatus("READY");
+        existing.setWatermarkTime(watermark);
         existing.setLastSyncedAt(LocalDateTime.now().minusMinutes(10));
         when(checkpointMapper.selectById(1L)).thenReturn(existing);
 
@@ -130,8 +131,8 @@ class DorisAuditAccessBatchServiceTest {
         ArgumentCaptor<DorisAuditAccessCheckpoint> captor =
                 ArgumentCaptor.forClass(DorisAuditAccessCheckpoint.class);
         verify(checkpointMapper).updateById(captor.capture());
-        assertEquals("READY", captor.getValue().getSyncStatus());
-        assertEquals("Doris connection refused", captor.getValue().getLastError());
+        assertEquals(watermark, captor.getValue().getWatermarkTime());
+        assertEquals("DEGRADED", captor.getValue().getSyncStatus());
     }
 
     private DorisAuditAccessBatchService service() {

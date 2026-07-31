@@ -84,6 +84,18 @@ class DorisAuditSqlTableParserTest {
     }
 
     @Test
+    void doubledQuoteInsideLiteralDoesNotSwallowTheRealTable() {
+        // 只跳过转义引号的前一个字符会让字面量提前结束，残留引号再开启一段新“字面量”，
+        // 把后面真正的表引用整段吞掉。
+        List<AuditTableReference> references = parser.parse(
+                "SELECT 'it''s here' AS note FROM dwd.orders", "dwd");
+
+        assertEquals(1, references.size());
+        assertEquals("dwd", references.get(0).getDatabaseName());
+        assertEquals("orders", references.get(0).getTableName());
+    }
+
+    @Test
     void ignoresTableTokensInsideStringLiteralsAndComments() {
         List<AuditTableReference> references = parser.parse(
                 "SELECT 'copied from dwd.ghost_one' AS note, \"join dwd.ghost_two\" AS other "

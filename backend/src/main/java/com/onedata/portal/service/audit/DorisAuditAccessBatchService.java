@@ -83,10 +83,7 @@ public class DorisAuditAccessBatchService {
     }
 
     /**
-     * 记录同步失败，但保留 {@code sync_status} 所表示的同步阶段。
-     * <p>
-     * 对外的 DEGRADED/UNAVAILABLE 由读取侧根据 {@code last_error} 推导，
-     * 这样恢复时仍能知道失败前是否已经追平过水位，从而正确决定是否重扫 overlap 窗口。
+     * 记录同步失败。水位与覆盖起点保持不变，下一轮从原游标继续。
      */
     @Transactional
     public void markFailure(Long clusterId, String auditSource, String error) {
@@ -96,7 +93,7 @@ public class DorisAuditAccessBatchService {
             checkpoint.setClusterId(clusterId);
             checkpoint.setAuditSource(auditSource);
             checkpoint.setCoverageStart(LocalDateTime.now());
-            checkpoint.setSyncStatus("BACKFILLING");
+            checkpoint.setSyncStatus("UNAVAILABLE");
             checkpoint.setLastError(truncate(error, 1000));
             checkpointMapper.insert(checkpoint);
             return;
@@ -104,6 +101,7 @@ public class DorisAuditAccessBatchService {
         if (StringUtils.hasText(auditSource)) {
             checkpoint.setAuditSource(auditSource);
         }
+        checkpoint.setSyncStatus(checkpoint.getLastSyncedAt() == null ? "UNAVAILABLE" : "DEGRADED");
         checkpoint.setLastError(truncate(error, 1000));
         checkpointMapper.updateById(checkpoint);
     }
