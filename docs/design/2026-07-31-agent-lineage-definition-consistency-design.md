@@ -213,3 +213,27 @@ DataTableService -> TaskLineageWriteService -> WorkflowService
 - **与导入路径的故意不一致**：`WorkflowDefinitionLifecycleService` 导入时把 unmatched / ambiguous 当作硬 error。导入是新建对象，拦截无存量代价；发布面对的是存量，拦截有回归风险。该不对称是有意为之，不应以"统一行为"为由改成一致。
 - **校验留在 `DataTaskService` 而非 Agent 层**：合并逻辑只有一份实现，代价是 `DataTaskService` 多一个 `TaskLineageConsistencyChecker` 依赖。依赖方向已验证无环。
 - **deploy 复检增加 SQL 解析开销**：`publish()` 处于事务内，大工作流会明显变重。当前接受该代价，换取"绕过 preview 也拦得住"。若成为瓶颈，后续可按 `previewToken` 缓存 preview 结论复用。
+
+## Known Limitations
+
+### definitionJson 并发刷新存在丢失更新风险
+
+`WorkflowService.normalizeAndPersistMetadata()` 的模式是"读取工作流 → 按关系表重算 `definitionJson` → 写回"，
+`DataWorkflow` 上没有乐观锁字段，也没有悲观锁。同一工作流的多个任务被并发保存时
+（多用户，或用户与 Agent 同时操作），两次重算可能互相覆盖，最后写入的一方获胜。
+
+该风险不是本次引入的，`DataTaskService.update()` 与 `delete()` 早已走这条路径。
+但本次新增了 `SqlTableMatcherService.bindTaskRelations()` 与
+`DataTableService.purgeTableMetadata()` 两个刷新触发点，**发生概率被提高了**。
+
+本次不修，理由：
+
+- 加 `@Version` 需要新增数据库字段与迁移，本次明确不含 schema 变更。
+- 乐观锁会让所有并发保存路径开始抛冲突异常，需要配套的重试或提示策略，
+  影响面远超本次范围。
+- 每次刷新都是按关系表全量重算而非增量累加，覆盖的结果本身仍然是自洽的定义，
+  不会产生半损坏状态；丢失的是另一方那次刷新的时效性，下一次保存即可纠正。
+
+后续改进方向：在 `DataWorkflow` 引入 `@Version` 乐观锁，或在
+`normalizeAndPersistMetadata()` 内以 `SELECT ... FOR UPDATE` 锁定工作流行，
+并统一定义重试语义。应作为独立变更处理。

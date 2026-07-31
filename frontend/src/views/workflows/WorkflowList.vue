@@ -593,19 +593,29 @@ const previewPublishAndConfirm = async (row) => {
   if (advisoryIssues.length) {
     // repairable=false 的问题（血缘一致性告警）修复动作解决不了，只做只读提示后继续。
     // 需要真正阻断时服务端会置 canPublish=false，已在上面的 errors 分支拦下。
-    await ElMessageBox.alert(
-      buildConsistencyIssueHtml(
-        advisoryIssues,
-        '检测到血缘一致性问题。发布不会被阻断，但建议打开相关任务，按 SQL 分析结果补齐血缘后重新保存。'
-      ),
-      '血缘一致性提醒',
-      {
-        type: 'warning',
-        customClass: 'workflow-publish-message-box',
-        confirmButtonText: '知道了',
-        dangerouslyUseHTMLString: true
+    try {
+      await ElMessageBox.alert(
+        buildConsistencyIssueHtml(
+          advisoryIssues,
+          '检测到血缘一致性问题。发布不会被阻断，但建议打开相关任务，按 SQL 分析结果补齐血缘后重新保存。'
+        ),
+        '血缘一致性提醒',
+        {
+          type: 'warning',
+          customClass: 'workflow-publish-message-box',
+          confirmButtonText: '知道了',
+          dangerouslyUseHTMLString: true
+        }
+      )
+    } catch (error) {
+      // alert 在 ESC / 关闭按钮时 reject。不接住会一路冒泡到 handleDeploy 的 catch，
+      // 弹出 ElMessage.error('close') 这种无意义提示。
+      // 唯一的按钮是"知道了"=已知悉并继续，所以关闭动作按"先不发布"处理，静默中止。
+      if (isDialogCancel(error)) {
+        return false
       }
-    )
+      throw error
+    }
   }
   if (repairIssues.length) {
     try {

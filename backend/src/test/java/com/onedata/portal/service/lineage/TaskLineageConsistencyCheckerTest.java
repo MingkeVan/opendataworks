@@ -367,6 +367,57 @@ class TaskLineageConsistencyCheckerTest {
     }
 
     @Test
+    void malformedDefinitionJsonDegradesGracefullyInsteadOfFailingThePreview() {
+        // definitionJson 可能来自导入或历史版本，格式不受本模块控制。
+        // 解析失败只应放弃漂移比对，不能让发布预检和导出整体报错。
+        for (String broken : Arrays.asList(
+                "{not json",
+                "[]",
+                "{\"taskDefinitionList\":\"not-an-array\"}",
+                "{\"taskDefinitionList\":[{}],\"processTaskRelationList\":\"nope\"}")) {
+            DataWorkflow workflow = workflow();
+            workflow.setDefinitionJson(broken);
+            stubTwoTaskWorkflow(workflow);
+
+            List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+            assertTrue(issues.stream().noneMatch(issue ->
+                            TaskLineageConsistencyChecker.CODE_DEFINITION_DRIFT.equals(issue.getCode())),
+                    "definitionJson 无法解析时不应产生漂移问题，输入: " + broken);
+        }
+    }
+
+    @Test
+    void sqlTaskWithoutSqlTextIsSkippedInsteadOfBeingFlagged() {
+        // 节点类型是 SQL 但 taskSql 为空（草稿态常见），没有可解析的内容，不应报任何 SQL 类问题。
+        DataTask task = sqlTask(7L, "draft");
+        task.setTaskSql(null);
+
+        TaskLineageConsistencyChecker.HighConfidenceGap gap = checker.findHighConfidenceGap(
+                task, Collections.emptyList(), Collections.emptyList());
+
+        assertTrue(gap.isEmpty());
+        verify(sqlTableMatcherService, never()).analyze(any(), any());
+
+        task.setTaskSql("   ");
+        assertTrue(checker.findHighConfidenceGap(task, Collections.emptyList(), Collections.emptyList())
+                .isEmpty());
+        verify(sqlTableMatcherService, never()).analyze(any(), any());
+    }
+
+    @Test
+    void sqlParseFailureDoesNotBlockSave() {
+        // 解析器对方言 SQL 存在误判空间，抛异常时必须放行而不是拒绝保存。
+        when(sqlTableMatcherService.analyze(anyString(), anyString()))
+                .thenThrow(new IllegalStateException("parser blew up"));
+
+        TaskLineageConsistencyChecker.HighConfidenceGap gap = checker.findHighConfidenceGap(
+                sqlTask(7L, "t"), Collections.emptyList(), Collections.emptyList());
+
+        assertTrue(gap.isEmpty());
+    }
+
+    @Test
     void warnModeNeverReportsBlockingIssues() {
         WorkflowPublishRepairIssue missing = new WorkflowPublishRepairIssue();
         missing.setCode(TaskLineageConsistencyChecker.CODE_SQL_RELATION_MISSING);

@@ -128,6 +128,22 @@ class BackendAgentTaskServiceTest {
     }
 
     @Test
+    void updateTaskWithEmptyBodyKeepsBothLineageSidesUntouched() {
+        // 完全空的 task body 是合法的"只保留现状"请求，两侧血缘都必须原样保留。
+        AgentTaskUpsertRequest request = new AgentTaskUpsertRequest();
+        request.setTask(new LinkedHashMap<>());
+
+        service().updateTask(7L, request, "agent-operator");
+
+        ArgumentCaptor<List<Long>> inputs = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<Long>> outputs = ArgumentCaptor.forClass(List.class);
+        verify(dataTaskService).update(any(), inputs.capture(), outputs.capture(),
+                eq(LineageValidationMode.STRICT));
+        assertNull(inputs.getValue());
+        assertNull(outputs.getValue());
+    }
+
+    @Test
     void createTaskUsesStrictValidation() {
         AgentTaskUpsertRequest request = new AgentTaskUpsertRequest();
         request.setTask(new LinkedHashMap<>());

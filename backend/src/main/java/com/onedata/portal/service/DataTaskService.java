@@ -24,7 +24,7 @@ import com.onedata.portal.mapper.TaskExecutionLogMapper;
 import com.onedata.portal.mapper.TableTaskRelationMapper;
 import com.onedata.portal.mapper.WorkflowTaskRelationMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
-import com.onedata.portal.controller.DataTaskController;
+import com.onedata.portal.dto.task.TaskLineageResponse;
 import com.onedata.portal.service.lineage.LineageValidationMode;
 import com.onedata.portal.service.lineage.TaskLineageConsistencyChecker;
 import com.onedata.portal.service.lineage.TaskLineageWriteService;
@@ -305,7 +305,7 @@ public class DataTaskService {
         // 先按侧合并出最终血缘，再用最终结果校验。
         // 只传一侧时，另一侧必须沿用库里的既有值，否则"只替换输入"会被误判成"输出为空"。
         boolean lineageProvided = inputTableIds != null || outputTableIds != null;
-        DataTaskController.TaskLineageResponse currentLineage = getTaskLineage(task.getId());
+        TaskLineageResponse currentLineage = getTaskLineage(task.getId());
         List<Long> finalInputTableIds = inputTableIds != null
                 ? inputTableIds
                 : currentLineage.getInputTableIds();
@@ -1143,7 +1143,7 @@ public class DataTaskService {
     /**
      * 获取任务的血缘关系（输入表和输出表ID列表）
      */
-    public com.onedata.portal.controller.DataTaskController.TaskLineageResponse getTaskLineage(Long taskId) {
+    public TaskLineageResponse getTaskLineage(Long taskId) {
         // 获取输入表
         List<DataLineage> inputLineages = dataLineageMapper.selectList(
                 new LambdaQueryWrapper<DataLineage>()
@@ -1164,9 +1164,7 @@ public class DataTaskService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
-        return new com.onedata.portal.controller.DataTaskController.TaskLineageResponse(
-                inputTableIds,
-                outputTableIds);
+        return new TaskLineageResponse(inputTableIds, outputTableIds);
     }
 
     private void attachExecutionStatus(List<DataTask> tasks) {
