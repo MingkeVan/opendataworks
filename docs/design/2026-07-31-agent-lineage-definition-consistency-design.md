@@ -155,8 +155,15 @@ DataTableService -> TaskLineageWriteService -> WorkflowService
   （导出会得到一个不含任何任务的文件）。
 - 工作流没有绑定任何任务、而定义里还留着旧节点，同样是漂移。
 
-只有在**完全读不出节点清单**时才降级跳过：`definitionJson` 为空、JSON 解析失败、
-`taskDefinitionList` 缺失或不是数组。
+降级的含义是**不抛异常、不阻断**，而不是"静默当成没问题"。三种情形要分开：
+
+- `definitionJson` 为空：合法状态，定义尚未生成，导出会走构建兜底，不报任何问题。
+- 定义非空但读不出节点清单（JSON 解析失败、`taskDefinitionList` 缺失或不是数组）：
+  报告一个 repairable 的 `LINEAGE_DEFINITION_DRIFT` 说明定义不可检查，然后跳过详细比较。
+  不能静默——导出会把这段内容原样发出去，存量扫描也会把它统计成干净的。
+  该问题标记为 repairable 是准确的：`repairPublishMetadata()` 会调用
+  `normalizeAndPersistMetadata()` 按关系表重建定义，确实能修复。
+- 定义可读：进入下面的详细比较。
 
 数组里存在认不出 `taskId` 的节点属于"读得出但不完整"，**不放弃整份检查**：
 能识别的节点仍照常比较表清单与缺失边，同时单独报告"有 N 个节点无法识别 taskId，
@@ -164,6 +171,11 @@ DataTableService -> TaskLineageWriteService -> WorkflowService
 
 - 不报"工作流绑定了但定义缺少该任务"——认不出的那个节点可能正是它。
 - 不报"多余的任务依赖边"——认不出的节点同样占着 taskCode，与它相连的边会被误判。
+
+无法识别的节点数必须在遍历时直接累计，不能用"节点总数 - 已解析 taskId 数"反推：
+后者会对重复 `taskId` 去重，两个都写着同一 `taskId` 的节点会被误算成"1 个无法识别"，
+进而错误抑制其他任务的缺失结论。重复 `taskId` 是另一类问题——节点身份是明确的，
+不影响"哪些任务在定义里"的判断，因此单独报告，不参与上述抑制。
 
 一刀切跳过整份检查是不可接受的：一个 `{}` 节点就能让明显残缺的定义在预检和导出中
 表现为完全一致。

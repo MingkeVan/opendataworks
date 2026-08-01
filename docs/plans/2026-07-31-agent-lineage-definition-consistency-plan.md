@@ -90,7 +90,7 @@
 
 已执行：
 
-- 后端：`mvn -B -pl backend -am test` → 428 tests，0 failures，18 errors。18 个 error 全部是无 MySQL 导致的 Spring context 加载失败，与改动前基线（368 tests / 18 errors）逐条比对完全一致，未新增任何失败。
+- 后端：`mvn -B -pl backend -am test` → 430 tests，0 failures，18 errors。18 个 error 全部是无 MySQL 导致的 Spring context 加载失败，与改动前基线（368 tests / 18 errors）逐条比对完全一致，未新增任何失败。
 - Portal MCP：`pytest dataagent/portal-mcp/tests` → 27 passed。
 - 前端：`npx vitest run` → 39 files / 237 tests 全部通过。
 

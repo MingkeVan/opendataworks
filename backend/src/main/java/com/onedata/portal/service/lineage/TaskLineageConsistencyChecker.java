@@ -248,13 +248,34 @@ public class TaskLineageConsistencyChecker {
             Map<Long, Set<Long>> readsByTask,
             Map<Long, Set<Long>> writesByTask,
             List<WorkflowPublishRepairIssue> issues) {
-        ParsedDefinition definition = parseDefinition(workflow.getDefinitionJson());
-        // 只在定义无法解读时降级。节点为空是一个明确结论（"定义里一个任务都没有"），
-        // 必须参与比较，否则 taskDefinitionList:[] 会被当成"没有漂移"，
-        // 导出得到的文件不含任何任务却毫无提示。
-        if (definition == null) {
+        // definitionJson 为空是合法状态：定义尚未生成，导出会走构建兜底，不算漂移。
+        if (!StringUtils.hasText(workflow.getDefinitionJson())) {
             return;
         }
+        ParsedDefinition definition = parseDefinition(workflow.getDefinitionJson());
+        if (definition == null) {
+            // 降级的含义是"不抛异常、不阻断"，不是"静默当成没问题"。
+            // 定义非空却读不出节点清单时，导出会把这段内容原样发出去，
+            // 存量扫描也会把它统计成干净的——必须显式报告不可检查。
+            issues.add(buildIssue(null,
+                    CODE_DEFINITION_DRIFT,
+                    SEVERITY_WARNING,
+                    true,
+                    "workflow.definitionJson",
+                    "工作流定义无法解析或缺少 taskDefinitionList 节点清单，无法与当前血缘比对。"
+                            + "该定义可能已损坏，建议重新保存任一任务以重建定义。"));
+            return;
+        }
+        if (!definition.getDuplicateTaskIds().isEmpty()) {
+            issues.add(buildIssue(null,
+                    CODE_DEFINITION_DRIFT,
+                    SEVERITY_WARNING,
+                    true,
+                    "workflow.definitionJson.taskDefinitionList",
+                    String.format("工作流定义中存在重复的 taskId：%s。", definition.getDuplicateTaskIds())));
+        }
+        // 节点为空是一个明确结论（"定义里一个任务都没有"），必须参与比较，
+        // 否则 taskDefinitionList:[] 会被当成"没有漂移"，导出得到的文件不含任何任务却毫无提示。
 
         Map<Long, DataTask> taskById = new LinkedHashMap<>();
         for (DataTask task : tasks) {
@@ -416,15 +437,22 @@ public class TaskLineageConsistencyChecker {
                 // 读不出节点清单就无从判断漂移，降级跳过而不是误报。
                 return null;
             }
-            int nodeCount = 0;
             for (JsonNode taskNode : taskListNode) {
-                nodeCount++;
                 JsonNode metaNode = taskNode == null ? null : taskNode.get("xPlatformTaskMeta");
                 JsonNode taskIdNode = metaNode == null ? null : metaNode.get("taskId");
                 if (taskIdNode == null || !taskIdNode.canConvertToLong()) {
+                    // 直接累计真正认不出 taskId 的节点。不能用 nodeCount - map.size() 反推：
+                    // map 会对重复 taskId 去重，两个都写着 taskId=7 的节点会被误算成
+                    // "1 个无法识别"，进而错误抑制其他任务的缺失结论。
+                    parsed.setUnresolvedNodeCount(parsed.getUnresolvedNodeCount() + 1);
                     continue;
                 }
                 long taskId = taskIdNode.asLong();
+                if (parsed.getTablesByTaskId().containsKey(taskId)) {
+                    // 重复 taskId 是另一类问题：节点身份是明确的，不影响"哪些任务在定义里"
+                    // 的判断，因此单独报告，不参与 unresolved 的抑制逻辑。
+                    parsed.getDuplicateTaskIds().add(taskId);
+                }
                 DefinitionTables tables = new DefinitionTables();
                 tables.setInputs(readLongSet(taskNode.get("inputTableIds")));
                 tables.setOutputs(readLongSet(taskNode.get("outputTableIds")));
@@ -437,10 +465,6 @@ public class TaskLineageConsistencyChecker {
                 }
                 parsed.getCodeByTaskId().put(taskId, code != null && code > 0 ? code : taskId);
             }
-
-            // 认不出 taskId 的节点数量。不因此放弃整份检查：能识别的节点、表清单和
-            // 任务边仍然照常比较，只是把受这些节点影响的结论单独抑制掉。
-            parsed.setUnresolvedNodeCount(nodeCount - parsed.getTablesByTaskId().size());
 
             JsonNode relationListNode = root.get("processTaskRelationList");
             if (relationListNode != null && relationListNode.isArray()) {
@@ -656,6 +680,8 @@ public class TaskLineageConsistencyChecker {
         private final Set<String> taskEdges = new LinkedHashSet<>();
         /** {@code taskDefinitionList} 中认不出 {@code taskId} 的节点数量。 */
         private int unresolvedNodeCount;
+        /** 在 {@code taskDefinitionList} 中出现多次的 {@code taskId}。 */
+        private final Set<Long> duplicateTaskIds = new LinkedHashSet<>();
 
         boolean hasUnresolvedNodes() {
             return unresolvedNodeCount > 0;
