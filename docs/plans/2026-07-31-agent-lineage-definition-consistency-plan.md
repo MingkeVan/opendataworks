@@ -90,20 +90,39 @@
 
 已执行：
 
-- 后端：`mvn -B -pl backend -am test` → 404 tests，0 failures，18 errors。18 个 error 全部是无 MySQL 导致的 Spring context 加载失败，与改动前基线（368 tests / 18 errors）逐条比对完全一致，未新增任何失败。
+- 后端：`mvn -B -pl backend -am test` → 430 tests，0 failures，18 errors。18 个 error 全部是无 MySQL 导致的 Spring context 加载失败，与改动前基线（368 tests / 18 errors）逐条比对完全一致，未新增任何失败。
 - Portal MCP：`pytest dataagent/portal-mcp/tests` → 27 passed。
-- 前端：`npx vitest run` → 39 files / 229 tests 全部通过。
+- 前端：`npx vitest run` → 39 files / 237 tests 全部通过。
 
-未执行：
+数字覆盖 #437 与其后两轮 review 补丁的累计结果。
 
-- 本地端到端冒烟。当前环境没有 MySQL，无法启动后端与 Portal MCP 走真实 HTTP 流程。已验证的层次是单元与契约级，尚未验证的是"Agent 更新任务 → 发布预检 → 导出"的真实全链路。
-- 本地冒烟：Agent 省略输入、显式传输入子集、正常完整更新、发布预检、导出各跑一次，记录 MySQL、后端、Portal MCP 与前端验证环境。
+真实数据验证（review 环境执行）：
+
+- 环境：MySQL `127.0.0.1:3306/opendataworks`；临时后端 Java 8 / 端口 `18080` / Flyway 关闭 / 数据库连接只读；验证后停止后端，未修改数据库。
+- 对全部 4 个有效工作流调用 `GET /v1/workflows/{id}/lineage-consistency`：
+  - 2 个无问题；
+  - 1 个真实定义缺少 `taskDefinitionList`，返回 repairable 的 `LINEAGE_DEFINITION_DRIFT`；
+  - 1 个返回预期的 `LINEAGE_RELATION_EXTRA`。
+- 结论：只读一致性检查在真实存量数据上行为符合预期，且证实"定义损坏"这一形态在现网确实存在。
+
+仍未执行：
+
+- 完整写链路端到端冒烟："Agent 更新任务 → 保存 → 发布预检 → deploy → 导出 → 重新导入"。上述验证覆盖的是只读扫描路径，未覆盖 Portal MCP 真实调用与发布/导出的写入行为。
+- 具体未跑的场景：Agent 省略输入、显式传输入子集、正常完整更新、实际 deploy、导出文件重新导入。
 
 ## Rollout
 
 1. 默认 `warn` 上线，不改变既有发布能力。
 2. 用 `GET /v1/workflows/{id}/lineage-consistency` 扫描存量，统计高可信缺失分布。
 3. 修复存量后切换 `block-missing`。
+
+步骤 2 依赖定义漂移检查的准确性：定义为空、或含无法识别节点的工作流必须能被扫出来，
+否则扫描结论不可信。相关修复见 review 后续补丁。
+
+真实数据扫描已发现 1 个工作流的定义缺少 `taskDefinitionList`。切换 `block-missing`
+之前应先处理这类损坏定义——对该工作流重新保存任一任务，或执行发布预检中的
+"修复元数据"，都会经 `normalizeAndPersistMetadata()` 按关系表重建定义。
+在定义重建之前，该工作流的 SQL/关系比对结果不完整，不应作为存量统计的依据。
 
 ## Backout
 

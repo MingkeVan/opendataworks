@@ -245,6 +245,7 @@ import WorkflowPublishPreviewDialog from './WorkflowPublishPreviewDialog.vue'
 import {
   buildConsistencyIssueHtml,
   buildPublishRepairHtml,
+  buildPublishBlockedHtml,
   splitRepairIssues,
   firstPreviewErrorMessage,
   isDialogCancel,
@@ -586,6 +587,24 @@ const previewPublishAndConfirm = async (row) => {
   }
   let preview = await workflowApi.previewPublish(row.id)
   if (!preview?.canPublish) {
+    // block-missing 模式下每个缺边任务都会进 errors。只弹首条的话用户得反复
+    // "修一个再发一次"，helper 会把血缘问题连同其他发布错误一次列全。
+    const blockedHtml = buildPublishBlockedHtml(preview)
+    if (blockedHtml) {
+      try {
+        await ElMessageBox.alert(blockedHtml, '血缘缺失，无法发布', {
+          type: 'error',
+          customClass: 'workflow-publish-message-box',
+          confirmButtonText: '知道了',
+          dangerouslyUseHTMLString: true
+        })
+      } catch (error) {
+        if (!isDialogCancel(error)) {
+          throw error
+        }
+      }
+      return false
+    }
     ElMessage.error(firstPreviewErrorMessage(preview))
     return false
   }

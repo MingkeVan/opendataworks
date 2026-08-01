@@ -313,10 +313,12 @@ export const splitRepairIssues = (preview) => {
 }
 
 const renderIssueLine = (issue) => {
-  const task = issue?.taskName || issue?.taskCode
+  // 血缘问题带 taskName/taskCode；其他发布错误只有 code，退回用 code 当标签，
+  // 否则整行会渲染成 "-：xxx"。
+  const label = issue?.taskName || issue?.taskCode
     ? `${issue?.taskName || '-'} (${issue?.taskCode ?? '-'})`
-    : '-'
-  return `<li>${escapeHtml(task)}：${escapeHtml(issue?.message || issue?.field || '-')}</li>`
+    : (issue?.code || '-')
+  return `<li>${escapeHtml(label)}：${escapeHtml(issue?.message || issue?.field || '-')}</li>`
 }
 
 /**
@@ -336,6 +338,43 @@ export const buildConsistencyIssueHtml = (issues, intro) => {
       </ul>
     </div>
   `
+}
+
+/**
+ * 把预检错误拆成血缘一致性问题和其他发布错误。
+ *
+ * block-missing 模式下后端会把**每一个**缺边任务都写进 errors。只显示首条的话，
+ * 用户得反复"修一个、再发一次"才能发现下一个，无法一次性修全。
+ */
+export const splitPreviewErrors = (preview) => {
+  const errors = Array.isArray(preview?.errors) ? preview.errors : []
+  return {
+    lineage: errors.filter((issue) => String(issue?.code || '').startsWith('LINEAGE_')),
+    others: errors.filter((issue) => !String(issue?.code || '').startsWith('LINEAGE_'))
+  }
+}
+
+/**
+ * 构造发布被阻断时的弹窗内容。
+ *
+ * 返回 `null` 表示没有血缘类阻断问题，调用方退回到显示首条错误即可。
+ *
+ * 有血缘问题时必须把**其他发布错误一并列出**：只显示血缘部分的话，用户逐个补齐
+ * 血缘、重新发布，才会发现还卡在别的错误上，等于把一次修复拆成了两轮。
+ */
+export const buildPublishBlockedHtml = (preview) => {
+  const { lineage, others } = splitPreviewErrors(preview)
+  if (!lineage.length) {
+    return null
+  }
+  const lineageHtml = buildConsistencyIssueHtml(
+    lineage,
+    '发布已被阻断：以下任务的 SQL 已解析出的表未登记到血缘。请逐个打开任务，按 SQL 分析结果补齐输入/输出表后重新保存。'
+  )
+  const othersHtml = others.length
+    ? buildConsistencyIssueHtml(others, '此外还有以下发布问题需要一并处理：')
+    : ''
+  return lineageHtml + othersHtml
 }
 
 export const firstPreviewErrorMessage = (preview) => {

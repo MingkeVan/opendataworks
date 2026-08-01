@@ -1,9 +1,11 @@
 import {
   buildConsistencyIssueHtml,
   buildPublishPreviewHtml,
+  buildPublishBlockedHtml,
   buildPublishRepairHtml,
   resolvePublishVersionId,
   shouldPromptOnlineAfterDeploy,
+  splitPreviewErrors,
   splitRepairIssues
 } from '../publishPreviewHelper'
 import { buildTaskFieldDiffRows } from '../publishPreviewDiffHelper'
@@ -164,5 +166,85 @@ describe('buildPublishRepairHtml', () => {
 
     expect(filtered).toContain('缺少 datasourceId')
     expect(filtered).not.toContain('缺少输入表')
+  })
+})
+
+describe('splitPreviewErrors', () => {
+  it('separates lineage blocking errors from other publish errors', () => {
+    const { lineage, others } = splitPreviewErrors({
+      errors: [
+        { code: 'LINEAGE_SQL_RELATION_MISSING', taskName: 'a', message: '缺少输入表 x' },
+        { code: 'PUBLISH_PREVIEW_FAILED', message: '读取运行态定义失败' },
+        { code: 'LINEAGE_SQL_RELATION_MISSING', taskName: 'b', message: '缺少输出表 y' }
+      ]
+    })
+
+    // block-missing 模式下每个缺边任务都会进 errors，必须能一次性全部取出
+    expect(lineage).toHaveLength(2)
+    expect(lineage.map((issue) => issue.taskName)).toEqual(['a', 'b'])
+    expect(others.map((issue) => issue.code)).toEqual(['PUBLISH_PREVIEW_FAILED'])
+  })
+
+  it('returns empty lists when there are no errors', () => {
+    expect(splitPreviewErrors({})).toEqual({ lineage: [], others: [] })
+    expect(splitPreviewErrors(null)).toEqual({ lineage: [], others: [] })
+  })
+
+  it('renders every blocking task, not just the first', () => {
+    const { lineage } = splitPreviewErrors({
+      errors: [
+        { code: 'LINEAGE_SQL_RELATION_MISSING', taskName: 'task_a', message: '缺少输入表 x' },
+        { code: 'LINEAGE_SQL_RELATION_MISSING', taskName: 'task_b', message: '缺少输出表 y' }
+      ]
+    })
+    const html = buildConsistencyIssueHtml(lineage, '发布已被阻断')
+
+    expect(html).toContain('task_a')
+    expect(html).toContain('task_b')
+  })
+})
+
+describe('buildPublishBlockedHtml', () => {
+  it('lists other publish errors alongside the lineage ones', () => {
+    // 回归：此前调用方只取 lineage 后就 return，others 从不展示，
+    // 用户补完血缘重新发布才会发现还卡在别的错误上。
+    const html = buildPublishBlockedHtml({
+      errors: [
+        { code: 'LINEAGE_SQL_RELATION_MISSING', taskName: 'task_a', message: '缺少输入表 x' },
+        { code: 'LINEAGE_SQL_RELATION_MISSING', taskName: 'task_b', message: '缺少输出表 y' },
+        { code: 'PUBLISH_PREVIEW_FAILED', message: '读取运行态定义失败' }
+      ]
+    })
+
+    expect(html).toContain('task_a')
+    expect(html).toContain('task_b')
+    expect(html).toContain('读取运行态定义失败')
+    expect(html).toContain('此外还有以下发布问题需要一并处理')
+  })
+
+  it('labels non-lineage errors by code instead of a bare dash', () => {
+    const html = buildPublishBlockedHtml({
+      errors: [
+        { code: 'LINEAGE_SQL_RELATION_MISSING', taskName: 'task_a', message: '缺少输入表' },
+        { code: 'PUBLISH_PREVIEW_FAILED', message: '读取运行态定义失败' }
+      ]
+    })
+
+    expect(html).toContain('PUBLISH_PREVIEW_FAILED')
+  })
+
+  it('omits the extra section when every error is lineage related', () => {
+    const html = buildPublishBlockedHtml({
+      errors: [{ code: 'LINEAGE_SQL_RELATION_MISSING', taskName: 'task_a', message: '缺少输入表' }]
+    })
+
+    expect(html).toContain('task_a')
+    expect(html).not.toContain('此外还有以下发布问题')
+  })
+
+  it('returns null when nothing is lineage related, so callers fall back to the first error', () => {
+    expect(buildPublishBlockedHtml({ errors: [{ code: 'PUBLISH_PREVIEW_FAILED', message: 'x' }] })).toBeNull()
+    expect(buildPublishBlockedHtml({})).toBeNull()
+    expect(buildPublishBlockedHtml(null)).toBeNull()
   })
 })

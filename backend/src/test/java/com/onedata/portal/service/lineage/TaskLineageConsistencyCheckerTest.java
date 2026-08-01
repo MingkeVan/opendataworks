@@ -367,24 +367,155 @@ class TaskLineageConsistencyCheckerTest {
     }
 
     @Test
+    void emptyTaskDefinitionListIsReportedWhenWorkflowActuallyHasTasks() {
+        // 回归：此前 tablesByTaskId 为空就直接返回，这段合法 JSON 会被当成"没有漂移"，
+        // 导出得到一个不含任何任务的文件却毫无提示。
+        DataWorkflow workflow = workflow();
+        workflow.setDefinitionJson("{\"taskDefinitionList\":[],\"processTaskRelationList\":[]}");
+        stubTwoTaskWorkflow(workflow);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        long missingNodeIssues = issues.stream()
+                .filter(issue -> "workflow.definitionJson.taskDefinitionList".equals(issue.getField()))
+                .filter(issue -> issue.getMessage().contains("缺少该任务节点"))
+                .count();
+        assertEquals(2, missingNodeIssues, "两个绑定任务都应被报告，实际问题: " + issues);
+    }
+
+    @Test
+    void definitionNodesAreReportedWhenWorkflowHasNoBoundTasks() {
+        // 反向盲区：工作流没有任何绑定任务时，此前在 taskIds 为空处就返回了，
+        // 定义里残留的旧节点永远发现不了。
+        DataWorkflow workflow = workflow();
+        workflow.setDefinitionJson("{\"taskDefinitionList\":["
+                + "{\"taskCode\":1007,\"xPlatformTaskMeta\":{\"taskId\":7},"
+                + "\"inputTableIds\":[],\"outputTableIds\":[5]}],"
+                + "\"processTaskRelationList\":[]}");
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(tableTaskRelationMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        assertTrue(issues.stream().anyMatch(issue ->
+                        issue.getMessage().contains("未绑定到该工作流的任务节点")),
+                "应报告定义中残留的任务节点，实际问题: " + issues);
+        verify(dataTaskMapper, never()).selectBatchIds(any());
+    }
+
+    @Test
+    void oneUnidentifiableNodeDoesNotDisableTheWholeDriftCheck() {
+        // 回归：此前"解析出的 taskId 数 != 节点数"就整份返回 null，
+        // 一个 {} 节点会让本来可确认的节点、表清单和任务边全部不再比较。
+        DataWorkflow workflow = workflow();
+        workflow.setDefinitionJson("{\"taskDefinitionList\":["
+                + "{\"taskCode\":1007,\"xPlatformTaskMeta\":{\"taskId\":7},"
+                + "\"inputTableIds\":[99],\"outputTableIds\":[5]},"
+                + "{}],"
+                + "\"processTaskRelationList\":[]}");
+        stubTwoTaskWorkflow(workflow);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        // 不完整这件事本身必须被报告，不能表现为一致
+        assertTrue(issues.stream().anyMatch(issue ->
+                        issue.getMessage().contains("无法识别 taskId")
+                                && issue.getMessage().contains("检查不完整")),
+                "应报告存在无法识别的节点，实际问题: " + issues);
+        // 能识别的节点仍然照常比对表清单：定义写了输入 [99]，关系表里任务 7 没有读关系
+        assertTrue(issues.stream().anyMatch(issue ->
+                        "workflow.definitionJson".equals(issue.getField())
+                                && issue.getMessage().contains("与当前血缘不一致")),
+                "可识别节点的表清单仍应比较，实际问题: " + issues);
+    }
+
+    @Test
+    void unidentifiableNodesSuppressOnlyTheClaimsTheyCouldInvalidate() {
+        // 任务 8 在定义里没有对应节点，但存在一个认不出的节点——它可能正是任务 8，
+        // 因此不能断言"定义缺少任务 8"。多余边同理：认不出的节点也占着 taskCode。
+        DataWorkflow workflow = workflow();
+        workflow.setDefinitionJson("{\"taskDefinitionList\":["
+                + "{\"taskCode\":1007,\"xPlatformTaskMeta\":{\"taskId\":7},"
+                + "\"inputTableIds\":[],\"outputTableIds\":[5]},"
+                + "{}],"
+                + "\"processTaskRelationList\":[{\"preTaskCode\":9999,\"postTaskCode\":1007}]}");
+        stubTwoTaskWorkflow(workflow);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        assertTrue(issues.stream().noneMatch(issue ->
+                        issue.getMessage().contains("缺少该任务节点")),
+                "有认不出的节点时不应断言任务缺失，实际问题: " + issues);
+        assertTrue(issues.stream().noneMatch(issue ->
+                        issue.getMessage().contains("不存在的任务依赖边")),
+                "有认不出的节点时不应断言多余边，实际问题: " + issues);
+    }
+
+    @Test
     void malformedDefinitionJsonDegradesGracefullyInsteadOfFailingThePreview() {
         // definitionJson 可能来自导入或历史版本，格式不受本模块控制。
-        // 解析失败只应放弃漂移比对，不能让发布预检和导出整体报错。
+        // 降级的含义是"不抛异常、不阻断"，不是"静默当成没问题"：定义非空却读不出
+        // 节点清单时，导出会把这段内容原样发出去，存量扫描也会把它统计成干净的。
         for (String broken : Arrays.asList(
                 "{not json",
                 "[]",
                 "{\"taskDefinitionList\":\"not-an-array\"}",
-                "{\"taskDefinitionList\":[{}],\"processTaskRelationList\":\"nope\"}")) {
+                "{\"processTaskRelationList\":[]}")) {
             DataWorkflow workflow = workflow();
             workflow.setDefinitionJson(broken);
             stubTwoTaskWorkflow(workflow);
 
             List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
 
+            assertTrue(issues.stream().anyMatch(issue ->
+                            TaskLineageConsistencyChecker.CODE_DEFINITION_DRIFT.equals(issue.getCode())
+                                    && issue.getMessage().contains("无法解析或缺少")),
+                    "定义不可检查这件事必须被报告，输入: " + broken + "，实际问题: " + issues);
+        }
+    }
+
+    @Test
+    void blankDefinitionJsonIsNotTreatedAsDrift() {
+        // 定义尚未生成是合法状态，导出会走构建兜底，不该报成损坏。
+        for (String blank : Arrays.asList(null, "", "   ")) {
+            DataWorkflow workflow = workflow();
+            workflow.setDefinitionJson(blank);
+            stubTwoTaskWorkflow(workflow);
+
+            List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
             assertTrue(issues.stream().noneMatch(issue ->
                             TaskLineageConsistencyChecker.CODE_DEFINITION_DRIFT.equals(issue.getCode())),
-                    "definitionJson 无法解析时不应产生漂移问题，输入: " + broken);
+                    "定义为空不应报漂移，输入: " + blank + "，实际问题: " + issues);
         }
+    }
+
+    @Test
+    void duplicateTaskIdIsReportedSeparatelyAndDoesNotSuppressMissingTaskNodes() {
+        // 回归：此前用 nodeCount - map.size() 反推无法识别的节点数，map 会对重复
+        // taskId 去重，两个都写着 taskId=7 的节点会被误算成"1 个无法识别"，
+        // 进而错误抑制"任务 8 在定义中缺失"这个本可确认的结论。
+        DataWorkflow workflow = workflow();
+        workflow.setDefinitionJson("{\"taskDefinitionList\":["
+                + "{\"taskCode\":1007,\"xPlatformTaskMeta\":{\"taskId\":7},"
+                + "\"inputTableIds\":[],\"outputTableIds\":[5]},"
+                + "{\"taskCode\":1007,\"xPlatformTaskMeta\":{\"taskId\":7},"
+                + "\"inputTableIds\":[],\"outputTableIds\":[5]}],"
+                + "\"processTaskRelationList\":[]}");
+        stubTwoTaskWorkflow(workflow);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        assertTrue(issues.stream().anyMatch(issue ->
+                        issue.getMessage().contains("重复的 taskId")),
+                "重复 taskId 应单独报告，实际问题: " + issues);
+        assertTrue(issues.stream().noneMatch(issue ->
+                        issue.getMessage().contains("无法识别 taskId")),
+                "重复不等于无法识别，实际问题: " + issues);
+        // 任务 8 确实不在定义里，这个结论不该被重复 taskId 抑制
+        assertTrue(issues.stream().anyMatch(issue ->
+                        issue.getMessage().contains("缺少该任务节点")),
+                "缺失结论不应被重复 taskId 抑制，实际问题: " + issues);
     }
 
     @Test
