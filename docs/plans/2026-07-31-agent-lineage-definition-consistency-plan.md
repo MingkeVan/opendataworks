@@ -90,9 +90,11 @@
 
 已执行：
 
-- 后端：`mvn -B -pl backend -am test` → 404 tests，0 failures，18 errors。18 个 error 全部是无 MySQL 导致的 Spring context 加载失败，与改动前基线（368 tests / 18 errors）逐条比对完全一致，未新增任何失败。
+- 后端：`mvn -B -pl backend -am test` → 428 tests，0 failures，18 errors。18 个 error 全部是无 MySQL 导致的 Spring context 加载失败，与改动前基线（368 tests / 18 errors）逐条比对完全一致，未新增任何失败。
 - Portal MCP：`pytest dataagent/portal-mcp/tests` → 27 passed。
-- 前端：`npx vitest run` → 39 files / 229 tests 全部通过。
+- 前端：`npx vitest run` → 39 files / 237 tests 全部通过。
+
+数字覆盖 #437 与其后两轮 review 补丁的累计结果。
 
 未执行：
 
@@ -104,6 +106,9 @@
 1. 默认 `warn` 上线，不改变既有发布能力。
 2. 用 `GET /v1/workflows/{id}/lineage-consistency` 扫描存量，统计高可信缺失分布。
 3. 修复存量后切换 `block-missing`。
+
+步骤 2 依赖定义漂移检查的准确性：定义为空、或含无法识别节点的工作流必须能被扫出来，
+否则扫描结论不可信。相关修复见 review 后续补丁。
 
 ## Backout
 

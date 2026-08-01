@@ -1,6 +1,7 @@
 import {
   buildConsistencyIssueHtml,
   buildPublishPreviewHtml,
+  buildPublishBlockedHtml,
   buildPublishRepairHtml,
   resolvePublishVersionId,
   shouldPromptOnlineAfterDeploy,
@@ -200,5 +201,50 @@ describe('splitPreviewErrors', () => {
 
     expect(html).toContain('task_a')
     expect(html).toContain('task_b')
+  })
+})
+
+describe('buildPublishBlockedHtml', () => {
+  it('lists other publish errors alongside the lineage ones', () => {
+    // 回归：此前调用方只取 lineage 后就 return，others 从不展示，
+    // 用户补完血缘重新发布才会发现还卡在别的错误上。
+    const html = buildPublishBlockedHtml({
+      errors: [
+        { code: 'LINEAGE_SQL_RELATION_MISSING', taskName: 'task_a', message: '缺少输入表 x' },
+        { code: 'LINEAGE_SQL_RELATION_MISSING', taskName: 'task_b', message: '缺少输出表 y' },
+        { code: 'PUBLISH_PREVIEW_FAILED', message: '读取运行态定义失败' }
+      ]
+    })
+
+    expect(html).toContain('task_a')
+    expect(html).toContain('task_b')
+    expect(html).toContain('读取运行态定义失败')
+    expect(html).toContain('此外还有以下发布问题需要一并处理')
+  })
+
+  it('labels non-lineage errors by code instead of a bare dash', () => {
+    const html = buildPublishBlockedHtml({
+      errors: [
+        { code: 'LINEAGE_SQL_RELATION_MISSING', taskName: 'task_a', message: '缺少输入表' },
+        { code: 'PUBLISH_PREVIEW_FAILED', message: '读取运行态定义失败' }
+      ]
+    })
+
+    expect(html).toContain('PUBLISH_PREVIEW_FAILED')
+  })
+
+  it('omits the extra section when every error is lineage related', () => {
+    const html = buildPublishBlockedHtml({
+      errors: [{ code: 'LINEAGE_SQL_RELATION_MISSING', taskName: 'task_a', message: '缺少输入表' }]
+    })
+
+    expect(html).toContain('task_a')
+    expect(html).not.toContain('此外还有以下发布问题')
+  })
+
+  it('returns null when nothing is lineage related, so callers fall back to the first error', () => {
+    expect(buildPublishBlockedHtml({ errors: [{ code: 'PUBLISH_PREVIEW_FAILED', message: 'x' }] })).toBeNull()
+    expect(buildPublishBlockedHtml({})).toBeNull()
+    expect(buildPublishBlockedHtml(null)).toBeNull()
   })
 })

@@ -404,14 +404,64 @@ class TaskLineageConsistencyCheckerTest {
     }
 
     @Test
+    void oneUnidentifiableNodeDoesNotDisableTheWholeDriftCheck() {
+        // 回归：此前"解析出的 taskId 数 != 节点数"就整份返回 null，
+        // 一个 {} 节点会让本来可确认的节点、表清单和任务边全部不再比较。
+        DataWorkflow workflow = workflow();
+        workflow.setDefinitionJson("{\"taskDefinitionList\":["
+                + "{\"taskCode\":1007,\"xPlatformTaskMeta\":{\"taskId\":7},"
+                + "\"inputTableIds\":[99],\"outputTableIds\":[5]},"
+                + "{}],"
+                + "\"processTaskRelationList\":[]}");
+        stubTwoTaskWorkflow(workflow);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        // 不完整这件事本身必须被报告，不能表现为一致
+        assertTrue(issues.stream().anyMatch(issue ->
+                        issue.getMessage().contains("无法识别 taskId")
+                                && issue.getMessage().contains("检查不完整")),
+                "应报告存在无法识别的节点，实际问题: " + issues);
+        // 能识别的节点仍然照常比对表清单：定义写了输入 [99]，关系表里任务 7 没有读关系
+        assertTrue(issues.stream().anyMatch(issue ->
+                        "workflow.definitionJson".equals(issue.getField())
+                                && issue.getMessage().contains("与当前血缘不一致")),
+                "可识别节点的表清单仍应比较，实际问题: " + issues);
+    }
+
+    @Test
+    void unidentifiableNodesSuppressOnlyTheClaimsTheyCouldInvalidate() {
+        // 任务 8 在定义里没有对应节点，但存在一个认不出的节点——它可能正是任务 8，
+        // 因此不能断言"定义缺少任务 8"。多余边同理：认不出的节点也占着 taskCode。
+        DataWorkflow workflow = workflow();
+        workflow.setDefinitionJson("{\"taskDefinitionList\":["
+                + "{\"taskCode\":1007,\"xPlatformTaskMeta\":{\"taskId\":7},"
+                + "\"inputTableIds\":[],\"outputTableIds\":[5]},"
+                + "{}],"
+                + "\"processTaskRelationList\":[{\"preTaskCode\":9999,\"postTaskCode\":1007}]}");
+        stubTwoTaskWorkflow(workflow);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        assertTrue(issues.stream().noneMatch(issue ->
+                        issue.getMessage().contains("缺少该任务节点")),
+                "有认不出的节点时不应断言任务缺失，实际问题: " + issues);
+        assertTrue(issues.stream().noneMatch(issue ->
+                        issue.getMessage().contains("不存在的任务依赖边")),
+                "有认不出的节点时不应断言多余边，实际问题: " + issues);
+    }
+
+    @Test
     void malformedDefinitionJsonDegradesGracefullyInsteadOfFailingThePreview() {
         // definitionJson 可能来自导入或历史版本，格式不受本模块控制。
-        // 解析失败只应放弃漂移比对，不能让发布预检和导出整体报错。
+        // 完全读不出节点清单时放弃漂移比对，但不能让发布预检和导出整体报错。
+        // 注意：{"taskDefinitionList":[{}]} 不属于这一类——它读得出节点清单，
+        // 只是节点认不出 taskId，属于"检查不完整"，必须报告而不是静默放行。
         for (String broken : Arrays.asList(
                 "{not json",
                 "[]",
                 "{\"taskDefinitionList\":\"not-an-array\"}",
-                "{\"taskDefinitionList\":[{}],\"processTaskRelationList\":\"nope\"}")) {
+                "{\"processTaskRelationList\":[]}")) {
             DataWorkflow workflow = workflow();
             workflow.setDefinitionJson(broken);
             stubTwoTaskWorkflow(workflow);

@@ -263,6 +263,17 @@ public class TaskLineageConsistencyChecker {
             }
         }
 
+        if (definition.hasUnresolvedNodes()) {
+            // 单独报告，避免"有认不出的节点"这一事实被静默吞掉，表现为一致。
+            issues.add(buildIssue(null,
+                    CODE_DEFINITION_DRIFT,
+                    SEVERITY_WARNING,
+                    true,
+                    "workflow.definitionJson.taskDefinitionList",
+                    String.format("工作流定义中有 %d 个任务节点无法识别 taskId，本次定义漂移检查不完整。",
+                            definition.getUnresolvedNodeCount())));
+        }
+
         for (DataTask task : tasks) {
             if (task == null || task.getId() == null) {
                 continue;
@@ -271,6 +282,11 @@ public class TaskLineageConsistencyChecker {
             Set<Long> writes = writesByTask.getOrDefault(task.getId(), Collections.emptySet());
             DefinitionTables persisted = definition.getTablesByTaskId().get(task.getId());
             if (persisted == null) {
+                // 存在认不出 taskId 的节点时不报"缺少该任务"：那个节点可能正是它，
+                // 信息不足以断言。上面的"检查不完整"已经提示了这一事实。
+                if (definition.hasUnresolvedNodes()) {
+                    continue;
+                }
                 // 工作流绑定了该任务，定义里却没有对应节点。发布出去会直接少一个节点。
                 issues.add(buildIssue(task,
                         CODE_DEFINITION_DRIFT,
@@ -366,6 +382,12 @@ public class TaskLineageConsistencyChecker {
                     String.format("工作流定义缺少血缘推导出的任务依赖边：%s。", edgeLabels.get(key))));
         }
 
+        // 多余边只在节点全部可识别时才敢断言：认不出的节点也有 taskCode，
+        // 与它相连的边会被误判成"血缘中不存在"。缺失边不受影响——两端都能识别时，
+        // 期望边没出现在定义里就是真的少了。
+        if (definition.hasUnresolvedNodes()) {
+            return;
+        }
         Set<String> extra = new LinkedHashSet<>(persistedEdges);
         extra.removeAll(expectedEdges);
         for (String key : extra) {
@@ -416,11 +438,9 @@ public class TaskLineageConsistencyChecker {
                 parsed.getCodeByTaskId().put(taskId, code != null && code > 0 ? code : taskId);
             }
 
-            // 有节点却认不出 taskId 时信息是残缺的，报"定义缺少该任务"会误导用户。
-            // 空数组则是明确结论，可以直接比较。
-            if (parsed.getTablesByTaskId().size() != nodeCount) {
-                return null;
-            }
+            // 认不出 taskId 的节点数量。不因此放弃整份检查：能识别的节点、表清单和
+            // 任务边仍然照常比较，只是把受这些节点影响的结论单独抑制掉。
+            parsed.setUnresolvedNodeCount(nodeCount - parsed.getTablesByTaskId().size());
 
             JsonNode relationListNode = root.get("processTaskRelationList");
             if (relationListNode != null && relationListNode.isArray()) {
@@ -634,5 +654,11 @@ public class TaskLineageConsistencyChecker {
         private final Map<Long, Long> codeByTaskId = new LinkedHashMap<>();
         /** {@code preTaskCode->postTaskCode}，已排除 preTaskCode=0 的入口边。 */
         private final Set<String> taskEdges = new LinkedHashSet<>();
+        /** {@code taskDefinitionList} 中认不出 {@code taskId} 的节点数量。 */
+        private int unresolvedNodeCount;
+
+        boolean hasUnresolvedNodes() {
+            return unresolvedNodeCount > 0;
+        }
     }
 }
