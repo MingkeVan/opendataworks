@@ -367,6 +367,43 @@ class TaskLineageConsistencyCheckerTest {
     }
 
     @Test
+    void emptyTaskDefinitionListIsReportedWhenWorkflowActuallyHasTasks() {
+        // 回归：此前 tablesByTaskId 为空就直接返回，这段合法 JSON 会被当成"没有漂移"，
+        // 导出得到一个不含任何任务的文件却毫无提示。
+        DataWorkflow workflow = workflow();
+        workflow.setDefinitionJson("{\"taskDefinitionList\":[],\"processTaskRelationList\":[]}");
+        stubTwoTaskWorkflow(workflow);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        long missingNodeIssues = issues.stream()
+                .filter(issue -> "workflow.definitionJson.taskDefinitionList".equals(issue.getField()))
+                .filter(issue -> issue.getMessage().contains("缺少该任务节点"))
+                .count();
+        assertEquals(2, missingNodeIssues, "两个绑定任务都应被报告，实际问题: " + issues);
+    }
+
+    @Test
+    void definitionNodesAreReportedWhenWorkflowHasNoBoundTasks() {
+        // 反向盲区：工作流没有任何绑定任务时，此前在 taskIds 为空处就返回了，
+        // 定义里残留的旧节点永远发现不了。
+        DataWorkflow workflow = workflow();
+        workflow.setDefinitionJson("{\"taskDefinitionList\":["
+                + "{\"taskCode\":1007,\"xPlatformTaskMeta\":{\"taskId\":7},"
+                + "\"inputTableIds\":[],\"outputTableIds\":[5]}],"
+                + "\"processTaskRelationList\":[]}");
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(tableTaskRelationMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, true);
+
+        assertTrue(issues.stream().anyMatch(issue ->
+                        issue.getMessage().contains("未绑定到该工作流的任务节点")),
+                "应报告定义中残留的任务节点，实际问题: " + issues);
+        verify(dataTaskMapper, never()).selectBatchIds(any());
+    }
+
+    @Test
     void malformedDefinitionJsonDegradesGracefullyInsteadOfFailingThePreview() {
         // definitionJson 可能来自导入或历史版本，格式不受本模块控制。
         // 解析失败只应放弃漂移比对，不能让发布预检和导出整体报错。

@@ -75,7 +75,10 @@ Agent 更新任务时，血缘会被静默清空，链路上有三个独立缺�
 3. 用**最终列表**与**有效任务**校验（输出非空；STRICT 模式追加 SQL 高可信校验）。
 4. 校验通过后才更新任务与血缘。
 
-"有效任务"指请求覆盖在库中旧值之上的结果。更新请求只携带调用方显式提交的字段，
+"有效任务"指请求覆盖在库中旧值之上的结果。字段是否算"已提交"以 `!= null` 判定，
+与 MyBatis-Plus 默认的 `NOT_NULL` 字段策略一致：空字符串会被 `updateById` 真正写库，
+是显式提交的新值。若用 `hasText` 判定，"把 SQL 清空成草稿"会被误判成未提交，
+继续拿旧 SQL 校验，导致同时清空血缘的合法操作被拒。更新请求只携带调用方显式提交的字段，
 而 `updateById` 只写非空字段，保存后生效的正是这个覆盖结果。校验必须针对它：
 否则只提交 `taskName` 的部分更新会因为 `dolphinNodeType` 为空而被当成非 SQL 任务，
 直接绕过 SQL 一致性校验，随后仍用不完整的列表全量覆盖血缘。
@@ -146,9 +149,20 @@ DataTableService -> TaskLineageWriteService -> WorkflowService
   而真正决定运行态拓扑的是这份关系列表。
 - 节点集合本身：工作流绑定了但定义中缺失的任务，以及定义中存在但未绑定的任务。
 
+节点集合比较是**双向**的，两侧的空集合都必须参与，不能提前返回：
+
+- 定义的 `taskDefinitionList` 为空数组、而工作流实际绑定了任务，是漂移
+  （导出会得到一个不含任何任务的文件）。
+- 工作流没有绑定任何任务、而定义里还留着旧节点，同样是漂移。
+
+只有在定义**无法解读**时才降级跳过：`definitionJson` 为空、JSON 解析失败、
+`taskDefinitionList` 缺失或不是数组、数组里存在认不出 `taskId` 的节点。
+最后一种情况下信息是残缺的，报"定义缺少该任务"会误导用户。
+
 ### 5. 发布时序
 
 - **Preview**：同时展示 SQL / 关系差异与定义漂移。block-missing 模式下若存在 `LINEAGE_SQL_RELATION_MISSING`，除写入 `repairIssues` 外同时写入 `errors` 并置 `canPublish=false`，使两个前端入口既有的 `if (!preview?.canPublish)` 门禁直接生效。warn 模式下 `canPublish` 保持不变。
+  前端在阻断时必须把**全部**血缘类 error 一次列出，而不是只弹首条：后端会把每个缺边任务都写进 `errors`，只显示第一条会迫使用户"修一个、再发一次"才能发现下一个。其他类型的发布错误仍显示首条即可。
 - **Deploy**：仍先执行 `syncCurrentVersion()`。同步后 `definitionJson` 必然与关系表一致，因此复检**只检查 SQL 与关系表**，不检查定义漂移。
 
 `ensureBlockingRepairIssuesResolved()` 扩展为按场景筛选：

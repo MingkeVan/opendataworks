@@ -135,12 +135,13 @@ public class TaskLineageConsistencyChecker {
             return Collections.emptyList();
         }
         List<Long> taskIds = findTaskIds(workflow.getId());
-        if (taskIds.isEmpty()) {
-            return Collections.emptyList();
-        }
-        List<DataTask> tasks = dataTaskMapper.selectBatchIds(taskIds);
-        if (CollectionUtils.isEmpty(tasks)) {
-            return Collections.emptyList();
+        // 这里不能在任务为空时提前返回：工作流没有绑定任务、而定义里还留着旧节点，
+        // 同样是需要报告的漂移。空集合必须进入下面的双向比较。
+        List<DataTask> tasks = taskIds.isEmpty()
+                ? Collections.emptyList()
+                : dataTaskMapper.selectBatchIds(taskIds);
+        if (tasks == null) {
+            tasks = Collections.emptyList();
         }
         Map<Long, Set<Long>> readsByTask = loadRelationMap(taskIds, "read");
         Map<Long, Set<Long>> writesByTask = loadRelationMap(taskIds, "write");
@@ -248,7 +249,10 @@ public class TaskLineageConsistencyChecker {
             Map<Long, Set<Long>> writesByTask,
             List<WorkflowPublishRepairIssue> issues) {
         ParsedDefinition definition = parseDefinition(workflow.getDefinitionJson());
-        if (definition == null || definition.getTablesByTaskId().isEmpty()) {
+        // 只在定义无法解读时降级。节点为空是一个明确结论（"定义里一个任务都没有"），
+        // 必须参与比较，否则 taskDefinitionList:[] 会被当成"没有漂移"，
+        // 导出得到的文件不含任何任务却毫无提示。
+        if (definition == null) {
             return;
         }
 
@@ -386,26 +390,36 @@ public class TaskLineageConsistencyChecker {
             ParsedDefinition parsed = new ParsedDefinition();
 
             JsonNode taskListNode = root.get("taskDefinitionList");
-            if (taskListNode != null && taskListNode.isArray()) {
-                for (JsonNode taskNode : taskListNode) {
-                    JsonNode metaNode = taskNode == null ? null : taskNode.get("xPlatformTaskMeta");
-                    JsonNode taskIdNode = metaNode == null ? null : metaNode.get("taskId");
-                    if (taskIdNode == null || !taskIdNode.canConvertToLong()) {
-                        continue;
-                    }
-                    long taskId = taskIdNode.asLong();
-                    DefinitionTables tables = new DefinitionTables();
-                    tables.setInputs(readLongSet(taskNode.get("inputTableIds")));
-                    tables.setOutputs(readLongSet(taskNode.get("outputTableIds")));
-                    parsed.getTablesByTaskId().put(taskId, tables);
-
-                    // 关系列表用的是运行态 taskCode，缺失时 assembler 回退成 taskId。
-                    Long code = readLong(taskNode, "taskCode", "code");
-                    if (code == null || code <= 0) {
-                        code = readLong(metaNode, "dolphinTaskCode");
-                    }
-                    parsed.getCodeByTaskId().put(taskId, code != null && code > 0 ? code : taskId);
+            if (taskListNode == null || !taskListNode.isArray()) {
+                // 读不出节点清单就无从判断漂移，降级跳过而不是误报。
+                return null;
+            }
+            int nodeCount = 0;
+            for (JsonNode taskNode : taskListNode) {
+                nodeCount++;
+                JsonNode metaNode = taskNode == null ? null : taskNode.get("xPlatformTaskMeta");
+                JsonNode taskIdNode = metaNode == null ? null : metaNode.get("taskId");
+                if (taskIdNode == null || !taskIdNode.canConvertToLong()) {
+                    continue;
                 }
+                long taskId = taskIdNode.asLong();
+                DefinitionTables tables = new DefinitionTables();
+                tables.setInputs(readLongSet(taskNode.get("inputTableIds")));
+                tables.setOutputs(readLongSet(taskNode.get("outputTableIds")));
+                parsed.getTablesByTaskId().put(taskId, tables);
+
+                // 关系列表用的是运行态 taskCode，缺失时 assembler 回退成 taskId。
+                Long code = readLong(taskNode, "taskCode", "code");
+                if (code == null || code <= 0) {
+                    code = readLong(metaNode, "dolphinTaskCode");
+                }
+                parsed.getCodeByTaskId().put(taskId, code != null && code > 0 ? code : taskId);
+            }
+
+            // 有节点却认不出 taskId 时信息是残缺的，报"定义缺少该任务"会误导用户。
+            // 空数组则是明确结论，可以直接比较。
+            if (parsed.getTablesByTaskId().size() != nodeCount) {
+                return null;
             }
 
             JsonNode relationListNode = root.get("processTaskRelationList");

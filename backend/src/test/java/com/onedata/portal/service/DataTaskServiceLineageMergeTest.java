@@ -258,6 +258,35 @@ class DataTaskServiceLineageMergeTest {
     }
 
     @Test
+    void explicitlyBlankedSqlIsTreatedAsSubmittedNotAsOmitted() {
+        // MyBatis-Plus 默认 NOT_NULL 策略：空串会被 updateById 真正写库，
+        // 是一个显式提交的新值。校验必须用空串，而不是回退到旧 SQL——
+        // 否则"把任务改回空白草稿并清空输入血缘"会因为旧 SQL 引用的表缺失被拒。
+        DataTask blanked = new DataTask();
+        blanked.setId(TASK_ID);
+        blanked.setTaskSql("");
+
+        service.update(blanked, Collections.emptyList(), null, LineageValidationMode.STRICT);
+
+        ArgumentCaptor<DataTask> captor = ArgumentCaptor.forClass(DataTask.class);
+        verify(taskLineageConsistencyChecker).findHighConfidenceGap(captor.capture(), any(), any());
+        assertEquals("", captor.getValue().getTaskSql());
+    }
+
+    @Test
+    void omittedSqlStillFallsBackToStoredValue() {
+        DataTask partial = new DataTask();
+        partial.setId(TASK_ID);
+        partial.setTaskName("renamed-only");
+
+        service.update(partial, Collections.emptyList(), null, LineageValidationMode.STRICT);
+
+        ArgumentCaptor<DataTask> captor = ArgumentCaptor.forClass(DataTask.class);
+        verify(taskLineageConsistencyChecker).findHighConfidenceGap(captor.capture(), any(), any());
+        assertEquals("insert into dws.a select * from ods.b", captor.getValue().getTaskSql());
+    }
+
+    @Test
     void effectiveTaskViewDoesNotLeakOldValuesBackIntoTheUpdatePayload() {
         // 有效任务是副本：旧值不能写回请求对象，否则会被 updateById 当成本次提交的变更持久化。
         DataTask partial = new DataTask();

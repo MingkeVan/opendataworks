@@ -1402,13 +1402,17 @@ public class DataTaskService {
         if (exists == null) {
             return task;
         }
+        // 判定条件必须是 != null，而不是 hasText。
+        // MyBatis-Plus 默认字段策略是 NOT_NULL：空字符串会被 updateById 真正写库，
+        // 它是一个显式提交的新值，不是"字段省略"。用 hasText 会把"把 SQL 清空成草稿"
+        // 误判成未提交，继续拿旧 SQL 校验，导致同时清空血缘的合法操作被拒。
         DataTask effective = new DataTask();
         effective.setId(task.getId() != null ? task.getId() : exists.getId());
-        effective.setTaskName(StringUtils.hasText(task.getTaskName())
+        effective.setTaskName(task.getTaskName() != null
                 ? task.getTaskName() : exists.getTaskName());
-        effective.setDolphinNodeType(StringUtils.hasText(task.getDolphinNodeType())
+        effective.setDolphinNodeType(task.getDolphinNodeType() != null
                 ? task.getDolphinNodeType() : exists.getDolphinNodeType());
-        effective.setTaskSql(StringUtils.hasText(task.getTaskSql())
+        effective.setTaskSql(task.getTaskSql() != null
                 ? task.getTaskSql() : exists.getTaskSql());
         effective.setDolphinTaskCode(task.getDolphinTaskCode() != null
                 ? task.getDolphinTaskCode() : exists.getDolphinTaskCode());

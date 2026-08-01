@@ -338,6 +338,20 @@ export const buildConsistencyIssueHtml = (issues, intro) => {
   `
 }
 
+/**
+ * 把预检错误拆成血缘一致性问题和其他发布错误。
+ *
+ * block-missing 模式下后端会把**每一个**缺边任务都写进 errors。只显示首条的话，
+ * 用户得反复"修一个、再发一次"才能发现下一个，无法一次性修全。
+ */
+export const splitPreviewErrors = (preview) => {
+  const errors = Array.isArray(preview?.errors) ? preview.errors : []
+  return {
+    lineage: errors.filter((issue) => String(issue?.code || '').startsWith('LINEAGE_')),
+    others: errors.filter((issue) => !String(issue?.code || '').startsWith('LINEAGE_'))
+  }
+}
+
 export const firstPreviewErrorMessage = (preview) => {
   const first = Array.isArray(preview?.errors) ? preview.errors[0] : null
   return first?.message || '发布预检未通过'
