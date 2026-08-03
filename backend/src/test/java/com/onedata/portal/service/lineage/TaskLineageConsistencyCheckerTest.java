@@ -172,6 +172,80 @@ class TaskLineageConsistencyCheckerTest {
     }
 
     @Test
+    void selfReferentialTableIsExemptFromTheInputSideCheck() {
+        // INSERT INTO t SELECT ... FROM t：t 同时是输入和输出。
+        // 血缘里只登记了输出 t，不应因为"缺少输入 t"而拒绝保存——
+        // 任务不可能依赖自己，补这条读关系不会产生任何依赖边。
+        SqlTableAnalyzeResponse analyze = new SqlTableAnalyzeResponse();
+        analyze.setInputRefs(Collections.singletonList(matched("dws.t", 5L)));
+        analyze.setOutputRefs(Collections.singletonList(matched("dws.t", 5L)));
+        when(sqlTableMatcherService.analyze(anyString(), anyString())).thenReturn(analyze);
+
+        TaskLineageConsistencyChecker.HighConfidenceGap gap = checker.findHighConfidenceGap(
+                sqlTask(7L, "self_merge"), Collections.emptyList(), Collections.singletonList(5L));
+
+        assertTrue(gap.isEmpty(), "自读自写不应算作血缘缺失: " + gap.describe());
+    }
+
+    @Test
+    void selfReferentialExemptionDoesNotHideAMissingOutput() {
+        // 输出侧不豁免：写关系决定下游任务能否连上来，缺了就是真的少边。
+        SqlTableAnalyzeResponse analyze = new SqlTableAnalyzeResponse();
+        analyze.setInputRefs(Collections.singletonList(matched("dws.t", 5L)));
+        analyze.setOutputRefs(Collections.singletonList(matched("dws.t", 5L)));
+        when(sqlTableMatcherService.analyze(anyString(), anyString())).thenReturn(analyze);
+
+        TaskLineageConsistencyChecker.HighConfidenceGap gap = checker.findHighConfidenceGap(
+                sqlTask(7L, "self_merge"), Collections.singletonList(5L), Collections.emptyList());
+
+        assertFalse(gap.isEmpty());
+        assertEquals(1, gap.getMissingOutputs().size());
+        assertTrue(gap.getMissingInputs().isEmpty());
+    }
+
+    @Test
+    void selfReferentialExemptionStillFlagsAGenuinelyMissingInput() {
+        // 只豁免自读自写那张表，其他输入表照常校验。
+        SqlTableAnalyzeResponse analyze = new SqlTableAnalyzeResponse();
+        analyze.setInputRefs(Arrays.asList(matched("dws.t", 5L), matched("ods.src", 9L)));
+        analyze.setOutputRefs(Collections.singletonList(matched("dws.t", 5L)));
+        when(sqlTableMatcherService.analyze(anyString(), anyString())).thenReturn(analyze);
+
+        TaskLineageConsistencyChecker.HighConfidenceGap gap = checker.findHighConfidenceGap(
+                sqlTask(7L, "self_merge"), Collections.emptyList(), Collections.singletonList(5L));
+
+        assertEquals(1, gap.getMissingInputs().size());
+        assertTrue(gap.describe().contains("ods.src"), "实际: " + gap.describe());
+    }
+
+    @Test
+    void workflowCheckExemptsSelfReferentialTableOnBothMissingAndExtra() {
+        DataWorkflow workflow = workflow();
+        DataTask task = sqlTask(7L, "self_merge");
+        SqlTableAnalyzeResponse analyze = new SqlTableAnalyzeResponse();
+        // 解析器只识别出输出侧（自读常被方言写法漏掉）
+        analyze.setInputRefs(Collections.emptyList());
+        analyze.setOutputRefs(Collections.singletonList(matched("dws.t", 5L)));
+        when(sqlTableMatcherService.analyze(anyString(), anyString())).thenReturn(analyze);
+
+        List<WorkflowTaskRelation> bindings = new ArrayList<>();
+        WorkflowTaskRelation binding = new WorkflowTaskRelation();
+        binding.setWorkflowId(workflow.getId());
+        binding.setTaskId(7L);
+        bindings.add(binding);
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(bindings);
+        when(dataTaskMapper.selectBatchIds(any())).thenReturn(Collections.singletonList(task));
+        // 用户把读写两侧都登记了
+        when(tableTaskRelationMapper.selectList(any())).thenReturn(
+                Collections.singletonList(relation(7L, 5L, "read")),
+                Collections.singletonList(relation(7L, 5L, "write")));
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, false);
+
+        assertTrue(issues.isEmpty(), "读写都登记齐全的自读自写任务不应产生任何问题: " + issues);
+    }
+
+    @Test
     void nonSqlTaskSkipsSqlAnalysisEntirely() {
         DataTask shellTask = sqlTask(7L, "t");
         shellTask.setDolphinNodeType("SHELL");
