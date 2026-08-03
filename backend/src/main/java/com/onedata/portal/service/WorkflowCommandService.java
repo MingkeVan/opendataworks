@@ -46,6 +46,7 @@ public class WorkflowCommandService {
     private final WorkflowTaskRelationMapper workflowTaskRelationMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
     private final DataTaskMapper dataTaskMapper;
+    private final DataTaskIdentityArchiver dataTaskIdentityArchiver;
     private final DataLineageMapper dataLineageMapper;
     private final TableTaskRelationMapper tableTaskRelationMapper;
     private final WorkflowVersionService workflowVersionService;
@@ -195,6 +196,8 @@ public class WorkflowCommandService {
                 tableTaskRelationMapper.delete(
                         Wrappers.<TableTaskRelation>lambdaQuery()
                                 .in(TableTaskRelation::getTaskId, taskIds));
+                // 与单任务删除一致：软删除前归档唯一键，否则同名任务再次级联删除会触发 duplicate key
+                dataTaskIdentityArchiver.archiveByIds(taskIds);
                 dataTaskMapper.deleteBatchIds(taskIds);
                 log.info("已级联软删除任务: workflowId={}, taskCount={}", workflowId, taskIds.size());
             }

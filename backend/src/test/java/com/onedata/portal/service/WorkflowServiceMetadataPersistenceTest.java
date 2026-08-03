@@ -118,6 +118,7 @@ class WorkflowServiceMetadataPersistenceTest {
                 workflowTaskRelationMapper,
                 dolphinSchedulerService,
                 dataTaskMapper,
+                new DataTaskIdentityArchiver(dataTaskMapper),
                 dataLineageMapper,
                 tableTaskRelationMapper,
                 workflowVersionService,

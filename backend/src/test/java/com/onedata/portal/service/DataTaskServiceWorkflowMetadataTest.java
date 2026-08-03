@@ -23,12 +23,14 @@ import com.onedata.portal.service.lineage.TaskLineageConsistencyChecker;
 import com.onedata.portal.service.lineage.TaskLineageWriteService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -103,6 +105,16 @@ class DataTaskServiceWorkflowMetadataTest {
 
     @InjectMocks
     private DataTaskService dataTaskService;
+
+    /**
+     * 归档逻辑已收敛到 {@link DataTaskIdentityArchiver}，这里注入真实实现并复用 mock 的
+     * {@link DataTaskMapper}，使删除/创建路径上的归档断言仍然直接作用于 mapper 调用。
+     */
+    @BeforeEach
+    void wireIdentityArchiver() {
+        ReflectionTestUtils.setField(dataTaskService, "dataTaskIdentityArchiver",
+                new DataTaskIdentityArchiver(dataTaskMapper));
+    }
 
     @Test
     void getByIdEnrichesWorkflowMetadata() {

@@ -79,6 +79,7 @@ class DataTaskServiceLineageMergeTest {
     void setUp() {
         service = new DataTaskService(
                 dataTaskMapper,
+                new DataTaskIdentityArchiver(dataTaskMapper),
                 dataLineageMapper,
                 executionLogMapper,
                 tableTaskRelationMapper,
