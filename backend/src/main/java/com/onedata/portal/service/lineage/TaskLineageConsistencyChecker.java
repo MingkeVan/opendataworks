@@ -86,7 +86,14 @@ public class TaskLineageConsistencyChecker {
         Set<Long> outputs = toIdSet(finalOutputTableIds);
 
         for (SqlTableAnalyzeResponse.TableRefMatch ref : matchedRefs(analyze.getInputRefs())) {
-            if (!inputs.contains(ref.getChosenTable().getTableId())) {
+            Long tableId = ref.getChosenTable().getTableId();
+            // 自读自写的表豁免输入侧检查：INSERT INTO t SELECT ... FROM t 这类写法里，
+            // t 已经作为输出登记在血缘中，任务不可能依赖自己（边推导本就排除自环），
+            // 再要求一条读关系不会产生任何依赖边，只会让这类任务永远存不进去。
+            if (isSelfReferential(tableId, outputs, matchedTableIds(analyze.getOutputRefs()))) {
+                continue;
+            }
+            if (!inputs.contains(tableId)) {
                 gap.getMissingInputs().add(describeRef(ref));
             }
         }
@@ -189,10 +196,14 @@ public class TaskLineageConsistencyChecker {
         Set<Long> sqlInputs = matchedTableIds(analyze.getInputRefs());
         Set<Long> sqlOutputs = matchedTableIds(analyze.getOutputRefs());
 
+        // 自读自写的表在输入侧一律豁免，理由同 findHighConfidenceGap：
+        // 该表已作为输出登记，自环边本就不存在，补一条读关系不改变任何依赖。
         List<String> missingInputs = matchedRefs(analyze.getInputRefs()).stream()
+                .filter(ref -> !isSelfReferential(ref.getChosenTable().getTableId(), writes, sqlOutputs))
                 .filter(ref -> !reads.contains(ref.getChosenTable().getTableId()))
                 .map(this::describeRef)
                 .collect(Collectors.toList());
+        // 输出侧不豁免：写关系决定下游任务能否连上这个任务，缺了就是真的少边。
         List<String> missingOutputs = matchedRefs(analyze.getOutputRefs()).stream()
                 .filter(ref -> !writes.contains(ref.getChosenTable().getTableId()))
                 .map(this::describeRef)
@@ -211,6 +222,10 @@ public class TaskLineageConsistencyChecker {
 
         Set<Long> extraInputs = new LinkedHashSet<>(reads);
         extraInputs.removeAll(sqlInputs);
+        // 同一张表既读又写时，读关系不参与"多余"判定：解析器没识别出自读的情况下，
+        // 用户手工登记的那条读关系会被误报成多余的依赖。
+        extraInputs.removeAll(writes);
+        extraInputs.removeAll(sqlOutputs);
         Set<Long> extraOutputs = new LinkedHashSet<>(writes);
         extraOutputs.removeAll(sqlOutputs);
         if (!extraInputs.isEmpty() || !extraOutputs.isEmpty()) {
@@ -522,6 +537,24 @@ public class TaskLineageConsistencyChecker {
             log.debug("SQL analyze failed for task {}: {}", task.getId(), ex.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 判断某张表对该任务而言是否"自读自写"。
+     *
+     * <p>只要它出现在任务的输出侧（已登记的写关系，或 SQL 推断出的输出），
+     * 该表在输入侧的差异就不再报告。
+     *
+     * <p>取舍：若工作流内还有**另一个**任务写这张表，那条读关系其实承载着
+     * "对方 -> 本任务"的依赖边，豁免会让这类缺边不再被提示。当前按用户口径一律豁免，
+     * 换取自读自写任务不被反复误报。若需要区分该场景，应新增一类只在
+     * "其他任务也写该表"时触发的告警，而不是收回本豁免。
+     */
+    private boolean isSelfReferential(Long tableId, Set<Long> writes, Set<Long> sqlOutputs) {
+        if (tableId == null) {
+            return false;
+        }
+        return writes.contains(tableId) || sqlOutputs.contains(tableId);
     }
 
     private boolean isSqlTask(DataTask task) {
