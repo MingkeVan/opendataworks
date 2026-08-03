@@ -55,6 +55,16 @@ When working in this repository, optimize for:
 - When introducing Tailwind CSS, do it incrementally and only for the touched UI area.
 - Keep frontend changes aligned with the existing Vue component structure and routing/state patterns already in the repo.
 
+### Frontend visual structure rules
+
+- Keep visible frames shallow. Two levels of border are the normal maximum: the outer panel or card, and the content's own frame.
+- `Element Plus` content components usually bring their own frame (`el-table` with `border`, `el-descriptions` with `border`, code blocks, metric cards). Do not wrap them in another bordered or tinted card.
+- Every wrapper element must earn its place. Drop a container that has a single child and provides no title, no actions, and no layout of its own.
+- Prefer a section title plus whitespace over a card frame when grouping sibling blocks. When frames are removed, increase the gap between blocks so grouping stays readable.
+- Use the available horizontal space. A key-value block that fills its container should render multiple columns (`el-descriptions` with `:column="2"` or more) instead of one narrow column; give long text items a full-width span.
+- For panes inside a user-resizable pane, pick the column count from the measured container width and fall back to fewer columns when it gets narrow, instead of hardcoding a count that only works at one width.
+- When changing the visual structure of one tab or pane, apply the same treatment to its sibling tabs or panes in the same container. Do not leave one surface flat and its neighbors nested.
+
 ### Node / nvm baseline
 
 - This repository uses `nvm`.

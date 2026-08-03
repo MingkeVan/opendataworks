@@ -4,7 +4,7 @@
 // computed 与模板渲染。若 F17 抽取破坏了引用或响应式,挂载/渲染会抛错。
 import { describe, it, expect, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
-import { reactive, ref } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 
 const { apiStub, listPartitionsMock } = vi.hoisted(() => {
   const listPartitionsMock = vi.fn(() => Promise.resolve([]))
@@ -123,7 +123,7 @@ describe('DataStudioRightPanel mount smoke', () => {
 
   it('mounts each pane child with the ctx (P2-2 F17d)', () => {
     const panes = [
-      [DataStudioRightPanelBasic, '.basic-grid'],
+      [DataStudioRightPanelBasic, '.meta-descriptions'],
       [DataStudioRightPanelColumns, '.section-block'],
       [DataStudioRightPanelAccess, '.section-block'],
     ]
@@ -140,6 +140,67 @@ describe('DataStudioRightPanel mount smoke', () => {
       expect(wrapper.find(marker).exists()).toBe(true)
       wrapper.unmount()
     }
+  })
+
+  it('表信息默认两列，面板收窄后退回一列', async () => {
+    // 两列布局与「Doris信息」一致；右栏可拖到 400px 下限，窄面板下退回一列
+    const observers = []
+    class MockResizeObserver {
+      constructor(callback) {
+        this.callback = callback
+        observers.push(this)
+      }
+      observe() {}
+      disconnect() {}
+      emit(width) {
+        this.callback([{ contentRect: { width } }])
+      }
+    }
+    vi.stubGlobal('ResizeObserver', MockResizeObserver)
+
+    const wrapper = shallowMount(DataStudioRightPanelBasic, {
+      global: {
+        provide: { dataStudioCtx: buildCtx() },
+        stubs: {
+          TableTrendDialog: true,
+          ElScrollbar: { template: '<div><slot /></div>' },
+          ElDescriptions: {
+            props: ['column'],
+            template: '<div class="desc" :data-column="column"><slot /></div>',
+          },
+          ElDescriptionsItem: {
+            props: ['label', 'span'],
+            template: '<div class="desc-item" :data-label="label" :data-span="span"><slot /></div>',
+          },
+        },
+        config: { warnHandler: () => {} },
+        directives: { loading: {} },
+      },
+    })
+    const column = () => wrapper.find('.desc').attributes('data-column')
+    // 表注释是长文本，跨满整行
+    const commentSpan = () =>
+      wrapper.findAll('.desc-item').find((n) => n.attributes('data-label') === '表注释').attributes('data-span')
+
+    expect(column()).toBe('2')
+    expect(commentSpan()).toBe('2')
+
+    observers[0].emit(360)
+    await nextTick()
+    expect(column()).toBe('1')
+    expect(commentSpan()).toBe('1')
+
+    observers[0].emit(720)
+    await nextTick()
+    expect(column()).toBe('2')
+
+    // tab 隐藏时宽度为 0，不能把列数抖回一列
+    observers[0].emit(0)
+    await nextTick()
+    expect(column()).toBe('2')
+
+    wrapper.unmount()
+    vi.unstubAllGlobals()
   })
 
   it('访问概况展示同步关闭状态和历史覆盖信息', () => {
