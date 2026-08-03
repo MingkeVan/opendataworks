@@ -123,7 +123,7 @@ describe('DataStudioRightPanel mount smoke', () => {
 
   it('mounts each pane child with the ctx (P2-2 F17d)', () => {
     const panes = [
-      [DataStudioRightPanelBasic, '.basic-grid'],
+      [DataStudioRightPanelBasic, '.meta-descriptions'],
       [DataStudioRightPanelColumns, '.section-block'],
       [DataStudioRightPanelAccess, '.section-block'],
     ]

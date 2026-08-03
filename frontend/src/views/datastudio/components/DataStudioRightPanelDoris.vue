@@ -210,8 +210,9 @@ watch(pageSize, () => {
 .warning-icon {
   font-size: 13px;
 }
+/* 区块不再有卡片边框，两块之间靠留白分隔，间距比原来大一点 */
 .partition-block {
-  margin-top: 10px;
+  margin-top: 16px;
 }
 .partition-count {
   color: var(--text-muted);

@@ -680,11 +680,9 @@ const {
   min-height: 0;
 }
 
+/* 区块只做分组与间距，不再自带边框/底色：里面的表格、描述列表、代码框都
+   已经有自己的边框，再套一层卡片就是「面板边框 + 卡片边框 + 内容边框」三层套娃 */
 .meta-tabs :deep(.section-block) {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-muted);
-  padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
