@@ -163,7 +163,8 @@ public class TaskLineageConsistencyChecker {
             // 非 SQL 节点完全跳过 SQL 比对：analyze() 对非 SQL 返回空结果，
             // 若不跳过，SHELL/PYTHON 等任务的既有血缘会被整体误判成"多余"。
             if (isSqlTask(task)) {
-                collectSqlIssues(task, reads, writes, issues);
+                collectSqlIssues(task, reads, writes,
+                        tablesWrittenByOtherTasks(task.getId(), writesByTask), issues);
             }
         }
         if (includeDefinitionDrift) {
@@ -187,6 +188,7 @@ public class TaskLineageConsistencyChecker {
     private void collectSqlIssues(DataTask task,
             Set<Long> reads,
             Set<Long> writes,
+            Set<Long> tablesWrittenByOthers,
             List<WorkflowPublishRepairIssue> issues) {
         SqlTableAnalyzeResponse analyze = analyzeTaskSql(task);
         if (analyze == null) {
@@ -196,13 +198,36 @@ public class TaskLineageConsistencyChecker {
         Set<Long> sqlInputs = matchedTableIds(analyze.getInputRefs());
         Set<Long> sqlOutputs = matchedTableIds(analyze.getOutputRefs());
 
-        // 自读自写的表在输入侧一律豁免，理由同 findHighConfidenceGap：
-        // 该表已作为输出登记，自环边本就不存在，补一条读关系不改变任何依赖。
-        List<String> missingInputs = matchedRefs(analyze.getInputRefs()).stream()
-                .filter(ref -> !isSelfReferential(ref.getChosenTable().getTableId(), writes, sqlOutputs))
-                .filter(ref -> !reads.contains(ref.getChosenTable().getTableId()))
-                .map(this::describeRef)
-                .collect(Collectors.toList());
+        // 自读自写的表在输入侧豁免，但仅限"本工作流里只有本任务写这张表"的情况。
+        // 若还有别的任务写它，这条读关系承载着"对方 -> 本任务"的真实依赖边，
+        // 缺了会让该边彻底消失（inferTaskEdges 对没有任何读关系的任务直接跳过），
+        // 因此单独拎出来照常报告。
+        List<String> missingInputs = new ArrayList<>();
+        List<String> missingSharedTableInputs = new ArrayList<>();
+        for (SqlTableAnalyzeResponse.TableRefMatch ref : matchedRefs(analyze.getInputRefs())) {
+            Long tableId = ref.getChosenTable().getTableId();
+            if (reads.contains(tableId)) {
+                continue;
+            }
+            if (!isSelfReferential(tableId, writes, sqlOutputs)) {
+                missingInputs.add(describeRef(ref));
+            } else if (tablesWrittenByOthers.contains(tableId)) {
+                missingSharedTableInputs.add(describeRef(ref));
+            }
+            // 其余情况：自读自写且只有本任务写该表，豁免。
+        }
+        if (!missingSharedTableInputs.isEmpty()) {
+            issues.add(buildIssue(task,
+                    CODE_SQL_RELATION_MISSING,
+                    blockMissingSeverity(),
+                    false,
+                    "task.lineage.missing",
+                    String.format("任务[%s] 读取了同工作流其他任务也在写入的表 %s，但未登记读血缘。"
+                                    + "缺这条读关系会让上游任务到本任务的依赖边消失，调度顺序可能出错。"
+                                    + "请补齐输入表后重新保存。",
+                            taskLabel(task),
+                            String.join(", ", missingSharedTableInputs))));
+        }
         // 输出侧不豁免：写关系决定下游任务能否连上这个任务，缺了就是真的少边。
         List<String> missingOutputs = matchedRefs(analyze.getOutputRefs()).stream()
                 .filter(ref -> !writes.contains(ref.getChosenTable().getTableId()))
@@ -540,15 +565,30 @@ public class TaskLineageConsistencyChecker {
     }
 
     /**
+     * 本工作流内、除该任务之外，还有哪些表被其他任务写入。
+     *
+     * <p>{@code writesByTask} 在工作流级检查里本就全量在手，因此这里没有额外查询。
+     */
+    private Set<Long> tablesWrittenByOtherTasks(Long taskId, Map<Long, Set<Long>> writesByTask) {
+        Set<Long> result = new LinkedHashSet<>();
+        for (Map.Entry<Long, Set<Long>> entry : writesByTask.entrySet()) {
+            if (Objects.equals(entry.getKey(), taskId)) {
+                continue;
+            }
+            result.addAll(entry.getValue());
+        }
+        return result;
+    }
+
+    /**
      * 判断某张表对该任务而言是否"自读自写"。
      *
-     * <p>只要它出现在任务的输出侧（已登记的写关系，或 SQL 推断出的输出），
-     * 该表在输入侧的差异就不再报告。
+     * <p>只要它出现在任务的输出侧（已登记的写关系，或 SQL 推断出的输出），就算自读自写。
      *
-     * <p>取舍：若工作流内还有**另一个**任务写这张表，那条读关系其实承载着
-     * "对方 -> 本任务"的依赖边，豁免会让这类缺边不再被提示。当前按用户口径一律豁免，
-     * 换取自读自写任务不被反复误报。若需要区分该场景，应新增一类只在
-     * "其他任务也写该表"时触发的告警，而不是收回本豁免。
+     * <p>这只是"是否自读自写"的判定，不等于最终豁免：
+     * 工作流级检查还会看该表是否被其他任务写入，被写入时仍照常报告
+     * （见 {@link #collectSqlIssues}）。任务级保存检查拿不到工作流上下文，
+     * 一律豁免，由发布/导出阶段兜底。
      */
     private boolean isSelfReferential(Long tableId, Set<Long> writes, Set<Long> sqlOutputs) {
         if (tableId == null) {
