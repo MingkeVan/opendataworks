@@ -72,13 +72,12 @@ public class WorkflowExecutionService {
         if (workflowCode == null || workflowCode <= 0) {
             throw new IllegalStateException("工作流尚未部署或缺少 Dolphin 编码");
         }
-        if (request == null) {
-            throw new IllegalArgumentException("补数参数不能为空");
-        }
-
         if (!"online".equalsIgnoreCase(workflow.getStatus())) {
             throw new IllegalStateException("工作流未上线，请先上线后再补数");
         }
+        // 先校验再落日志，避免被拒的请求在 task_execution_log 留下垃圾行。
+        WorkflowBackfillValidator.validate(request);
+
         TaskExecutionLog executionLog = createWorkflowExecutionLog(workflowId, "backfill");
         try {
             String triggerId = dolphinSchedulerService.backfillProcessInstance(

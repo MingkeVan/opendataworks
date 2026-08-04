@@ -679,19 +679,17 @@ public class DolphinSchedulerService {
         return withConfig(dolphinConfigId, () -> backfillProcessInstance(workflowCode, request));
     }
 
+    /**
+     * Build the {@code scheduleTime} payload for a complement run. Presence,
+     * format and ordering are already enforced by
+     * {@link WorkflowBackfillValidator} before the request reaches this point.
+     */
     private String buildComplementScheduleTime(WorkflowBackfillRequest request) {
         Map<String, String> payload = new HashMap<>();
-        String mode = StringUtils.hasText(request.getMode()) ? request.getMode() : "range";
 
-        if ("list".equalsIgnoreCase(mode)) {
-            if (!StringUtils.hasText(request.getScheduleDateList())) {
-                throw new IllegalArgumentException("scheduleDateList is required when mode=list");
-            }
+        if (WorkflowBackfillValidator.isListMode(request)) {
             payload.put("complementScheduleDateList", request.getScheduleDateList());
         } else {
-            if (!StringUtils.hasText(request.getStartTime()) || !StringUtils.hasText(request.getEndTime())) {
-                throw new IllegalArgumentException("startTime/endTime is required when mode=range");
-            }
             payload.put("complementStartDate", request.getStartTime());
             payload.put("complementEndDate", request.getEndTime());
         }
@@ -794,20 +792,76 @@ public class DolphinSchedulerService {
             if (result.size() >= targetLimit) {
                 break;
             }
-            result.add(WorkflowInstanceSummary.builder()
-                    .instanceId(instance.getId())
-                    .state(instance.getState())
-                    .commandType(instance.getCommandType())
-                    .startTime(instance.getStartTime())
-                    .endTime(instance.getEndTime())
-                    .durationMs(parseDuration(instance.getDuration()))
-                    .build());
+            result.add(toSummary(instance));
         }
         return result;
     }
 
+    private WorkflowInstanceSummary toSummary(DolphinProcessInstance instance) {
+        return WorkflowInstanceSummary.builder()
+                .instanceId(instance.getId())
+                .workflowCode(instance.getProcessDefinitionCode())
+                .state(instance.getState())
+                .commandType(instance.getCommandType())
+                .startTime(instance.getStartTime())
+                .endTime(instance.getEndTime())
+                .scheduleTime(instance.getScheduleTime())
+                .durationMs(parseDuration(instance.getDuration()))
+                .build();
+    }
+
     public List<WorkflowInstanceSummary> listWorkflowInstances(Long dolphinConfigId, Long workflowCode, int limit) {
         return withConfig(dolphinConfigId, () -> listWorkflowInstances(workflowCode, limit));
+    }
+
+    /**
+     * List the most recent workflow instances of the whole project, without
+     * filtering by workflow definition.
+     *
+     * <p>Used by the execution monitor, which shows「最近执行」across every
+     * workflow: one project-scoped query replaces one query per workflow, so the
+     * call count follows the number of DolphinScheduler configs rather than the
+     * number of workflows. Callers map instances back to their own workflows via
+     * {@link WorkflowInstanceSummary#getWorkflowCode()} and drop the ones they do
+     * not manage.</p>
+     */
+    public List<WorkflowInstanceSummary> listRecentProjectInstances(int limit) {
+        Long projectCode = getProjectCode();
+        if (projectCode == null) {
+            throw new IllegalStateException("Cannot list workflow instances: Project not found");
+        }
+
+        int targetLimit = Math.min(Math.max(limit, 1), 100);
+        int pageSize = Math.min(Math.max(targetLimit, 20), 100);
+        int maxPages = 3;
+
+        List<WorkflowInstanceSummary> result = new ArrayList<>();
+        int pageNo = 1;
+        while (pageNo <= maxPages && result.size() < targetLimit) {
+            DolphinPageData<DolphinProcessInstance> page = openApiClient.listProcessInstances(
+                    projectCode, pageNo, pageSize, null);
+            if (page == null || page.getTotalList() == null || page.getTotalList().isEmpty()) {
+                break;
+            }
+            for (DolphinProcessInstance instance : page.getTotalList()) {
+                if (instance == null || instance.getId() == null) {
+                    continue;
+                }
+                result.add(toSummary(instance));
+                if (result.size() >= targetLimit) {
+                    break;
+                }
+            }
+            if (shouldStopPaging(page, pageNo, pageSize)) {
+                break;
+            }
+            pageNo++;
+        }
+        return result;
+    }
+
+    public List<WorkflowInstanceSummary> listRecentProjectInstances(Long dolphinConfigId, int limit) {
+        return withConfig(dolphinConfigId, () -> listRecentProjectInstances(limit));
     }
 
     /**

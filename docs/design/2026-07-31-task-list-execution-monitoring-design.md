@@ -118,7 +118,7 @@ Dolphin 实例与本地日志按“平台工作流 ID + 外部实例 ID”去重
 
 ```text
 GET /v1/executions/workflow-instances
-  ?workflowId=&status=&startTime=&endTime=&refresh=&pageNum=&pageSize=
+  ?workflowId=&status=&refresh=&pageNum=&pageSize=
 
 GET /v1/executions/workflows/{workflowId}/instances/{instanceId}/tasks
 ```
@@ -131,6 +131,13 @@ GET /v1/executions/workflows/{workflowId}/instances/{instanceId}/tasks
 
 旧 `/v1/executions/history`、`/statistics`、`/running`、`/failed` 和详情/同步接口保持不变。
 
+> **2026-08-04 更新**（见 [2026-08-04-workflow-backfill-and-execution-view-design.md](2026-08-04-workflow-backfill-and-execution-view-design.md)）：
+>
+> - 移除 `startTime` / `endTime` 查询参数。监控页是「最近执行」视图，在最近 N 条里再按时间筛没有意义。
+> - `records[]` 新增 `scheduleTime`（Dolphin 运行实例的调度日期，补数实例上表示补的是哪一个调度周期）与 `dolphinInstanceUrl`（实例详情深链，未配置 WebUI 地址时为 `null`）。
+> - 取数方式改变：不传 `workflowId` 时不再按工作流逐个查询，而是按 `dolphinConfigId` 分组做项目级查询取最近 50 条，再用 `processDefinitionCode` 反查回本平台工作流。传 `workflowId` 时仍按 `processDefinitionCode` 服务端过滤。
+> - 该接口现同时服务执行监控与工作流详情「执行历史」，两者共用 `WorkflowInstanceTable` 组件，作用域由是否传 `workflowId` 决定。
+
 ## Failure and Fallback
 
 - Dolphin 工作流实例刷新失败：读取对应工作流已有缓存。
@@ -141,7 +148,7 @@ GET /v1/executions/workflows/{workflowId}/instances/{instanceId}/tasks
 
 ## Tradeoffs
 
-- 监控每次加载会按已部署工作流读取最近最多 100 个实例，工作流较多时 OpenAPI 请求数随工作流数增长。
+- 监控每次加载会按已部署工作流读取最近最多 100 个实例，工作流较多时 OpenAPI 请求数随工作流数增长。（已于 2026-08-04 改为项目级查询，请求数与工作流数量解耦，见上方接口更新。）
 - 任务实例不落库，Dolphin 不可用时无法提供历史任务级详情；页面明确显示不可用或展开错误。
 - 当前统计是可见的近期实例口径，不是 Dolphin 全量历史报表。
 

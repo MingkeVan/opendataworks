@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -47,6 +48,12 @@ public class WorkflowExecutionMonitorService {
 
     private static final int MAX_INSTANCES_PER_WORKFLOW = 100;
 
+    /**
+     * 执行监控展示的是「最近执行」，不需要保证每个工作流都被公平采样。
+     * 不指定工作流时按项目级查询取最近这么多条，调用次数与工作流数量无关。
+     */
+    private static final int RECENT_INSTANCE_WINDOW = 50;
+
     private final DataWorkflowMapper dataWorkflowMapper;
     private final WorkflowTaskRelationMapper workflowTaskRelationMapper;
     private final DataTaskMapper dataTaskMapper;
@@ -56,8 +63,6 @@ public class WorkflowExecutionMonitorService {
 
     public WorkflowExecutionPage listWorkflowInstances(Long workflowId,
             String status,
-            LocalDateTime startTime,
-            LocalDateTime endTime,
             boolean refresh,
             int pageNum,
             int pageSize) {
@@ -71,21 +76,25 @@ public class WorkflowExecutionMonitorService {
             return emptyPage(resolvedPageNum, resolvedPageSize);
         }
 
-        Map<Long, List<TaskExecutionLog>> localLogsByWorkflow = loadLocalLogsByWorkflow(workflows);
-        List<WorkflowInstanceExecution> snapshot = new ArrayList<>();
-        for (DataWorkflow workflow : workflows) {
-            snapshot.addAll(resolveWorkflowExecutions(
+        // Web UI base URL 按 dolphinConfigId 记忆，避免逐工作流重复读配置。
+        Map<Long, String> webuiBaseUrlCache = new HashMap<>();
+        List<WorkflowInstanceExecution> snapshot;
+        if (workflowId != null) {
+            // 指定工作流：按 processDefinitionCode 服务端过滤，精确且只打一次 Dolphin。
+            DataWorkflow workflow = workflows.get(0);
+            Map<Long, List<TaskExecutionLog>> localLogsByWorkflow =
+                    loadLocalLogsByWorkflow(workflows, MAX_INSTANCES_PER_WORKFLOW);
+            snapshot = resolveWorkflowExecutions(
                     workflow,
                     localLogsByWorkflow.getOrDefault(workflow.getId(), Collections.emptyList()),
-                    refresh));
+                    refresh,
+                    webuiBaseUrlCache);
+        } else {
+            snapshot = resolveRecentExecutions(workflows, webuiBaseUrlCache);
         }
 
         List<WorkflowInstanceExecution> filtered = snapshot.stream()
                 .filter(item -> !StringUtils.hasText(status) || status.equalsIgnoreCase(item.getStatus()))
-                .filter(item -> startTime == null
-                        || (item.getStartTime() != null && !item.getStartTime().isBefore(startTime)))
-                .filter(item -> endTime == null
-                        || (item.getStartTime() != null && !item.getStartTime().isAfter(endTime)))
                 .sorted(Comparator.comparing(
                         WorkflowInstanceExecution::getStartTime,
                         Comparator.nullsLast(Comparator.reverseOrder())))
@@ -131,7 +140,8 @@ public class WorkflowExecutionMonitorService {
 
     private List<WorkflowInstanceExecution> resolveWorkflowExecutions(DataWorkflow workflow,
             List<TaskExecutionLog> localLogs,
-            boolean refresh) {
+            boolean refresh,
+            Map<Long, String> webuiBaseUrlCache) {
         List<RuntimeWorkflowInstance> runtimeInstances = new ArrayList<>();
         if (workflow.getWorkflowCode() != null && workflow.getWorkflowCode() > 0) {
             try {
@@ -153,7 +163,114 @@ public class WorkflowExecutionMonitorService {
                         .collect(Collectors.toList());
             }
         }
+        return mergeWithLocalLogs(workflow, runtimeInstances, localLogs, webuiBaseUrlCache);
+    }
 
+    /**
+     * 不指定工作流时的取数路径：按 dolphinConfigId 分组做项目级查询，取最近
+     * {@link #RECENT_INSTANCE_WINDOW} 条，Dolphin 调用次数等于配置数量而非工作流数量。
+     * 该路径只读不写缓存——缓存是 per-workflow 语义，由 WorkflowExecutionSyncJob 维护。
+     */
+    private List<WorkflowInstanceExecution> resolveRecentExecutions(List<DataWorkflow> workflows,
+            Map<Long, String> webuiBaseUrlCache) {
+        Map<Long, DataWorkflow> workflowByCode = new LinkedHashMap<>();
+        Map<Long, List<DataWorkflow>> workflowsByConfig = new LinkedHashMap<>();
+        for (DataWorkflow workflow : workflows) {
+            if (workflow.getWorkflowCode() == null || workflow.getWorkflowCode() <= 0) {
+                continue;
+            }
+            workflowByCode.putIfAbsent(workflow.getWorkflowCode(), workflow);
+            workflowsByConfig
+                    .computeIfAbsent(workflow.getDolphinConfigId(), key -> new ArrayList<>())
+                    .add(workflow);
+        }
+
+        Map<DataWorkflow, List<RuntimeWorkflowInstance>> runtimeByWorkflow = new LinkedHashMap<>();
+        boolean anyConfigFailed = false;
+        for (Long dolphinConfigId : workflowsByConfig.keySet()) {
+            try {
+                List<WorkflowInstanceSummary> summaries = dolphinSchedulerService
+                        .listRecentProjectInstances(dolphinConfigId, RECENT_INSTANCE_WINDOW);
+                for (WorkflowInstanceSummary summary : summaries) {
+                    DataWorkflow owner = workflowByCode.get(summary.getWorkflowCode());
+                    if (owner == null) {
+                        // 项目里可能有非本平台托管的工作流，其实例直接丢弃。
+                        continue;
+                    }
+                    runtimeByWorkflow
+                            .computeIfAbsent(owner, key -> new ArrayList<>())
+                            .add(RuntimeWorkflowInstance.fromSummary(summary, "dolphin"));
+                }
+            } catch (Exception ex) {
+                anyConfigFailed = true;
+                log.warn("Failed to list recent instances for dolphin config {}: {}",
+                        dolphinConfigId, ex.getMessage());
+            }
+        }
+
+        if (runtimeByWorkflow.isEmpty() && anyConfigFailed) {
+            Map<Long, DataWorkflow> workflowById = workflows.stream()
+                    .filter(workflow -> workflow.getId() != null)
+                    .collect(Collectors.toMap(
+                            DataWorkflow::getId,
+                            workflow -> workflow,
+                            (left, right) -> left,
+                            LinkedHashMap::new));
+            for (WorkflowInstanceCache cache : workflowInstanceCacheService
+                    .listRecentAcrossWorkflows(RECENT_INSTANCE_WINDOW)) {
+                DataWorkflow owner = workflowById.get(cache.getWorkflowId());
+                if (owner == null) {
+                    continue;
+                }
+                runtimeByWorkflow
+                        .computeIfAbsent(owner, key -> new ArrayList<>())
+                        .add(RuntimeWorkflowInstance.fromCache(cache, "cache"));
+            }
+        }
+
+        Map<Long, List<TaskExecutionLog>> localLogsByWorkflow =
+                loadLocalLogsByWorkflow(workflows, RECENT_INSTANCE_WINDOW);
+        List<WorkflowInstanceExecution> result = new ArrayList<>();
+        Set<Long> coveredWorkflowIds = new HashSet<>();
+        for (Map.Entry<DataWorkflow, List<RuntimeWorkflowInstance>> entry : runtimeByWorkflow.entrySet()) {
+            DataWorkflow owner = entry.getKey();
+            coveredWorkflowIds.add(owner.getId());
+            result.addAll(mergeWithLocalLogs(
+                    owner,
+                    entry.getValue(),
+                    localLogsByWorkflow.getOrDefault(owner.getId(), Collections.emptyList()),
+                    webuiBaseUrlCache));
+        }
+        // 已触发但 Dolphin 侧还没有实例的平台记录，仍要在监控里可见。
+        for (DataWorkflow workflow : workflows) {
+            if (coveredWorkflowIds.contains(workflow.getId())) {
+                continue;
+            }
+            List<TaskExecutionLog> localLogs =
+                    localLogsByWorkflow.getOrDefault(workflow.getId(), Collections.emptyList());
+            if (localLogs.isEmpty()) {
+                continue;
+            }
+            result.addAll(mergeWithLocalLogs(
+                    workflow, Collections.emptyList(), localLogs, webuiBaseUrlCache));
+        }
+
+        return result.stream()
+                .sorted(Comparator.comparing(
+                        WorkflowInstanceExecution::getStartTime,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .limit(RECENT_INSTANCE_WINDOW)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 把 Dolphin 运行实例与本地触发日志合并成一份展示快照：能对上的补齐来源与错误信息，
+     * 对不上的本地记录单独成行。
+     */
+    private List<WorkflowInstanceExecution> mergeWithLocalLogs(DataWorkflow workflow,
+            List<RuntimeWorkflowInstance> runtimeInstances,
+            List<TaskExecutionLog> localLogs,
+            Map<Long, String> webuiBaseUrlCache) {
         Map<String, TaskExecutionLog> localByExternalId = localLogs.stream()
                 .filter(logRecord -> StringUtils.hasText(logRecord.getExecutionId()))
                 .collect(Collectors.toMap(
@@ -174,7 +291,7 @@ public class WorkflowExecutionMonitorService {
             if (instanceKey != null) {
                 seenExternalIds.add(instanceKey);
             }
-            result.add(mapRuntimeInstance(workflow, runtime, localMatch));
+            result.add(mapRuntimeInstance(workflow, runtime, localMatch, webuiBaseUrlCache));
         }
 
         for (TaskExecutionLog localLog : localLogs) {
@@ -185,12 +302,12 @@ public class WorkflowExecutionMonitorService {
                     && !seenExternalIds.add(localLog.getExecutionId())) {
                 continue;
             }
-            result.add(mapLocalExecution(workflow, localLog));
+            result.add(mapLocalExecution(workflow, localLog, webuiBaseUrlCache));
         }
         return result;
     }
 
-    private Map<Long, List<TaskExecutionLog>> loadLocalLogsByWorkflow(List<DataWorkflow> workflows) {
+    private Map<Long, List<TaskExecutionLog>> loadLocalLogsByWorkflow(List<DataWorkflow> workflows, int limit) {
         List<Long> workflowIds = workflows.stream()
                 .map(DataWorkflow::getId)
                 .filter(Objects::nonNull)
@@ -217,7 +334,8 @@ public class WorkflowExecutionMonitorService {
         List<TaskExecutionLog> logs = executionLogMapper.selectList(
                 Wrappers.<TaskExecutionLog>lambdaQuery()
                         .in(TaskExecutionLog::getTaskId, workflowIdByTaskId.keySet())
-                        .orderByDesc(TaskExecutionLog::getStartTime));
+                        .orderByDesc(TaskExecutionLog::getStartTime)
+                        .last("LIMIT " + Math.max(limit, 1)));
         return logs.stream()
                 .filter(logRecord -> workflowIdByTaskId.containsKey(logRecord.getTaskId()))
                 .collect(Collectors.groupingBy(
@@ -248,7 +366,8 @@ public class WorkflowExecutionMonitorService {
 
     private WorkflowInstanceExecution mapRuntimeInstance(DataWorkflow workflow,
             RuntimeWorkflowInstance runtime,
-            TaskExecutionLog localMatch) {
+            TaskExecutionLog localMatch,
+            Map<Long, String> webuiBaseUrlCache) {
         LocalDateTime startTime = runtime.startTime;
         LocalDateTime endTime = runtime.endTime;
         String triggerType = localMatch != null && StringUtils.hasText(localMatch.getTriggerType())
@@ -266,15 +385,19 @@ public class WorkflowExecutionMonitorService {
                 .triggerType(triggerType)
                 .source(localMatch == null ? "dolphin" : "platform")
                 .executionSource(runtime.executionSource)
+                .scheduleTime(runtime.scheduleTime)
                 .startTime(startTime)
                 .endTime(endTime)
                 .durationSeconds(resolveWorkflowDurationSeconds(startTime, endTime, runtime.durationMs))
                 .errorMessage(localMatch == null ? null : localMatch.getErrorMessage())
                 .expandable(runtime.instanceId != null)
+                .dolphinInstanceUrl(resolveInstanceUrl(workflow, runtime.instanceId, webuiBaseUrlCache))
                 .build();
     }
 
-    private WorkflowInstanceExecution mapLocalExecution(DataWorkflow workflow, TaskExecutionLog localLog) {
+    private WorkflowInstanceExecution mapLocalExecution(DataWorkflow workflow,
+            TaskExecutionLog localLog,
+            Map<Long, String> webuiBaseUrlCache) {
         Long instanceId = parseLong(localLog.getExecutionId());
         return WorkflowInstanceExecution.builder()
                 .workflowId(workflow.getId())
@@ -293,7 +416,32 @@ public class WorkflowExecutionMonitorService {
                 .expandable(instanceId != null
                         && workflow.getWorkflowCode() != null
                         && workflow.getWorkflowCode() > 0)
+                .dolphinInstanceUrl(resolveInstanceUrl(workflow, instanceId, webuiBaseUrlCache))
                 .build();
+    }
+
+    /**
+     * 解析实例详情深链。Web UI 地址按 dolphinConfigId 记忆，同一配置下的工作流只读一次配置；
+     * 读取失败时记为空串，后续同一配置不再重试。
+     */
+    private String resolveInstanceUrl(DataWorkflow workflow,
+            Long instanceId,
+            Map<Long, String> webuiBaseUrlCache) {
+        if (instanceId == null || workflow.getProjectCode() == null || workflow.getWorkflowCode() == null) {
+            return null;
+        }
+        String baseUrl = webuiBaseUrlCache.computeIfAbsent(workflow.getDolphinConfigId(), configId -> {
+            try {
+                String resolved = dolphinSchedulerService.getWebuiBaseUrl(configId);
+                return resolved == null ? "" : resolved;
+            } catch (Exception ex) {
+                log.warn("Failed to resolve Dolphin WebUI base url for config {}: {}",
+                        configId, ex.getMessage());
+                return "";
+            }
+        });
+        return DolphinExecutionMapper.workflowInstanceUrl(
+                baseUrl, workflow.getProjectCode(), workflow.getWorkflowCode(), instanceId);
     }
 
     private WorkflowTaskInstanceExecution mapTaskInstance(DolphinTaskInstance instance, DataTask task) {
@@ -405,6 +553,7 @@ public class WorkflowExecutionMonitorService {
         private Long instanceId;
         private String state;
         private String commandType;
+        private LocalDateTime scheduleTime;
         private LocalDateTime startTime;
         private LocalDateTime endTime;
         private Long durationMs;
@@ -416,6 +565,7 @@ public class WorkflowExecutionMonitorService {
             instance.instanceId = summary.getInstanceId();
             instance.state = summary.getState();
             instance.commandType = summary.getCommandType();
+            instance.scheduleTime = DolphinExecutionMapper.parseDateTime(summary.getScheduleTime());
             instance.startTime = DolphinExecutionMapper.parseDateTime(summary.getStartTime());
             instance.endTime = DolphinExecutionMapper.parseDateTime(summary.getEndTime());
             instance.durationMs = summary.getDurationMs();
@@ -429,6 +579,7 @@ public class WorkflowExecutionMonitorService {
             instance.instanceId = cache.getInstanceId();
             instance.state = cache.getState();
             instance.commandType = cache.getTriggerType();
+            instance.scheduleTime = toLocalDateTime(cache.getScheduleTime());
             instance.startTime = toLocalDateTime(cache.getStartTime());
             instance.endTime = toLocalDateTime(cache.getEndTime());
             instance.durationMs = cache.getDurationMs();

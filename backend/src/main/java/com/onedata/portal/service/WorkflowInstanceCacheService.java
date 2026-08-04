@@ -52,6 +52,18 @@ public class WorkflowInstanceCacheService {
         );
     }
 
+    /**
+     * 跨工作流取最近若干条缓存实例，用于执行监控全局查询失败时的降级。
+     * 一次索引查询取代按工作流逐个读取。
+     */
+    public List<WorkflowInstanceCache> listRecentAcrossWorkflows(int limit) {
+        return cacheMapper.selectList(
+            Wrappers.<WorkflowInstanceCache>lambdaQuery()
+                .orderByDesc(WorkflowInstanceCache::getStartTime)
+                .last("LIMIT " + Math.max(limit, 1))
+        );
+    }
+
     public WorkflowInstanceCache findLatest(Long workflowId) {
         return cacheMapper.selectOne(
             Wrappers.<WorkflowInstanceCache>lambdaQuery()
@@ -71,6 +83,7 @@ public class WorkflowInstanceCacheService {
         cache.setDurationMs(instance.getDurationMs());
         cache.setStartTime(parse(instance.getStartTime()));
         cache.setEndTime(parse(instance.getEndTime()));
+        cache.setScheduleTime(parse(instance.getScheduleTime()));
         cache.setExtra(instance.getRawJson());
         return cache;
     }

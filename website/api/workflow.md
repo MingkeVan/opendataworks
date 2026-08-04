@@ -120,17 +120,56 @@
 * **路径**: `POST /api/v1/workflows/{id}/execute`
 
 #### 补数据执行 (Backfill)
-根据指定的日期范围批量回溯执行工作流。
+根据指定的日期范围或日期列表批量回溯执行工作流，对应 DolphinScheduler 的 `COMPLEMENT_DATA`。
+
 * **路径**: `POST /api/v1/workflows/{id}/backfill`
-* **请求体 (JSON)**:
+* **前置条件**: 工作流已部署（有 `workflowCode`）且状态为 `online`。
+* **时间格式**: `yyyy-MM-dd HH:mm:ss`。
+* **日期约束**: 补数只针对已经过去的调度周期，**不接受晚于今天的日期**（按日粒度判断，今天当天任意时刻可用）。范围模式还要求开始时间不晚于结束时间。违反时返回 400 并带中文原因。
+
+* **请求体 (JSON)** — 范围模式：
 
 ```json
 {
-  "startRunDate": "2026-05-01 00:00:00",
-  "endRunDate": "2026-05-15 00:00:00",
-  "parallelism": 2
+  "mode": "range",
+  "startTime": "2026-05-01 00:00:00",
+  "endTime": "2026-05-15 00:00:00",
+  "runMode": "RUN_MODE_SERIAL",
+  "expectedParallelismNumber": null,
+  "complementDependentMode": "OFF_MODE",
+  "allLevelDependent": false,
+  "executionOrder": "DESC_ORDER",
+  "failureStrategy": "CONTINUE"
 }
 ```
+
+* **请求体 (JSON)** — 列表模式：
+
+```json
+{
+  "mode": "list",
+  "scheduleDateList": "2026-05-01 00:00:00,2026-05-03 00:00:00",
+  "runMode": "RUN_MODE_PARALLEL",
+  "expectedParallelismNumber": 8,
+  "complementDependentMode": "OFF_MODE",
+  "allLevelDependent": false,
+  "executionOrder": "DESC_ORDER",
+  "failureStrategy": "CONTINUE"
+}
+```
+
+* **字段说明**:
+
+| 字段 | 说明 |
+| --- | --- |
+| `mode` | `range`（默认）或 `list`。`range` 用 `startTime`/`endTime`，`list` 用 `scheduleDateList` |
+| `runMode` | `RUN_MODE_SERIAL` 或 `RUN_MODE_PARALLEL` |
+| `expectedParallelismNumber` | 并行度，仅 `RUN_MODE_PARALLEL` 时必填且需大于 0 |
+| `complementDependentMode` | `OFF_MODE` 或 `ALL_DEPENDENT` |
+| `executionOrder` | `DESC_ORDER`（倒序）或 `ASC_ORDER`（正序） |
+| `failureStrategy` | `CONTINUE` 或 `END` |
+
+* **响应**: `data` 为触发码（Dolphin 工作流实例 ID）。
 
 #### 配置调度策略
 * **路径**: `PUT /api/v1/workflows/{id}/schedule`

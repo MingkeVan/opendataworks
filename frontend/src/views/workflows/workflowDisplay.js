@@ -22,37 +22,6 @@ export const getWorkflowStatusText = (status) => {
   return map[status] || status || '-'
 }
 
-export const getInstanceStateType = (state) => {
-  const map = {
-    SUCCESS: 'success',
-    FAILED: 'danger',
-    RUNNING: 'warning',
-    STOP: 'info',
-    KILL: 'info'
-  }
-  return map[state] || 'info'
-}
-
-export const getInstanceStateText = (state) => {
-  const map = {
-    SUCCESS: '成功',
-    FAILED: '失败',
-    RUNNING: '运行中',
-    STOP: '终止',
-    KILL: '被终止'
-  }
-  return map[state] || state || '-'
-}
-
-export const getTriggerText = (type) => {
-  const map = {
-    manual: '手动',
-    schedule: '调度',
-    api: 'API'
-  }
-  return map[type] || type || '-'
-}
-
 export const getOperationText = (operation) => {
   const map = {
     deploy: '部署',
@@ -86,20 +55,6 @@ export const getPublishRecordStatusText = (status) => {
 
 export const formatDateTime = (value) => {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'
-}
-
-export const formatDuration = (durationMs, startTime, endTime) => {
-  let duration = durationMs
-  if (!duration && startTime && endTime) {
-    duration = dayjs(endTime).diff(dayjs(startTime))
-  }
-  if (!duration) {
-    return '-'
-  }
-  const seconds = Math.floor(duration / 1000)
-  const minutes = Math.floor(seconds / 60)
-  const remainSeconds = seconds % 60
-  return minutes ? `${minutes}分${remainSeconds}秒` : `${remainSeconds}秒`
 }
 
 export const getErrorMessage = (error) => {

@@ -5,7 +5,9 @@
         <div class="card-header">
           <div>
             <div class="page-title">执行监控</div>
-            <div class="page-subtitle">统一展示平台触发与 Dolphin 定时产生的工作流实例</div>
+            <div class="page-subtitle">
+              统一展示平台触发与 Dolphin 定时产生的工作流实例，取最近 {{ RECENT_INSTANCE_WINDOW }} 次
+            </div>
           </div>
           <el-button type="primary" :icon="Refresh" :loading="loading" @click="refreshData">
             刷新
@@ -47,7 +49,7 @@
           <div class="stat-card">
             <div class="stat-icon duration"><el-icon><Timer /></el-icon></div>
             <div class="stat-info">
-              <div class="stat-value">{{ formatDuration(statistics.avgDurationSeconds) }}</div>
+              <div class="stat-value">{{ formatDurationSeconds(statistics.avgDurationSeconds) }}</div>
               <div class="stat-label">平均执行时长</div>
             </div>
           </div>
@@ -74,17 +76,6 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="时间范围">
-          <el-date-picker
-            v-model="dateRange"
-            type="datetimerange"
-            range-separator="-"
-            start-placeholder="开始时间"
-            end-placeholder="结束时间"
-            value-format="YYYY-MM-DD HH:mm:ss"
-            style="width: 380px"
-          />
-        </el-form-item>
         <el-form-item>
           <el-button type="primary" :icon="Search" @click="handleQuery">查询</el-button>
           <el-button :icon="Refresh" @click="handleReset">重置</el-button>
@@ -104,124 +95,21 @@
     </el-card>
 
     <el-card class="table-card">
-      <el-table
-        v-loading="loading"
-        :data="executionList"
-        :row-key="getExecutionRowKey"
-        :expand-row-keys="expandedRowKeys"
-        stripe
+      <WorkflowInstanceTable
+        :instances="executionList"
+        :loading="loading"
         empty-text="当前筛选条件下暂无工作流执行记录"
-        style="width: 100%"
-        @expand-change="handleExpandChange"
-      >
-        <el-table-column type="expand" width="44">
-          <template #default="{ row }">
-            <div class="task-instance-panel">
-              <el-empty
-                v-if="!row.expandable"
-                description="该记录在提交 Dolphin 前失败，没有任务实例"
-                :image-size="56"
-              />
-              <div v-else-if="taskLoading[getExecutionRowKey(row)]" class="expand-loading">
-                <el-icon class="is-loading"><Loading /></el-icon>
-                正在读取 Dolphin 任务实例…
-              </div>
-              <el-alert
-                v-else-if="taskErrors[getExecutionRowKey(row)]"
-                type="error"
-                :closable="false"
-                show-icon
-              >
-                <template #title>
-                  <span>{{ taskErrors[getExecutionRowKey(row)] }}</span>
-                  <el-button link type="primary" @click="retryLoadTasks(row)">重试</el-button>
-                </template>
-              </el-alert>
-              <el-table
-                v-else
-                :data="taskInstances[getExecutionRowKey(row)] || []"
-                size="small"
-                border
-                empty-text="本次运行没有任务实例"
-              >
-                <el-table-column prop="platformTaskId" label="任务ID" width="90">
-                  <template #default="{ row: task }">{{ task.platformTaskId || '-' }}</template>
-                </el-table-column>
-                <el-table-column prop="taskName" label="任务名称" min-width="180" />
-                <el-table-column prop="status" label="状态" width="110">
-                  <template #default="{ row: task }">
-                    <el-tag :type="getStatusType(task.status)" size="small">
-                      {{ getStatusText(task.status) }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="host" label="主机" min-width="150">
-                  <template #default="{ row: task }">{{ task.host || '-' }}</template>
-                </el-table-column>
-                <el-table-column prop="retryTimes" label="重试次数" width="90">
-                  <template #default="{ row: task }">{{ task.retryTimes ?? 0 }}</template>
-                </el-table-column>
-                <el-table-column prop="startTime" label="开始时间" width="170">
-                  <template #default="{ row: task }">{{ formatDateTime(task.startTime) }}</template>
-                </el-table-column>
-                <el-table-column prop="endTime" label="结束时间" width="170">
-                  <template #default="{ row: task }">{{ formatDateTime(task.endTime) }}</template>
-                </el-table-column>
-                <el-table-column prop="durationSeconds" label="时长" width="100">
-                  <template #default="{ row: task }">{{ formatDuration(task.durationSeconds) }}</template>
-                </el-table-column>
-              </el-table>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="workflowName" label="工作流" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="instanceId" label="实例ID" width="130">
-          <template #default="{ row }">{{ row.instanceId || '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="110">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">
-              {{ getStatusText(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="triggerType" label="触发方式" width="100">
-          <template #default="{ row }">
-            <el-tag size="small" effect="plain">{{ getTriggerTypeText(row.triggerType) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="source" label="来源" width="100">
-          <template #default="{ row }">
-            <el-tooltip
-              :content="row.executionSource === 'cache' ? 'Dolphin 暂不可用，当前展示缓存数据' : ''"
-              :disabled="row.executionSource !== 'cache'"
-            >
-              <el-tag :type="row.source === 'platform' ? 'primary' : 'info'" size="small">
-                {{ getExecutionSourceText(row.source) }}
-              </el-tag>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-        <el-table-column prop="startTime" label="开始时间" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.startTime) }}</template>
-        </el-table-column>
-        <el-table-column prop="endTime" label="结束时间" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.endTime) }}</template>
-        </el-table-column>
-        <el-table-column prop="durationSeconds" label="时长" width="100">
-          <template #default="{ row }">{{ formatDuration(row.durationSeconds) }}</template>
-        </el-table-column>
-        <el-table-column prop="errorMessage" label="错误信息" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.errorMessage || '-' }}</template>
-        </el-table-column>
-      </el-table>
+        expandable
+        show-workflow-name
+        show-source
+        show-error-message
+      />
 
       <el-pagination
         v-model:current-page="queryParams.pageNum"
         v-model:page-size="queryParams.pageSize"
         :total="total"
-        :page-sizes="[10, 20, 50, 100]"
+        :page-sizes="[10, 20, 50]"
         layout="total, sizes, prev, pager, next, jumper"
         class="pagination"
         @size-change="loadExecutionList"
@@ -238,31 +126,25 @@ import {
   CircleCheck,
   CircleClose,
   Document,
-  Loading,
   Refresh,
   Search,
   Timer
 } from '@element-plus/icons-vue'
-import { getWorkflowExecutionInstances, getWorkflowExecutionTasks } from '@/api/execution'
+import { getWorkflowExecutionInstances } from '@/api/execution'
 import { workflowApi } from '@/api/workflow'
-import {
-  buildWorkflowExecutionParams,
-  getExecutionRowKey,
-  getExecutionSourceText,
-  getTriggerTypeText
-} from './executionMonitorModel'
+import WorkflowInstanceTable from '@/components/WorkflowInstanceTable.vue'
+import { formatDurationSeconds } from '@/components/workflowInstanceDisplay'
+import { buildWorkflowExecutionParams } from './executionMonitorModel'
+
+// 与后端 WorkflowExecutionMonitorService.RECENT_INSTANCE_WINDOW 保持一致，仅用于文案。
+const RECENT_INSTANCE_WINDOW = 50
 
 const loading = ref(false)
 const executionList = ref([])
 const total = ref(0)
 const statistics = ref({})
-const dateRange = ref([])
 const workflowOptions = ref([])
 const workflowOptionsLoading = ref(false)
-const expandedRowKeys = ref([])
-const taskInstances = reactive({})
-const taskLoading = reactive({})
-const taskErrors = reactive({})
 
 const queryParams = reactive({
   workflowId: null,
@@ -294,13 +176,11 @@ const loadExecutionList = async (refresh = false) => {
   try {
     const response = await getWorkflowExecutionInstances(buildWorkflowExecutionParams({
       ...queryParams,
-      dateRange: dateRange.value,
       refresh: refresh === true
     }))
     executionList.value = response.records || []
     total.value = response.total || 0
     statistics.value = response.statistics || {}
-    expandedRowKeys.value = []
   } catch (error) {
     ElMessage.error(`加载执行监控失败: ${error.message}`)
   } finally {
@@ -324,87 +204,11 @@ const handleReset = () => {
   queryParams.status = ''
   queryParams.pageNum = 1
   queryParams.pageSize = 10
-  dateRange.value = []
   loadExecutionList()
 }
 
 const refreshData = () => {
   loadExecutionList(true)
-}
-
-const handleExpandChange = (row, expandedRows) => {
-  const key = getExecutionRowKey(row)
-  const expanded = expandedRows.some(item => getExecutionRowKey(item) === key)
-  if (!expanded) {
-    expandedRowKeys.value = expandedRowKeys.value.filter(item => item !== key)
-    return
-  }
-  if (!expandedRowKeys.value.includes(key)) {
-    expandedRowKeys.value.push(key)
-  }
-  if (row.expandable && !taskInstances[key] && !taskLoading[key]) {
-    loadTaskInstances(row)
-  }
-}
-
-const loadTaskInstances = async (row) => {
-  const key = getExecutionRowKey(row)
-  taskLoading[key] = true
-  taskErrors[key] = ''
-  try {
-    taskInstances[key] = await getWorkflowExecutionTasks(row.workflowId, row.instanceId)
-  } catch (error) {
-    taskErrors[key] = `任务实例加载失败：${error.message}`
-  } finally {
-    taskLoading[key] = false
-  }
-}
-
-const retryLoadTasks = (row) => {
-  const key = getExecutionRowKey(row)
-  delete taskInstances[key]
-  loadTaskInstances(row)
-}
-
-const getStatusType = (status) => {
-  const types = {
-    success: 'success',
-    failed: 'danger',
-    running: 'primary',
-    pending: 'info',
-    waiting: 'warning',
-    not_run: 'info',
-    unavailable: 'danger',
-    killed: 'warning',
-    paused: 'warning'
-  }
-  return types[status] || 'info'
-}
-
-const getStatusText = (status) => {
-  const labels = {
-    success: '成功',
-    failed: '失败',
-    running: '运行中',
-    pending: '待执行',
-    waiting: '等待执行',
-    not_run: '本次未运行',
-    unavailable: '状态不可用',
-    killed: '已终止',
-    paused: '已暂停'
-  }
-  return labels[status] || status || '-'
-}
-
-const formatDateTime = (datetime) => datetime || '-'
-
-const formatDuration = (seconds) => {
-  const value = Number(seconds)
-  if (!Number.isFinite(value) || value < 0) return '-'
-  if (value < 60) return `${Math.round(value)}s`
-  const minutes = Math.floor(value / 60)
-  const remainingSeconds = Math.round(value % 60)
-  return `${minutes}m ${remainingSeconds}s`
 }
 
 onMounted(() => {
@@ -523,20 +327,6 @@ onMounted(() => {
 
 .filter-form {
   margin-bottom: 8px;
-}
-
-.task-instance-panel {
-  padding: 12px 24px 18px 68px;
-  background: #f8fafc;
-}
-
-.expand-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 90px;
-  gap: 8px;
-  color: #909399;
 }
 
 .pagination {

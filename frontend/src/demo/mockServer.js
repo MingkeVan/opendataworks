@@ -1959,11 +1959,14 @@ const getDemoWorkflowExecutions = () => getExecutions().map((execution) => {
     triggerType,
     source: triggerType === 'manual' || triggerType === 'backfill' ? 'platform' : 'dolphin',
     executionSource: 'dolphin',
+    scheduleTime: execution.scheduleTime || execution.startTime,
     startTime: execution.startTime,
     endTime: execution.endTime,
     durationSeconds: execution.durationSeconds,
     errorMessage: execution.errorMessage,
-    expandable: true
+    expandable: true,
+    // 演示模式没有配置 Dolphin WebUI 地址，实例ID 自然降级为纯文本。
+    dolphinInstanceUrl: null
   }
 })
 
@@ -1974,12 +1977,6 @@ const handleWorkflowExecutionList = (params = {}) => {
   }
   if (params.status) {
     records = records.filter((item) => item.status === params.status)
-  }
-  if (params.startTime) {
-    records = records.filter((item) => String(item.startTime || '').replace('T', ' ') >= params.startTime)
-  }
-  if (params.endTime) {
-    records = records.filter((item) => String(item.startTime || '').replace('T', ' ') <= params.endTime)
   }
   const page = toPaged(records, params.pageNum, params.pageSize)
   const successCount = records.filter((item) => item.status === 'success').length

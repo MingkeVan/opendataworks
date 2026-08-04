@@ -32,23 +32,21 @@ public class TaskExecutionController {
     /**
      * Unified workflow-instance monitor for both platform and Dolphin scheduled
      * executions. Statistics and records are calculated from the same snapshot.
+     *
+     * <p>Without {@code workflowId} this returns the most recent instances across
+     * every workflow; with it, the instances of that one workflow. There is no
+     * time-range filter — the monitor is a recent-executions view.</p>
      */
     @GetMapping("/workflow-instances")
     public Result<WorkflowExecutionPage> getWorkflowInstances(
             @RequestParam(required = false) Long workflowId,
             @RequestParam(required = false) String status,
-            @RequestParam(required = false)
-            @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
-            @RequestParam(required = false)
-            @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime,
             @RequestParam(defaultValue = "false") boolean refresh,
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "10") Integer pageSize) {
         return Result.success(workflowExecutionMonitorService.listWorkflowInstances(
                 workflowId,
                 status,
-                startTime,
-                endTime,
                 refresh,
                 pageNum,
                 pageSize));

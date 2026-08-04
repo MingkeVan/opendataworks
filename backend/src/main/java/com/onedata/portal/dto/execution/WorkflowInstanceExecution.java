@@ -23,9 +23,13 @@ public class WorkflowInstanceExecution {
     private String triggerType;
     private String source;
     private String executionSource;
+    /** DolphinScheduler 运行实例上的调度日期，补数实例上表示补的是哪一个调度周期。 */
+    private LocalDateTime scheduleTime;
     private LocalDateTime startTime;
     private LocalDateTime endTime;
     private Integer durationSeconds;
     private String errorMessage;
     private Boolean expandable;
+    /** DolphinScheduler Web UI 实例详情深链，缺少配置时为 null。 */
+    private String dolphinInstanceUrl;
 }

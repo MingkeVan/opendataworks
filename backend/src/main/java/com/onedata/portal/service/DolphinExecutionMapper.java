@@ -74,6 +74,23 @@ public final class DolphinExecutionMapper {
         return "api";
     }
 
+    /**
+     * Build the DolphinScheduler 3.x Web UI deep link for one workflow instance.
+     * Returns {@code null} when any part is missing so callers can degrade to
+     * plain text instead of rendering a broken link.
+     */
+    public static String workflowInstanceUrl(String baseUrl,
+            Long projectCode,
+            Long workflowCode,
+            Long instanceId) {
+        if (baseUrl == null || baseUrl.trim().isEmpty()
+                || projectCode == null || workflowCode == null || instanceId == null) {
+            return null;
+        }
+        return String.format("%s/ui/projects/%d/workflow/instances/%d?code=%d",
+                baseUrl.replaceAll("/+$", ""), projectCode, instanceId, workflowCode);
+    }
+
     public static LocalDateTime parseDateTime(String value) {
         if (value == null || value.trim().isEmpty() || "null".equalsIgnoreCase(value.trim())) {
             return null;

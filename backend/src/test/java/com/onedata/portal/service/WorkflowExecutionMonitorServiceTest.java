@@ -36,6 +36,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -91,11 +94,10 @@ class WorkflowExecutionMonitorServiceTest {
 
         WorkflowInstanceSummary platformInstance = workflowInstance(9001L, "SUCCESS", "START_PROCESS");
         WorkflowInstanceSummary scheduledInstance = workflowInstance(9002L, "SUCCESS", "SCHEDULER");
-        when(dolphinSchedulerService.listWorkflowInstances(20L, 3001L, 100))
+        when(dolphinSchedulerService.listRecentProjectInstances(20L, 50))
                 .thenReturn(Arrays.asList(platformInstance, scheduledInstance));
 
-        WorkflowExecutionPage page = service.listWorkflowInstances(
-                null, null, null, null, false, 1, 20);
+        WorkflowExecutionPage page = service.listWorkflowInstances(null, null, false, 1, 20);
 
         assertEquals(3, page.getTotal());
         assertEquals(3L, page.getStatistics().get("totalExecutions"));
@@ -118,8 +120,64 @@ class WorkflowExecutionMonitorServiceTest {
         assertNull(failure.getInstanceId());
         assertFalse(failure.getExpandable());
         assertEquals("submit failed", failure.getErrorMessage());
-        verify(workflowInstanceCacheService).replaceCache(
-                workflow, Arrays.asList(platformInstance, scheduledInstance));
+        // 全局路径只读不写：缓存由 WorkflowExecutionSyncJob 维护。
+        verify(workflowInstanceCacheService, never()).replaceCache(any(), any());
+    }
+
+    @Test
+    void queriesDolphinOncePerConfigRegardlessOfWorkflowCount() {
+        DataWorkflow first = workflow();
+        DataWorkflow second = workflow();
+        second.setId(11L);
+        second.setWorkflowName("workflow-11");
+        second.setWorkflowCode(3002L);
+        when(dataWorkflowMapper.selectList(any())).thenReturn(Arrays.asList(first, second));
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(dolphinSchedulerService.listRecentProjectInstances(20L, 50))
+                .thenReturn(Arrays.asList(
+                        instanceOf(3001L, 9001L, "SUCCESS", "SCHEDULER"),
+                        instanceOf(3002L, 9002L, "SUCCESS", "SCHEDULER")));
+
+        WorkflowExecutionPage page = service.listWorkflowInstances(null, null, false, 1, 20);
+
+        assertEquals(2, page.getTotal());
+        assertEquals("workflow-10", findByInstanceId(page.getRecords(), 9001L).getWorkflowName());
+        assertEquals("workflow-11", findByInstanceId(page.getRecords(), 9002L).getWorkflowName());
+        verify(dolphinSchedulerService, times(1)).listRecentProjectInstances(20L, 50);
+        verify(dolphinSchedulerService, never()).listWorkflowInstances(any(), any(), anyInt());
+    }
+
+    @Test
+    void dropsProjectInstancesThatBelongToUnmanagedWorkflows() {
+        DataWorkflow workflow = workflow();
+        when(dataWorkflowMapper.selectList(any())).thenReturn(Collections.singletonList(workflow));
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(dolphinSchedulerService.listRecentProjectInstances(20L, 50))
+                .thenReturn(Arrays.asList(
+                        instanceOf(3001L, 9001L, "SUCCESS", "SCHEDULER"),
+                        instanceOf(8888L, 9999L, "SUCCESS", "SCHEDULER")));
+
+        WorkflowExecutionPage page = service.listWorkflowInstances(null, null, false, 1, 20);
+
+        assertEquals(1, page.getTotal());
+        assertEquals(9001L, page.getRecords().get(0).getInstanceId());
+    }
+
+    @Test
+    void fallsBackToCrossWorkflowCacheWhenProjectQueryFails() {
+        DataWorkflow workflow = workflow();
+        when(dataWorkflowMapper.selectList(any())).thenReturn(Collections.singletonList(workflow));
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(dolphinSchedulerService.listRecentProjectInstances(20L, 50))
+                .thenThrow(new RuntimeException("offline"));
+        when(workflowInstanceCacheService.listRecentAcrossWorkflows(50))
+                .thenReturn(Collections.singletonList(cachedInstance()));
+
+        WorkflowExecutionPage page = service.listWorkflowInstances(null, "running", false, 1, 10);
+
+        assertEquals(1, page.getTotal());
+        assertEquals("cache", page.getRecords().get(0).getExecutionSource());
+        assertEquals("schedule", page.getRecords().get(0).getTriggerType());
     }
 
     @Test
@@ -129,25 +187,57 @@ class WorkflowExecutionMonitorServiceTest {
         when(workflowTaskRelationMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(dolphinSchedulerService.listWorkflowInstances(20L, 3001L, 100))
                 .thenThrow(new RuntimeException("offline"));
-
-        WorkflowInstanceCache cache = new WorkflowInstanceCache();
-        cache.setWorkflowId(10L);
-        cache.setInstanceId(9100L);
-        cache.setState("RUNNING_EXECUTION");
-        cache.setTriggerType("SCHEDULER");
-        cache.setStartTime(Date.from(
-                LocalDateTime.of(2026, 7, 31, 10, 0)
-                        .atZone(ZoneId.systemDefault())
-                        .toInstant()));
         when(workflowInstanceCacheService.listRecent(10L, 100))
-                .thenReturn(Collections.singletonList(cache));
+                .thenReturn(Collections.singletonList(cachedInstance()));
 
-        WorkflowExecutionPage page = service.listWorkflowInstances(
-                10L, "running", null, null, true, 1, 10);
+        WorkflowExecutionPage page = service.listWorkflowInstances(10L, "running", true, 1, 10);
 
         assertEquals(1, page.getTotal());
         assertEquals("cache", page.getRecords().get(0).getExecutionSource());
         assertEquals("schedule", page.getRecords().get(0).getTriggerType());
+    }
+
+    @Test
+    void carriesScheduleTimeAndDolphinDeepLink() {
+        DataWorkflow workflow = workflow();
+        workflow.setProjectCode(777L);
+        when(dataWorkflowMapper.selectList(any())).thenReturn(Collections.singletonList(workflow));
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(dolphinSchedulerService.listRecentProjectInstances(20L, 50))
+                .thenReturn(Collections.singletonList(WorkflowInstanceSummary.builder()
+                        .instanceId(9001L)
+                        .workflowCode(3001L)
+                        .state("SUCCESS")
+                        .commandType("COMPLEMENT_DATA")
+                        .scheduleTime("2026-07-20 00:00:00")
+                        .startTime("2026-07-31 10:00:00")
+                        .endTime("2026-07-31 10:05:00")
+                        .build()));
+        when(dolphinSchedulerService.getWebuiBaseUrl(20L)).thenReturn("http://ds.local/");
+
+        WorkflowExecutionPage page = service.listWorkflowInstances(null, null, false, 1, 10);
+
+        WorkflowInstanceExecution record = page.getRecords().get(0);
+        assertEquals(LocalDateTime.of(2026, 7, 20, 0, 0), record.getScheduleTime());
+        assertEquals("backfill", record.getTriggerType());
+        assertEquals("http://ds.local/ui/projects/777/workflow/instances/9001?code=3001",
+                record.getDolphinInstanceUrl());
+    }
+
+    @Test
+    void leavesDeepLinkNullWhenWebuiIsNotConfigured() {
+        DataWorkflow workflow = workflow();
+        workflow.setProjectCode(777L);
+        when(dataWorkflowMapper.selectList(any())).thenReturn(Collections.singletonList(workflow));
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(dolphinSchedulerService.listRecentProjectInstances(20L, 50))
+                .thenReturn(Collections.singletonList(
+                        instanceOf(3001L, 9001L, "SUCCESS", "SCHEDULER")));
+        when(dolphinSchedulerService.getWebuiBaseUrl(20L)).thenReturn(null);
+
+        WorkflowExecutionPage page = service.listWorkflowInstances(null, null, false, 1, 10);
+
+        assertNull(page.getRecords().get(0).getDolphinInstanceUrl());
     }
 
     @Test
@@ -214,13 +304,31 @@ class WorkflowExecutionMonitorServiceTest {
     }
 
     private WorkflowInstanceSummary workflowInstance(Long id, String state, String commandType) {
+        return instanceOf(3001L, id, state, commandType);
+    }
+
+    private WorkflowInstanceSummary instanceOf(Long workflowCode, Long id, String state, String commandType) {
         return WorkflowInstanceSummary.builder()
                 .instanceId(id)
+                .workflowCode(workflowCode)
                 .state(state)
                 .commandType(commandType)
                 .startTime("2026-07-31 10:00:00")
                 .endTime("2026-07-31 10:05:00")
                 .build();
+    }
+
+    private WorkflowInstanceCache cachedInstance() {
+        WorkflowInstanceCache cache = new WorkflowInstanceCache();
+        cache.setWorkflowId(10L);
+        cache.setInstanceId(9100L);
+        cache.setState("RUNNING_EXECUTION");
+        cache.setTriggerType("SCHEDULER");
+        cache.setStartTime(Date.from(
+                LocalDateTime.of(2026, 7, 31, 10, 0)
+                        .atZone(ZoneId.systemDefault())
+                        .toInstant()));
+        return cache;
     }
 
     private WorkflowInstanceExecution findByInstanceId(List<WorkflowInstanceExecution> records, Long id) {

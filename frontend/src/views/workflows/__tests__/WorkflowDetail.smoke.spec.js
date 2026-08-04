@@ -16,9 +16,17 @@ const { apiStub } = vi.hoisted(() => {
   return { apiStub }
 })
 
+const { getWorkflowExecutionInstances } = vi.hoisted(() => ({
+  getWorkflowExecutionInstances: vi.fn(() => Promise.resolve({ records: [], total: 0 })),
+}))
+
 vi.mock('@/api/workflow', () => ({ workflowApi: apiStub() }))
 vi.mock('@/api/task', () => ({ taskApi: apiStub() }))
 vi.mock('@/api/settings', () => ({ settingsApi: apiStub() }))
+vi.mock('@/api/execution', () => ({
+  getWorkflowExecutionInstances,
+  getWorkflowExecutionTasks: vi.fn(() => Promise.resolve([])),
+}))
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { id: '1' }, query: {}, path: '/workflows/1', name: 'workflow-detail' }),
@@ -52,27 +60,51 @@ class NoopObserver {
   }
 }
 
+const mountDetail = () =>
+  shallowMount(WorkflowDetail, {
+    global: {
+      stubs: {
+        WorkflowTaskManager: true,
+        WorkflowBackfillDialog: true,
+        WorkflowVersionComparePanel: true,
+        WorkflowPublishPreviewDialog: true,
+        WorkflowInstanceTable: true,
+        QuartzCronBuilder: true,
+      },
+      config: { warnHandler: () => {} },
+      directives: { loading: {} },
+    },
+  })
+
 describe('WorkflowDetail runtime mount smoke', () => {
   beforeEach(() => {
     vi.stubGlobal('IntersectionObserver', NoopObserver)
     vi.stubGlobal('ResizeObserver', NoopObserver)
+    getWorkflowExecutionInstances.mockClear()
   })
 
   it('mounts and renders without throwing (setup + computed + onMounted)', () => {
-    const wrapper = shallowMount(WorkflowDetail, {
-      global: {
-        stubs: {
-          WorkflowTaskManager: true,
-          WorkflowBackfillDialog: true,
-          WorkflowVersionComparePanel: true,
-          WorkflowPublishPreviewDialog: true,
-          QuartzCronBuilder: true,
-        },
-        config: { warnHandler: () => {} },
-        directives: { loading: {} },
-      },
-    })
+    const wrapper = mountDetail()
     expect(wrapper.exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('does not fetch execution history until the tab is opened', () => {
+    const wrapper = mountDetail()
+    expect(getWorkflowExecutionInstances).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  // 作用域断言：执行历史只看当前工作流，请求必须带 workflowId。
+  // 若后续误改成不传 workflowId，就会拉到全量实例，这里应当失败。
+  it('scopes execution history to the current workflow', async () => {
+    const wrapper = mountDetail()
+    wrapper.vm.workflow = { workflow: { id: 42 } }
+    wrapper.vm.activeTab = 'executions'
+    await wrapper.vm.$nextTick()
+
+    expect(getWorkflowExecutionInstances).toHaveBeenCalledTimes(1)
+    expect(getWorkflowExecutionInstances.mock.calls[0][0]).toMatchObject({ workflowId: 42 })
     wrapper.unmount()
   })
 })

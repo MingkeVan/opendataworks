@@ -459,50 +459,20 @@
             </div>
           </el-tab-pane>
           <el-tab-pane label="执行历史" name="executions">
-            <el-table
-              v-if="workflow?.recentInstances?.length"
-              :data="workflow.recentInstances"
-              border
-              size="small"
-            >
-              <el-table-column prop="instanceId" label="实例ID" width="140">
-                <template #default="{ row }">
-                  <el-link type="primary" @click="openDolphinInstance(row)" :disabled="!buildDolphinInstanceUrl(row)">
-                    #{{ row.instanceId }}
-                  </el-link>
-                </template>
-              </el-table-column>
-              <el-table-column prop="state" label="状态" width="120">
-                <template #default="{ row }">
-                  <el-tag size="small" :type="getInstanceStateType(row.state)">
-                    {{ getInstanceStateText(row.state) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="triggerType" label="触发方式" width="120">
-                <template #default="{ row }">
-                  {{ getTriggerText(row.triggerType) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="startTime" label="开始时间" width="170">
-                <template #default="{ row }">
-                  {{ formatDateTime(row.startTime) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="endTime" label="结束时间" width="170">
-                <template #default="{ row }">
-                  {{ formatDateTime(row.endTime) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="durationMs" label="耗时" width="120">
-                <template #default="{ row }">
-                  {{ formatDuration(row.durationMs, row.startTime, row.endTime) }}
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-empty
-              v-else
-              description="暂无执行记录"
+            <WorkflowInstanceTable
+              :instances="executionInstances"
+              :loading="executionInstancesLoading"
+              expandable
+            />
+            <el-pagination
+              v-model:current-page="executionQuery.pageNum"
+              v-model:page-size="executionQuery.pageSize"
+              :total="executionTotal"
+              :page-sizes="[10, 20, 50]"
+              layout="total, sizes, prev, pager, next, jumper"
+              class="execution-pagination"
+              @size-change="loadExecutionInstances"
+              @current-change="loadExecutionInstances"
             />
           </el-tab-pane>
           <el-tab-pane label="版本历史" name="changes">
@@ -842,17 +812,15 @@ import {
   shouldPromptOnlineAfterDeploy
 } from './publishPreviewHelper'
 import QuartzCronBuilder from '@/components/QuartzCronBuilder.vue'
+import WorkflowInstanceTable from '@/components/WorkflowInstanceTable.vue'
+import { getWorkflowExecutionInstances } from '@/api/execution'
 import {
   getWorkflowStatusType,
   getWorkflowStatusText,
-  getInstanceStateType,
-  getInstanceStateText,
-  getTriggerText,
   getOperationText,
   getPublishRecordStatusType,
   getPublishRecordStatusText,
   formatDateTime,
-  formatDuration,
   formatLog,
   getErrorMessage
 } from './workflowDisplay'
@@ -885,6 +853,15 @@ const pendingApprovalFlags = reactive({})
 const actionLoading = reactive({})
 const backfillDialogVisible = ref(false)
 const backfillTarget = ref(null)
+// 执行历史：作用域恒定为当前工作流，workflowId 来自路由、不暴露给用户修改。
+const executionInstances = ref([])
+const executionInstancesLoading = ref(false)
+const executionInstancesLoaded = ref(false)
+const executionTotal = ref(0)
+const executionQuery = reactive({
+  pageNum: 1,
+  pageSize: 10
+})
 const changeMode = ref('list')
 const schedulerSwitchDialogVisible = ref(false)
 const schedulerSwitchSaving = ref(false)
@@ -1883,26 +1860,34 @@ const consumePublishHint = () => {
   router.replace({ path: route.path, query: nextQuery })
 }
 
-const buildDolphinInstanceUrl = (instance) => {
-  const wf = workflow.value?.workflow
-  if (!wf || !dolphinWebuiUrl.value) {
-    return ''
-  }
-  if (!wf.projectCode || !wf.workflowCode || !instance?.instanceId) {
-    return ''
-  }
-  const base = dolphinWebuiUrl.value.replace(/\/+$/, '')
-  return `${base}/ui/projects/${wf.projectCode}/workflow/instances/${instance.instanceId}?code=${wf.workflowCode}`
-}
-
-const openDolphinInstance = (instance) => {
-  const url = buildDolphinInstanceUrl(instance)
-  if (!url) {
-    ElMessage.warning('无法跳转到实例详情')
+const loadExecutionInstances = async () => {
+  const workflowId = workflow.value?.workflow?.id
+  if (!workflowId) {
     return
   }
-  window.open(url, '_blank')
+  executionInstancesLoading.value = true
+  try {
+    const response = await getWorkflowExecutionInstances({
+      workflowId,
+      pageNum: executionQuery.pageNum,
+      pageSize: executionQuery.pageSize
+    })
+    executionInstances.value = response.records || []
+    executionTotal.value = response.total || 0
+    executionInstancesLoaded.value = true
+  } catch (error) {
+    ElMessage.error(`加载执行历史失败：${getErrorMessage(error)}`)
+  } finally {
+    executionInstancesLoading.value = false
+  }
 }
+
+// 首次切到执行历史时才拉取，不跟着工作流详情一起打。
+watch(activeTab, (tab) => {
+  if (tab === 'executions' && !executionInstancesLoaded.value) {
+    loadExecutionInstances()
+  }
+})
 
 watch(currentDolphinConfigId, async (nextId, prevId) => {
   if (nextId === prevId) {
@@ -1929,6 +1914,11 @@ watch(
 </script>
 
 <style scoped>
+.execution-pagination {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
 .workflow-detail {
   padding: 20px;
 }

@@ -2,14 +2,10 @@ import { describe, it, expect } from 'vitest'
 import {
   getWorkflowStatusType,
   getWorkflowStatusText,
-  getInstanceStateType,
-  getInstanceStateText,
-  getTriggerText,
   getOperationText,
   getPublishRecordStatusType,
   getPublishRecordStatusText,
   formatDateTime,
-  formatDuration,
   formatLog,
   getErrorMessage,
 } from '../workflowDisplay'
@@ -31,12 +27,6 @@ describe('workflow status/text mappers', () => {
     expect(getWorkflowStatusText('weird')).toBe('weird')
     expect(getWorkflowStatusText(undefined)).toBe('-')
 
-    expect(getInstanceStateType('FAILED')).toBe('danger')
-    expect(getInstanceStateType('???')).toBe('info')
-    expect(getInstanceStateText('RUNNING')).toBe('运行中')
-
-    expect(getTriggerText('schedule')).toBe('调度')
-    expect(getTriggerText('x')).toBe('x')
     expect(getOperationText('deploy')).toBe('部署')
 
     expect(getPublishRecordStatusType('pending_approval')).toBe('warning')
@@ -51,15 +41,6 @@ describe('formatDateTime', () => {
     expect(formatDateTime('2026-06-18T07:30:00')).toBe('2026-06-18 07:30:00')
     expect(formatDateTime(null)).toBe('-')
     expect(formatDateTime('')).toBe('-')
-  })
-})
-
-describe('formatDuration', () => {
-  it('uses durationMs, derives from start/end, and formats min/sec', () => {
-    expect(formatDuration(0)).toBe('-')
-    expect(formatDuration(5000)).toBe('5秒')
-    expect(formatDuration(125000)).toBe('2分5秒')
-    expect(formatDuration(null, '2026-06-18T07:00:00', '2026-06-18T07:01:30')).toBe('1分30秒')
   })
 })
 

@@ -10,7 +10,7 @@
       :closable="false"
       style="margin-bottom: 12px"
       title="参数兼容 DolphinScheduler 补数据（COMPLEMENT_DATA）"
-      description="时间格式：YYYY-MM-DD HH:mm:ss；范围模式会提交 complementStartDate/complementEndDate；列表模式会提交 complementScheduleDateList。"
+      description="时间格式：YYYY-MM-DD HH:mm:ss，不支持晚于今天的日期；范围模式会提交 complementStartDate/complementEndDate；列表模式会提交 complementScheduleDateList。"
     />
 
     <el-form :model="form" label-width="120px">
@@ -36,6 +36,8 @@
           start-placeholder="开始时间"
           end-placeholder="结束时间"
           value-format="YYYY-MM-DD HH:mm:ss"
+          :default-time="defaultRangeTime"
+          :disabled-date="isAfterToday"
           style="width: 420px"
         />
       </el-form-item>
@@ -45,7 +47,7 @@
           v-model="form.scheduleDateList"
           type="textarea"
           :rows="3"
-          placeholder="例如：2022-01-01 00:00:00,2022-01-02 00:00:00"
+          placeholder="例如：2022-01-01 00:00:00,2022-01-02 00:00:00（不支持晚于今天的日期）"
         />
       </el-form-item>
 
@@ -104,6 +106,11 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { workflowApi } from '@/api/workflow'
+import {
+  buildBackfillPayload,
+  isAfterToday,
+  validateBackfillForm
+} from './backfillForm'
 
 const props = defineProps({
   modelValue: {
@@ -124,6 +131,12 @@ const visible = computed({
 })
 
 const submitting = ref(false)
+
+// 起止各自落在当天的首尾，避免默认取到同一时刻。
+const defaultRangeTime = [
+  new Date(2000, 0, 1, 0, 0, 0),
+  new Date(2000, 0, 1, 23, 59, 59)
+]
 
 const defaultForm = () => ({
   mode: 'range',
@@ -160,19 +173,9 @@ const validateForm = () => {
     ElMessage.warning('工作流未上线，请先上线后再补数')
     return false
   }
-  if (form.mode === 'list') {
-    if (!form.scheduleDateList.trim()) {
-      ElMessage.warning('请填写时间列表')
-      return false
-    }
-  } else {
-    if (!form.dateRange || form.dateRange.length !== 2) {
-      ElMessage.warning('请选择补数时间范围')
-      return false
-    }
-  }
-  if (form.runMode === 'RUN_MODE_PARALLEL' && (!form.expectedParallelismNumber || form.expectedParallelismNumber < 1)) {
-    ElMessage.warning('并行度必须大于 0')
+  const error = validateBackfillForm(form)
+  if (error) {
+    ElMessage.warning(error)
     return false
   }
   return true
@@ -183,20 +186,7 @@ const handleSubmit = async () => {
 
   submitting.value = true
   try {
-    const payload = {
-      mode: form.mode,
-      startTime: form.mode === 'range' ? form.dateRange[0] : null,
-      endTime: form.mode === 'range' ? form.dateRange[1] : null,
-      scheduleDateList: form.mode === 'list' ? form.scheduleDateList.trim() : null,
-      runMode: form.runMode,
-      expectedParallelismNumber: form.runMode === 'RUN_MODE_PARALLEL' ? form.expectedParallelismNumber : null,
-      complementDependentMode: form.complementDependentMode,
-      allLevelDependent: form.allLevelDependent,
-      executionOrder: form.executionOrder,
-      failureStrategy: form.failureStrategy
-    }
-
-    const triggerId = await workflowApi.backfill(props.workflow.id, payload)
+    const triggerId = await workflowApi.backfill(props.workflow.id, buildBackfillPayload(form))
     ElMessage.success(`补数已提交，触发码：${triggerId || '-'}`)
     emit('submitted', { workflowId: props.workflow.id, triggerId })
     visible.value = false

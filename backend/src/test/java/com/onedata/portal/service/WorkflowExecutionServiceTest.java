@@ -14,12 +14,15 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -137,8 +140,31 @@ class WorkflowExecutionServiceTest {
     }
 
     @Test
+    void backfillWorkflowShouldRejectFutureRangeBeforeWritingAnyLog() {
+        WorkflowBackfillRequest request = new WorkflowBackfillRequest();
+        request.setMode("range");
+        request.setStartTime(LocalDate.now().minusDays(1).atStartOfDay()
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+        request.setEndTime(LocalDate.now().plusDays(1).atStartOfDay()
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+        when(dataWorkflowMapper.selectById(1L)).thenReturn(onlineWorkflow());
+
+        IllegalArgumentException thrown =
+                assertThrows(IllegalArgumentException.class, () -> service.backfillWorkflow(1L, request));
+
+        assertTrue(thrown.getMessage().startsWith("补数时间不能晚于今天"));
+        verify(taskExecutionLogMapper, never()).insert(any());
+        verify(dolphinSchedulerService, never()).backfillProcessInstance(any(), any(), any());
+    }
+
+    @Test
     void backfillWorkflowShouldCreateLogAndTriggerDolphin() {
         WorkflowBackfillRequest request = new WorkflowBackfillRequest();
+        request.setMode("range");
+        request.setStartTime(LocalDate.now().minusDays(2).atStartOfDay()
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+        request.setEndTime(LocalDate.now().minusDays(1).atStartOfDay()
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         when(dataWorkflowMapper.selectById(1L)).thenReturn(onlineWorkflow());
         when(workflowTaskRelationMapper.selectOne(any())).thenReturn(monitorRelation());
         when(dolphinSchedulerService.backfillProcessInstance(eq(2L), eq(5001L), eq(request)))

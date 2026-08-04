@@ -29,6 +29,9 @@ public class WorkflowInstanceCache {
 
     private Date endTime;
 
+    /** DolphinScheduler 运行实例上的调度日期 */
+    private Date scheduleTime;
+
     private String triggerType;
 
     private Long durationMs;
