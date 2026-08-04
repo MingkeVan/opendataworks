@@ -26,6 +26,10 @@ export const workflowApi = {
     return request.get('/v1/workflows/import/dolphin', { params })
   },
 
+  findImportDolphinWorkflow(workflowCode, params = {}) {
+    return request.get(`/v1/workflows/import/dolphin/${workflowCode}`, { params })
+  },
+
   commitImportDefinition(data) {
     return request.post('/v1/workflows/import/commit', data)
   },
