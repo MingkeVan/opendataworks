@@ -246,6 +246,86 @@ class TaskLineageConsistencyCheckerTest {
     }
 
     @Test
+    void selfReferentialExemptionIsWithdrawnWhenAnotherTaskWritesTheSameTable() {
+        // A: INSERT INTO dws.stat SELECT * FROM ods.src   -> 写 5
+        // B: INSERT INTO dws.stat SELECT * FROM dws.stat  -> 读 5 且写 5（自读自写）
+        // B 缺 read(5) 时，边 A->B 会彻底消失（inferTaskEdges 对没有读关系的任务直接跳过），
+        // 因此这条不能豁免。
+        DataWorkflow workflow = workflow();
+        DataTask a = sqlTask(1L, "load_stat");
+        DataTask b = sqlTask(2L, "dedup_stat");
+
+        List<WorkflowTaskRelation> bindings = new ArrayList<>();
+        for (DataTask t : Arrays.asList(a, b)) {
+            WorkflowTaskRelation binding = new WorkflowTaskRelation();
+            binding.setWorkflowId(workflow.getId());
+            binding.setTaskId(t.getId());
+            bindings.add(binding);
+        }
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(bindings);
+        when(dataTaskMapper.selectBatchIds(any())).thenReturn(Arrays.asList(a, b));
+        // read 关系一条都没有；write：A 和 B 都写 5
+        when(tableTaskRelationMapper.selectList(any())).thenReturn(
+                Collections.emptyList(),
+                Arrays.asList(relation(1L, 5L, "write"), relation(2L, 5L, "write")));
+        // 两个任务的 SQL 解析：A 输入 9 输出 5；B 输入 5 输出 5
+        SqlTableAnalyzeResponse aAnalyze = new SqlTableAnalyzeResponse();
+        aAnalyze.setInputRefs(Collections.singletonList(matched("ods.src", 9L)));
+        aAnalyze.setOutputRefs(Collections.singletonList(matched("dws.stat", 5L)));
+        SqlTableAnalyzeResponse bAnalyze = new SqlTableAnalyzeResponse();
+        bAnalyze.setInputRefs(Collections.singletonList(matched("dws.stat", 5L)));
+        bAnalyze.setOutputRefs(Collections.singletonList(matched("dws.stat", 5L)));
+        when(sqlTableMatcherService.analyze(anyString(), anyString())).thenReturn(aAnalyze, bAnalyze);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, false);
+
+        assertTrue(issues.stream().anyMatch(issue ->
+                        "dedup_stat".equals(issue.getTaskName())
+                                && TaskLineageConsistencyChecker.CODE_SQL_RELATION_MISSING.equals(issue.getCode())
+                                && issue.getMessage().contains("其他任务也在写入")),
+                "同表多写时自读自写不应被豁免，实际问题: " + issues);
+    }
+
+    @Test
+    void selfReferentialStaysExemptWhenNoOtherTaskWritesThatTable() {
+        // 只有本任务写 5，读关系产生不了任何边，豁免继续生效。
+        DataWorkflow workflow = workflow();
+        DataTask only = sqlTask(2L, "dedup_stat");
+
+        WorkflowTaskRelation binding = new WorkflowTaskRelation();
+        binding.setWorkflowId(workflow.getId());
+        binding.setTaskId(2L);
+        when(workflowTaskRelationMapper.selectList(any())).thenReturn(Collections.singletonList(binding));
+        when(dataTaskMapper.selectBatchIds(any())).thenReturn(Collections.singletonList(only));
+        when(tableTaskRelationMapper.selectList(any())).thenReturn(
+                Collections.emptyList(),
+                Collections.singletonList(relation(2L, 5L, "write")));
+        SqlTableAnalyzeResponse analyze = new SqlTableAnalyzeResponse();
+        analyze.setInputRefs(Collections.singletonList(matched("dws.stat", 5L)));
+        analyze.setOutputRefs(Collections.singletonList(matched("dws.stat", 5L)));
+        when(sqlTableMatcherService.analyze(anyString(), anyString())).thenReturn(analyze);
+
+        List<WorkflowPublishRepairIssue> issues = checker.checkWorkflow(workflow, false);
+
+        assertTrue(issues.isEmpty(), "只有本任务写该表时应继续豁免: " + issues);
+    }
+
+    @Test
+    void taskLevelSaveCheckStaysExemptRegardlessOfOtherWriters() {
+        // 保存时拿不到工作流上下文，且被依赖的任务可能还没创建，
+        // 一律豁免，由发布/导出兜底。
+        SqlTableAnalyzeResponse analyze = new SqlTableAnalyzeResponse();
+        analyze.setInputRefs(Collections.singletonList(matched("dws.stat", 5L)));
+        analyze.setOutputRefs(Collections.singletonList(matched("dws.stat", 5L)));
+        when(sqlTableMatcherService.analyze(anyString(), anyString())).thenReturn(analyze);
+
+        TaskLineageConsistencyChecker.HighConfidenceGap gap = checker.findHighConfidenceGap(
+                sqlTask(2L, "dedup_stat"), Collections.emptyList(), Collections.singletonList(5L));
+
+        assertTrue(gap.isEmpty(), "保存路径应保持豁免: " + gap.describe());
+    }
+
+    @Test
     void nonSqlTaskSkipsSqlAnalysisEntirely() {
         DataTask shellTask = sqlTask(7L, "t");
         shellTask.setDolphinNodeType("SHELL");
