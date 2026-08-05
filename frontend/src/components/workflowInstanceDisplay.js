@@ -1,5 +1,6 @@
 // 工作流实例行的展示映射与格式化纯工具，供执行监控与工作流详情「执行历史」共用。
 // 纯函数、无 Vue 依赖、无副作用，便于单测。
+import dayjs from 'dayjs'
 
 export const getInstanceRowKey = (row) => {
   const instanceKey = row.instanceId ?? `local-${row.localExecutionLogId}`
@@ -54,7 +55,12 @@ export const getExecutionSourceText = (source) => {
   return labels[source] || source || '-'
 }
 
-export const formatInstanceDateTime = (datetime) => datetime || '-'
+// 后端返回的是 ISO 形式（2026-03-11T07:30:00），直接透传会把 T 显示出来。
+export const formatInstanceDateTime = (datetime) => {
+  if (!datetime) return '-'
+  const parsed = dayjs(datetime)
+  return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : String(datetime)
+}
 
 export const formatDurationSeconds = (seconds) => {
   const value = Number(seconds)

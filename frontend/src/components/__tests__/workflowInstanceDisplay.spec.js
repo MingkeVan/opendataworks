@@ -48,8 +48,11 @@ describe('workflow instance display', () => {
     expect(formatDurationSeconds(-1)).toBe('-')
   })
 
-  it('passes datetimes through and dashes empties', () => {
+  it('normalizes ISO datetimes so the T never reaches the table', () => {
+    expect(formatInstanceDateTime('2026-03-11T07:30:00')).toBe('2026-03-11 07:30:00')
     expect(formatInstanceDateTime('2026-08-04 10:00:00')).toBe('2026-08-04 10:00:00')
     expect(formatInstanceDateTime(null)).toBe('-')
+    expect(formatInstanceDateTime('')).toBe('-')
+    expect(formatInstanceDateTime('not-a-date')).toBe('not-a-date')
   })
 })

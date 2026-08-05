@@ -459,10 +459,13 @@
             </div>
           </el-tab-pane>
           <el-tab-pane label="执行历史" name="executions">
+            <!-- 与执行监控同一组件、同一组列，只省掉「工作流」——整屏都是当前工作流，那一列是噪音。 -->
             <WorkflowInstanceTable
               :instances="executionInstances"
               :loading="executionInstancesLoading"
               expandable
+              show-source
+              show-error-message
             />
             <el-pagination
               v-model:current-page="executionQuery.pageNum"

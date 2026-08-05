@@ -89,7 +89,7 @@
         <span v-else>{{ row.instanceId || '-' }}</span>
       </template>
     </el-table-column>
-    <el-table-column prop="scheduleTime" label="调度日期" width="170">
+    <el-table-column prop="scheduleTime" label="调度日期" min-width="170">
       <template #default="{ row }">{{ formatInstanceDateTime(row.scheduleTime) }}</template>
     </el-table-column>
     <el-table-column prop="status" label="状态" width="110">
@@ -116,10 +116,10 @@
         </el-tooltip>
       </template>
     </el-table-column>
-    <el-table-column prop="startTime" label="开始时间" width="170">
+    <el-table-column prop="startTime" label="开始时间" min-width="170">
       <template #default="{ row }">{{ formatInstanceDateTime(row.startTime) }}</template>
     </el-table-column>
-    <el-table-column prop="endTime" label="结束时间" width="170">
+    <el-table-column prop="endTime" label="结束时间" min-width="170">
       <template #default="{ row }">{{ formatInstanceDateTime(row.endTime) }}</template>
     </el-table-column>
     <el-table-column prop="durationSeconds" label="时长" width="100">
