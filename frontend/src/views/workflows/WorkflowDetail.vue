@@ -1917,9 +1917,10 @@ watch(
 </script>
 
 <style scoped>
+/* 与执行监控的 .pagination 保持一致 */
 .execution-pagination {
   justify-content: flex-end;
-  margin-top: 16px;
+  margin-top: 20px;
 }
 
 .workflow-detail {
