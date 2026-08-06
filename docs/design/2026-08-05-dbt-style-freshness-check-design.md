@@ -13,7 +13,7 @@
 - 新增表级新鲜度契约：时间字段取值方式 + `warnAfter` / `errorAfter` 两级阈值 + 可选 `filter`。
 - 新增 `FreshnessCheckService`，判定 `pass | warn | error | runtime_error`，每次检查落一行结果。
 - `DataFreshnessRuleHandler` 改为消费检查结果，只把非 `pass` 转成 `inspection_issue`。
-- 一个检查、三个触发点：定时调度、页面按需、工作流执行完成后检查它写出的表。
+- 一个检查、三个触发点：工作流执行完成后检查它写出的表（主，事件驱动）、页面按需、每日巡检（治理兜底）。不设固定间隔的墙钟轮询。
 - 补齐配置可达性：种子化规则、规则配置更新接口、表级契约 REST 与前端页签。
 
 **不做（本设计之外）：**
@@ -103,11 +103,17 @@ SQL 失败 / 超时 / 列不存在  -> runtime_error
 
 ### 5. 触发点
 
-**一个检查，三个触发点。触发点不改变检查逻辑，只决定何时调用。**
+**数据只在生产任务运行时变动，因此检查绑定到「运行」而非固定时钟轮询。** 对上次产出后没动过的表反复取数只是浪费——两次产出之间 `age` 只线性增长、无新信息。这一点上本实现比 dbt 更进一步：dbt 不掌握外部 source 的加载时机，只能定时跑 `source freshness`；而本平台拥有生产工作流，知道每张表何时被写，可精确在写入后检查。
 
-1. **定时**：`FreshnessScheduledTask`，`fixedDelayString = ${freshness.check.fixed-delay-ms:900000}`。候选集就是「有契约的表」，到期判定 `nextCheckAt = freshnessCheckedAt + max(minInterval, warnAfter / 2)`。没有表配契约时空跑。
+同一套检查逻辑，触发点只决定何时调用：
+
+1. **工作流完成后（主，事件驱动）**：`WorkflowExecutionSyncJob`（`0 */5 * * * ?`）同步到工作流实例**新变为成功**时，对该工作流各任务经 `table_task_relation`（`relation_type = write`）关联的表触发一次检查。**只覆盖本次真正产出的表**，回答「任务报成功了，数据真的到了吗」。不改 DolphinScheduler 链路，只在既有同步作业里挂钩。
 2. **按需**：`POST /v1/tables/{id}/freshness/check`，等价 `dbt source freshness --select`。
-3. **工作流完成后**：`WorkflowExecutionSyncJob`（`0 */5 * * * ?`）同步到工作流实例**新变为成功**时，对该工作流各任务经 `table_task_relation`（`relation_type = write`）关联的表触发一次检查。回答「任务报成功了，数据真的到了吗」。不改 DolphinScheduler 链路，只在既有同步作业里挂钩。
+3. **每日巡检（治理兜底）**：`data_freshness` 规则随每日全量巡检运行，是唯一建 `inspection_issue` 的路径，也做 `reportUnconfigured` 治理上报，并**兜底覆盖非工作流产出的表**（外部同步、上游直灌等无完成事件的表）。
+
+**不设固定间隔的墙钟轮询。** 工作流产出表由触发点 1 在产出后即时检查；非工作流表由触发点 3 每日兜底。二者之外没有需要高频轮询的场景。
+
+**留痕与问题的分层（已知、可接受）**：触发点 1/2 实时更新 `data_table.freshness_status` 与结果行，Data Studio 面板与巡检新鲜度视图即时可见；转成被追踪的 `inspection_issue`（带 open/acknowledged/resolved 状态流）仍由每日巡检承担。若后续需要「运行即建问题」的即时告警，可让触发点 1 复用巡检的问题映射逻辑，在本设计范围之外。
 
 ### 6. 与巡检的关系
 
@@ -227,7 +233,7 @@ Data Studio 右侧面板新增「数据新鲜度」页签（`lazy`，插在「�
 | 分区值取数 | 无（可用表达式塞进 `loaded_at_field`） | **补充**：`partition` 模式，零扫描 |
 | 从未加载 | 哨兵值让 `age` 溢出成 error | **偏离**：显式 `error` + `reason = never_loaded` |
 | 结果产物 | `target/sources.json` | **偏离**：落 `table_freshness_result` 表 |
-| 触发方式 | 独立命令，不随 `dbt build` | **补充**：定时 / 按需 / 工作流完成后，同一套检查逻辑 |
+| 触发方式 | 独立命令，定时跑 `source freshness`（不掌握 source 加载时机） | **更进一步**：事件驱动，工作流完成后即检查其写出表；平台掌握生产时机，无需墙钟轮询 |
 
 **备选方案：**
 

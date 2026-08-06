@@ -89,13 +89,17 @@ SQL 失败 / 超时 / 列不存在  -> runtime_error
 
 ## 触发时机
 
-一个检查，三个触发点。触发点不改变判定逻辑，只决定何时运行。
+**数据只在生产任务运行时变动，所以检查绑定到「运行」，不做固定时钟轮询。** 对上次产出后没动过的表反复取数只是浪费——两次产出之间数据年龄只是线性增长，没有新信息。这一点上本实现比 dbt 更进一步：dbt 不掌握外部 source 的加载时机，只能定时跑 `source freshness`；而本平台拥有生产工作流，知道每张表何时被写，可精确在写入后检查。
 
-1. **定时**：`FreshnessScheduledTask`（默认 15 分钟一轮）。候选集是「有启用中表级契约」的活跃表，每轮只挑到期的（`nextCheckAt = 上次检查 + max(minInterval, warnAfter/2)`）。无表配置契约时空跑。
+一个检查，三个触发点，只决定何时运行：
+
+1. **工作流完成后（主，事件驱动）**：`WorkflowExecutionSyncJob` 识别新变为成功的实例，检查该工作流经写关系（`relation_type='write'`）关联的表——**只覆盖本次真正产出的表**，回答「任务报成功了，数据真的到了吗」。
 2. **按需**：Data Studio「数据新鲜度」页签「立即检查」，或 `POST /v1/tables/{id}/freshness/check`。
-3. **工作流完成后**：`WorkflowExecutionSyncJob` 识别新变为成功的实例，检查该工作流经写关系关联的表——回答「任务报成功了，数据真的到了吗」。
+3. **每日巡检（治理兜底）**：`data_freshness` 规则随每日全量巡检运行——唯一建 `inspection_issue` 的路径，做 `reportUnconfigured` 治理上报，并兜底覆盖非工作流产出的表（外部同步、上游直灌等无完成事件的表）。
 
-开关：`freshness.check.enabled`（默认 true，仅控制定时与工作流触发；按需与巡检路径不受影响）。
+开关：`freshness.check.enabled`（默认 true，控制工作流触发；按需与巡检路径不受影响）。
+
+**留痕与问题的分层**：触发点 1/2 实时更新 `freshness_status` 与结果行，Data Studio 面板与巡检新鲜度视图即时可见；转成被追踪的 `inspection_issue`（带 open/acknowledged/resolved 状态流）由每日巡检承担。工作流在 03:00 产出旧数据，`freshness_status=error` 立即可见，但成为一条可追踪的巡检问题要到当日巡检运行。
 
 ## 与巡检的关系
 

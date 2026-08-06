@@ -12,11 +12,10 @@
 ## Architecture Summary
 
 ```
-三个触发点 ─ FreshnessScheduledTask（定时）
+三个触发点 ─ WorkflowExecutionSyncJob（工作流成功后，查它写出的表 — 主，事件驱动）
            ├ POST /tables/{id}/freshness/check（按需）
-           ├ WorkflowExecutionSyncJob（工作流成功后，查它写出的表）
-           └ DataFreshnessRuleHandler（每日巡检）
-                        │  同一套逻辑，触发点不改变判定
+           └ DataFreshnessRuleHandler（每日巡检 — 治理兜底，唯一建 issue）
+                        │  同一套逻辑，触发点不改变判定；不设墙钟轮询
                         ▼
               FreshnessCheckService
    ├─ FreshnessContractResolver（表级 ⊕ 规则 defaults，逐字段合并；无阈值 → 不检查）
@@ -113,24 +112,24 @@ Task 1-5 构成可独立发布的后端闭环，Task 6-7 为接口与前端，Ta
 - 新增 `DataFreshnessRuleHandlerTest`：warn/error/runtime_error → issue 映射、`pass` 不产生 issue、无契约表默认不产生 issue、`reportUnconfigured = true` 时产生治理型 issue。
 - `InspectionRuleHandlerCoverageTest` 仍通过。
 
-## Task 5: 定时与工作流触发 — ✅ 已完成
+## Task 5: 工作流触发（事件驱动） — ✅ 已完成（2026-08-06 按评审收敛）
 
-> 说明：工作流触发抽为独立组件 `WorkflowFreshnessTrigger`（便于单测），由 `WorkflowExecutionSyncJob` 在检测到「新变为成功」的实例后调用；两者共享 `FreshnessRuleConfigLoader` 加载规则配置。开关与节流由 `FreshnessCheckProperties`（`freshness.check.*`）承载。`WorkflowFreshnessTriggerTest` 覆盖写关系触发与异常隔离；`FreshnessScheduledTaskTest` 覆盖候选/到期/开关。
+> **设计收敛**：初版含固定 15min 墙钟轮询 `FreshnessScheduledTask`。评审指出数据只在生产任务运行时变动，对未变动表反复取数是浪费；正确模型是「检查绑定到运行」。故**删除墙钟轮询**，收敛到：工作流完成后即检查其写出表（主，事件驱动）+ 按需 + 每日巡检兜底。`FreshnessScheduledTask` 及其单测、`FreshnessCheckProperties` 的 `fixedDelayMs`/`minIntervalMs`、`application.yml` 的对应键一并移除；保留 `freshness.check.enabled` 门控工作流触发。
+>
+> 工作流触发抽为独立组件 `WorkflowFreshnessTrigger`（便于单测），由 `WorkflowExecutionSyncJob` 在检测到「新变为成功」的实例后调用，共享 `FreshnessRuleConfigLoader`。`WorkflowFreshnessTriggerTest` 覆盖写关系触发与异常隔离。
 
 **Files:**
-- `backend/src/main/java/com/onedata/portal/scheduled/FreshnessScheduledTask.java`
+- `backend/src/main/java/com/onedata/portal/service/freshness/WorkflowFreshnessTrigger.java`
 - `backend/src/main/java/com/onedata/portal/scheduled/WorkflowExecutionSyncJob.java`
-- `backend/src/main/java/com/onedata/portal/service/freshness/FreshnessCheckService.java`
+- `backend/src/main/java/com/onedata/portal/config/FreshnessCheckProperties.java`
 - `backend/src/main/resources/application.yml`
 
 **Steps:**
-1. `FreshnessScheduledTask`：`@Scheduled(fixedDelayString = "${freshness.check.fixed-delay-ms:900000}")`，开关 `${freshness.check.enabled:true}`。候选集 = 存在启用中 `table_freshness_config` 的表；到期判定 `nextCheckAt = freshnessCheckedAt + max(freshness.check.min-interval-ms, warnAfter / 2)`。整体 try/catch 记日志不外抛。
-2. `WorkflowExecutionSyncJob` 在同步中识别**新变为成功**的工作流实例（以缓存中已有状态与本次同步结果比对，避免重复触发），取该工作流各任务经 `table_task_relation`（`relation_type = write`）关联的表，调 `checkBatch(..., "workflow", "system")`。触发失败只记日志，不影响同步作业主流程。
-3. `application.yml` 增加 `freshness.check.*` 默认值与注释。
+1. `WorkflowExecutionSyncJob` 在同步中识别**新变为成功**的工作流实例（以缓存中已有状态与本次同步结果比对，避免重复触发），取该工作流各任务经 `table_task_relation`（`relation_type = write`）关联的表，经 `WorkflowFreshnessTrigger` 调 `checkBatch(..., "workflow", "system")`。触发失败只记日志，不影响同步作业主流程。开关 `${freshness.check.enabled:true}`。
+2. 非工作流产出的表（外部同步等无完成事件）由每日巡检（Task 4）兜底覆盖，不做高频轮询。
 
 **Expected Result:**
-- 新增 `FreshnessScheduledTaskTest`：无契约表不入候选、未到期不检查、异常不外抛。
-- 新增 `WorkflowFreshnessTriggerTest`：只对 `relation_type = write` 的表触发、同一实例不重复触发、触发异常不影响同步。
+- 新增 `WorkflowFreshnessTriggerTest`：只对 `relation_type = write` 的表触发、开关关闭不触发、触发异常不影响同步。
 
 ## Task 6: REST 接口 — ✅ 已完成
 
@@ -200,7 +199,7 @@ Task 1-5 构成可独立发布的后端闭环，Task 6-7 为接口与前端，Ta
 
 ```bash
 mvn -pl backend -am \
-  -Dtest='FreshnessContractResolverTest,FreshnessCheckServiceTest,DataFreshnessRuleHandlerTest,FreshnessScheduledTaskTest,WorkflowFreshnessTriggerTest,TableFreshnessServiceTest,InspectionRuleHandlerCoverageTest,DataTableControllerTest' \
+  -Dtest='FreshnessContractResolverTest,FreshnessCheckServiceTest,DataFreshnessRuleHandlerTest,WorkflowFreshnessTriggerTest,TableFreshnessServiceTest,InspectionRuleHandlerCoverageTest,DataTableControllerTest' \
   -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
@@ -231,8 +230,8 @@ npm --prefix frontend run build
 **Rollout：**
 
 - 种子规则 `enabled = 0`，且未配置任何表级契约时检查为空跑，升级后行为与升级前一致。
-- 灰度顺序：先给少量核心表配契约并手动触发 → 观察结果与 Doris 负载 → 打开 `DATA_FRESHNESS_CHECK` 接入每日巡检 → 依赖定时与工作流触发覆盖小时级 SLA → 最后按需打开 `reportUnconfigured` 推动补配。
-- `freshness.check.enabled=false` 可单独关掉定时调度，不影响巡检与按需路径。
+- 灰度顺序：先给少量核心表配契约并手动触发 → 观察结果与 Doris 负载 → 打开 `DATA_FRESHNESS_CHECK` 接入每日巡检 → 依赖工作流完成触发覆盖产出即检查 → 最后按需打开 `reportUnconfigured` 推动补配。
+- `freshness.check.enabled=false` 可单独关掉工作流触发，不影响巡检与按需路径。
 
 **Backout：**
 

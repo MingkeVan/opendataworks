@@ -43,12 +43,10 @@ metadata:
   statistics-sync:
     fixed-delay-ms: 600000
 
-# 数据新鲜度检查（定时 + 工作流触发）。未配置表级契约时定时任务空跑。
+# 数据新鲜度检查（事件驱动）：工作流完成后检查其写出表；非工作流表由每日巡检兜底。
 freshness:
   check:
     enabled: ${FRESHNESS_CHECK_ENABLED:true}
-    fixed-delay-ms: ${FRESHNESS_CHECK_FIXED_DELAY_MS:900000}
-    min-interval-ms: ${FRESHNESS_CHECK_MIN_INTERVAL_MS:300000}
 
 # MyBatis Plus 配置
 mybatis-plus:
