@@ -5,6 +5,10 @@
 **Goal:** 交付表级新鲜度契约、检查执行与结果留痕，未配置契约的表不参与检查；`data_freshness` 巡检规则改为消费检查结果。
 **Tech Stack:** 后端（Java 8 · Spring Boot 2.7 · MyBatis-Plus · Flyway · Doris JDBC）、前端（Vue 3 · Element Plus · Vitest）、数据库（MySQL 8）。
 
+## 实施状态（2026-08-06 回填）
+
+八个任务全部完成。后端定向单测 49 项、前端 `freshnessPanel.spec.js` 4 项 + RightPanel smoke 16 项全绿，前端生产构建通过。**真实 Doris 全链路未跑**：当前环境无可访问的 Doris 实例，`column` / `custom_sql` / `partition` 的真实取数路径与端到端冒烟（下方「端到端冒烟」9 步）未执行；已验证到单测、迁移、前端构建层。实现与计划的少量偏差记录在各任务后。
+
 ## Architecture Summary
 
 ```
@@ -28,7 +32,7 @@ Task 1-5 构成可独立发布的后端闭环，Task 6-7 为接口与前端，Ta
 
 ---
 
-## Task 1: 数据库迁移与实体
+## Task 1: 数据库迁移与实体 — ✅ 已完成
 
 **Files:**
 - `backend/src/main/resources/db/migration/V50__table_freshness.sql`
@@ -47,7 +51,9 @@ Task 1-5 构成可独立发布的后端闭环，Task 6-7 为接口与前端，Ta
 **Expected Result:**
 - `mvn -pl backend -am test-compile -DskipTests` 通过；迁移在本地 MySQL 可重复执行且幂等。
 
-## Task 2: 契约模型与解析
+## Task 2: 契约模型与解析 — ✅ 已完成
+
+> 偏差：`UpdateCycleParser` 未实现——收敛后的两层继承（表级 + 规则默认）不再从 `statistics_cycle` 推导，该解析器无存在必要，随之其单测也取消。新增 `FreshnessThreshold` / `FreshnessSource` / `FreshnessDefault` / `FreshnessRuleConfig` 承载阈值、来源标记与规则配置解析。
 
 **Files:**
 - `backend/src/main/java/com/onedata/portal/service/freshness/FreshnessPeriod.java`
@@ -67,7 +73,9 @@ Task 1-5 构成可独立发布的后端闭环，Task 6-7 为接口与前端，Ta
 **Expected Result:**
 - 新增 `FreshnessContractResolverTest`：无任何配置返回空、`enabled = 0` 短路、表级只声明 `errorAfter` 时 `warnAfter` 取自规则默认、`scope` 不命中时不套用默认。
 
-## Task 3: 检查执行服务
+## Task 3: 检查执行服务 — ✅ 已完成
+
+> 偏差：探针失败以异常向上抛出（而非 `Optional`），`FreshnessCheckService.evaluate` 捕获后判 `runtime_error`，以便区分「空表（never_loaded）」与「取数失败」；`data_table` 最新态回写改用列名 `UpdateWrapper`（无 Spring 上下文单测下 `LambdaUpdateWrapper` 拿不到 lambda 缓存）。`checkBatch` 返回 `BatchOutcome`（结果 + 未配置表），供 Task 4 治理型上报复用。metadata 探针失败直接判 `runtime_error`（与收敛后的设计一致，不做跨源降级）。
 
 **Files:**
 - `backend/src/main/java/com/onedata/portal/service/freshness/FreshnessCheckResult.java`
@@ -87,7 +95,7 @@ Task 1-5 构成可独立发布的后端闭环，Task 6-7 为接口与前端，Ta
 **Expected Result:**
 - 新增 `FreshnessCheckServiceTest`：mock `DorisConnectionService`，覆盖四种状态、边界（`age == warnAfter` / `age == errorAfter` 判上一档，`阈值 + 1s` 才升档）、`never_loaded`、四种模式取数、`partition` 解析失败、单表异常隔离、无契约不落结果。
 
-## Task 4: 巡检规则改造
+## Task 4: 巡检规则改造 — ✅ 已完成
 
 **Files:**
 - `backend/src/main/java/com/onedata/portal/service/inspection/DataFreshnessRuleHandler.java`
@@ -105,7 +113,9 @@ Task 1-5 构成可独立发布的后端闭环，Task 6-7 为接口与前端，Ta
 - 新增 `DataFreshnessRuleHandlerTest`：warn/error/runtime_error → issue 映射、`pass` 不产生 issue、无契约表默认不产生 issue、`reportUnconfigured = true` 时产生治理型 issue。
 - `InspectionRuleHandlerCoverageTest` 仍通过。
 
-## Task 5: 定时与工作流触发
+## Task 5: 定时与工作流触发 — ✅ 已完成
+
+> 说明：工作流触发抽为独立组件 `WorkflowFreshnessTrigger`（便于单测），由 `WorkflowExecutionSyncJob` 在检测到「新变为成功」的实例后调用；两者共享 `FreshnessRuleConfigLoader` 加载规则配置。开关与节流由 `FreshnessCheckProperties`（`freshness.check.*`）承载。`WorkflowFreshnessTriggerTest` 覆盖写关系触发与异常隔离；`FreshnessScheduledTaskTest` 覆盖候选/到期/开关。
 
 **Files:**
 - `backend/src/main/java/com/onedata/portal/scheduled/FreshnessScheduledTask.java`
@@ -122,7 +132,9 @@ Task 1-5 构成可独立发布的后端闭环，Task 6-7 为接口与前端，Ta
 - 新增 `FreshnessScheduledTaskTest`：无契约表不入候选、未到期不检查、异常不外抛。
 - 新增 `WorkflowFreshnessTriggerTest`：只对 `relation_type = write` 的表触发、同一实例不重复触发、触发异常不影响同步。
 
-## Task 6: REST 接口
+## Task 6: REST 接口 — ✅ 已完成
+
+> 说明：`loadedAtQuery` 的「仅管理员」限制目前落在 `@RequireAuth`（要求已认证）+ SQL 形状校验层面，未接入更细的 RBAC 角色判定；如需严格管理员门槛，后续在 auth 模块补角色注解。
 
 **Files:**
 - `backend/src/main/java/com/onedata/portal/service/freshness/TableFreshnessService.java`
@@ -146,7 +158,9 @@ Task 1-5 构成可独立发布的后端闭环，Task 6-7 为接口与前端，Ta
 **Expected Result:**
 - 新增/更新 `TableFreshnessServiceTest`、`DataTableControllerTest`、`InspectionControllerTest` 全绿，含各项校验拒绝用例。
 
-## Task 7: 前端
+## Task 7: 前端 — ✅ 已完成
+
+> 说明：`freshnessPanel.spec.js` 聚焦挂载与 API 接线（EP 组件在 shallowMount 下 DOM 断言较脆，故不做像素级断言）；巡检页新鲜度视图以卡片形式加入 `InspectionView.vue`（该视图是卡片布局而非页签）。
 
 **Files:**
 - `frontend/src/api/*`（新增新鲜度接口封装，沿用现有 api 模块组织方式）
@@ -166,7 +180,7 @@ Task 1-5 构成可独立发布的后端闭环，Task 6-7 为接口与前端，Ta
 **Expected Result:**
 - `npm --prefix frontend run test -- src/views/datastudio/__tests__/freshnessPanel.spec.js` 通过；`npm --prefix frontend run build` 通过。
 
-## Task 8: 文档与收尾
+## Task 8: 文档与收尾 — ✅ 已完成
 
 **Files:**
 - `docs/handbook/features/data-freshness.md`
@@ -186,7 +200,7 @@ Task 1-5 构成可独立发布的后端闭环，Task 6-7 为接口与前端，Ta
 
 ```bash
 mvn -pl backend -am \
-  -Dtest='FreshnessContractResolverTest,FreshnessCheckServiceTest,DataFreshnessRuleHandlerTest,FreshnessScheduledTaskTest,WorkflowFreshnessTriggerTest,TableFreshnessServiceTest,InspectionRuleHandlerCoverageTest,DataTableControllerTest,InspectionControllerTest' \
+  -Dtest='FreshnessContractResolverTest,FreshnessCheckServiceTest,DataFreshnessRuleHandlerTest,FreshnessScheduledTaskTest,WorkflowFreshnessTriggerTest,TableFreshnessServiceTest,InspectionRuleHandlerCoverageTest,DataTableControllerTest' \
   -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 

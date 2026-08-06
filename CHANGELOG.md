@@ -6,8 +6,12 @@
 
 ## [Unreleased]
 
+### Added
+- 新增类 dbt 的数据新鲜度（freshness）检查：表级契约（时间字段取值方式 + warn/error 两级阈值 + 可选 filter），支持 `column` / `custom_sql` / `partition` / `metadata` 四种取值模式；检查结果留痕并可查询历史；提供表级契约 REST 接口、Data Studio「数据新鲜度」页签与巡检页新鲜度视图。
+- 新增新鲜度检查的三个触发点（同一套检查逻辑）：定时调度、页面按需、工作流执行成功后检查其写出的表。
+
 ### Changed
-- 待补充。
+- `data_freshness` 巡检规则语义由「按 `statistics_cycle` 命名段推断」改为「按表级新鲜度契约」。**行为变更**：未配置契约的表不再产出新鲜度问题（可通过规则配置 `reportUnconfigured` 开启治理型上报）。因该规则此前从未随迁移种子化、也无配置入口，存量影响为零。
 
 ## [1.4.0] - 2026-06-26
 
