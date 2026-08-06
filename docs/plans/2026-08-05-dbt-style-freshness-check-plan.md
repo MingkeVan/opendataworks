@@ -14,9 +14,9 @@ DataFreshnessRuleHandler ─┘
               │
               ▼
       FreshnessCheckService
-   ├─ FreshnessContractResolver（表级 → 规则 defaults → statistics_cycle → 不检查）
-   ├─ 取值：column(MAX+NOW) / partition(SHOW PARTITIONS) / metadata(UPDATE_TIME，单层降级)
-   ├─ 判定：pass | warn | error | runtime_error
+   ├─ FreshnessContractResolver（表级 ⊕ 规则 defaults ⊕ statistics_cycle，逐字段合并）
+   ├─ 取值：column(MAX+NOW) / custom_sql(标量子查询+NOW) / partition(SHOW PARTITIONS) / metadata(UPDATE_TIME，单层降级)
+   ├─ 判定：pass | warn | error | runtime_error，阈值比较严格大于
    └─ 留痕：table_freshness_result + data_table.freshness_status/checked_at
               │
               ▼
@@ -57,14 +57,17 @@ DataFreshnessRuleHandler ─┘
 - `backend/src/main/java/com/onedata/portal/util/UpdateCycleParser.java`
 
 **Steps:**
-1. `FreshnessPeriod` 枚举 `MINUTE/HOUR/DAY`，提供 `toDuration(count)`；`FreshnessMode` 枚举 `COLUMN/PARTITION/METADATA`。
-2. `FreshnessContract` 为不可变值对象：`mode`、`loadedAtField`、`filterExpr`、`warnAfter`、`errorAfter`、`source`（`TABLE/RULE_DEFAULT/STATISTICS_CYCLE`）。
+1. `FreshnessPeriod` 枚举 `MINUTE/HOUR/DAY`，提供 `toDuration(count)`；`FreshnessMode` 枚举 `COLUMN/CUSTOM_SQL/PARTITION/METADATA`。
+2. `FreshnessContract` 为不可变值对象：`mode`、`loadedAtField`、`loadedAtQuery`、`filterExpr`、`warnAfter`、`errorAfter`，外加各字段来源标记（`TABLE/RULE_DEFAULT/STATISTICS_CYCLE`）用于接口回显「这个值从哪来」。
 3. `UpdateCycleParser.parse(String)` 返回 `Optional<Duration>`：支持 `s/m/h/d/w`，`m` 一律按**分钟**处理，识别 `realtime` 返回 15 分钟基准，不再支持「月」。
-4. `FreshnessContractResolver.resolve(table, ruleConfig)` 按设计文档四层顺序返回 `Optional<FreshnessContract>`：表级配置（`enabled = 0` 直接返回空）→ `rule_config.defaults[]` 按 `clusterIds/dbNames/layers` 匹配 → `statistics_cycle` 推导（`warn = 2×cycle`、`error = 3×cycle`、模式固定 `METADATA`）→ 空。
-5. 命中即返回，不做跨层合并。
+4. `FreshnessContractResolver.resolve(table, ruleConfig)` 采用**逐字段合并**（对齐 dbt `merge_freshness`），不是命中即返回：
+   - 表级配置 `enabled = 0` → 短路返回空（等价 `freshness: null`）。
+   - 逐字段取值优先级：表级配置 → `rule_config.defaults[]` 中按 `clusterIds/dbNames/layers` 命中的项 → 由 `statistics_cycle` 推导（`warn = 2×cycle`、`error = 3×cycle`，`mode` 缺省 `METADATA`）。
+   - 合并后 `warnAfter` 与 `errorAfter` 均为空 → 返回空，该表不检查。
+5. 合并实现写成 `firstNonNull` 风格的小工具方法，避免每个字段重复三段 `if`。
 
 **Expected Result:**
-- 新增 `UpdateCycleParserTest`、`FreshnessContractResolverTest` 覆盖 5 个前端取值、非法值、四层命中顺序与显式关闭。
+- 新增 `UpdateCycleParserTest`、`FreshnessContractResolverTest` 覆盖 5 个前端取值、非法值、显式关闭短路，以及逐字段合并的关键用例：表级只声明 `errorAfter` 时 `warnAfter` 应来自规则默认，表级只声明 `loadedAtField` 时阈值应来自规则默认或 `statistics_cycle`。
 
 ## Task 3: 检查执行服务
 
@@ -75,15 +78,16 @@ DataFreshnessRuleHandler ─┘
 
 **Steps:**
 1. `DorisConnectionService` 增加 `Optional<FreshnessProbe> probeMaxLoadedAt(clusterId, database, tableName, loadedAtField, filterExpr, timeoutSeconds)`：单条 SQL 同时取 `MAX(col)` 与 `NOW()`，标识符反引号包裹，`filterExpr` 直接拼在 `WHERE` 后，设置 `Statement#setQueryTimeout`。
-2. 增加 `Optional<LocalDateTime> probeMetadataUpdateTime(clusterId, database, tableName)`，实时查 `information_schema.tables.UPDATE_TIME`。
-3. `FreshnessCheckService.check(DataTable, FreshnessContract, triggerType, operator)`：
-   - `COLUMN` → `probeMaxLoadedAt`；`PARTITION` → 复用 `listPartitions` 取最新分区可见版本时间；`METADATA` → `probeMetadataUpdateTime`，失败时**单层降级**到 `data_table.doris_update_time` 并置 `degraded = true`。
-   - 按设计文档判定 `pass | warn | error | runtime_error`；`max_loaded_at` 为空判 `error`，异常/超时判 `runtime_error`。
+2. 增加 `Optional<FreshnessProbe> probeMaxLoadedAtByQuery(clusterId, database, loadedAtQuery, timeoutSeconds)`：把用户查询包成标量子查询执行 `SELECT (<loadedAtQuery>) AS max_loaded_at, NOW() AS snapshotted_at`，形状照搬 dbt `default__collect_freshness_custom_sql`——用户查询只返回时间戳，快照时间由平台拼。
+3. 增加 `Optional<LocalDateTime> probeMetadataUpdateTime(clusterId, database, tableName)`，实时查 `information_schema.tables.UPDATE_TIME`。
+4. `FreshnessCheckService.check(DataTable, FreshnessContract, triggerType, operator)`：
+   - `COLUMN` → `probeMaxLoadedAt`；`CUSTOM_SQL` → `probeMaxLoadedAtByQuery`；`PARTITION` → 复用 `listPartitions` 取最新分区可见版本时间；`METADATA` → `probeMetadataUpdateTime`，失败时**单层降级**到 `data_table.doris_update_time` 并置 `degraded = true`。
+   - 判定按设计文档：`age > errorAfter` → `error`，`age > warnAfter` → `warn`，**严格大于**（对齐 dbt `Time.exceeded`），先判 error 后判 warn；`max_loaded_at` 为空判 `error` 并带 `reason = never_loaded`；异常/超时判 `runtime_error`。
    - 写 `table_freshness_result`，回写 `data_table.freshness_status` 与 `freshness_checked_at`。
-4. `checkBatch(List<DataTable>, ruleConfig, triggerType, operator)`：按 `clusterId` 分组，线程池并发上限取 `rule_config.maxConcurrentPerCluster`（默认 4），单表异常不影响其余表。
+5. `checkBatch(List<DataTable>, ruleConfig, triggerType, operator)`：按 `clusterId` 分组，线程池并发上限取 `rule_config.maxConcurrentPerCluster`（默认 4），单表异常不影响其余表。
 
 **Expected Result:**
-- 新增 `FreshnessCheckServiceTest`：mock `DorisConnectionService`，覆盖四种状态、阈值边界（`age == warnAfter` / `age == errorAfter`）、metadata 降级、单表异常隔离。
+- 新增 `FreshnessCheckServiceTest`：mock `DorisConnectionService`，覆盖四种状态、阈值边界（`age == warnAfter` 与 `age == errorAfter` 均判上一档而非本档、`age = 阈值 + 1s` 才升档）、`never_loaded`、`custom_sql` 取数、metadata 降级、单表异常隔离。
 
 ## Task 4: 巡检规则改造
 
@@ -128,7 +132,13 @@ DataFreshnessRuleHandler ─┘
 - `backend/src/main/java/com/onedata/portal/service/InspectionService.java`
 
 **Steps:**
-1. `TableFreshnessService` 承载契约 upsert / 删除 / 查询 / 单表检查 / 历史查询；保存时校验 `loadedAtField` 命中 `data_field` 中该表真实列名，`filterExpr` 拒绝分号与注释符并限长 512，`COLUMN` 模式必须有 `loadedAtField`。
+1. `TableFreshnessService` 承载契约 upsert / 删除 / 查询 / 单表检查 / 历史查询。保存校验：
+   - `loadedAtField` 必须命中 `data_field` 中该表真实列名（大小写不敏感）。
+   - `filterExpr` 拒绝分号与注释符，限长 512。
+   - `loadedAtQuery` 必须以 `SELECT` 开头，拒绝分号与注释符，限长 2048，需管理员权限。
+   - `loadedAtField` 与 `loadedAtQuery` **互斥**（对齐 dbt），同时提供直接拒绝。
+   - `COLUMN` 模式必须有 `loadedAtField`，`CUSTOM_SQL` 模式必须有 `loadedAtQuery`。
+   - 查询接口回显生效契约时带上每个字段的来源（表级 / 规则默认 / `statistics_cycle` 推导），供前端标注。
 2. `DataTableController` 增加 `GET/PUT/DELETE /{id}/freshness`、`POST /{id}/freshness/check`、`GET /{id}/freshness/history`，控制器只做绑定 + 鉴权注解 + `try/catch → Result.fail(e.getMessage())`，业务全部在服务层（沿用 2026-06-21 设计确立的下沉约定）。
 3. `InspectionController` 增加 `GET /freshness`、`POST /freshness/run`，以及 `PUT /rules/{ruleId}`（更新 `ruleConfig` / `severity` / `ruleName` / `description`，`ruleType` 与 `ruleCode` 不可改）。
 4. `InspectionService` 增加对应的规则更新与新鲜度结果查询方法。
@@ -146,7 +156,7 @@ DataFreshnessRuleHandler ─┘
 - `frontend/src/views/datastudio/__tests__/freshnessPanel.spec.js`
 
 **Steps:**
-1. 新增右侧面板「数据新鲜度」页签（`lazy`），插在「访问情况」之后：契约用 `el-descriptions :column="2"` 展示（列数按容器宽度自适应，参考同目录既有面板做法），编辑用抽屉或内联表单；下方 `el-table` 带 border 展示最近结果历史，顶部「立即检查」按钮。
+1. 新增右侧面板「数据新鲜度」页签（`lazy`），插在「访问情况」之后：契约用 `el-descriptions :column="2"` 展示（列数按容器宽度自适应，参考同目录既有面板做法），非表级来源的字段标注「继承自规则默认 / 由统计周期推导」；编辑用抽屉或内联表单，`mode` 四选一并按选择联动显隐 `loadedAtField` / `loadedAtQuery`（互斥）；下方 `el-table` 带 border 展示最近结果历史，顶部「立即检查」按钮。
 2. 状态用 `el-tag` 着色：`pass` 成功、`warn` 警告、`error` 危险、`runtime_error` 信息灰。
 3. `InspectionView.vue` 中 `data_freshness` 的中文名保持「数据新鲜度」，新增按新鲜度状态筛选的表级视图入口。
 4. 不再额外包一层卡片；同容器兄弟页签保持一致的扁平结构。
@@ -163,7 +173,7 @@ DataFreshnessRuleHandler ─┘
 - `docs/plans/2026-08-05-dbt-style-freshness-check-plan.md`
 
 **Steps:**
-1. 新增 handbook 文档：契约字段含义、三种模式的选型建议、继承链、状态语义、与 dbt 概念对照表、常见故障排查。
+1. 新增 handbook 文档：契约字段含义、四种模式的选型建议、逐字段继承规则、状态语义（含严格大于的边界行为）、与 dbt 的对齐与偏离对照表（直接引用 design 中的表格）、常见故障排查。
 2. `CHANGELOG.md` 记录新增能力，并**显式标注行为变更**：周期后缀 `m` 由「月」改为「分钟」，`realtime` 不再被跳过。
 3. 回填本 plan 的任务勾选状态与实际验证结论。
 
@@ -193,8 +203,11 @@ npm --prefix frontend run build
 1. 对一张有加载时间列的表 `PUT /v1/tables/{id}/freshness`，设 `mode = column`、`warnAfter = 1 hour`、`errorAfter = 3 hour`。
 2. `POST /v1/tables/{id}/freshness/check` 应返回 `pass`，`table_freshness_result` 落一行。
 3. 把 `warnAfter` 调到 1 分钟后重跑，应返回 `warn`；`errorAfter` 调到 1 分钟应返回 `error`。
-4. 把 `loadedAtField` 改成不存在的列（绕过接口直接改库）后重跑，应返回 `runtime_error` 而非 `pass`。
-5. 启用 `DATA_FRESHNESS_CHECK` 规则跑一次 `POST /v1/inspections/run`，确认非 `pass` 的表在 `inspection_issue` 中生成对应问题、`pass` 的表不生成。
+4. 表级只改 `errorAfter`、清空 `warnAfter` 后重跑，确认 `warnAfter` 由规则默认或 `statistics_cycle` 补齐，接口回显标注了来源（验证逐字段合并）。
+5. 切到 `mode = custom_sql`，`loadedAtQuery` 填 `select max(dt) from <db>.<tbl>`，重跑应得到与 `column` 模式一致的 `max_loaded_at`；同时提交 `loadedAtField` 与 `loadedAtQuery` 应被接口拒绝。
+6. 把 `loadedAtField` 改成不存在的列（绕过接口直接改库）后重跑，应返回 `runtime_error` 而非 `pass`。
+7. 对一张空表（从未写入）检查，应返回 `error` 且 `reason = never_loaded`，问题描述不出现天文数字延迟。
+8. 启用 `DATA_FRESHNESS_CHECK` 规则跑一次 `POST /v1/inspections/run`，确认非 `pass` 的表在 `inspection_issue` 中生成对应问题、`pass` 的表不生成。
 
 若 Doris 不可用，须在提交说明与 plan 回填中写明：已验证到单测与迁移层，`column` / `partition` 真实取数路径未跑。
 

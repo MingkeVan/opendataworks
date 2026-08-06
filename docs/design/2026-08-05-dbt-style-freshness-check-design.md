@@ -11,7 +11,7 @@
 **做：**
 
 - 新增表级新鲜度契约（取数模式、`loadedAtField`、过滤条件、warn/error 两级阈值）及其继承链解析。
-- 新增 `FreshnessCheckService`，支持 `column` / `partition` / `metadata` 三种新鲜度取值模式，判定 `pass | warn | error | runtime_error`。
+- 新增 `FreshnessCheckService`，支持 `column` / `custom_sql` / `partition` / `metadata` 四种新鲜度取值模式，判定 `pass | warn | error | runtime_error`。
 - 新增检查结果留痕表，`pass` 也落库，用于「上次检查时间」与新鲜度趋势。
 - `DataFreshnessRuleHandler` 改为委托 `FreshnessCheckService`，仅把 `warn/error/runtime_error` 转成 `inspection_issue`，问题面保持单一。
 - 修正周期解析缺陷：`10m/30m` 当前被解析为「月」，`realtime` 被静默跳过。
@@ -66,14 +66,16 @@
 
 ### 1. 新鲜度契约与继承链
 
-契约字段对齐 dbt：`mode`、`loadedAtField`、`filter`、`warnAfter{count, period}`、`errorAfter{count, period}`。`period` 枚举 `minute | hour | day`，与 dbt 一致，解析为 `Duration`。
+契约字段对齐 dbt：`mode`、`loadedAtField`、`loadedAtQuery`、`filter`、`warnAfter{count, period}`、`errorAfter{count, period}`。`period` 枚举 `minute | hour | day`，与 dbt 的 `TimePeriod` 一致，解析为 `Duration`。
 
-解析顺序由具体到通用，**第一个命中即生效**（不做多层合并，避免叠加语义）：
+解析采用**逐字段合并**，由具体到通用，与 dbt `merge_freshness` / `merge_freshness_time_thresholds` 的语义一致——上层只覆盖它自己声明过的字段，不是整块二选一：
 
-1. `table_freshness_config` 表级显式配置（`enabled = 0` 表示显式关闭，直接跳过该表，等价 dbt 的 `freshness: null`）。
-2. 规则配置 `rule_config.defaults[]`：每项含 `scope`（`clusterIds` / `dbNames` / `layers`）与阈值，命中即用。等价 dbt source 级默认。
-3. 由 `statistics_cycle` 推导的兜底：`warnAfter = 2 × cycle`、`errorAfter = 3 × cycle`，`realtime` 按 `15 分钟 / 30 分钟` 处理，模式固定为 `metadata`。
-4. 均未命中 → 该表不参与新鲜度检查（等价 dbt 中未声明 `freshness` 的 source）。
+1. `table_freshness_config` 表级显式配置。`enabled = 0` 表示显式关闭，**短路**整个解析并跳过该表，等价 dbt 的 `freshness: null`。
+2. 规则配置 `rule_config.defaults[]`：每项含 `scope`（`clusterIds` / `dbNames` / `layers`）与阈值，命中项提供表级未声明的字段。等价 dbt 的 source 级默认。
+3. 阈值仍为空时，由 `statistics_cycle` 推导兜底：`warnAfter = 2 × cycle`、`errorAfter = 3 × cycle`，`realtime` 按 `15 分钟 / 30 分钟` 处理，`mode` 缺省为 `metadata`。
+4. 合并后 `warnAfter` 与 `errorAfter` 仍全为空 → 该表不参与新鲜度检查（等价 dbt 中未声明 `freshness` 的 source）。
+
+因此「表级只覆盖 `errorAfter`、`warnAfter` 沿用规则默认」是受支持的写法。取数字段（`mode` / `loadedAtField` / `loadedAtQuery` / `filter`）同样逐字段合并，但规则默认一般不提供 `loadedAtField`——列名逐表不同。
 
 第 3 层要求先修正周期解析：后缀 `m` 一律按**分钟**处理，支持 `s/m/h/d/w`，识别 `realtime`，不再支持「月」。当前无任何入口能产生月周期，且该规则未种子化，故存量影响为零。
 
@@ -82,8 +84,11 @@
 | 模式 | 取数方式 | 适用场景 |
 | --- | --- | --- |
 | `column` | `SELECT MAX(\`col\`) AS max_loaded_at, NOW() AS snapshotted_at FROM \`db\`.\`tbl\` [WHERE filter]` | 首选，等价 dbt `loaded_at_field` |
+| `custom_sql` | `SELECT (<loadedAtQuery>) AS max_loaded_at, NOW() AS snapshotted_at` | 加载时点需要自定义算法，等价 dbt 1.10 的 `loaded_at_query` |
 | `partition` | 复用 `DorisConnectionService.listPartitions`（`SHOW PARTITIONS`）取最新分区的可见版本时间 | 大表、按天分区、`MAX()` 成本高 |
 | `metadata` | 实时查 `information_schema.tables.UPDATE_TIME` | 无加载时间列的表，等价 dbt 的 metadata-based freshness |
+
+`custom_sql` 照搬 dbt `collect_freshness_custom_sql` 的形状：用户配置的 `loadedAtQuery` 只负责返回一个时间戳，被包成**标量子查询**，`snapshotted_at` 仍由平台自己拼。好处是用户查询与快照时间的取数保持同源同事务，且用户不需要知道结果列名约定。`loadedAtQuery` 与 `loadedAtField` 互斥（与 dbt 一致），保存时校验。
 
 `snapshotted_at` 一律取自 Doris 侧（同一条 SQL 内的 `NOW()`），避免门户与 Doris 时钟偏差。
 
@@ -95,13 +100,17 @@
 age = snapshotted_at - max_loaded_at
 
 max_loaded_at 为空          -> error        (reason = never_loaded)
-age >= errorAfter           -> error
-age >= warnAfter            -> warn
+age >  errorAfter           -> error
+age >  warnAfter            -> warn
 否则                        -> pass
 SQL 失败 / 超时 / 列不存在  -> runtime_error
 ```
 
+比较用**严格大于**，与 dbt `Time.exceeded` 的 `actual_age > difference` 一致：`age` 恰好等于阈值判 `pass`。先判 `errorAfter` 再判 `warnAfter`，顺序同 `FreshnessThreshold.status`。
+
 `runtime_error` 独立于 `pass`，与 dbt 的 runtime error 语义一致：检查没跑成功不等于数据新鲜。
+
+**有意偏离 dbt 的一点**：dbt 不为「从未加载」单列状态，而是在 `_create_freshness_response` 里把缺失的 `last_modified` 塞成公元 1 年（`datetime(1, 1, 1, tzinfo=UTC)`），让 `age` 溢出成天文数字后自然落进 `error`。本设计改为显式判 `error` 并带 `reason = never_loaded`，理由是问题描述要直接告诉用户「这张表从未产出过数据」，而不是甩一个 `已延迟 17,750,000 小时`。状态结论与 dbt 相同，只是可读性更好。
 
 ### 4. 执行与留痕
 
@@ -127,6 +136,7 @@ nextCheckAt = lastCheckedAt + max(freshness.check.min-interval-ms, warnAfter / 2
 
 - `loadedAtField` 必须精确命中该表在 `data_field` 中的真实列名（大小写不敏感），否则保存即拒绝；执行时统一反引号包裹标识符。
 - `filter` 仅作为 `WHERE` 谓词拼接：禁止分号与注释符（`--`、`/*`），长度上限 512，保存需要与巡检规则一致的管理权限。
+- `loadedAtQuery` 是自由 SQL，约束比 `filter` 更严：必须以 `SELECT` 开头、禁止分号与注释符、长度上限 2048，且只允许管理员配置。它被包成标量子查询执行，语法上无法携带第二条语句。
 - 检查走 `DorisConnectionService` 的只读查询路径，带 `queryTimeout`，不复用 `DataQueryService` 的用户态权限链路（检查是系统态行为）。
 
 ## Interfaces / Data Model
@@ -137,8 +147,9 @@ nextCheckAt = lastCheckedAt + max(freshness.check.min-interval-ms, warnAfter / 2
 CREATE TABLE table_freshness_config (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
   table_id          BIGINT      NOT NULL,
-  mode              VARCHAR(16) NOT NULL DEFAULT 'metadata',  -- column | partition | metadata
+  mode              VARCHAR(16) NOT NULL DEFAULT 'metadata',  -- column | custom_sql | partition | metadata
   loaded_at_field   VARCHAR(128) DEFAULT NULL,
+  loaded_at_query   VARCHAR(2048) DEFAULT NULL,               -- 与 loaded_at_field 互斥
   filter_expr       VARCHAR(512) DEFAULT NULL,
   warn_after_count  INT         DEFAULT NULL,
   warn_after_period VARCHAR(16) DEFAULT NULL,                 -- minute | hour | day
@@ -216,7 +227,21 @@ ON DUPLICATE KEY UPDATE rule_name = VALUES(rule_name), description = VALUES(desc
 - **时区与时钟偏差。** `max_loaded_at` 与 `snapshotted_at` 同源于 Doris；仅 `metadata` 降级路径使用门户时间，结果以 `degraded = true` 标注。
 - **行为变更：`m` 由「月」改为「分钟」。** 影响面仅限新鲜度兜底路径，且该规则当前未种子化，存量为零。需在 CHANGELOG 与 plan 中显式记录。
 - **调度叠加负载。** 15 分钟一轮但只取到期表，且未配置契约的表不入候选；出厂空集。
-- **`filter` 是自由 SQL。** 通过谓词位置约束 + 字符黑名单 + 长度上限 + 权限控制降低风险，不做通用 SQL 解析。
+- **`filter` / `loadedAtQuery` 是自由 SQL。** 通过位置约束（谓词 / 标量子查询）+ 字符黑名单 + 长度上限 + 权限控制降低风险，不做通用 SQL 解析。
+
+**与 dbt 的对齐与偏离清单**（便于后续对照 dbt 版本演进）：
+
+| 维度 | dbt 行为 | 本设计 |
+| --- | --- | --- |
+| 阈值比较 | `Time.exceeded` 用 `age > threshold` | 一致，严格大于 |
+| 判定顺序 | 先 `error_after` 后 `warn_after` | 一致 |
+| 配置继承 | `merge_freshness` 逐字段合并 source / table | 一致，逐字段合并三层来源 |
+| 快照时间 | 仓库侧 `current_timestamp()`，与 `max_loaded_at` 同查询 | 一致，Doris 侧 `NOW()` |
+| 自定义取数 | 1.10 `loaded_at_query`，包成标量子查询 | 一致，`custom_sql` 模式 |
+| 从未加载 | `max_loaded_at` 置公元 1 年，靠溢出落进 error | **偏离**：显式 `error` + `reason = never_loaded` |
+| 元数据取数 | `get_relation_last_modified` 按 schema 批量查 | **偏离**：当前按表查 `information_schema.tables`，批量化留作后续优化 |
+| 结果产物 | `target/sources.json` 文件 | **偏离**：落 `table_freshness_result` 表，便于查询与趋势 |
+| 触发方式 | 独立命令 `dbt source freshness`，不随 `dbt build` | 一致：独立调度 + 按需接口，同时额外接入每日巡检 |
 
 **备选方案：**
 
@@ -227,7 +252,7 @@ ON DUPLICATE KEY UPDATE rule_name = VALUES(rule_name), description = VALUES(desc
 
 ## Verification
 
-- **后端单测：** 周期解析（`10m/30m/1h/1d/realtime/非法值`）、状态判定边界（等于阈值、`max_loaded_at` 为空、`runtime_error`）、继承链四层命中顺序、`loadedAtField` 白名单与 `filter` 校验、handler → `inspection_issue` 映射、控制器参数透传。
+- **后端单测：** 周期解析（`10m/30m/1h/1d/realtime/非法值`）、状态判定边界（`age` 恰好等于阈值判 `pass`、超过 1 秒判 `warn`/`error`、`max_loaded_at` 为空、`runtime_error`）、继承链逐字段合并（表级只覆盖 `errorAfter` 时 `warnAfter` 来自规则默认）与显式关闭短路、`loadedAtField` 白名单与 `filter` / `loadedAtQuery` 校验（含二者互斥）、handler → `inspection_issue` 映射、控制器参数透传。
 - **迁移：** `V50` 在本地 MySQL 上 `flyway migrate` 通过；`InspectionRuleHandlerCoverageTest` 同步更新。
 - **前端：** `nvm use` 后跑新增组件 Vitest 与生产构建。
 - **端到端：** 完整链路需要可访问的 Doris 集群（`column` / `partition` 模式依赖真实表与真实列）。当前仓库环境不具备 Doris 实例，如果实施时仍不可用，须在提交说明中明确标注「未跑真实 Doris 全链路」，并说明已验证到哪一层。
