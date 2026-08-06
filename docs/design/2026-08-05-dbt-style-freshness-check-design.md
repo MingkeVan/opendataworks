@@ -10,16 +10,16 @@
 
 **做：**
 
-- 新增表级新鲜度契约：时间字段取值方式 + `warnAfter` / `errorAfter` 两级阈值 + 可选 `filter`。
-- 新增 `FreshnessCheckService`，判定 `pass | warn | error | runtime_error`，每次检查落一行结果。
-- `DataFreshnessRuleHandler` 改为消费检查结果，只把非 `pass` 转成 `inspection_issue`。
-- 一个检查、三个触发点：工作流执行完成后检查它写出的表（主，事件驱动）、页面按需、每日巡检（治理兜底）。不设固定间隔的墙钟轮询。
-- 补齐配置可达性：种子化规则、规则配置更新接口、表级契约 REST 与前端页签。
+- 新增**表级**新鲜度契约：时间字段取值方式 + `warnAfter` / `errorAfter` 两级阈值 + 可选 `filter`。每张表各自声明（对齐 dbt「每个 source 各自声明 freshness」）。
+- 新增 `FreshnessCheckService`，判定 `pass | warn | error | runtime_error`，每次检查落一行结果并回写 `data_table.freshness_status`。
+- **两个触发点**：工作流执行完成后检查它写出的表（主，事件驱动）、页面按需。检查绑定到「运行」，不设墙钟轮询。
+- 表级契约 REST 与前端页签；巡检页只读展示各表最新结果。
 
 **不做（本设计之外）：**
 
-- **不猜阈值、不猜字段。** 不从 `statistics_cycle` 推导、不从 `schedule_cron` 反推、不按列名模式自动识别时间列。未配置契约的表**不参与检查、不产出新鲜度结论**，与 dbt 中未声明 `freshness` 的 source 一致。
-- 不新增告警通道（邮件、Webhook、IM），沿用 `inspection_issue`。
+- **不猜阈值、不猜字段。** 不从 `statistics_cycle` 推导、不从 `schedule_cron` 反推、不按列名模式自动识别时间列，也**不提供规则级 `defaults` 兜底**。每张表要么显式配契约，要么不检查。
+- **freshness 是独立于巡检的子系统**，不是巡检规则：不产生 `inspection_issue`、不参与每日巡检、不做 `reportUnconfigured` 治理上报。红/黄状态活在 `freshness_status` 与结果列表（对齐 dbt——只写状态，不建"问题"）。
+- 不新增告警通道（邮件、Webhook、IM）。
 - 不做工作流阻断式门禁，只提供只读状态查询接口。
 - 不改 `DorisMetadataSyncService` 元数据同步链路，不改 `inspection_record` / `inspection_issue` 表结构与既有 REST 契约。
 - 不引入 dbt 本体，不生成 `sources.json` 文件产物。
@@ -55,14 +55,11 @@
 
 表级契约字段：`mode`、`loadedAtField`、`loadedAtQuery`、`filter`、`warnAfter{count, period}`、`errorAfter{count, period}`。`period` 枚举 `minute | hour | day`，与 dbt `TimePeriod` 一致。
 
-只有两层来源，逐字段合并，语义与 dbt `merge_freshness` 一致（上层只覆盖它自己声明过的字段）：
+**只有一层来源：表级 `table_freshness_config`。** 每张表各自声明取值方式与阈值（对齐 dbt——每个 source 在 `sources.yml` 里各自写 `freshness`）。`enabled = 0` 短路，等价 dbt 的 `freshness: null`。
 
-1. `table_freshness_config` 表级配置。`enabled = 0` 短路，等价 dbt 的 `freshness: null`。
-2. 规则配置 `rule_config.defaults[]`：每项含 `scope`（`clusterIds` / `dbNames` / `layers`）与阈值，为表级未声明的字段兜底。等价 dbt 的 source 级默认。
+`warnAfter` 与 `errorAfter` 全为空 → **该表不检查**，不产出任何新鲜度结论。
 
-合并后 `warnAfter` 与 `errorAfter` 仍全为空 → **该表不检查**，不产出任何新鲜度结论。
-
-未配置契约的表不是「检查通过」，也不是「检查失败」，而是**未纳入管理**。规则配置 `reportUnconfigured`（默认 `false`）可开启后，为 scope 内未配置的表产出一条治理型问题，推动 owner 去配——默认关闭以免首次启用时刷屏。
+不做规则级 `defaults` 兜底：初版曾设计「表级 + 规则默认」两层逐字段合并（对齐 dbt `merge_freshness`），评审时收敛掉——「一次给整个 layer 设 SLA」的便利抵不上多一层配置存储与继承推理的复杂度；每张表显式声明自己的 SLA 更符合事件驱动、每表契约的模型。未配置契约的表就是**未纳入管理**，既不是通过也不是失败。
 
 ### 2. 取值模式
 
@@ -105,21 +102,18 @@ SQL 失败 / 超时 / 列不存在  -> runtime_error
 
 **数据只在生产任务运行时变动，因此检查绑定到「运行」而非固定时钟轮询。** 对上次产出后没动过的表反复取数只是浪费——两次产出之间 `age` 只线性增长、无新信息。这一点上本实现比 dbt 更进一步：dbt 不掌握外部 source 的加载时机，只能定时跑 `source freshness`；而本平台拥有生产工作流，知道每张表何时被写，可精确在写入后检查。
 
-同一套检查逻辑，触发点只决定何时调用：
+同一套检查逻辑，两个触发点只决定何时调用：
 
 1. **工作流完成后（主，事件驱动）**：`WorkflowExecutionSyncJob`（`0 */5 * * * ?`）同步到工作流实例**新变为成功**时，对该工作流各任务经 `table_task_relation`（`relation_type = write`）关联的表触发一次检查。**只覆盖本次真正产出的表**，回答「任务报成功了，数据真的到了吗」。不改 DolphinScheduler 链路，只在既有同步作业里挂钩。
-2. **按需**：`POST /v1/tables/{id}/freshness/check`，等价 `dbt source freshness --select`。
-3. **每日巡检（治理兜底）**：`data_freshness` 规则随每日全量巡检运行，是唯一建 `inspection_issue` 的路径，也做 `reportUnconfigured` 治理上报，并**兜底覆盖非工作流产出的表**（外部同步、上游直灌等无完成事件的表）。
+2. **按需**：`POST /v1/tables/{id}/freshness/check`（单表）与 `POST /v1/inspections/freshness/run`（按 scope 批量），等价 `dbt source freshness --select`。
 
-**不设固定间隔的墙钟轮询。** 工作流产出表由触发点 1 在产出后即时检查；非工作流表由触发点 3 每日兜底。二者之外没有需要高频轮询的场景。
+**不设墙钟轮询、也没有每日巡检兜底。** 数据只在生产任务运行时变动，工作流产出表由触发点 1 在产出后即时检查即可；对未变动的表按时钟反复取数（无论 15 分钟还是每日）都是浪费。非工作流产出的表（外部同步等）由按需触发覆盖。开关 `freshness.check.enabled` 控制触发点 1。
 
-**留痕与问题的分层（已知、可接受）**：触发点 1/2 实时更新 `data_table.freshness_status` 与结果行，Data Studio 面板与巡检新鲜度视图即时可见；转成被追踪的 `inspection_issue`（带 open/acknowledged/resolved 状态流）仍由每日巡检承担。若后续需要「运行即建问题」的即时告警，可让触发点 1 复用巡检的问题映射逻辑，在本设计范围之外。
+### 6. 与巡检的关系：无
 
-### 6. 与巡检的关系
+**freshness 不是巡检规则，也不产生 `inspection_issue`。** 它是独立的事件驱动子系统，红/黄状态活在 `table_freshness_result` 与 `data_table.freshness_status`——对齐 dbt 只写 `sources.json` 状态、不建"问题"的做法。巡检页仅**只读展示**各表最新新鲜度结果（`GET /v1/inspections/freshness`），不把它们转成带 open/resolved 状态流的巡检问题。
 
-`DataFreshnessRuleHandler` 保留 `ruleType = data_freshness`，改为：解析 scope → 取表集合 → 逐表解析契约 → 有契约的调 `FreshnessCheckService` → 只把非 `pass` 转成 `inspection_issue`。严重程度映射：`warn` → `rule_config.warnSeverity`（默认 `medium`）、`error` → `critical`、`runtime_error` → `high`。既有问题查询、状态流转与修复链路不变，不新增告警通道。
-
-原 handler 内的 `parseUpdateCycle` / `calculateDelayHours` / `calculateFreshnessSeverity` 随之删除。
+初版曾把 freshness 挂成 `data_freshness` 巡检规则（`DataFreshnessRuleHandler`），随每日巡检建 issue、做 `reportUnconfigured`。评审时一并去掉：每日巡检是时钟驱动的兜底，与「检查绑定到运行」矛盾；freshness 的问题面就是它自己的状态与结果历史。`data_freshness` 规则种子、handler 与其 `parseUpdateCycle` / `calculateDelayHours` / `calculateFreshnessSeverity` 全部删除，`inspection_rule` 不再种子该规则。
 
 ### 7. 安全约束
 
@@ -180,15 +174,14 @@ ALTER TABLE data_table
   ADD COLUMN freshness_checked_at DATETIME    DEFAULT NULL COMMENT '最近新鲜度检查时间';
 ```
 
-同一迁移种子化规则（`enabled = 0`，与 V22 默认关闭策略一致）：
+**不种子任何 `inspection_rule`。** freshness 不是巡检规则。运行期开关与操作参数放在 `application.yml`（`FreshnessCheckProperties`）：
 
-```sql
-INSERT INTO inspection_rule (rule_code, rule_name, rule_type, severity, description, rule_config, enabled)
-VALUES ('DATA_FRESHNESS_CHECK', '数据新鲜度检查', 'data_freshness', 'high',
-        '按表级新鲜度契约检查数据是否在约定时限内更新，未配置契约的表不参与检查',
-        '{"warnSeverity":"medium","queryTimeoutSeconds":30,"maxConcurrentPerCluster":4,
-          "reportUnconfigured":false,"defaults":[]}', 0)
-ON DUPLICATE KEY UPDATE rule_name = VALUES(rule_name), description = VALUES(description);
+```yaml
+freshness:
+  check:
+    enabled: true                     # 工作流完成后触发检查的开关
+    query-timeout-seconds: 30         # 单次取数 JDBC 超时
+    max-concurrent-per-cluster: 4     # 每数据源并发上限
 ```
 
 ### REST
@@ -200,19 +193,18 @@ ON DUPLICATE KEY UPDATE rule_name = VALUES(rule_name), description = VALUES(desc
 | DELETE | `/v1/tables/{id}/freshness` | 删除表级契约 |
 | POST | `/v1/tables/{id}/freshness/check` | 按需单表检查 |
 | GET | `/v1/tables/{id}/freshness/history?limit=` | 结果历史 |
-| GET | `/v1/inspections/freshness` | 按 `status`/`clusterId`/`dbName` 列出各表最新结果 |
-| POST | `/v1/inspections/freshness/run` | 按 scope 批量检查 |
-| PUT | `/v1/inspections/rules/{ruleId}` | 补齐规则 `rule_config` / `severity` 编辑 |
+| GET | `/v1/inspections/freshness` | 按 `status`/`clusterId`/`dbName` 列出各表最新结果（只读） |
+| POST | `/v1/inspections/freshness/run` | 按 scope 批量检查（按需） |
 
-响应走既有 `Result<T>` 包装，失败沿用控制器 `try/catch → Result.fail(e.getMessage())` 的现行约定。
+响应走既有 `Result<T>` 包装，失败沿用控制器 `try/catch → Result.fail(e.getMessage())` 的现行约定。（`/v1/inspections/freshness*` 挂在巡检控制器下只是路由归类，freshness 结果不进 `inspection_issue`。）
 
 ### 前端
 
-Data Studio 右侧面板新增「数据新鲜度」页签（`lazy`，插在「访问情况」之后）：契约用 `el-descriptions :column="2"` 展示并标注字段来源（表级 / 规则默认），编辑表单按 `mode` 联动显隐 `loadedAtField` / `loadedAtQuery` / `partitionFormat`，选择 `metadata` 时明示「只能发现长期无写入，发现不了写入了旧数据」；下方 `el-table` 带 border 展示结果历史，顶部「立即检查」。未配置契约时展示引导而非空表格。巡检页新增按新鲜度状态过滤的表级最新结果视图。遵循前端视觉规范，不套多余卡片，兄弟页签保持一致的扁平结构。
+Data Studio 右侧面板新增「数据新鲜度」页签（`lazy`，插在「访问情况」之后）：契约用 `el-descriptions :column="2"` 展示（字段来源恒为表级），编辑表单按 `mode` 联动显隐 `loadedAtField` / `loadedAtQuery` / `partitionFormat`，选择 `metadata` 时明示「只能发现长期无写入，发现不了写入了旧数据」；下方 `el-table` 带 border 展示结果历史，顶部「立即检查」。未配置契约时展示引导而非空表格。巡检页新增按新鲜度状态过滤的表级最新结果视图（只读）。遵循前端视觉规范，不套多余卡片，兄弟页签保持一致的扁平结构。
 
 ## Risks / Alternatives
 
-- **覆盖率取决于用户配置。** 这是有意的取舍：宁可少测，不可假 `pass`。缺少可判定字段的表通过 `reportUnconfigured` 变成一条可治理的问题，而不是一个骗人的绿灯。
+- **覆盖率取决于用户配置。** 这是有意的取舍：宁可少测，不可假 `pass`。缺少可判定字段的表就是「未纳入管理」，在面板上明示，而不是给一个骗人的绿灯。缺时间字段的表应补一列写入时间戳后再配契约。
 - **大表 `MAX()` 扫描成本。** 缓解：`partition` 模式零扫描、支持 `filter`、`queryTimeout` + 每集群并发上限；文档建议 `loadedAtField` 选 key 列或分区列。
 - **`partition` 模式依赖分区值可解析为日期。** 由 `partitionFormat` 显式声明，解析失败判 `runtime_error` 而非静默通过。
 - **时区。** `max_loaded_at` 与 `snapshotted_at` 同源于 Doris。`partition` / `metadata` 模式的快照时间取门户侧，需在文档注明两者需同时区部署。
@@ -226,7 +218,7 @@ Data Studio 右侧面板新增「数据新鲜度」页签（`lazy`，插在「�
 | 未配置的资源 | 不检查 | 一致 |
 | 阈值比较 | `age > threshold` | 一致，严格大于 |
 | 判定顺序 | 先 `error_after` 后 `warn_after` | 一致 |
-| 配置继承 | `merge_freshness` 逐字段合并 source / table | 一致，规则默认 + 表级两层逐字段合并 |
+| 配置继承 | `merge_freshness` 合并 source / table 两层 | **简化**：只有表级一层，每张表各自声明 SLA（不做规则默认兜底） |
 | 快照时间 | 仓库侧 `current_timestamp()`，与 `max_loaded_at` 同查询 | 一致（`column` / `custom_sql`） |
 | 自定义取数 | 1.10 `loaded_at_query`，包成标量子查询 | 一致，`custom_sql` 模式 |
 | 元数据取数 | 无 `loaded_at_field` 时自动走 metadata | **偏离**：metadata 是显式可选项，不自动兜底，并标注其局限 |
@@ -244,7 +236,7 @@ Data Studio 右侧面板新增「数据新鲜度」页签（`lazy`，插在「�
 
 ## Verification
 
-- **后端单测：** 状态判定边界（`age` 恰好等于阈值判 `pass`、超过才升档、`never_loaded`、`runtime_error`）、两层契约逐字段合并与显式关闭短路、无契约表不参与检查、`loadedAtField` 白名单、`filter` / `loadedAtQuery` 校验与互斥、`partition` 值解析、handler → `inspection_issue` 映射、工作流完成触发只覆盖 `relation_type = write` 的表、控制器参数透传。
+- **后端单测：** 状态判定边界（`age` 恰好等于阈值判 `pass`、超过才升档、`never_loaded`、`runtime_error`）、单层契约解析（无契约/显式关闭/无阈值均不检查）、`loadedAtField` 白名单、`filter` / `loadedAtQuery` 校验与互斥、`partition` 值解析、工作流完成触发只覆盖 `relation_type = write` 的表、控制器参数透传。
 - **迁移：** `V50` 在本地 MySQL 上可重复执行且幂等；`InspectionRuleHandlerCoverageTest` 同步更新。
 - **前端：** `nvm use` 后跑新增组件 Vitest 与生产构建。
 - **端到端：** `column` / `custom_sql` / `partition` 模式依赖真实 Doris 表与真实列。当前仓库环境无 Doris 实例，如果实施时仍不可用，须在提交说明中明确标注「未跑真实 Doris 全链路」，并说明已验证到哪一层。

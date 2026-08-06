@@ -52,12 +52,5 @@ ALTER TABLE `data_table`
 ALTER TABLE `data_table`
     ADD COLUMN `freshness_checked_at` DATETIME DEFAULT NULL COMMENT '最近新鲜度检查时间';
 
--- 种子化新鲜度规则，默认关闭（与 V22 默认关闭策略一致）
-INSERT INTO `inspection_rule` (`rule_code`, `rule_name`, `rule_type`, `severity`, `description`, `rule_config`, `enabled`)
-VALUES ('DATA_FRESHNESS_CHECK', '数据新鲜度检查', 'data_freshness', 'high',
-        '按表级新鲜度契约检查数据是否在约定时限内更新，未配置契约的表不参与检查',
-        '{"warnSeverity":"medium","queryTimeoutSeconds":30,"maxConcurrentPerCluster":4,"reportUnconfigured":false,"defaults":[]}',
-        0)
-ON DUPLICATE KEY UPDATE
-    `rule_name` = VALUES(`rule_name`),
-    `description` = VALUES(`description`);
+-- 新鲜度是独立于巡检的事件驱动子系统：阈值由表级契约声明，检查在工作流完成后触发，
+-- 结果落 table_freshness_result / data_table.freshness_status，不产生 inspection_issue、不种子巡检规则。

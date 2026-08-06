@@ -33,11 +33,10 @@ class TableFreshnessServiceTest {
     private final TableFreshnessConfigMapper configMapper = mock(TableFreshnessConfigMapper.class);
     private final TableFreshnessResultMapper resultMapper = mock(TableFreshnessResultMapper.class);
     private final FreshnessContractResolver resolver = new FreshnessContractResolver();
-    private final FreshnessRuleConfigLoader ruleConfigLoader = mock(FreshnessRuleConfigLoader.class);
     private final FreshnessCheckService checkService = mock(FreshnessCheckService.class);
 
     private final TableFreshnessService service = new TableFreshnessService(
-        dataTableMapper, dataFieldMapper, configMapper, resultMapper, resolver, ruleConfigLoader, checkService);
+        dataTableMapper, dataFieldMapper, configMapper, resultMapper, resolver, checkService);
 
     private void tableExists() {
         DataTable t = new DataTable();
@@ -172,7 +171,6 @@ class TableFreshnessServiceTest {
         cfg.setErrorAfterPeriod("hour");
         cfg.setEnabled(true);
         when(configMapper.selectOne(any())).thenReturn(cfg);
-        when(ruleConfigLoader.load()).thenReturn(FreshnessRuleConfig.fromMap(Collections.emptyMap()));
         when(resultMapper.selectList(any())).thenReturn(Collections.emptyList());
 
         TableFreshnessResponse response = service.getFreshness(1L);

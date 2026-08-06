@@ -7,11 +7,11 @@
 ## [Unreleased]
 
 ### Added
-- 新增类 dbt 的数据新鲜度（freshness）检查：表级契约（时间字段取值方式 + warn/error 两级阈值 + 可选 filter），支持 `column` / `custom_sql` / `partition` / `metadata` 四种取值模式；检查结果留痕并可查询历史；提供表级契约 REST 接口、Data Studio「数据新鲜度」页签与巡检页新鲜度视图。
-- 新增新鲜度检查的三个触发点（同一套检查逻辑）：定时调度、页面按需、工作流执行成功后检查其写出的表。
+- 新增类 dbt 的数据新鲜度（freshness）检查：**表级契约**（时间字段取值方式 + warn/error 两级阈值 + 可选 filter，每张表各自声明），支持 `column` / `custom_sql` / `partition` / `metadata` 四种取值模式；检查结果留痕并可查询历史；提供表级契约 REST 接口、Data Studio「数据新鲜度」页签与巡检页只读新鲜度视图。
+- 新鲜度检查采用**事件驱动**：工作流执行成功后即检查其写出的表（回答「任务报成功了，数据真的到了吗」），另提供页面按需触发。检查绑定到「运行」，不设时钟轮询。
 
 ### Changed
-- `data_freshness` 巡检规则语义由「按 `statistics_cycle` 命名段推断」改为「按表级新鲜度契约」。**行为变更**：未配置契约的表不再产出新鲜度问题（可通过规则配置 `reportUnconfigured` 开启治理型上报）。因该规则此前从未随迁移种子化、也无配置入口，存量影响为零。
+- 数据新鲜度不再作为巡检规则。**行为变更**：`data_freshness` 巡检规则移除，freshness 成为独立的事件驱动子系统——不产生 `inspection_issue`、不参与每日巡检，红/黄状态活在 `table_freshness_result` 与 `data_table.freshness_status`（对齐 dbt 只写 `sources.json`、不建"问题"）。原规则从未随迁移种子化、也无配置入口，存量影响为零。
 
 ## [1.4.0] - 2026-06-26
 

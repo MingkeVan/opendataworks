@@ -20,11 +20,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class InspectionRuleHandlerCoverageTest {
 
-    /** 原 switch 覆盖的全部规则类型。 */
+    /**
+     * 巡检规则类型集合。{@code data_freshness} 已从巡检子系统移除——新鲜度改为独立的
+     * 事件驱动子系统（工作流完成触发 + 表级契约），不再作为巡检规则参与分发。
+     */
     private static final Set<String> EXPECTED_RULE_TYPES = new HashSet<>(Arrays.asList(
             "table_naming", "replica_count", "tablet_count", "tablet_size",
             "table_owner", "table_comment", "task_failure", "task_schedule",
-            "table_layer", "data_freshness", "data_volume_spike", "service_health",
+            "table_layer", "data_volume_spike", "service_health",
             "doris_node_resources", "orphan_tables", "deprecated_tables"));
 
     private static List<InspectionRuleHandler> allHandlers() {
@@ -38,7 +41,6 @@ class InspectionRuleHandlerCoverageTest {
                 new TaskFailureRuleHandler(null, null, null),
                 new TaskScheduleRuleHandler(null, null, null),
                 new TableLayerRuleHandler(null, null),
-                new DataFreshnessRuleHandler(null, null, null),
                 new DataVolumeSpikeRuleHandler(null, null),
                 new ServiceHealthRuleHandler(null, null),
                 new DorisNodeResourcesRuleHandler(null, null),
@@ -61,6 +63,6 @@ class InspectionRuleHandlerCoverageTest {
                 .map(InspectionRuleHandler::ruleType)
                 .collect(Collectors.toSet());
         assertEquals(EXPECTED_RULE_TYPES, actual);
-        assertEquals(15, allHandlers().size());
+        assertEquals(14, allHandlers().size());
     }
 }

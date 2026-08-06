@@ -23,7 +23,6 @@ public class WorkflowFreshnessTrigger {
     private final FreshnessCheckProperties properties;
     private final TableTaskRelationMapper tableTaskRelationMapper;
     private final DataTableMapper dataTableMapper;
-    private final FreshnessRuleConfigLoader ruleConfigLoader;
     private final FreshnessCheckService freshnessCheckService;
 
     /**
@@ -44,12 +43,11 @@ public class WorkflowFreshnessTrigger {
             if (tables.isEmpty()) {
                 return;
             }
-            FreshnessRuleConfig ruleConfig = ruleConfigLoader.load();
-            FreshnessCheckService.BatchOutcome outcome =
-                freshnessCheckService.checkBatch(tables, ruleConfig, "workflow", "system");
-            if (!outcome.getResults().isEmpty()) {
+            List<FreshnessCheckResult> results =
+                freshnessCheckService.checkBatch(tables, "workflow", "system");
+            if (!results.isEmpty()) {
                 log.info("Workflow {} freshness check done: writeTables={}, checked={}",
-                    workflowId, tables.size(), outcome.getResults().size());
+                    workflowId, tables.size(), results.size());
             }
         } catch (Exception e) {
             log.warn("Workflow freshness trigger failed for workflow {}: {}", workflowId, e.getMessage());

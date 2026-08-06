@@ -44,31 +44,24 @@
 
 `partition` 比较的是**分区值解析出的业务日期**（`ds=20260806` → `2026-08-06`），不是分区的物理写入时间。注意它的 age 语义：一张 T+1 日表，正常情况下 `max(ds)` 就是昨天，`age` 恒在 24～48 小时之间。阈值要按「今天几点还没出昨天的数」来设，**不能**照搬「2 小时没更新就告警」的直觉，否则天天误报。`partitionFormat` 应写成匹配分区名数字串的格式，如 `yyyyMMdd`。
 
-## 阈值继承（两层，逐字段合并）
+## 契约只有表级一层
 
-阈值与取值字段有两层来源，**逐字段合并**（对齐 dbt `merge_freshness`）：上层只覆盖它自己声明过的字段。
+**每张表各自声明自己的 SLA**（对齐 dbt——每个 source 在 `sources.yml` 里各自写 `freshness`）。没有规则级默认、没有按 layer 兜底、没有继承。
 
-1. **表级契约** `table_freshness_config`。`enabled = 0` 表示显式关闭该表检查（等价 dbt 的 `freshness: null`），短路。
-2. **规则默认** `rule_config.defaults[]`：每项含 `scope`（`clusterIds` / `dbNames` / `layers`）与阈值，为表级未声明的字段兜底（等价 dbt 的 source 级默认）。
+- `table_freshness_config` 一张表一行：`mode` + 时间字段 + `warnAfter` / `errorAfter` + 可选 `filter`。
+- `enabled = 0` 显式关闭该表检查（等价 dbt 的 `freshness: null`）。
+- `warnAfter` 与 `errorAfter` 都没配 → 该表不检查。
 
-因此「表级只声明取数方式（`mode` + `loadedAtField`），阈值统一由某个 layer 的规则默认给出」是受支持的写法。合并后若仍无任何阈值，则该表不检查。
+> 初版曾设计「表级 + 规则默认」两层逐字段合并（`rule_config.defaults[]` 按 layer/库给一批表兜底阈值）。评审时去掉了——「一次给整个 layer 设 SLA」的便利，抵不上多一层配置存储与继承推理的复杂度；每张表显式声明更符合事件驱动、每表契约的模型。
 
-规则默认配置示例（`DATA_FRESHNESS_CHECK` 规则的 `rule_config`）：
+运行期参数（不是契约、是运维旋钮）在 `application.yml`：
 
-```json
-{
-  "warnSeverity": "medium",
-  "queryTimeoutSeconds": 30,
-  "maxConcurrentPerCluster": 4,
-  "reportUnconfigured": false,
-  "defaults": [
-    {
-      "scope": { "layers": ["DWD"] },
-      "warnAfter": { "count": 2, "period": "hour" },
-      "errorAfter": { "count": 4, "period": "hour" }
-    }
-  ]
-}
+```yaml
+freshness:
+  check:
+    enabled: true                     # 工作流完成后触发检查的开关
+    query-timeout-seconds: 30
+    max-concurrent-per-cluster: 4
 ```
 
 ## 状态判定
@@ -91,25 +84,27 @@ SQL 失败 / 超时 / 列不存在  -> runtime_error
 
 **数据只在生产任务运行时变动，所以检查绑定到「运行」，不做固定时钟轮询。** 对上次产出后没动过的表反复取数只是浪费——两次产出之间数据年龄只是线性增长，没有新信息。这一点上本实现比 dbt 更进一步：dbt 不掌握外部 source 的加载时机，只能定时跑 `source freshness`；而本平台拥有生产工作流，知道每张表何时被写，可精确在写入后检查。
 
-一个检查，三个触发点，只决定何时运行：
+一个检查，**两个触发点**，只决定何时运行：
 
 1. **工作流完成后（主，事件驱动）**：`WorkflowExecutionSyncJob` 识别新变为成功的实例，检查该工作流经写关系（`relation_type='write'`）关联的表——**只覆盖本次真正产出的表**，回答「任务报成功了，数据真的到了吗」。
-2. **按需**：Data Studio「数据新鲜度」页签「立即检查」，或 `POST /v1/tables/{id}/freshness/check`。
-3. **每日巡检（治理兜底）**：`data_freshness` 规则随每日全量巡检运行——唯一建 `inspection_issue` 的路径，做 `reportUnconfigured` 治理上报，并兜底覆盖非工作流产出的表（外部同步、上游直灌等无完成事件的表）。
+2. **按需**：Data Studio「数据新鲜度」页签「立即检查」（`POST /v1/tables/{id}/freshness/check`），或巡检页「执行检查」（`POST /v1/inspections/freshness/run` 按 scope 批量）。
 
-开关：`freshness.check.enabled`（默认 true，控制工作流触发；按需与巡检路径不受影响）。
+**没有墙钟轮询，也没有每日巡检。** 数据只在任务跑的时候变，工作流产出表在产出后即时检查即可；非工作流产出的表（外部同步等）用按需触发。开关 `freshness.check.enabled`（默认 true，控制工作流触发；按需路径不受影响）。
 
-**留痕与问题的分层**：触发点 1/2 实时更新 `freshness_status` 与结果行，Data Studio 面板与巡检新鲜度视图即时可见；转成被追踪的 `inspection_issue`（带 open/acknowledged/resolved 状态流）由每日巡检承担。工作流在 03:00 产出旧数据，`freshness_status=error` 立即可见，但成为一条可追踪的巡检问题要到当日巡检运行。
+## freshness 不是巡检规则，不产生巡检问题
 
-## 与巡检的关系
+新鲜度是独立于巡检的事件驱动子系统。它**不产生 `inspection_issue`**、不参与每日巡检、`inspection_rule` 里也没有 `data_freshness` 规则。红/黄状态活在两个地方：
 
-`data_freshness` 巡检规则改为消费检查结果，只把非 `pass` 结果转成 `inspection_issue`：`warn → warnSeverity`（默认 `medium`）、`error → critical`、`runtime_error → high`。规则默认关闭；启用后接入每日巡检。打开 `reportUnconfigured` 后，scope 内未配置契约的表会产出一条低优先级的治理型问题，推动 owner 去配置，而不是被静默忽略。
+- `data_table.freshness_status`（每表最新态，供列表/巡检页按状态过滤）；
+- `table_freshness_result`（每次检查一行，含历史）。
+
+这对齐 dbt——`dbt source freshness` 只写 `sources.json` 状态，不建"问题"；红了靠流水线里的下游动作（我们这里是页面可见 + 后续可接的告警）。巡检页的「数据新鲜度」卡片只是**只读展示**这些结果，不把它们转成带 open/resolved 状态流的巡检问题。
 
 ## 缺少可判定字段的表怎么办
 
 全量覆盖、没有任何时间列、也没有分区的表，当前**无法可靠判定新鲜度**。对这类表，正确做法不是编一个假的 `pass`，而是：
 
-- 借 `reportUnconfigured` 把「未纳入新鲜度管理」作为一条治理项暴露出来；
+- 面板上它就是「未纳入新鲜度管理」，不给假绿灯；
 - 推动补一列写入时间戳（如 `etl_time DATETIME`），一次 DDL 换永久可检。这也是 dbt 生态里 `_etl_loaded_at` 成为惯例的原因。
 
 ## REST 接口
@@ -121,9 +116,10 @@ SQL 失败 / 超时 / 列不存在  -> runtime_error
 | DELETE | `/v1/tables/{id}/freshness` | 删除表级契约 |
 | POST | `/v1/tables/{id}/freshness/check` | 按需单表检查 |
 | GET | `/v1/tables/{id}/freshness/history?limit=` | 结果历史 |
-| GET | `/v1/inspections/freshness` | 各表最新结果（按 `status` / `clusterId` / `dbName` 过滤） |
-| POST | `/v1/inspections/freshness/run` | 按 scope 批量检查 |
-| PUT | `/v1/inspections/rules/{ruleId}` | 编辑规则 `ruleConfig` / `severity` 等 |
+| GET | `/v1/inspections/freshness` | 各表最新结果（按 `status` / `clusterId` / `dbName` 过滤，只读） |
+| POST | `/v1/inspections/freshness/run` | 按 scope 批量检查（按需） |
+
+（`/v1/inspections/freshness*` 只是路由归类在巡检控制器下，结果不进 `inspection_issue`。）
 
 保存契约时的校验：`loadedAtField` 必须命中该表真实列名；`loadedAtQuery` 必须以 `SELECT` 开头且不含分号/注释符（上限 2048）；`filter` 不含分号/注释符（上限 512）；`loadedAtField` 与 `loadedAtQuery` 互斥；`partition` 模式要求表有分区列。
 
@@ -134,7 +130,9 @@ SQL 失败 / 超时 / 列不存在  -> runtime_error
 | 未配置的资源 | 不检查 | 一致 |
 | 阈值比较 | `age > threshold` | 一致（严格大于） |
 | 判定顺序 | 先 error 后 warn | 一致 |
-| 配置继承 | `merge_freshness` 逐字段合并 | 一致（规则默认 + 表级两层） |
+| 配置继承 | `merge_freshness` 合并 source/table 两层 | 简化：只有表级一层，每表各自声明 SLA |
+| 结果产物 | `target/sources.json` | 落 `table_freshness_result` 表 + `freshness_status` |
+| 问题追踪 | 无（红了靠 CI 失败） | 不建 inspection_issue，靠状态与结果列表 |
 | 自定义取数 | 1.10 `loaded_at_query` 标量子查询 | 一致（`custom_sql`） |
 | 元数据取数 | 无字段时自动走 metadata | 偏离：metadata 为显式可选项，不自动兜底，并标注局限 |
 | 分区取数 | 无（可用表达式塞进字段） | 补充：`partition` 模式零扫描 |

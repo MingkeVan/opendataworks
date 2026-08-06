@@ -1,5 +1,6 @@
 package com.onedata.portal.service.freshness;
 
+import com.onedata.portal.config.FreshnessCheckProperties;
 import com.onedata.portal.dto.TablePartitionInfo;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.TableFreshnessConfig;
@@ -38,9 +39,10 @@ class FreshnessCheckServiceTest {
     private final TableFreshnessResultMapper resultMapper = mock(TableFreshnessResultMapper.class);
     private final DataTableMapper dataTableMapper = mock(DataTableMapper.class);
     private final FreshnessContractResolver resolver = new FreshnessContractResolver();
+    private final FreshnessCheckProperties properties = new FreshnessCheckProperties();
 
     private final FreshnessCheckService service = new FreshnessCheckService(
-        doris, configMapper, resultMapper, dataTableMapper, resolver);
+        doris, configMapper, resultMapper, dataTableMapper, resolver, properties);
 
     private DataTable table() {
         DataTable t = new DataTable();
@@ -73,7 +75,7 @@ class FreshnessCheckServiceTest {
     void pass_ageWellUnderWarn() {
         LocalDateTime snap = LocalDateTime.now();
         stubColumnProbe(snap.minusHours(1), snap);
-        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)), 30);
+        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)));
         assertEquals(FreshnessCheckResult.STATUS_PASS, r.getStatus());
         assertEquals(3600L, r.getAgeSeconds());
     }
@@ -82,7 +84,7 @@ class FreshnessCheckServiceTest {
     void warn_betweenThresholds() {
         LocalDateTime snap = LocalDateTime.now();
         stubColumnProbe(snap.minusHours(3), snap);
-        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)), 30);
+        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)));
         assertEquals(FreshnessCheckResult.STATUS_WARN, r.getStatus());
     }
 
@@ -90,7 +92,7 @@ class FreshnessCheckServiceTest {
     void error_overErrorThreshold() {
         LocalDateTime snap = LocalDateTime.now();
         stubColumnProbe(snap.minusHours(5), snap);
-        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)), 30);
+        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)));
         assertEquals(FreshnessCheckResult.STATUS_ERROR, r.getStatus());
     }
 
@@ -100,7 +102,7 @@ class FreshnessCheckServiceTest {
         LocalDateTime maxLoaded = LocalDateTime.of(2026, 8, 6, 0, 0, 0);
         LocalDateTime snap = maxLoaded.plusHours(2); // age = 7200 == warn
         stubColumnProbe(maxLoaded, snap);
-        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)), 30);
+        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)));
         assertEquals(FreshnessCheckResult.STATUS_PASS, r.getStatus());
         assertEquals(7200L, r.getAgeSeconds());
     }
@@ -110,14 +112,14 @@ class FreshnessCheckServiceTest {
         LocalDateTime maxLoaded = LocalDateTime.of(2026, 8, 6, 0, 0, 0);
         LocalDateTime snap = maxLoaded.plusHours(2).plusSeconds(1); // age = 7201 > warn
         stubColumnProbe(maxLoaded, snap);
-        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)), 30);
+        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)));
         assertEquals(FreshnessCheckResult.STATUS_WARN, r.getStatus());
     }
 
     @Test
     void neverLoaded_maxNull_isError() {
         stubColumnProbe(null, LocalDateTime.now());
-        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)), 30);
+        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)));
         assertEquals(FreshnessCheckResult.STATUS_ERROR, r.getStatus());
         assertEquals(FreshnessCheckResult.REASON_NEVER_LOADED, r.getReason());
         assertNull(r.getAgeSeconds());
@@ -127,7 +129,7 @@ class FreshnessCheckServiceTest {
     void runtimeError_probeThrows() {
         when(doris.probeMaxLoadedAt(any(), any(), any(), any(), any(), anyInt()))
             .thenThrow(new RuntimeException("列 etl_time 不存在"));
-        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)), 30);
+        FreshnessCheckResult r = service.evaluate(table(), columnContract(hours(2), hours(4)));
         assertEquals(FreshnessCheckResult.STATUS_RUNTIME_ERROR, r.getStatus());
         assertNotNull(r.getErrorMessage());
         assertTrue(r.getErrorMessage().contains("etl_time"));
@@ -142,7 +144,7 @@ class FreshnessCheckServiceTest {
             .loadedAtField("etl_time", FreshnessSource.TABLE)
             .warnAfter(hours(2), FreshnessSource.TABLE)
             .build();
-        FreshnessCheckResult r = service.evaluate(table(), contract, 30);
+        FreshnessCheckResult r = service.evaluate(table(), contract);
         assertEquals(FreshnessCheckResult.STATUS_WARN, r.getStatus());
     }
 
@@ -155,7 +157,7 @@ class FreshnessCheckServiceTest {
             .loadedAtField("etl_time", FreshnessSource.TABLE)
             .errorAfter(hours(4), FreshnessSource.TABLE)
             .build();
-        FreshnessCheckResult r = service.evaluate(table(), contract, 30);
+        FreshnessCheckResult r = service.evaluate(table(), contract);
         assertEquals(FreshnessCheckResult.STATUS_PASS, r.getStatus());
     }
 
@@ -170,7 +172,7 @@ class FreshnessCheckServiceTest {
             .warnAfter(hours(2), FreshnessSource.TABLE)
             .errorAfter(hours(4), FreshnessSource.TABLE)
             .build();
-        FreshnessCheckResult r = service.evaluate(table(), contract, 30);
+        FreshnessCheckResult r = service.evaluate(table(), contract);
         assertEquals(FreshnessCheckResult.STATUS_PASS, r.getStatus());
         verify(doris).probeMaxLoadedAtByQuery(eq(10L), eq("dwd"), any(), anyInt());
     }
@@ -185,7 +187,7 @@ class FreshnessCheckServiceTest {
             .warnAfter(hours(2), FreshnessSource.TABLE)
             .errorAfter(hours(4), FreshnessSource.TABLE)
             .build();
-        FreshnessCheckResult r = service.evaluate(table(), contract, 30);
+        FreshnessCheckResult r = service.evaluate(table(), contract);
         assertEquals(FreshnessCheckResult.STATUS_PASS, r.getStatus());
     }
 
@@ -200,7 +202,7 @@ class FreshnessCheckServiceTest {
             .partitionFormat("yyyyMMdd", FreshnessSource.TABLE)
             .errorAfter(new FreshnessThreshold(3650, FreshnessPeriod.DAY), FreshnessSource.TABLE)
             .build();
-        FreshnessCheckResult r = service.evaluate(table(), contract, 30);
+        FreshnessCheckResult r = service.evaluate(table(), contract);
         assertEquals(FreshnessCheckResult.STATUS_PASS, r.getStatus());
         assertEquals(LocalDateTime.of(2026, 8, 6, 0, 0), r.getMaxLoadedAt());
     }
@@ -214,7 +216,7 @@ class FreshnessCheckServiceTest {
             .partitionFormat("yyyyMMdd", FreshnessSource.TABLE)
             .errorAfter(hours(4), FreshnessSource.TABLE)
             .build();
-        FreshnessCheckResult r = service.evaluate(table(), contract, 30);
+        FreshnessCheckResult r = service.evaluate(table(), contract);
         assertEquals(FreshnessCheckResult.STATUS_RUNTIME_ERROR, r.getStatus());
     }
 
@@ -250,15 +252,12 @@ class FreshnessCheckServiceTest {
         when(doris.probeMetadataUpdateTime(any(), any(), any(), anyInt()))
             .thenReturn(new FreshnessProbe(snap.minusHours(1), snap));
 
-        FreshnessRuleConfig ruleConfig = FreshnessRuleConfig.fromMap(Collections.emptyMap());
-        FreshnessCheckService.BatchOutcome outcome = service.checkBatch(
-            Arrays.asList(configured, unconfigured), ruleConfig, "schedule", "system");
+        List<FreshnessCheckResult> results = service.checkBatch(
+            Arrays.asList(configured, unconfigured), "workflow", "system");
 
-        // 只有 configured 被检查，unconfigured 记为未配置
-        assertEquals(1, outcome.getResults().size());
-        assertEquals(1L, outcome.getResults().get(0).getTableId());
-        assertEquals(1, outcome.getUnconfiguredTables().size());
-        assertEquals(2L, outcome.getUnconfiguredTables().get(0).getId());
+        // 只有 configured 被检查；unconfigured 无契约，跳过、不落结果
+        assertEquals(1, results.size());
+        assertEquals(1L, results.get(0).getTableId());
     }
 
     private TablePartitionInfo partition(String name) {

@@ -24,11 +24,10 @@ class WorkflowFreshnessTriggerTest {
     private final FreshnessCheckProperties properties = new FreshnessCheckProperties();
     private final TableTaskRelationMapper relationMapper = mock(TableTaskRelationMapper.class);
     private final DataTableMapper dataTableMapper = mock(DataTableMapper.class);
-    private final FreshnessRuleConfigLoader ruleConfigLoader = mock(FreshnessRuleConfigLoader.class);
     private final FreshnessCheckService checkService = mock(FreshnessCheckService.class);
 
     private final WorkflowFreshnessTrigger trigger = new WorkflowFreshnessTrigger(
-        properties, relationMapper, dataTableMapper, ruleConfigLoader, checkService);
+        properties, relationMapper, dataTableMapper, checkService);
 
     private DataTable activeTable(long id) {
         DataTable t = new DataTable();
@@ -41,20 +40,19 @@ class WorkflowFreshnessTriggerTest {
     void triggersCheckForWriteTables() {
         when(relationMapper.selectWriteTableIdsByWorkflow(eq(7L))).thenReturn(Arrays.asList(1L, 2L));
         when(dataTableMapper.selectBatchIds(any())).thenReturn(Arrays.asList(activeTable(1), activeTable(2)));
-        when(ruleConfigLoader.load()).thenReturn(FreshnessRuleConfig.fromMap(Collections.emptyMap()));
-        when(checkService.checkBatch(any(), any(), eq("workflow"), eq("system")))
-            .thenReturn(new FreshnessCheckService.BatchOutcome(Collections.emptyList(), Collections.emptyList()));
+        when(checkService.checkBatch(any(), eq("workflow"), eq("system")))
+            .thenReturn(Collections.emptyList());
 
         trigger.onWorkflowSucceeded(7L);
 
-        verify(checkService).checkBatch(any(), any(), eq("workflow"), eq("system"));
+        verify(checkService).checkBatch(any(), eq("workflow"), eq("system"));
     }
 
     @Test
     void noWriteTables_noCheck() {
         when(relationMapper.selectWriteTableIdsByWorkflow(any())).thenReturn(Collections.emptyList());
         trigger.onWorkflowSucceeded(7L);
-        verify(checkService, never()).checkBatch(any(), any(), any(), any());
+        verify(checkService, never()).checkBatch(any(), any(), any());
     }
 
     @Test
@@ -62,7 +60,7 @@ class WorkflowFreshnessTriggerTest {
         properties.setEnabled(false);
         trigger.onWorkflowSucceeded(7L);
         verify(relationMapper, never()).selectWriteTableIdsByWorkflow(any());
-        verify(checkService, never()).checkBatch(any(), any(), any(), any());
+        verify(checkService, never()).checkBatch(any(), any(), any());
     }
 
     @Test
@@ -71,6 +69,6 @@ class WorkflowFreshnessTriggerTest {
             .thenThrow(new RuntimeException("db down"));
         // 不应抛出
         trigger.onWorkflowSucceeded(7L);
-        verify(checkService, never()).checkBatch(any(), any(), any(), any());
+        verify(checkService, never()).checkBatch(any(), any(), any());
     }
 }

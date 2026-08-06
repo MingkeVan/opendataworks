@@ -43,10 +43,12 @@ metadata:
   statistics-sync:
     fixed-delay-ms: 600000
 
-# 数据新鲜度检查（事件驱动）：工作流完成后检查其写出表；非工作流表由每日巡检兜底。
+# 数据新鲜度检查（事件驱动）：工作流完成后检查其写出表。阈值由表级契约声明。
 freshness:
   check:
     enabled: ${FRESHNESS_CHECK_ENABLED:true}
+    query-timeout-seconds: ${FRESHNESS_CHECK_QUERY_TIMEOUT_SECONDS:30}
+    max-concurrent-per-cluster: ${FRESHNESS_CHECK_MAX_CONCURRENT_PER_CLUSTER:4}
 
 # MyBatis Plus 配置
 mybatis-plus:

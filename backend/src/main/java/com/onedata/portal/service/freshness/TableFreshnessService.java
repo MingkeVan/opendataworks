@@ -36,7 +36,6 @@ public class TableFreshnessService {
     private final TableFreshnessConfigMapper freshnessConfigMapper;
     private final TableFreshnessResultMapper freshnessResultMapper;
     private final FreshnessContractResolver contractResolver;
-    private final FreshnessRuleConfigLoader ruleConfigLoader;
     private final FreshnessCheckService freshnessCheckService;
 
     /**
@@ -45,14 +44,13 @@ public class TableFreshnessService {
     public TableFreshnessResponse getFreshness(Long tableId) {
         DataTable table = requireTable(tableId);
         TableFreshnessConfig config = findConfig(tableId);
-        FreshnessRuleConfig ruleConfig = ruleConfigLoader.load();
 
         TableFreshnessResponse response = new TableFreshnessResponse();
         response.setTableId(tableId);
         response.setConfigured(config != null);
         response.setConfig(config);
 
-        contractResolver.resolve(table, config, ruleConfig.getDefaults())
+        contractResolver.resolve(table, config)
             .ifPresent(contract -> response.setEffective(toEffective(contract)));
 
         response.setLatestResult(findLatestResult(tableId));
@@ -105,11 +103,9 @@ public class TableFreshnessService {
     public FreshnessCheckResult checkNow(Long tableId, String operator) {
         DataTable table = requireTable(tableId);
         TableFreshnessConfig config = findConfig(tableId);
-        FreshnessRuleConfig ruleConfig = ruleConfigLoader.load();
-        FreshnessContract contract = contractResolver.resolve(table, config, ruleConfig.getDefaults())
+        FreshnessContract contract = contractResolver.resolve(table, config)
             .orElseThrow(() -> new IllegalArgumentException("该表未配置可用的新鲜度契约，请先设置时间字段与时效阈值"));
-        return freshnessCheckService.check(table, contract, ruleConfig.getQueryTimeoutSeconds(),
-            "manual", operator == null ? "manual" : operator);
+        return freshnessCheckService.check(table, contract, "manual", operator == null ? "manual" : operator);
     }
 
     public List<TableFreshnessResult> history(Long tableId, int limit) {
@@ -150,10 +146,8 @@ public class TableFreshnessService {
         if (tables.isEmpty()) {
             return 0;
         }
-        FreshnessRuleConfig ruleConfig = ruleConfigLoader.load();
-        FreshnessCheckService.BatchOutcome outcome = freshnessCheckService.checkBatch(
-            tables, ruleConfig, "manual", operator == null ? "manual" : operator);
-        return outcome.getResults().size();
+        return freshnessCheckService.checkBatch(
+            tables, "manual", operator == null ? "manual" : operator).size();
     }
 
     // ---- 校验 ----

@@ -2,6 +2,7 @@ package com.onedata.portal.service.freshness;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.onedata.portal.config.FreshnessCheckProperties;
 import com.onedata.portal.dto.TablePartitionInfo;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.TableFreshnessConfig;
@@ -48,13 +49,14 @@ public class FreshnessCheckService {
     private final TableFreshnessResultMapper freshnessResultMapper;
     private final DataTableMapper dataTableMapper;
     private final FreshnessContractResolver contractResolver;
+    private final FreshnessCheckProperties properties;
 
     /**
      * 检查单表并落一行结果，回写 data_table 最新态。异常内部收敛为 runtime_error。
      */
     public FreshnessCheckResult check(DataTable table, FreshnessContract contract,
-                                      int timeoutSeconds, String triggerType, String operator) {
-        FreshnessCheckResult result = evaluate(table, contract, timeoutSeconds);
+                                      String triggerType, String operator) {
+        FreshnessCheckResult result = evaluate(table, contract);
         result.setTableId(table.getId());
         result.setClusterId(table.getClusterId());
         result.setDbName(table.getDbName());
@@ -64,35 +66,24 @@ public class FreshnessCheckService {
     }
 
     /**
-     * 批量检查。按 clusterId 分组，每集群并发上限 {@code maxConcurrentPerCluster}；
-     * 无契约的表跳过、不落结果；单表异常隔离。返回已检查结果 + 未配置表（供治理型上报）。
+     * 批量检查。按 clusterId 分组，每集群并发上限来自配置；无契约的表跳过、不落结果；单表异常隔离。
      */
-    public BatchOutcome checkBatch(List<DataTable> tables, FreshnessRuleConfig ruleConfig,
-                                   String triggerType, String operator) {
+    public List<FreshnessCheckResult> checkBatch(List<DataTable> tables, String triggerType, String operator) {
         if (tables == null || tables.isEmpty()) {
-            return new BatchOutcome(Collections.emptyList(), Collections.emptyList());
+            return Collections.emptyList();
         }
         Map<Long, TableFreshnessConfig> configByTable = loadConfigs(tables);
-        List<FreshnessDefault> defaults = ruleConfig.getDefaults();
 
-        // 解析契约：可检查的进入待检查集；解析不到且未显式关闭的记为「未配置」
         List<TableWithContract> pending = new ArrayList<>();
-        List<DataTable> unconfigured = new ArrayList<>();
         for (DataTable table : tables) {
-            TableFreshnessConfig config = configByTable.get(table.getId());
-            Optional<FreshnessContract> contract = contractResolver.resolve(table, config, defaults);
-            if (contract.isPresent()) {
-                pending.add(new TableWithContract(table, contract.get()));
-            } else if (!isExplicitlyDisabled(config)) {
-                unconfigured.add(table);
-            }
+            contractResolver.resolve(table, configByTable.get(table.getId()))
+                .ifPresent(c -> pending.add(new TableWithContract(table, c)));
         }
         if (pending.isEmpty()) {
-            return new BatchOutcome(Collections.emptyList(), unconfigured);
+            return Collections.emptyList();
         }
 
-        int timeout = ruleConfig.getQueryTimeoutSeconds();
-        int maxConcurrent = Math.max(1, ruleConfig.getMaxConcurrentPerCluster());
+        int maxConcurrent = Math.max(1, properties.getMaxConcurrentPerCluster());
 
         // 按 clusterId 分组，逐集群并发
         Map<Long, List<TableWithContract>> byCluster = pending.stream()
@@ -100,16 +91,12 @@ public class FreshnessCheckService {
 
         List<FreshnessCheckResult> results = new ArrayList<>();
         for (List<TableWithContract> group : byCluster.values()) {
-            results.addAll(runGroup(group, timeout, maxConcurrent, triggerType, operator));
+            results.addAll(runGroup(group, maxConcurrent, triggerType, operator));
         }
-        return new BatchOutcome(results, unconfigured);
+        return results;
     }
 
-    private boolean isExplicitlyDisabled(TableFreshnessConfig config) {
-        return config != null && Boolean.FALSE.equals(config.getEnabled());
-    }
-
-    private List<FreshnessCheckResult> runGroup(List<TableWithContract> group, int timeout, int maxConcurrent,
+    private List<FreshnessCheckResult> runGroup(List<TableWithContract> group, int maxConcurrent,
                                                 String triggerType, String operator) {
         int poolSize = Math.min(maxConcurrent, group.size());
         ExecutorService executor = Executors.newFixedThreadPool(poolSize);
@@ -117,7 +104,7 @@ public class FreshnessCheckService {
             List<Callable<FreshnessCheckResult>> tasks = group.stream()
                 .map(t -> (Callable<FreshnessCheckResult>) () -> {
                     try {
-                        return check(t.table, t.contract, timeout, triggerType, operator);
+                        return check(t.table, t.contract, triggerType, operator);
                     } catch (Exception e) {
                         log.error("Freshness check failed for table id={}", t.table.getId(), e);
                         return null;
@@ -148,7 +135,7 @@ public class FreshnessCheckService {
     /**
      * 纯判定：取数 + 状态计算，不做持久化。异常收敛为 runtime_error。
      */
-    FreshnessCheckResult evaluate(DataTable table, FreshnessContract contract, int timeoutSeconds) {
+    FreshnessCheckResult evaluate(DataTable table, FreshnessContract contract) {
         FreshnessCheckResult result = new FreshnessCheckResult();
         FreshnessMode mode = contract.getMode();
         result.setMode(mode == null ? null : mode.code());
@@ -159,7 +146,7 @@ public class FreshnessCheckService {
         result.setErrorAfterSeconds(errSec);
 
         try {
-            Probe probe = probe(table, contract, timeoutSeconds);
+            Probe probe = probe(table, contract, properties.getQueryTimeoutSeconds());
             result.setMaxLoadedAt(probe.maxLoadedAt);
             result.setSnapshottedAt(probe.snapshottedAt);
 
@@ -331,25 +318,6 @@ public class FreshnessCheckService {
             return null;
         }
         return value.length() <= MAX_ERROR_MESSAGE_LENGTH ? value : value.substring(0, MAX_ERROR_MESSAGE_LENGTH);
-    }
-
-    /** 批量检查产物：已检查结果 + 未配置契约的表（未显式关闭）。 */
-    public static final class BatchOutcome {
-        private final List<FreshnessCheckResult> results;
-        private final List<DataTable> unconfiguredTables;
-
-        public BatchOutcome(List<FreshnessCheckResult> results, List<DataTable> unconfiguredTables) {
-            this.results = results;
-            this.unconfiguredTables = unconfiguredTables;
-        }
-
-        public List<FreshnessCheckResult> getResults() {
-            return results;
-        }
-
-        public List<DataTable> getUnconfiguredTables() {
-            return unconfiguredTables;
-        }
     }
 
     /** 内部取数结果。 */

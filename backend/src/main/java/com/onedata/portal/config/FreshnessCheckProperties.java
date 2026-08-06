@@ -12,6 +12,12 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "freshness.check")
 public class FreshnessCheckProperties {
 
-    /** 工作流完成后触发新鲜度检查的开关。关闭后按需接口与每日巡检路径仍可用。 */
+    /** 工作流完成后触发新鲜度检查的开关。关闭后按需接口仍可用。 */
     private boolean enabled = true;
+
+    /** 单次取数的 JDBC 查询超时（秒）。 */
+    private int queryTimeoutSeconds = 30;
+
+    /** 每个数据源的并发检查上限。 */
+    private int maxConcurrentPerCluster = 4;
 }
