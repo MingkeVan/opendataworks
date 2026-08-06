@@ -106,3 +106,36 @@ export function updateRuleEnabled(ruleId, data) {
     data
   })
 }
+
+/**
+ * 更新巡检规则配置（rule_config / severity / 名称 / 描述）
+ */
+export function updateRule(ruleId, data) {
+  return request({
+    url: `/v1/inspections/rules/${ruleId}`,
+    method: 'put',
+    data
+  })
+}
+
+/**
+ * 列出各表最新新鲜度结果
+ */
+export function listFreshnessResults(params) {
+  return request({
+    url: '/v1/inspections/freshness',
+    method: 'get',
+    params
+  })
+}
+
+/**
+ * 按 scope 批量执行新鲜度检查
+ */
+export function runFreshnessCheck(data = {}) {
+  return request({
+    url: '/v1/inspections/freshness/run',
+    method: 'post',
+    data
+  })
+}

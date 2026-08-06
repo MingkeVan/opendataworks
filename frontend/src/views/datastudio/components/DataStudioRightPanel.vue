@@ -140,6 +140,10 @@
             <DataStudioRightPanelAccess />
           </el-tab-pane>
 
+          <el-tab-pane name="freshness" label="数据新鲜度" lazy>
+            <DataStudioRightPanelFreshness />
+          </el-tab-pane>
+
           <el-tab-pane name="versions" label="变更记录" lazy>
             <div class="meta-section meta-section-fill">
               <!-- 不再重复 tab 名「变更记录」作为区块标题 -->
@@ -189,6 +193,7 @@ import DataStudioRightPanelBasic from './DataStudioRightPanelBasic.vue'
 import DataStudioRightPanelDoris from './DataStudioRightPanelDoris.vue'
 import DataStudioRightPanelColumns from './DataStudioRightPanelColumns.vue'
 import DataStudioRightPanelAccess from './DataStudioRightPanelAccess.vue'
+import DataStudioRightPanelFreshness from './DataStudioRightPanelFreshness.vue'
 import SmartMetadataDialog from './SmartMetadataDialog.vue'
 import { isDemoMode } from '@/demo/runtime'
 import { computeMetadataCompleteness } from '../metadataGeneration'

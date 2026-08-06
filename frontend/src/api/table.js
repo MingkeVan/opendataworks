@@ -165,6 +165,31 @@ export const tableApi = {
     })
   },
 
+  // 查询表的生效新鲜度契约与最近一次结果
+  getFreshness(id) {
+    return request.get(`/v1/tables/${id}/freshness`)
+  },
+
+  // 保存（upsert）表级新鲜度契约
+  saveFreshness(id, data) {
+    return request.put(`/v1/tables/${id}/freshness`, data)
+  },
+
+  // 删除表级新鲜度契约
+  deleteFreshness(id) {
+    return request.delete(`/v1/tables/${id}/freshness`)
+  },
+
+  // 立即检查该表新鲜度
+  checkFreshness(id) {
+    return request.post(`/v1/tables/${id}/freshness/check`)
+  },
+
+  // 新鲜度检查结果历史
+  freshnessHistory(id, limit = 20) {
+    return request.get(`/v1/tables/${id}/freshness/history`, { params: { limit } })
+  },
+
   // 修改表注释（同时更新Doris）
   updateComment(id, comment, clusterId = null) {
     return request.put(`/v1/tables/${id}/comment`, { comment }, {
