@@ -38,7 +38,7 @@ class InspectionRuleHandlerCoverageTest {
                 new TaskFailureRuleHandler(null, null, null),
                 new TaskScheduleRuleHandler(null, null, null),
                 new TableLayerRuleHandler(null, null),
-                new DataFreshnessRuleHandler(null, null),
+                new DataFreshnessRuleHandler(null, null, null),
                 new DataVolumeSpikeRuleHandler(null, null),
                 new ServiceHealthRuleHandler(null, null),
                 new DorisNodeResourcesRuleHandler(null, null),

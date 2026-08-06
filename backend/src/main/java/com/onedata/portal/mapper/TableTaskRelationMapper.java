@@ -6,11 +6,25 @@ import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
 
+import java.util.List;
+
 /**
  * 表任务关联 Mapper
  */
 @Mapper
 public interface TableTaskRelationMapper extends BaseMapper<TableTaskRelation> {
+
+    /**
+     * 某工作流写出的表 ID（经写关系关联的表）。用于工作流执行成功后触发新鲜度检查。
+     */
+    @Select("SELECT DISTINCT r.table_id " +
+        "FROM table_task_relation r " +
+        "JOIN data_task t ON r.task_id = t.id " +
+        "WHERE t.workflow_id = #{workflowId} " +
+        "  AND r.relation_type = 'write' " +
+        "  AND r.deleted = 0 " +
+        "  AND t.deleted = 0")
+    List<Long> selectWriteTableIdsByWorkflow(Long workflowId);
 
     /**
      * 物理删除指定任务的所有关联关系，避免逻辑删除导致唯一键冲突

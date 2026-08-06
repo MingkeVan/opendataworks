@@ -78,6 +78,10 @@ public class DataTable {
     @TableField("doris_update_time")
     private LocalDateTime dorisUpdateTime;
 
+    private String freshnessStatus;
+
+    private LocalDateTime freshnessCheckedAt;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

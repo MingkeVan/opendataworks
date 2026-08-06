@@ -976,6 +976,122 @@ public class DorisConnectionService {
         return partitions;
     }
 
+    /**
+     * 新鲜度探针：一次查询同时取「数据最后加载时间」与「快照时间」，二者同源同事务，
+     * 消除门户与 Doris 的时钟偏差。{@code maxLoadedAt} 可为 null（空表 → 从未加载）。
+     */
+    public static final class FreshnessProbe {
+        private final LocalDateTime maxLoadedAt;
+        private final LocalDateTime snapshottedAt;
+
+        public FreshnessProbe(LocalDateTime maxLoadedAt, LocalDateTime snapshottedAt) {
+            this.maxLoadedAt = maxLoadedAt;
+            this.snapshottedAt = snapshottedAt;
+        }
+
+        public LocalDateTime getMaxLoadedAt() {
+            return maxLoadedAt;
+        }
+
+        public LocalDateTime getSnapshottedAt() {
+            return snapshottedAt;
+        }
+    }
+
+    /**
+     * column 模式取值：{@code SELECT MAX(`col`) AS max_loaded_at, NOW() AS snapshotted_at
+     * FROM `db`.`tbl` [WHERE filter]}。等价 dbt {@code loaded_at_field}。
+     *
+     * <p>SQL 失败/超时向上抛出，由调用方判为 {@code runtime_error}。
+     */
+    public FreshnessProbe probeMaxLoadedAt(Long clusterId, String database, String tableName,
+                                           String loadedAtField, String filterExpr, int timeoutSeconds) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        String column = requireSafeIdentifier(loadedAtField, "加载时间列");
+        StringBuilder sql = new StringBuilder()
+            .append("SELECT MAX(`").append(column).append("`) AS max_loaded_at, NOW() AS snapshotted_at FROM `")
+            .append(database).append("`.`").append(tableName).append("`");
+        if (StringUtils.hasText(filterExpr)) {
+            sql.append(" WHERE ").append(filterExpr);
+        }
+        return runProbe(cluster, database, sql.toString(), timeoutSeconds);
+    }
+
+    /**
+     * custom_sql 模式取值：把用户查询包成标量子查询
+     * {@code SELECT (<loadedAtQuery>) AS max_loaded_at, NOW() AS snapshotted_at}。
+     * 形状照搬 dbt {@code default__collect_freshness_custom_sql}，用户查询只返回一个时间戳。
+     */
+    public FreshnessProbe probeMaxLoadedAtByQuery(Long clusterId, String database,
+                                                  String loadedAtQuery, int timeoutSeconds) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        String sql = "SELECT (" + loadedAtQuery + ") AS max_loaded_at, NOW() AS snapshotted_at";
+        return runProbe(cluster, database, sql, timeoutSeconds);
+    }
+
+    /**
+     * metadata 模式取值：实时查 {@code information_schema.tables.UPDATE_TIME}。
+     * 只能发现「没人写了」，发现不了「写入了旧数据」。表不存在时抛出 → {@code runtime_error}。
+     */
+    public FreshnessProbe probeMetadataUpdateTime(Long clusterId, String database, String tableName,
+                                                  int timeoutSeconds) {
+        DorisCluster cluster = resolveCluster(clusterId);
+        String sql = "SELECT UPDATE_TIME AS max_loaded_at, NOW() AS snapshotted_at "
+            + "FROM information_schema.tables WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?";
+        try (Connection connection = getConnection(cluster, null);
+                PreparedStatement stmt = connection.prepareStatement(sql)) {
+            if (timeoutSeconds > 0) {
+                stmt.setQueryTimeout(timeoutSeconds);
+            }
+            stmt.setString(1, database);
+            stmt.setString(2, tableName);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (!rs.next()) {
+                    throw new RuntimeException(String.format("表 %s.%s 不存在", database, tableName));
+                }
+                return readProbe(rs);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("查询元数据更新时间失败: " + e.getMessage(), e);
+        }
+    }
+
+    private FreshnessProbe runProbe(DorisCluster cluster, String database, String sql, int timeoutSeconds) {
+        try (Connection connection = getConnection(cluster, database);
+                Statement stmt = connection.createStatement()) {
+            if (timeoutSeconds > 0) {
+                stmt.setQueryTimeout(timeoutSeconds);
+            }
+            try (ResultSet rs = stmt.executeQuery(sql)) {
+                if (!rs.next()) {
+                    // 理论上恒有一行；无行按无数据处理
+                    return new FreshnessProbe(null, LocalDateTime.now());
+                }
+                return readProbe(rs);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("新鲜度取数失败: " + e.getMessage(), e);
+        }
+    }
+
+    private FreshnessProbe readProbe(ResultSet rs) throws SQLException {
+        Timestamp maxLoaded = rs.getTimestamp("max_loaded_at");
+        Timestamp snapshot = rs.getTimestamp("snapshotted_at");
+        LocalDateTime snapshotAt = snapshot != null ? snapshot.toLocalDateTime() : LocalDateTime.now();
+        LocalDateTime maxLoadedAt = maxLoaded != null ? maxLoaded.toLocalDateTime() : null;
+        return new FreshnessProbe(maxLoadedAt, snapshotAt);
+    }
+
+    /**
+     * 校验标识符不含反引号，防止拼接逃逸。列名合法性（是否为真实列）由服务层保存时校验。
+     */
+    private String requireSafeIdentifier(String identifier, String label) {
+        if (!StringUtils.hasText(identifier) || identifier.indexOf('`') >= 0) {
+            throw new IllegalArgumentException("非法的" + label + ": " + identifier);
+        }
+        return identifier;
+    }
+
     private Set<String> availableColumnLabels(ResultSetMetaData metaData) throws SQLException {
         Set<String> labels = new HashSet<>();
         for (int i = 1; i <= metaData.getColumnCount(); i++) {
