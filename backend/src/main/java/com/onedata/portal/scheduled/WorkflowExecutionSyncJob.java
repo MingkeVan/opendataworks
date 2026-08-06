@@ -5,6 +5,7 @@ import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.WorkflowInstanceCache;
 import com.onedata.portal.dto.workflow.WorkflowInstanceSummary;
 import com.onedata.portal.mapper.DataWorkflowMapper;
+import com.onedata.portal.service.DolphinExecutionMapper;
 import com.onedata.portal.service.DolphinSchedulerService;
 import com.onedata.portal.service.WorkflowInstanceCacheService;
 import com.onedata.portal.service.freshness.WorkflowFreshnessTrigger;
@@ -71,13 +72,21 @@ public class WorkflowExecutionSyncJob {
         return ids;
     }
 
-    private boolean hasNewlySucceeded(List<WorkflowInstanceSummary> instances, Set<Long> priorSuccess) {
+    /**
+     * 是否有新变为成功、且值得触发新鲜度检查的实例。
+     *
+     * <p>排除补数（{@code COMPLEMENT_DATA}）：补数写的是过去的调度日期，不改变「最新数据多旧」，
+     * 对当前新鲜度无意义；且在 metadata 模式下其物理写入会推进 {@code UPDATE_TIME} 造成假 pass。
+     * 手动、定时（调度）成功实例照常触发。
+     */
+    boolean hasNewlySucceeded(List<WorkflowInstanceSummary> instances, Set<Long> priorSuccess) {
         if (instances == null) {
             return false;
         }
         for (WorkflowInstanceSummary instance : instances) {
             if (isSuccess(instance.getState()) && instance.getInstanceId() != null
-                && !priorSuccess.contains(instance.getInstanceId())) {
+                && !priorSuccess.contains(instance.getInstanceId())
+                && !isBackfill(instance.getCommandType())) {
                 return true;
             }
         }
@@ -86,5 +95,9 @@ public class WorkflowExecutionSyncJob {
 
     private boolean isSuccess(String state) {
         return state != null && STATE_SUCCESS.equalsIgnoreCase(state.trim());
+    }
+
+    private boolean isBackfill(String commandType) {
+        return "backfill".equals(DolphinExecutionMapper.mapTriggerType(commandType));
     }
 }

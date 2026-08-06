@@ -86,7 +86,7 @@ SQL 失败 / 超时 / 列不存在  -> runtime_error
 
 一个检查，**两个触发点**，只决定何时运行：
 
-1. **工作流完成后（主，事件驱动）**：`WorkflowExecutionSyncJob` 识别新变为成功的实例，检查该工作流经写关系（`relation_type='write'`）关联的表——**只覆盖本次真正产出的表**，回答「任务报成功了，数据真的到了吗」。
+1. **工作流完成后（主，事件驱动）**：`WorkflowExecutionSyncJob` 识别新变为成功的实例，检查该工作流经写关系（`relation_type='write'`）关联的表——**只覆盖本次真正产出的表**，回答「任务报成功了，数据真的到了吗」。**手动和定时（调度）成功都触发；补数（`COMPLEMENT_DATA`）不触发**——补数写的是过去的调度日期，不改变当前新鲜度，还会在 `metadata` 模式下造成假 `pass`。「补数有没有把目标日期补上」是完整性校验、不是新鲜度。
 2. **按需**：Data Studio「数据新鲜度」页签「立即检查」（`POST /v1/tables/{id}/freshness/check`），或巡检页「执行检查」（`POST /v1/inspections/freshness/run` 按 scope 批量）。
 
 **没有墙钟轮询，也没有每日巡检。** 数据只在任务跑的时候变，工作流产出表在产出后即时检查即可；非工作流产出的表（外部同步等）用按需触发。开关 `freshness.check.enabled`（默认 true，控制工作流触发；按需路径不受影响）。

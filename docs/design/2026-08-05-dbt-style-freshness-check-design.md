@@ -104,7 +104,7 @@ SQL 失败 / 超时 / 列不存在  -> runtime_error
 
 同一套检查逻辑，两个触发点只决定何时调用：
 
-1. **工作流完成后（主，事件驱动）**：`WorkflowExecutionSyncJob`（`0 */5 * * * ?`）同步到工作流实例**新变为成功**时，对该工作流各任务经 `table_task_relation`（`relation_type = write`）关联的表触发一次检查。**只覆盖本次真正产出的表**，回答「任务报成功了，数据真的到了吗」。不改 DolphinScheduler 链路，只在既有同步作业里挂钩。
+1. **工作流完成后（主，事件驱动）**：`WorkflowExecutionSyncJob`（`0 */5 * * * ?`）同步到工作流实例**新变为成功**时，对该工作流各任务经 `table_task_relation`（`relation_type = write`）关联的表触发一次检查。**只覆盖本次真正产出的表**，回答「任务报成功了，数据真的到了吗」。不改 DolphinScheduler 链路，只在既有同步作业里挂钩。触发对**手动、定时（调度）**一视同仁，但**排除补数（`COMPLEMENT_DATA`）**：补数写的是过去的调度日期，不改变「最新数据多旧」，对当前新鲜度无意义，且在 `metadata` 模式下其物理写入会推进 `UPDATE_TIME` 造成假 `pass`。「补数是否补齐目标日期」是完整性校验、不是新鲜度，不在本设计范围。
 2. **按需**：`POST /v1/tables/{id}/freshness/check`（单表）与 `POST /v1/inspections/freshness/run`（按 scope 批量），等价 `dbt source freshness --select`。
 
 **不设墙钟轮询、也没有每日巡检兜底。** 数据只在生产任务运行时变动，工作流产出表由触发点 1 在产出后即时检查即可；对未变动的表按时钟反复取数（无论 15 分钟还是每日）都是浪费。非工作流产出的表（外部同步等）由按需触发覆盖。开关 `freshness.check.enabled` 控制触发点 1。
