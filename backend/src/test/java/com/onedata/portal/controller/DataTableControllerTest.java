@@ -3,6 +3,7 @@ package com.onedata.portal.controller;
 import com.onedata.portal.service.DataTableMetadataSyncService;
 import com.onedata.portal.service.DataTableQueryService;
 import com.onedata.portal.service.DataTableService;
+import com.onedata.portal.service.freshness.TableFreshnessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,6 +35,9 @@ class DataTableControllerTest {
     @Mock
     private DataTableMetadataSyncService dataTableMetadataSyncService;
 
+    @Mock
+    private TableFreshnessService tableFreshnessService;
+
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -41,7 +45,8 @@ class DataTableControllerTest {
         DataTableController controller = new DataTableController(
                 dataTableService,
                 dataTableQueryService,
-                dataTableMetadataSyncService);
+                dataTableMetadataSyncService,
+                tableFreshnessService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 

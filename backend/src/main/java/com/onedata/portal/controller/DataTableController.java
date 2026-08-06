@@ -7,6 +7,8 @@ import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
 import com.onedata.portal.dto.TableAccessStats;
 import com.onedata.portal.dto.TableExport;
+import com.onedata.portal.dto.TableFreshnessRequest;
+import com.onedata.portal.dto.TableFreshnessResponse;
 import com.onedata.portal.dto.TableLocation;
 import com.onedata.portal.dto.TableOption;
 import com.onedata.portal.dto.TablePartitionInfo;
@@ -15,10 +17,13 @@ import com.onedata.portal.dto.TableRelatedTasksResponse;
 import com.onedata.portal.dto.TableStatistics;
 import com.onedata.portal.entity.DataField;
 import com.onedata.portal.entity.DataTable;
+import com.onedata.portal.entity.TableFreshnessResult;
 import com.onedata.portal.entity.TableStatisticsHistory;
 import com.onedata.portal.service.DataTableMetadataSyncService;
 import com.onedata.portal.service.DataTableQueryService;
 import com.onedata.portal.service.DataTableService;
+import com.onedata.portal.service.freshness.FreshnessCheckResult;
+import com.onedata.portal.service.freshness.TableFreshnessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -47,6 +52,7 @@ public class DataTableController {
     private final DataTableService dataTableService;
     private final DataTableQueryService dataTableQueryService;
     private final DataTableMetadataSyncService dataTableMetadataSyncService;
+    private final TableFreshnessService tableFreshnessService;
 
     /**
      * 分页查询表列表
@@ -603,5 +609,82 @@ public class DataTableController {
             return Result.success(response, partialMessage);
         }
         return Result.success(response, failMessage);
+    }
+
+    // ---- 数据新鲜度 ----
+
+    /**
+     * 查询表的生效新鲜度契约与最近一次结果
+     */
+    @RequireAuth
+    @GetMapping("/{id}/freshness")
+    public Result<TableFreshnessResponse> getFreshness(@PathVariable Long id) {
+        try {
+            return Result.success(tableFreshnessService.getFreshness(id));
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    /**
+     * 保存（upsert）表级新鲜度契约
+     */
+    @RequireAuth
+    @PutMapping("/{id}/freshness")
+    public Result<Map<String, Object>> saveFreshness(
+            @PathVariable Long id,
+            @RequestBody TableFreshnessRequest request) {
+        try {
+            tableFreshnessService.saveFreshness(id, request, TableFreshnessService.currentOperator());
+            Map<String, Object> result = new java.util.HashMap<>();
+            result.put("success", true);
+            return Result.success(result, "新鲜度契约保存成功");
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    /**
+     * 删除表级新鲜度契约
+     */
+    @RequireAuth
+    @DeleteMapping("/{id}/freshness")
+    public Result<Map<String, Object>> deleteFreshness(@PathVariable Long id) {
+        try {
+            tableFreshnessService.deleteFreshness(id);
+            Map<String, Object> result = new java.util.HashMap<>();
+            result.put("success", true);
+            return Result.success(result, "新鲜度契约已删除");
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    /**
+     * 立即检查该表新鲜度
+     */
+    @RequireAuth
+    @PostMapping("/{id}/freshness/check")
+    public Result<FreshnessCheckResult> checkFreshness(@PathVariable Long id) {
+        try {
+            return Result.success(tableFreshnessService.checkNow(id, TableFreshnessService.currentOperator()));
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    /**
+     * 新鲜度检查结果历史
+     */
+    @RequireAuth
+    @GetMapping("/{id}/freshness/history")
+    public Result<List<TableFreshnessResult>> freshnessHistory(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "20") int limit) {
+        try {
+            return Result.success(tableFreshnessService.history(id, limit));
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
     }
 }

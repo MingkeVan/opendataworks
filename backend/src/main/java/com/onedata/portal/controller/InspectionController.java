@@ -4,7 +4,9 @@ import com.onedata.portal.dto.Result;
 import com.onedata.portal.entity.InspectionIssue;
 import com.onedata.portal.entity.InspectionRecord;
 import com.onedata.portal.entity.InspectionRule;
+import com.onedata.portal.entity.TableFreshnessResult;
 import com.onedata.portal.service.InspectionService;
+import com.onedata.portal.service.freshness.TableFreshnessService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -23,6 +25,7 @@ import java.util.Map;
 public class InspectionController {
 
     private final InspectionService inspectionService;
+    private final TableFreshnessService tableFreshnessService;
 
     /**
      * 手动触发全量巡检
@@ -219,6 +222,57 @@ public class InspectionController {
     }
 
     /**
+     * 更新巡检规则配置（rule_config / severity / 名称 / 描述）。ruleType 与 ruleCode 不可改。
+     */
+    @PutMapping("/rules/{ruleId}")
+    public Result<Map<String, Object>> updateRule(
+            @PathVariable Long ruleId,
+            @RequestBody UpdateRuleRequest request) {
+        try {
+            inspectionService.updateRule(ruleId, request.getRuleName(), request.getDescription(),
+                request.getSeverity(), request.getRuleConfig());
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            return Result.success(result, "规则更新成功");
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    /**
+     * 列出各表最新新鲜度结果，支持按状态/数据源/库过滤
+     */
+    @GetMapping("/freshness")
+    public Result<List<TableFreshnessResult>> listFreshnessResults(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Long clusterId,
+            @RequestParam(required = false) String dbName) {
+        try {
+            return Result.success(tableFreshnessService.listLatestResults(status, clusterId, dbName));
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    /**
+     * 按 scope 批量执行新鲜度检查
+     */
+    @PostMapping("/freshness/run")
+    public Result<Map<String, Object>> runFreshness(@RequestBody(required = false) RunFreshnessRequest request) {
+        try {
+            Long clusterId = request == null ? null : request.getClusterId();
+            String dbName = request == null ? null : request.getDbName();
+            int checked = tableFreshnessService.runByScope(clusterId, dbName, TableFreshnessService.currentOperator());
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("checked", checked);
+            return Result.success(result, "新鲜度检查完成，检查 " + checked + " 张表");
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    /**
      * 手动触发巡检请求
      */
     @lombok.Data
@@ -242,6 +296,26 @@ public class InspectionController {
     @lombok.Data
     public static class UpdateRuleEnabledRequest {
         private Boolean enabled;
+    }
+
+    /**
+     * 更新规则配置请求
+     */
+    @lombok.Data
+    public static class UpdateRuleRequest {
+        private String ruleName;
+        private String description;
+        private String severity;
+        private String ruleConfig;
+    }
+
+    /**
+     * 按 scope 执行新鲜度检查请求
+     */
+    @lombok.Data
+    public static class RunFreshnessRequest {
+        private Long clusterId;
+        private String dbName;
     }
 
     /**

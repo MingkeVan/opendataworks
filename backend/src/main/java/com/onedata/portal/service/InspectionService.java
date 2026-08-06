@@ -647,4 +647,31 @@ public class InspectionService {
         rule.setEnabled(enabled);
         inspectionRuleMapper.updateById(rule);
     }
+
+    /**
+     * 更新规则配置。ruleType 与 ruleCode 不可改；仅覆盖非空字段。
+     */
+    @Transactional
+    public void updateRule(Long ruleId, String ruleName, String description, String severity, String ruleConfig) {
+        if (ruleId == null) {
+            throw new IllegalArgumentException("ruleId is required");
+        }
+        InspectionRule rule = inspectionRuleMapper.selectById(ruleId);
+        if (rule == null) {
+            throw new IllegalArgumentException("Rule not found: " + ruleId);
+        }
+        if (StringUtils.hasText(ruleName)) {
+            rule.setRuleName(ruleName);
+        }
+        if (description != null) {
+            rule.setDescription(description);
+        }
+        if (StringUtils.hasText(severity)) {
+            rule.setSeverity(severity);
+        }
+        if (ruleConfig != null) {
+            rule.setRuleConfig(ruleConfig);
+        }
+        inspectionRuleMapper.updateById(rule);
+    }
 }
