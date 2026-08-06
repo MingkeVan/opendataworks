@@ -38,12 +38,14 @@ CREATE TABLE IF NOT EXISTS `table_freshness_result` (
     `age_seconds`         BIGINT       DEFAULT NULL COMMENT '数据年龄(秒)',
     `warn_after_seconds`  BIGINT       DEFAULT NULL COMMENT 'warn 阈值(秒)',
     `error_after_seconds` BIGINT       DEFAULT NULL COMMENT 'error 阈值(秒)',
-    `error_message`       VARCHAR(512) DEFAULT NULL COMMENT 'runtime_error 错误信息',
-    `trigger_type`        VARCHAR(16)  DEFAULT NULL COMMENT 'manual | schedule | inspection | workflow',
-    `checked_by`          VARCHAR(50)  DEFAULT NULL COMMENT '触发人',
-    `created_at`          DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `error_message`        VARCHAR(512) DEFAULT NULL COMMENT 'runtime_error 错误信息',
+    `trigger_type`         VARCHAR(16)  DEFAULT NULL COMMENT 'manual | schedule | inspection | workflow',
+    `workflow_instance_id` BIGINT       DEFAULT NULL COMMENT '触发本次检查的工作流实例ID（Dolphin 实例），用于按「每次运行」聚合并反查执行',
+    `checked_by`           VARCHAR(50)  DEFAULT NULL COMMENT '触发人',
+    `created_at`           DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     KEY `idx_table_time` (`table_id`, `created_at`),
-    KEY `idx_status` (`status`)
+    KEY `idx_status` (`status`),
+    KEY `idx_workflow_instance` (`workflow_instance_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据新鲜度检查结果';
 
 -- data_table 冗余最新态，供列表/巡检按状态过滤

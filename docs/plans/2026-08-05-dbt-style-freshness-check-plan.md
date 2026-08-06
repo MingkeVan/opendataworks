@@ -153,9 +153,9 @@ Task 1-5 构成可独立发布的后端闭环，Task 6-7 为接口与前端，Ta
 **Expected Result:**
 - 新增/更新 `TableFreshnessServiceTest`、`DataTableControllerTest`、`InspectionControllerTest` 全绿，含各项校验拒绝用例。
 
-## Task 7: 前端 — ✅ 已完成
+## Task 7: 前端 — ✅ 已完成（2026-08-06 展示位调整）
 
-> 说明：`freshnessPanel.spec.js` 聚焦挂载与 API 接线（EP 组件在 shallowMount 下 DOM 断言较脆，故不做像素级断言）；巡检页新鲜度视图以卡片形式加入 `InspectionView.vue`（该视图是卡片布局而非页签）。
+> **展示位收敛**：初版把「各表最新结果」列表放巡检页。评审指出放巡检页语义错位（freshness 已与巡检解耦）。改为放**工作流详情页新增「数据新鲜度」页签**：顶部状态汇总 + 「每次运行的问题表数」表（检查时间 / 触发实例 / 问题数/总数，一眼看出每次检查几张表出问题）+ 逐表最新状态。为支撑「每次运行」聚合，`table_freshness_result` 增加 `workflow_instance_id`（触发实例，兼作反查执行的关联键）。新增后端 `GET /v1/workflows/{id}/freshness`；移除巡检页新鲜度卡片与孤立的 `GET/POST /v1/inspections/freshness*` 端点。Data Studio 表级页签不变。`freshnessPanel.spec.js` 聚焦挂载与 API 接线。
 
 **Files:**
 - `frontend/src/api/*`（新增新鲜度接口封装，沿用现有 api 模块组织方式）

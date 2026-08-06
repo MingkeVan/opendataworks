@@ -117,25 +117,3 @@ export function updateRule(ruleId, data) {
     data
   })
 }
-
-/**
- * 列出各表最新新鲜度结果
- */
-export function listFreshnessResults(params) {
-  return request({
-    url: '/v1/inspections/freshness',
-    method: 'get',
-    params
-  })
-}
-
-/**
- * 按 scope 批量执行新鲜度检查
- */
-export function runFreshnessCheck(data = {}) {
-  return request({
-    url: '/v1/inspections/freshness/run',
-    method: 'post',
-    data
-  })
-}

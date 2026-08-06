@@ -9,6 +9,11 @@ export const workflowApi = {
     return request.get(`/v1/workflows/${id}`)
   },
 
+  // 工作流数据新鲜度：写出表最新状态汇总、每次运行问题表数、逐表最新结果
+  freshness(id) {
+    return request.get(`/v1/workflows/${id}/freshness`)
+  },
+
   create(data) {
     return request.post('/v1/workflows', data)
   },

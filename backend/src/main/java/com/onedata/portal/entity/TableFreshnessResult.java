@@ -59,6 +59,12 @@ public class TableFreshnessResult {
      */
     private String triggerType;
 
+    /**
+     * 触发本次检查的工作流实例ID（Dolphin 实例），用于按「每次运行」聚合并反查执行。
+     * 按需/单表检查为 null。
+     */
+    private Long workflowInstanceId;
+
     private String checkedBy;
 
     @TableField(fill = FieldFill.INSERT)

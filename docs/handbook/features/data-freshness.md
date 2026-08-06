@@ -87,7 +87,7 @@ SQL 失败 / 超时 / 列不存在  -> runtime_error
 一个检查，**两个触发点**，只决定何时运行：
 
 1. **工作流完成后（主，事件驱动）**：`WorkflowExecutionSyncJob` 识别新变为成功的实例，检查该工作流经写关系（`relation_type='write'`）关联的表——**只覆盖本次真正产出的表**，回答「任务报成功了，数据真的到了吗」。**手动和定时（调度）成功都触发；补数（`COMPLEMENT_DATA`）不触发**——补数写的是过去的调度日期，不改变当前新鲜度，还会在 `metadata` 模式下造成假 `pass`。「补数有没有把目标日期补上」是完整性校验、不是新鲜度。
-2. **按需**：Data Studio「数据新鲜度」页签「立即检查」（`POST /v1/tables/{id}/freshness/check`），或巡检页「执行检查」（`POST /v1/inspections/freshness/run` 按 scope 批量）。
+2. **按需**：Data Studio「数据新鲜度」页签「立即检查」（`POST /v1/tables/{id}/freshness/check`）。
 
 **没有墙钟轮询，也没有每日巡检。** 数据只在任务跑的时候变，工作流产出表在产出后即时检查即可；非工作流产出的表（外部同步等）用按需触发。开关 `freshness.check.enabled`（默认 true，控制工作流触发；按需路径不受影响）。
 
@@ -95,10 +95,14 @@ SQL 失败 / 超时 / 列不存在  -> runtime_error
 
 新鲜度是独立于巡检的事件驱动子系统。它**不产生 `inspection_issue`**、不参与每日巡检、`inspection_rule` 里也没有 `data_freshness` 规则。红/黄状态活在两个地方：
 
-- `data_table.freshness_status`（每表最新态，供列表/巡检页按状态过滤）；
-- `table_freshness_result`（每次检查一行，含历史）。
+- `data_table.freshness_status`（每表最新态，供表列表按状态过滤）；
+- `table_freshness_result`（每次检查一行，含历史，带 `workflow_instance_id` 可反查是哪次运行触发的）。
 
-这对齐 dbt——`dbt source freshness` 只写 `sources.json` 状态，不建"问题"；红了靠流水线里的下游动作（我们这里是页面可见 + 后续可接的告警）。巡检页的「数据新鲜度」卡片只是**只读展示**这些结果，不把它们转成带 open/resolved 状态流的巡检问题。
+这对齐 dbt——`dbt source freshness` 只写 `sources.json` 状态，不建"问题"；红了靠流水线里的下游动作（我们这里是页面可见 + 后续可接的告警）。
+
+**在哪看**：
+- **工作流详情页「数据新鲜度」页签** —— 顶部汇总（写出表总数 / 正常 / 预警 / 超时 / 检查失败 / 未配置），「每次运行的问题表数」表（检查时间 / 触发实例 / `问题数/总数`）一眼看出每次检查有几张表出问题，下方逐表最新状态。**不在巡检页**（放巡检页语义错位，已移除）。
+- **Data Studio 表级「数据新鲜度」页签** —— 单表的生效契约、最近结果、历史与「立即检查」。
 
 ## 缺少可判定字段的表怎么办
 
@@ -116,10 +120,9 @@ SQL 失败 / 超时 / 列不存在  -> runtime_error
 | DELETE | `/v1/tables/{id}/freshness` | 删除表级契约 |
 | POST | `/v1/tables/{id}/freshness/check` | 按需单表检查 |
 | GET | `/v1/tables/{id}/freshness/history?limit=` | 结果历史 |
-| GET | `/v1/inspections/freshness` | 各表最新结果（按 `status` / `clusterId` / `dbName` 过滤，只读） |
-| POST | `/v1/inspections/freshness/run` | 按 scope 批量检查（按需） |
+| GET | `/v1/workflows/{id}/freshness` | 工作流写出表：状态汇总 + 每次运行问题表数 + 逐表最新结果（只读） |
 
-（`/v1/inspections/freshness*` 只是路由归类在巡检控制器下，结果不进 `inspection_issue`。）
+所有 freshness 端点都不写 `inspection_issue`。
 
 保存契约时的校验：`loadedAtField` 必须命中该表真实列名；`loadedAtQuery` 必须以 `SELECT` 开头且不含分号/注释符（上限 2048）；`filter` 不含分号/注释符（上限 512）；`loadedAtField` 与 `loadedAtQuery` 互斥；`partition` 模式要求表有分区列。
 

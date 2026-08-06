@@ -56,19 +56,33 @@ public class FreshnessCheckService {
      */
     public FreshnessCheckResult check(DataTable table, FreshnessContract contract,
                                       String triggerType, String operator) {
+        return check(table, contract, triggerType, operator, null);
+    }
+
+    /**
+     * @param workflowInstanceId 触发本次检查的工作流实例ID；按需/单表检查传 null。
+     */
+    public FreshnessCheckResult check(DataTable table, FreshnessContract contract,
+                                      String triggerType, String operator, Long workflowInstanceId) {
         FreshnessCheckResult result = evaluate(table, contract);
         result.setTableId(table.getId());
         result.setClusterId(table.getClusterId());
         result.setDbName(table.getDbName());
         result.setTableName(table.getTableName());
-        persist(result, triggerType, operator);
+        persist(result, triggerType, operator, workflowInstanceId);
         return result;
+    }
+
+    public List<FreshnessCheckResult> checkBatch(List<DataTable> tables, String triggerType, String operator) {
+        return checkBatch(tables, triggerType, operator, null);
     }
 
     /**
      * 批量检查。按 clusterId 分组，每集群并发上限来自配置；无契约的表跳过、不落结果；单表异常隔离。
+     * 同一批次的结果共享 {@code workflowInstanceId}，用于按「每次运行」聚合并反查执行。
      */
-    public List<FreshnessCheckResult> checkBatch(List<DataTable> tables, String triggerType, String operator) {
+    public List<FreshnessCheckResult> checkBatch(List<DataTable> tables, String triggerType, String operator,
+                                                 Long workflowInstanceId) {
         if (tables == null || tables.isEmpty()) {
             return Collections.emptyList();
         }
@@ -91,20 +105,20 @@ public class FreshnessCheckService {
 
         List<FreshnessCheckResult> results = new ArrayList<>();
         for (List<TableWithContract> group : byCluster.values()) {
-            results.addAll(runGroup(group, maxConcurrent, triggerType, operator));
+            results.addAll(runGroup(group, maxConcurrent, triggerType, operator, workflowInstanceId));
         }
         return results;
     }
 
     private List<FreshnessCheckResult> runGroup(List<TableWithContract> group, int maxConcurrent,
-                                                String triggerType, String operator) {
+                                                String triggerType, String operator, Long workflowInstanceId) {
         int poolSize = Math.min(maxConcurrent, group.size());
         ExecutorService executor = Executors.newFixedThreadPool(poolSize);
         try {
             List<Callable<FreshnessCheckResult>> tasks = group.stream()
                 .map(t -> (Callable<FreshnessCheckResult>) () -> {
                     try {
-                        return check(t.table, t.contract, triggerType, operator);
+                        return check(t.table, t.contract, triggerType, operator, workflowInstanceId);
                     } catch (Exception e) {
                         log.error("Freshness check failed for table id={}", t.table.getId(), e);
                         return null;
@@ -250,7 +264,7 @@ public class FreshnessCheckService {
         }
     }
 
-    private void persist(FreshnessCheckResult result, String triggerType, String operator) {
+    private void persist(FreshnessCheckResult result, String triggerType, String operator, Long workflowInstanceId) {
         TableFreshnessResult entity = new TableFreshnessResult();
         entity.setTableId(result.getTableId());
         entity.setClusterId(result.getClusterId());
@@ -266,6 +280,7 @@ public class FreshnessCheckService {
         entity.setErrorAfterSeconds(result.getErrorAfterSeconds());
         entity.setErrorMessage(result.getErrorMessage());
         entity.setTriggerType(triggerType);
+        entity.setWorkflowInstanceId(workflowInstanceId);
         entity.setCheckedBy(operator);
         freshnessResultMapper.insert(entity);
 

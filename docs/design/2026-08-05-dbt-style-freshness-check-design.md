@@ -13,7 +13,7 @@
 - 新增**表级**新鲜度契约：时间字段取值方式 + `warnAfter` / `errorAfter` 两级阈值 + 可选 `filter`。每张表各自声明（对齐 dbt「每个 source 各自声明 freshness」）。
 - 新增 `FreshnessCheckService`，判定 `pass | warn | error | runtime_error`，每次检查落一行结果并回写 `data_table.freshness_status`。
 - **两个触发点**：工作流执行完成后检查它写出的表（主，事件驱动）、页面按需。检查绑定到「运行」，不设墙钟轮询。
-- 表级契约 REST 与前端页签；巡检页只读展示各表最新结果。
+- 表级契约 REST 与 Data Studio 前端页签；**工作流详情页新增「数据新鲜度」页签**，一眼看出该工作流写出表每次运行的问题表数。
 
 **不做（本设计之外）：**
 
@@ -104,14 +104,14 @@ SQL 失败 / 超时 / 列不存在  -> runtime_error
 
 同一套检查逻辑，两个触发点只决定何时调用：
 
-1. **工作流完成后（主，事件驱动）**：`WorkflowExecutionSyncJob`（`0 */5 * * * ?`）同步到工作流实例**新变为成功**时，对该工作流各任务经 `table_task_relation`（`relation_type = write`）关联的表触发一次检查。**只覆盖本次真正产出的表**，回答「任务报成功了，数据真的到了吗」。不改 DolphinScheduler 链路，只在既有同步作业里挂钩。触发对**手动、定时（调度）**一视同仁，但**排除补数（`COMPLEMENT_DATA`）**：补数写的是过去的调度日期，不改变「最新数据多旧」，对当前新鲜度无意义，且在 `metadata` 模式下其物理写入会推进 `UPDATE_TIME` 造成假 `pass`。「补数是否补齐目标日期」是完整性校验、不是新鲜度，不在本设计范围。
-2. **按需**：`POST /v1/tables/{id}/freshness/check`（单表）与 `POST /v1/inspections/freshness/run`（按 scope 批量），等价 `dbt source freshness --select`。
+1. **工作流完成后（主，事件驱动）**：`WorkflowExecutionSyncJob`（`0 */5 * * * ?`）同步到工作流实例**新变为成功**时，对该工作流各任务经 `table_task_relation`（`relation_type = write`）关联的表触发一次检查。**只覆盖本次真正产出的表**，回答「任务报成功了，数据真的到了吗」。不改 DolphinScheduler 链路，只在既有同步作业里挂钩。触发对**手动、定时（调度）**一视同仁，但**排除补数（`COMPLEMENT_DATA`）**：补数写的是过去的调度日期，不改变「最新数据多旧」，对当前新鲜度无意义，且在 `metadata` 模式下其物理写入会推进 `UPDATE_TIME` 造成假 `pass`。「补数是否补齐目标日期」是完整性校验、不是新鲜度，不在本设计范围。多个新成功实例时取**实例ID 最大者**（最近一次运行）归属，其 `workflow_instance_id` 随结果落库，用于按「每次运行」聚合并反查执行。
+2. **按需**：`POST /v1/tables/{id}/freshness/check`（单表），等价 `dbt source freshness --select`。
 
 **不设墙钟轮询、也没有每日巡检兜底。** 数据只在生产任务运行时变动，工作流产出表由触发点 1 在产出后即时检查即可；对未变动的表按时钟反复取数（无论 15 分钟还是每日）都是浪费。非工作流产出的表（外部同步等）由按需触发覆盖。开关 `freshness.check.enabled` 控制触发点 1。
 
 ### 6. 与巡检的关系：无
 
-**freshness 不是巡检规则，也不产生 `inspection_issue`。** 它是独立的事件驱动子系统，红/黄状态活在 `table_freshness_result` 与 `data_table.freshness_status`——对齐 dbt 只写 `sources.json` 状态、不建"问题"的做法。巡检页仅**只读展示**各表最新新鲜度结果（`GET /v1/inspections/freshness`），不把它们转成带 open/resolved 状态流的巡检问题。
+**freshness 不是巡检规则，也不产生 `inspection_issue`。** 它是独立的事件驱动子系统，红/黄状态活在 `table_freshness_result` 与 `data_table.freshness_status`——对齐 dbt 只写 `sources.json` 状态、不建"问题"的做法。展示在**工作流详情页的「数据新鲜度」页签**（该工作流写出表的每次运行问题表数 + 逐表最新状态）与 Data Studio 表级页签，不进巡检页、不转成带 open/resolved 状态流的巡检问题。
 
 初版曾把 freshness 挂成 `data_freshness` 巡检规则（`DataFreshnessRuleHandler`），随每日巡检建 issue、做 `reportUnconfigured`。评审时一并去掉：每日巡检是时钟驱动的兜底，与「检查绑定到运行」矛盾；freshness 的问题面就是它自己的状态与结果历史。`data_freshness` 规则种子、handler 与其 `parseUpdateCycle` / `calculateDelayHours` / `calculateFreshnessSeverity` 全部删除，`inspection_rule` 不再种子该规则。
 
@@ -163,10 +163,12 @@ CREATE TABLE table_freshness_result (
   error_after_seconds BIGINT  DEFAULT NULL,
   error_message  VARCHAR(512) DEFAULT NULL,
   trigger_type   VARCHAR(16)  DEFAULT NULL,    -- manual | schedule | inspection | workflow
+  workflow_instance_id BIGINT  DEFAULT NULL,   -- 触发本次检查的 Dolphin 实例ID；按「每次运行」聚合并反查执行
   checked_by     VARCHAR(50)  DEFAULT NULL,
   created_at     DATETIME     DEFAULT CURRENT_TIMESTAMP,
   KEY idx_table_time (table_id, created_at),
-  KEY idx_status (status)
+  KEY idx_status (status),
+  KEY idx_workflow_instance (workflow_instance_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据新鲜度检查结果';
 
 ALTER TABLE data_table
@@ -193,14 +195,15 @@ freshness:
 | DELETE | `/v1/tables/{id}/freshness` | 删除表级契约 |
 | POST | `/v1/tables/{id}/freshness/check` | 按需单表检查 |
 | GET | `/v1/tables/{id}/freshness/history?limit=` | 结果历史 |
-| GET | `/v1/inspections/freshness` | 按 `status`/`clusterId`/`dbName` 列出各表最新结果（只读） |
-| POST | `/v1/inspections/freshness/run` | 按 scope 批量检查（按需） |
+| GET | `/v1/workflows/{id}/freshness` | 工作流写出表：最新状态汇总 + 每次运行问题表数 + 逐表最新结果（只读） |
 
-响应走既有 `Result<T>` 包装，失败沿用控制器 `try/catch → Result.fail(e.getMessage())` 的现行约定。（`/v1/inspections/freshness*` 挂在巡检控制器下只是路由归类，freshness 结果不进 `inspection_issue`。）
+响应走既有 `Result<T>` 包装，失败沿用控制器 `try/catch → Result.fail(e.getMessage())` 的现行约定。freshness 全部端点均不写 `inspection_issue`。
 
 ### 前端
 
-Data Studio 右侧面板新增「数据新鲜度」页签（`lazy`，插在「访问情况」之后）：契约用 `el-descriptions :column="2"` 展示（字段来源恒为表级），编辑表单按 `mode` 联动显隐 `loadedAtField` / `loadedAtQuery` / `partitionFormat`，选择 `metadata` 时明示「只能发现长期无写入，发现不了写入了旧数据」；下方 `el-table` 带 border 展示结果历史，顶部「立即检查」。未配置契约时展示引导而非空表格。巡检页新增按新鲜度状态过滤的表级最新结果视图（只读）。遵循前端视觉规范，不套多余卡片，兄弟页签保持一致的扁平结构。
+- **Data Studio 表级页签**：契约用 `el-descriptions :column="2"` 展示（字段来源恒为表级），编辑表单按 `mode` 联动显隐 `loadedAtField` / `loadedAtQuery` / `partitionFormat`，选择 `metadata` 时明示局限；`el-table` 带 border 展示结果历史，顶部「立即检查」；未配置时展示引导。
+- **工作流详情页「数据新鲜度」页签**（`lazy`）：顶部状态汇总标签（写出表总数 / 正常 / 预警 / 超时 / 检查失败 / 未配置）；「每次运行的问题表数」表（检查时间 / 触发实例 / `问题数/总数`）——`一眼看出每次检查有问题的表个数`；「写出表最新状态」表（表 / 库 / 状态 / 数据最后加载 / 数据年龄）。
+- 不放在巡检页（freshness 已与巡检解耦，放巡检页语义错位）。遵循前端视觉规范，`el-table` 带 border、不套多余卡片。
 
 ## Risks / Alternatives
 

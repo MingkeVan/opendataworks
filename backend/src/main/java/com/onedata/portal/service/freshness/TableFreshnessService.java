@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.onedata.auth.context.UserContextHolder;
 import com.onedata.portal.dto.TableFreshnessRequest;
 import com.onedata.portal.dto.TableFreshnessResponse;
+import com.onedata.portal.dto.WorkflowFreshnessResponse;
 import com.onedata.portal.entity.DataField;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.TableFreshnessConfig;
@@ -12,10 +13,12 @@ import com.onedata.portal.mapper.DataFieldMapper;
 import com.onedata.portal.mapper.DataTableMapper;
 import com.onedata.portal.mapper.TableFreshnessConfigMapper;
 import com.onedata.portal.mapper.TableFreshnessResultMapper;
+import com.onedata.portal.mapper.TableTaskRelationMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -35,6 +38,7 @@ public class TableFreshnessService {
     private final DataFieldMapper dataFieldMapper;
     private final TableFreshnessConfigMapper freshnessConfigMapper;
     private final TableFreshnessResultMapper freshnessResultMapper;
+    private final TableTaskRelationMapper tableTaskRelationMapper;
     private final FreshnessContractResolver contractResolver;
     private final FreshnessCheckService freshnessCheckService;
 
@@ -116,38 +120,103 @@ public class TableFreshnessService {
     }
 
     /**
-     * 列出各表最新新鲜度结果，支持按状态/数据源/库过滤。
+     * 工作流详情页「数据新鲜度」页签：该工作流写出表的最新状态汇总、每次运行的问题表数、逐表最新结果。
      */
-    public List<TableFreshnessResult> listLatestResults(String status, Long clusterId, String dbName) {
-        LambdaQueryWrapper<TableFreshnessResult> wrapper = new LambdaQueryWrapper<TableFreshnessResult>()
-            .eq(status != null && !status.isEmpty(), TableFreshnessResult::getStatus, status)
-            .eq(clusterId != null, TableFreshnessResult::getClusterId, clusterId)
-            .eq(StringUtils.hasText(dbName), TableFreshnessResult::getDbName, dbName)
-            .orderByDesc(TableFreshnessResult::getCreatedAt);
-        // 每表取最近一条：按创建时间倒序后按 tableId 去重
-        List<TableFreshnessResult> all = freshnessResultMapper.selectList(wrapper);
-        return all.stream()
-            .collect(Collectors.groupingBy(TableFreshnessResult::getTableId,
-                java.util.LinkedHashMap::new, Collectors.toList()))
-            .values().stream()
-            .map(list -> list.get(0))
+    public WorkflowFreshnessResponse workflowFreshness(Long workflowId) {
+        WorkflowFreshnessResponse response = new WorkflowFreshnessResponse();
+        response.setWorkflowId(workflowId);
+        WorkflowFreshnessResponse.Summary summary = new WorkflowFreshnessResponse.Summary();
+        response.setSummary(summary);
+        response.setRuns(new ArrayList<>());
+        response.setTables(new ArrayList<>());
+
+        List<Long> tableIds = tableTaskRelationMapper.selectWriteTableIdsByWorkflow(workflowId);
+        if (tableIds == null || tableIds.isEmpty()) {
+            return response;
+        }
+        List<DataTable> tables = dataTableMapper.selectBatchIds(tableIds).stream()
+            .filter(t -> !Integer.valueOf(1).equals(t.getDeleted()))
             .collect(Collectors.toList());
+        if (tables.isEmpty()) {
+            return response;
+        }
+        List<Long> activeIds = tables.stream().map(DataTable::getId).collect(Collectors.toList());
+        summary.setTotal(tables.size());
+
+        // 逐表最新结果（按 tableId 取最近一条）
+        Map<Long, TableFreshnessResult> latestByTable = new java.util.HashMap<>();
+        for (TableFreshnessResult r : freshnessResultMapper.selectList(
+                new LambdaQueryWrapper<TableFreshnessResult>()
+                    .in(TableFreshnessResult::getTableId, activeIds)
+                    .orderByDesc(TableFreshnessResult::getCreatedAt))) {
+            latestByTable.putIfAbsent(r.getTableId(), r);
+        }
+
+        for (DataTable table : tables) {
+            TableFreshnessResult latest = latestByTable.get(table.getId());
+            WorkflowFreshnessResponse.TableStatus ts = new WorkflowFreshnessResponse.TableStatus();
+            ts.setTableId(table.getId());
+            ts.setDbName(table.getDbName());
+            ts.setTableName(table.getTableName());
+            ts.setConfigured(findConfig(table.getId()) != null);
+            if (latest != null) {
+                ts.setStatus(latest.getStatus());
+                ts.setMaxLoadedAt(latest.getMaxLoadedAt());
+                ts.setAgeSeconds(latest.getAgeSeconds());
+                ts.setCheckedAt(latest.getCreatedAt());
+                bumpSummary(summary, latest.getStatus());
+            } else {
+                summary.setUnconfigured(summary.getUnconfigured() + 1);
+            }
+            response.getTables().add(ts);
+        }
+
+        response.setRuns(buildRuns(activeIds));
+        return response;
+    }
+
+    private void bumpSummary(WorkflowFreshnessResponse.Summary s, String status) {
+        switch (status == null ? "" : status) {
+            case FreshnessCheckResult.STATUS_PASS: s.setPass(s.getPass() + 1); break;
+            case FreshnessCheckResult.STATUS_WARN: s.setWarn(s.getWarn() + 1); break;
+            case FreshnessCheckResult.STATUS_ERROR: s.setError(s.getError() + 1); break;
+            case FreshnessCheckResult.STATUS_RUNTIME_ERROR: s.setRuntimeError(s.getRuntimeError() + 1); break;
+            default: break;
+        }
     }
 
     /**
-     * 按 scope 批量检查（数据源/库可选）。
+     * 按触发实例聚合成「每次运行」，返回每次运行的问题表数。近 500 行内、最近 20 次运行。
      */
-    public int runByScope(Long clusterId, String dbName, String operator) {
-        LambdaQueryWrapper<DataTable> wrapper = new LambdaQueryWrapper<DataTable>()
-            .eq(DataTable::getStatus, "active")
-            .eq(clusterId != null, DataTable::getClusterId, clusterId)
-            .eq(StringUtils.hasText(dbName), DataTable::getDbName, dbName);
-        List<DataTable> tables = dataTableMapper.selectList(wrapper);
-        if (tables.isEmpty()) {
-            return 0;
+    private List<WorkflowFreshnessResponse.Run> buildRuns(List<Long> tableIds) {
+        List<TableFreshnessResult> rows = freshnessResultMapper.selectList(
+            new LambdaQueryWrapper<TableFreshnessResult>()
+                .in(TableFreshnessResult::getTableId, tableIds)
+                .isNotNull(TableFreshnessResult::getWorkflowInstanceId)
+                .orderByDesc(TableFreshnessResult::getCreatedAt)
+                .last("LIMIT 500"));
+
+        // 保序（createdAt 倒序）分组
+        Map<Long, List<TableFreshnessResult>> byInstance = rows.stream()
+            .collect(Collectors.groupingBy(TableFreshnessResult::getWorkflowInstanceId,
+                java.util.LinkedHashMap::new, Collectors.toList()));
+
+        List<WorkflowFreshnessResponse.Run> runs = new ArrayList<>();
+        for (Map.Entry<Long, List<TableFreshnessResult>> e : byInstance.entrySet()) {
+            List<TableFreshnessResult> group = e.getValue();
+            WorkflowFreshnessResponse.Run run = new WorkflowFreshnessResponse.Run();
+            run.setWorkflowInstanceId(e.getKey());
+            run.setCheckedAt(group.get(0).getCreatedAt());
+            run.setTotal(group.size());
+            run.setProblem((int) group.stream()
+                .filter(r -> !FreshnessCheckResult.STATUS_PASS.equals(r.getStatus()))
+                .count());
+            runs.add(run);
+            if (runs.size() >= 20) {
+                break;
+            }
         }
-        return freshnessCheckService.checkBatch(
-            tables, "manual", operator == null ? "manual" : operator).size();
+        return runs;
     }
 
     // ---- 校验 ----

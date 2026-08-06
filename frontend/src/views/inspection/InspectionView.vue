@@ -115,54 +115,6 @@
       </el-table>
     </el-card>
 
-    <!-- 数据新鲜度 -->
-    <el-card class="freshness-card">
-      <template #header>
-        <div class="card-header">
-          <span>数据新鲜度</span>
-          <div class="header-actions">
-            <el-select
-              v-model="freshnessStatusFilter"
-              placeholder="全部状态"
-              clearable
-              size="small"
-              style="width: 140px"
-              @change="loadFreshnessResults"
-            >
-              <el-option label="正常" value="pass" />
-              <el-option label="预警" value="warn" />
-              <el-option label="超时" value="error" />
-              <el-option label="检查失败" value="runtime_error" />
-            </el-select>
-            <el-button size="small" :loading="runningFreshness" @click="handleRunFreshness">执行检查</el-button>
-            <el-button size="small" :icon="Refresh" @click="loadFreshnessResults" />
-          </div>
-        </div>
-      </template>
-
-      <el-table :data="freshnessResults" border size="small" v-loading="freshnessLoading">
-        <el-table-column prop="tableName" label="表" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="dbName" label="库" min-width="120" show-overflow-tooltip />
-        <el-table-column label="状态" width="110">
-          <template #default="{ row }">
-            <el-tag :type="freshnessStatusType(row.status)" size="small" effect="plain">
-              {{ freshnessStatusLabel(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="数据最后加载" min-width="170">
-          <template #default="{ row }">{{ row.maxLoadedAt || '-' }}</template>
-        </el-table-column>
-        <el-table-column label="检查时间" min-width="170">
-          <template #default="{ row }">{{ row.createdAt || '-' }}</template>
-        </el-table-column>
-        <el-table-column label="触发" width="90">
-          <template #default="{ row }">{{ freshnessTriggerLabel(row.triggerType) }}</template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-if="!freshnessLoading && freshnessResults.length === 0" description="暂无新鲜度检查结果" />
-    </el-card>
-
     <!-- 巡检记录列表 -->
     <el-card class="records-card">
       <template #header>
@@ -547,9 +499,7 @@ import {
   getIssueFixPlan,
   fixInspectionIssue,
   updateRuleEnabled,
-  updateIssueStatus,
-  listFreshnessResults,
-  runFreshnessCheck
+  updateIssueStatus
 } from '@/api/inspection'
 import { dorisClusterApi } from '@/api/doris'
 import { tableApi } from '@/api/table'
@@ -641,52 +591,7 @@ onMounted(() => {
   loadRecords()
   loadRules()
   loadClusters()
-  loadFreshnessResults()
 })
-
-// ---- 数据新鲜度 ----
-const freshnessResults = ref([])
-const freshnessLoading = ref(false)
-const runningFreshness = ref(false)
-const freshnessStatusFilter = ref('')
-
-const FRESHNESS_STATUS = {
-  pass: { label: '正常', type: 'success' },
-  warn: { label: '预警', type: 'warning' },
-  error: { label: '超时', type: 'danger' },
-  runtime_error: { label: '检查失败', type: 'info' }
-}
-const freshnessStatusLabel = (s) => FRESHNESS_STATUS[s]?.label || s || '-'
-const freshnessStatusType = (s) => FRESHNESS_STATUS[s]?.type || 'info'
-const FRESHNESS_TRIGGER = { manual: '手动', schedule: '定时', inspection: '巡检', workflow: '工作流' }
-const freshnessTriggerLabel = (t) => FRESHNESS_TRIGGER[t] || t || '-'
-
-const loadFreshnessResults = async () => {
-  freshnessLoading.value = true
-  try {
-    const params = {}
-    if (freshnessStatusFilter.value) params.status = freshnessStatusFilter.value
-    const res = await listFreshnessResults(params)
-    freshnessResults.value = res || []
-  } catch (error) {
-    freshnessResults.value = []
-  } finally {
-    freshnessLoading.value = false
-  }
-}
-
-const handleRunFreshness = async () => {
-  runningFreshness.value = true
-  try {
-    const res = await runFreshnessCheck({})
-    ElMessage.success(`新鲜度检查完成，检查 ${res?.checked ?? 0} 张表`)
-    await loadFreshnessResults()
-  } catch (error) {
-    ElMessage.error('新鲜度检查失败: ' + (error?.response?.data?.message || error.message))
-  } finally {
-    runningFreshness.value = false
-  }
-}
 
 const loadClusters = async () => {
   try {

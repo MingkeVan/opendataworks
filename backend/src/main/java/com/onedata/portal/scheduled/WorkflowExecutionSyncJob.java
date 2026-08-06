@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -50,9 +51,8 @@ public class WorkflowExecutionSyncJob {
                     dolphinSchedulerService.listWorkflowInstances(workflow.getWorkflowCode(), 10);
                 cacheService.replaceCache(workflow, instances);
 
-                if (hasNewlySucceeded(instances, priorSuccess)) {
-                    workflowFreshnessTrigger.onWorkflowSucceeded(workflow.getId());
-                }
+                latestNewlySucceeded(instances, priorSuccess).ifPresent(instance ->
+                    workflowFreshnessTrigger.onWorkflowSucceeded(workflow.getId(), instance.getInstanceId()));
             } catch (Exception ex) {
                 log.warn("Failed to sync workflow {}: {}", workflow.getWorkflowName(), ex.getMessage());
             }
@@ -73,24 +73,29 @@ public class WorkflowExecutionSyncJob {
     }
 
     /**
-     * 是否有新变为成功、且值得触发新鲜度检查的实例。
+     * 挑出触发新鲜度检查的实例：新变为成功、非补数中，取实例ID 最大者（即最近一次运行）。
+     * 检查反映的是「最新数据多旧」，因此归属到最近那次成功运行，并把其实例ID 落库以便反查执行。
      *
      * <p>排除补数（{@code COMPLEMENT_DATA}）：补数写的是过去的调度日期，不改变「最新数据多旧」，
      * 对当前新鲜度无意义；且在 metadata 模式下其物理写入会推进 {@code UPDATE_TIME} 造成假 pass。
      * 手动、定时（调度）成功实例照常触发。
      */
-    boolean hasNewlySucceeded(List<WorkflowInstanceSummary> instances, Set<Long> priorSuccess) {
+    Optional<WorkflowInstanceSummary> latestNewlySucceeded(List<WorkflowInstanceSummary> instances,
+                                                           Set<Long> priorSuccess) {
         if (instances == null) {
-            return false;
+            return Optional.empty();
         }
+        WorkflowInstanceSummary latest = null;
         for (WorkflowInstanceSummary instance : instances) {
             if (isSuccess(instance.getState()) && instance.getInstanceId() != null
                 && !priorSuccess.contains(instance.getInstanceId())
                 && !isBackfill(instance.getCommandType())) {
-                return true;
+                if (latest == null || instance.getInstanceId() > latest.getInstanceId()) {
+                    latest = instance;
+                }
             }
         }
-        return false;
+        return Optional.ofNullable(latest);
     }
 
     private boolean isSuccess(String state) {

@@ -26,9 +26,10 @@ public class WorkflowFreshnessTrigger {
     private final FreshnessCheckService freshnessCheckService;
 
     /**
-     * 工作流实例新变为成功时调用。触发失败只记日志，不影响调用方主流程。
+     * 工作流实例新变为成功时调用。{@code instanceId} 是触发本次检查的 Dolphin 实例ID，
+     * 会随结果落库以便按「每次运行」聚合并反查执行。触发失败只记日志，不影响调用方主流程。
      */
-    public void onWorkflowSucceeded(Long workflowId) {
+    public void onWorkflowSucceeded(Long workflowId, Long instanceId) {
         if (!properties.isEnabled() || workflowId == null) {
             return;
         }
@@ -44,10 +45,10 @@ public class WorkflowFreshnessTrigger {
                 return;
             }
             List<FreshnessCheckResult> results =
-                freshnessCheckService.checkBatch(tables, "workflow", "system");
+                freshnessCheckService.checkBatch(tables, "workflow", "system", instanceId);
             if (!results.isEmpty()) {
-                log.info("Workflow {} freshness check done: writeTables={}, checked={}",
-                    workflowId, tables.size(), results.size());
+                log.info("Workflow {} instance {} freshness check done: writeTables={}, checked={}",
+                    workflowId, instanceId, tables.size(), results.size());
             }
         } catch (Exception e) {
             log.warn("Workflow freshness trigger failed for workflow {}: {}", workflowId, e.getMessage());

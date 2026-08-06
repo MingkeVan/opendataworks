@@ -3,6 +3,7 @@ package com.onedata.portal.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.Result;
+import com.onedata.portal.dto.WorkflowFreshnessResponse;
 import com.onedata.portal.dto.workflow.WorkflowApprovalRequest;
 import com.onedata.portal.dto.workflow.WorkflowBackfillRequest;
 import com.onedata.portal.dto.workflow.WorkflowExportJsonResponse;
@@ -32,6 +33,7 @@ import com.onedata.portal.service.WorkflowPublishService;
 import com.onedata.portal.service.WorkflowDefinitionLifecycleService;
 import com.onedata.portal.service.WorkflowScheduleService;
 import com.onedata.portal.service.WorkflowService;
+import com.onedata.portal.service.freshness.TableFreshnessService;
 import com.onedata.portal.service.lineage.TaskLineageConsistencyChecker;
 import com.onedata.portal.service.WorkflowVersionOperationService;
 import lombok.RequiredArgsConstructor;
@@ -51,6 +53,7 @@ public class WorkflowController {
     private final WorkflowVersionOperationService workflowVersionOperationService;
     private final WorkflowDefinitionLifecycleService workflowDefinitionLifecycleService;
     private final TaskLineageConsistencyChecker lineageConsistencyChecker;
+    private final TableFreshnessService tableFreshnessService;
 
     @GetMapping
     public Result<PageResult<DataWorkflow>> list(WorkflowQueryRequest request) {
@@ -61,6 +64,18 @@ public class WorkflowController {
     @GetMapping("/{id}")
     public Result<WorkflowDetailResponse> detail(@PathVariable Long id) {
         return Result.success(workflowService.getDetail(id));
+    }
+
+    /**
+     * 工作流数据新鲜度：写出表最新状态汇总、每次运行的问题表数、逐表最新结果。
+     */
+    @GetMapping("/{id}/freshness")
+    public Result<WorkflowFreshnessResponse> freshness(@PathVariable Long id) {
+        try {
+            return Result.success(tableFreshnessService.workflowFreshness(id));
+        } catch (Exception e) {
+            return Result.fail(e.getMessage());
+        }
     }
 
     @PostMapping("/{id}/versions/compare")

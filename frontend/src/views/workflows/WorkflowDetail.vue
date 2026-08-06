@@ -478,6 +478,72 @@
               @current-change="loadExecutionInstances"
             />
           </el-tab-pane>
+          <el-tab-pane label="数据新鲜度" name="freshness">
+            <div v-loading="freshnessLoading" class="freshness-pane">
+              <div class="freshness-toolbar">
+                <div class="freshness-summary" v-if="freshness">
+                  <el-tag type="info" effect="plain">写出表 {{ freshness.summary.total }}</el-tag>
+                  <el-tag type="success" effect="plain">正常 {{ freshness.summary.pass }}</el-tag>
+                  <el-tag type="warning" effect="plain">预警 {{ freshness.summary.warn }}</el-tag>
+                  <el-tag type="danger" effect="plain">超时 {{ freshness.summary.error }}</el-tag>
+                  <el-tag type="info" effect="plain">检查失败 {{ freshness.summary.runtimeError }}</el-tag>
+                  <el-tag effect="plain">未配置 {{ freshness.summary.unconfigured }}</el-tag>
+                </div>
+                <el-button size="small" @click="loadWorkflowFreshness">刷新</el-button>
+              </div>
+
+              <div class="freshness-section-title">每次运行的问题表数</div>
+              <el-table :data="freshness?.runs || []" border size="small">
+                <el-table-column label="检查时间" min-width="170">
+                  <template #default="{ row }">{{ formatDateTime(row.checkedAt) }}</template>
+                </el-table-column>
+                <el-table-column label="触发实例" min-width="110">
+                  <template #default="{ row }">#{{ row.workflowInstanceId }}</template>
+                </el-table-column>
+                <el-table-column label="问题表数" min-width="130">
+                  <template #default="{ row }">
+                    <el-tag :type="row.problem > 0 ? 'danger' : 'success'" size="small" effect="plain">
+                      {{ row.problem }} / {{ row.total }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <el-empty
+                v-if="freshness && freshness.runs.length === 0"
+                :image-size="60"
+                description="暂无检查记录（工作流成功产出后自动检查其写出表）"
+              />
+
+              <div class="freshness-section-title">写出表最新状态</div>
+              <el-table :data="freshness?.tables || []" border size="small">
+                <el-table-column label="表" min-width="180" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.tableName }}</template>
+                </el-table-column>
+                <el-table-column prop="dbName" label="库" min-width="120" show-overflow-tooltip />
+                <el-table-column label="状态" width="100">
+                  <template #default="{ row }">
+                    <el-tag v-if="row.status" :type="freshnessStatusType(row.status)" size="small" effect="plain">
+                      {{ freshnessStatusLabel(row.status) }}
+                    </el-tag>
+                    <el-tag v-else type="info" size="small" effect="plain">
+                      {{ row.configured ? '待检查' : '未配置' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="数据最后加载" min-width="170">
+                  <template #default="{ row }">{{ row.maxLoadedAt ? formatDateTime(row.maxLoadedAt) : '-' }}</template>
+                </el-table-column>
+                <el-table-column label="数据年龄" min-width="120">
+                  <template #default="{ row }">{{ humanizeAge(row.ageSeconds) }}</template>
+                </el-table-column>
+              </el-table>
+              <el-empty
+                v-if="freshness && freshness.tables.length === 0"
+                :image-size="60"
+                description="该工作流没有写出表"
+              />
+            </div>
+          </el-tab-pane>
           <el-tab-pane label="版本历史" name="changes">
             <div class="change-toolbar">
               <el-button
@@ -861,6 +927,42 @@ const executionInstances = ref([])
 const executionInstancesLoading = ref(false)
 const executionInstancesLoaded = ref(false)
 const executionTotal = ref(0)
+
+// 数据新鲜度页签
+const freshness = ref(null)
+const freshnessLoading = ref(false)
+const freshnessLoaded = ref(false)
+const FRESHNESS_STATUS = {
+  pass: { label: '正常', type: 'success' },
+  warn: { label: '预警', type: 'warning' },
+  error: { label: '超时', type: 'danger' },
+  runtime_error: { label: '检查失败', type: 'info' }
+}
+const freshnessStatusLabel = (s) => FRESHNESS_STATUS[s]?.label || s || '-'
+const freshnessStatusType = (s) => FRESHNESS_STATUS[s]?.type || 'info'
+const humanizeAge = (seconds) => {
+  if (seconds === null || seconds === undefined) return '-'
+  let s = Math.max(0, Number(seconds))
+  const d = Math.floor(s / 86400); s -= d * 86400
+  const h = Math.floor(s / 3600); s -= h * 3600
+  const m = Math.floor(s / 60)
+  if (d > 0) return h > 0 ? `${d} 天 ${h} 小时` : `${d} 天`
+  if (h > 0) return m > 0 ? `${h} 小时 ${m} 分钟` : `${h} 小时`
+  return `${m} 分钟`
+}
+const loadWorkflowFreshness = async () => {
+  const id = workflow.value?.workflow?.id
+  if (!id) return
+  freshnessLoading.value = true
+  try {
+    freshness.value = await workflowApi.freshness(id)
+    freshnessLoaded.value = true
+  } catch (e) {
+    // 拦截器已提示错误
+  } finally {
+    freshnessLoading.value = false
+  }
+}
 const executionQuery = reactive({
   pageNum: 1,
   pageSize: 10
@@ -1890,6 +1992,9 @@ watch(activeTab, (tab) => {
   if (tab === 'executions' && !executionInstancesLoaded.value) {
     loadExecutionInstances()
   }
+  if (tab === 'freshness' && !freshnessLoaded.value) {
+    loadWorkflowFreshness()
+  }
 })
 
 watch(currentDolphinConfigId, async (nextId, prevId) => {
@@ -1921,6 +2026,26 @@ watch(
 .execution-pagination {
   justify-content: flex-end;
   margin-top: 20px;
+}
+
+.freshness-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.freshness-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.freshness-section-title {
+  font-weight: 600;
+  margin: 16px 0 8px;
+}
+.freshness-section-title:first-of-type {
+  margin-top: 0;
 }
 
 .workflow-detail {

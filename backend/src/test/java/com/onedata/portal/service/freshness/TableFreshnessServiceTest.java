@@ -32,11 +32,13 @@ class TableFreshnessServiceTest {
     private final DataFieldMapper dataFieldMapper = mock(DataFieldMapper.class);
     private final TableFreshnessConfigMapper configMapper = mock(TableFreshnessConfigMapper.class);
     private final TableFreshnessResultMapper resultMapper = mock(TableFreshnessResultMapper.class);
+    private final com.onedata.portal.mapper.TableTaskRelationMapper relationMapper =
+        mock(com.onedata.portal.mapper.TableTaskRelationMapper.class);
     private final FreshnessContractResolver resolver = new FreshnessContractResolver();
     private final FreshnessCheckService checkService = mock(FreshnessCheckService.class);
 
     private final TableFreshnessService service = new TableFreshnessService(
-        dataTableMapper, dataFieldMapper, configMapper, resultMapper, resolver, checkService);
+        dataTableMapper, dataFieldMapper, configMapper, resultMapper, relationMapper, resolver, checkService);
 
     private void tableExists() {
         DataTable t = new DataTable();
