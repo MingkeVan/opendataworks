@@ -1,5 +1,6 @@
 import {
   buildImportPayload,
+  createRequestGuard,
   describeRuntimeBinding,
   describeRuntimeConflict,
   formatRuntimeWorkflowLabel,
@@ -29,6 +30,33 @@ describe('importFormHelper', () => {
       expect(parseDefinitionHints('not json')).toEqual(empty)
       expect(parseDefinitionHints(JSON.stringify({ processDefinition: { code: 0 } })))
         .toEqual(empty)
+    })
+  })
+
+  describe('createRequestGuard', () => {
+    it('treats only the newest request as current', () => {
+      const guard = createRequestGuard()
+      const first = guard.next()
+      const second = guard.next()
+      // 慢请求晚于新请求返回，必须被丢弃
+      expect(guard.isStale(first)).toBe(true)
+      expect(guard.isStale(second)).toBe(false)
+    })
+
+    it('invalidates every in-flight request on reset', () => {
+      const guard = createRequestGuard()
+      const inFlight = guard.next()
+      guard.invalidate()
+      expect(guard.isStale(inFlight)).toBe(true)
+    })
+
+    it('keeps guards independent of each other', () => {
+      const a = createRequestGuard()
+      const b = createRequestGuard()
+      const tokenA = a.next()
+      b.next()
+      b.next()
+      expect(a.isStale(tokenA)).toBe(false)
     })
   })
 

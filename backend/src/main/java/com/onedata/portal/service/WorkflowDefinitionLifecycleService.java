@@ -24,9 +24,11 @@ import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowSchedule;
 import com.onedata.portal.dto.workflow.runtime.DolphinRuntimeWorkflowOption;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
+import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.entity.WorkflowVersion;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
+import com.onedata.portal.mapper.DolphinConfigMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
 import com.onedata.portal.service.lineage.TaskLineageConsistencyChecker;
 import lombok.Data;
@@ -80,6 +82,7 @@ public class WorkflowDefinitionLifecycleService {
     private final WorkflowDefinitionAssembler workflowDefinitionAssembler;
     private final TaskLineageConsistencyChecker lineageConsistencyChecker;
     private final DataWorkflowMapper dataWorkflowMapper;
+    private final DolphinConfigMapper dolphinConfigMapper;
     private final DataTaskMapper dataTaskMapper;
     private final WorkflowVersionMapper workflowVersionMapper;
     private final ObjectMapper objectMapper;
@@ -170,6 +173,21 @@ public class WorkflowDefinitionLifecycleService {
 
     private DataWorkflow findWorkflowByRuntime(Long dolphinConfigId, Long projectCode, Long workflowCode) {
         return findWorkflowByRuntime(dolphinConfigId, projectCode, workflowCode, false);
+    }
+
+    /**
+     * 以目标 Dolphin 环境这一行作为互斥点，把"绑定该环境内某个运行态"的并发导入串行化。
+     * 运行态编码本来就只在单个环境内唯一，按环境串行是自然的粒度；导入是低频人工操作，
+     * 这点串行代价可以接受。
+     */
+    private void lockDolphinConfigForRuntimeBinding(Long dolphinConfigId) {
+        if (dolphinConfigId == null || dolphinConfigId <= 0) {
+            return;
+        }
+        dolphinConfigMapper.selectList(
+                Wrappers.<DolphinConfig>lambdaQuery()
+                        .eq(DolphinConfig::getId, dolphinConfigId)
+                        .last("FOR UPDATE"));
     }
 
     /**
@@ -917,8 +935,16 @@ public class WorkflowDefinitionLifecycleService {
 
     /**
      * 事务内兜底：预检到提交之间可能有并发导入抢先占用同一个运行态。
+     *
+     * <p>这里必须先在 {@code dolphin_config} 对应行上取排他行锁再查占用。只靠占用查询自己的
+     * {@code FOR UPDATE} 是不够的：目标行还不存在时它只能拿到间隙锁，而间隙锁是"纯抑制性"的、
+     * 可以被多个事务同时持有，两个并发导入会双双读到空。之后两边把 {@code workflow_code}
+     * 从 NULL 改成同一个值时，在 REPEATABLE READ 下互相等待对方的间隙锁而死锁，
+     * 在 READ COMMITTED 下则因为不加间隙锁而双双绑定成功。
+     * 锁一行真实存在的记录才是真正互斥的，且不依赖隔离级别。
      */
     private void ensureWorkflowConflictAbsent(WorkflowImportRuntimeBinding binding) {
+        lockDolphinConfigForRuntimeBinding(binding.getDolphinConfigId());
         DataWorkflow existing = findWorkflowByRuntime(binding.getDolphinConfigId(),
                 binding.getProjectCode(), binding.getWorkflowCode(), true);
         if (existing != null) {

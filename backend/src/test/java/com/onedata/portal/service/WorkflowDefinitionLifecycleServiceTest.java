@@ -20,12 +20,14 @@ import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.WorkflowVersion;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
+import com.onedata.portal.mapper.DolphinConfigMapper;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -43,6 +45,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -54,6 +58,7 @@ class WorkflowDefinitionLifecycleServiceTest {
         TableInfoHelper.initTableInfo(assistant, DataTask.class);
         TableInfoHelper.initTableInfo(assistant, DataWorkflow.class);
         TableInfoHelper.initTableInfo(assistant, WorkflowVersion.class);
+        TableInfoHelper.initTableInfo(assistant, com.onedata.portal.entity.DolphinConfig.class);
     }
 
     @Mock
@@ -73,6 +78,9 @@ class WorkflowDefinitionLifecycleServiceTest {
 
     @Mock
     private DataWorkflowMapper dataWorkflowMapper;
+
+    @Mock
+    private DolphinConfigMapper dolphinConfigMapper;
 
     @Mock
     private DataTaskMapper dataTaskMapper;
@@ -102,6 +110,7 @@ class WorkflowDefinitionLifecycleServiceTest {
                 workflowDefinitionAssembler,
                 lineageConsistencyChecker,
                 dataWorkflowMapper,
+                dolphinConfigMapper,
                 dataTaskMapper,
                 workflowVersionMapper,
                 new com.fasterxml.jackson.databind.ObjectMapper());
@@ -748,6 +757,28 @@ class WorkflowDefinitionLifecycleServiceTest {
         assertEquals(TARGET_DOLPHIN_CONFIG_ID, updated.getDolphinConfigId());
         verify(workflowDefinitionAssembler)
                 .refreshRuntimeBindings(any(), eq(TARGET_DOLPHIN_CONFIG_ID), eq(TARGET_PROJECT_CODE));
+    }
+
+    @Test
+    void commitShouldLockDolphinConfigBeforeCheckingRuntimeOccupancy() {
+        when(runtimeDefinitionService.findRuntimeWorkflow(TARGET_DOLPHIN_CONFIG_ID, TARGET_PROJECT_CODE, 8888L))
+                .thenReturn(runtimeOption(8888L, "wf_runtime_target", "ONLINE"));
+
+        commitSingleTaskImport(8888L, 93L);
+
+        // 占用判定在目标行还不存在时只能拿到间隙锁，而间隙锁可被多事务同时持有，
+        // 因此必须先锁住 dolphin_config 这一行真实记录才是真互斥。顺序颠倒就等于没锁。
+        InOrder inOrder = inOrder(dolphinConfigMapper, dataWorkflowMapper);
+        inOrder.verify(dolphinConfigMapper).selectList(any());
+        inOrder.verify(dataWorkflowMapper).selectList(any());
+    }
+
+    @Test
+    void commitShouldNotTakeRuntimeLockWhenNotLinked() {
+        // 不关联既有运行态时没有可争抢的目标，不该白白串行化导入
+        commitSingleTaskImport(null, 94L);
+
+        verify(dolphinConfigMapper, never()).selectList(any());
     }
 
     @Test

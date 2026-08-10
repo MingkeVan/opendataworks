@@ -18,6 +18,20 @@ const firstPresent = (node, keys) => {
 }
 
 /**
+ * 并发请求守卫：每次发起前取一个递增序号，回来时确认自己仍是最新的那次。
+ * 目标 Dolphin 环境可以被随时切换，慢请求晚于新请求返回就会把别的环境的数据写进来，
+ * 用户看到 A 的列表却带着 B 的 dolphinConfigId 去提交。
+ */
+export const createRequestGuard = () => {
+  let latest = 0
+  return {
+    next: () => ++latest,
+    isStale: (token) => token !== latest,
+    invalidate: () => { latest += 1 }
+  }
+}
+
+/**
  * 解析待导入 JSON 中携带的来源运行态信息。
  * 这些值只用于「猜一个默认关联项」，最终归属由用户在表单上确认、后端复核。
  */

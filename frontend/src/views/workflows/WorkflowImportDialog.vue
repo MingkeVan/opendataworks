@@ -270,6 +270,7 @@ import { workflowApi } from '@/api/workflow'
 import { settingsApi } from '@/api/settings'
 import {
   buildImportPayload,
+  createRequestGuard,
   describeRuntimeBinding,
   describeRuntimeConflict,
   formatDolphinConfigLabel,
@@ -329,8 +330,10 @@ const previewLoading = ref(false)
 const commitLoading = ref(false)
 const previewResult = ref(null)
 
-// 自增序号，用于丢弃乱序返回的运行态探测结果
-let autoLinkToken = 0
+// 目标环境可随时切换，三处异步读取都要能丢弃过期响应
+const autoLinkGuard = createRequestGuard()
+const runtimeListGuard = createRequestGuard()
+const dolphinListGuard = createRequestGuard()
 
 const selectableConfigCount = computed(
   () => dolphinConfigs.value.filter((item) => item.isActive !== false).length
@@ -435,7 +438,7 @@ const handleDefinitionJsonChange = () => {
  */
 const autoLinkFromDefinition = async () => {
   form.linkedWorkflowCode = null
-  const token = ++autoLinkToken
+  const token = autoLinkGuard.next()
   const hints = parseDefinitionHints(form.definitionJson)
   const configId = form.dolphinConfigId
   if (!hints.workflowCode || !configId) return
@@ -444,7 +447,7 @@ const autoLinkFromDefinition = async () => {
       dolphinConfigId: configId
     })
     // 期间用户又换了文件或环境，这次结果已经过期
-    if (token !== autoLinkToken || configId !== form.dolphinConfigId) return
+    if (autoLinkGuard.isStale(token) || configId !== form.dolphinConfigId) return
     if (!found?.workflowCode) return
     if (!runtimeWorkflows.value.some((item) => item.workflowCode === found.workflowCode)) {
       runtimeWorkflows.value = [found, ...runtimeWorkflows.value]
@@ -458,21 +461,27 @@ const autoLinkFromDefinition = async () => {
 }
 
 const loadRuntimeWorkflows = async (keyword) => {
-  if (!form.dolphinConfigId) return
+  const configId = form.dolphinConfigId
+  if (!configId) return
+  const token = runtimeListGuard.next()
   runtimeLoading.value = true
   try {
     const page = await workflowApi.listImportDolphinWorkflows({
-      dolphinConfigId: form.dolphinConfigId,
+      dolphinConfigId: configId,
       pageNum: 1,
       pageSize: 50,
       keyword: keyword || undefined
     })
+    if (runtimeListGuard.isStale(token) || configId !== form.dolphinConfigId) return
     runtimeWorkflows.value = page?.records || []
   } catch (error) {
     console.error('加载目标 Dolphin 工作流失败', error)
+    if (runtimeListGuard.isStale(token) || configId !== form.dolphinConfigId) return
     runtimeWorkflows.value = []
   } finally {
-    runtimeLoading.value = false
+    if (!runtimeListGuard.isStale(token)) {
+      runtimeLoading.value = false
+    }
   }
 }
 
@@ -498,21 +507,27 @@ const handleDolphinSizeChange = () => {
 }
 
 const loadDolphinWorkflows = async () => {
-  if (!form.dolphinConfigId) return
+  const configId = form.dolphinConfigId
+  if (!configId) return
+  const token = dolphinListGuard.next()
   dolphinLoading.value = true
   try {
     const page = await workflowApi.listImportDolphinWorkflows({
-      dolphinConfigId: form.dolphinConfigId,
+      dolphinConfigId: configId,
       pageNum: dolphinPagination.pageNum,
       pageSize: dolphinPagination.pageSize
     })
+    if (dolphinListGuard.isStale(token) || configId !== form.dolphinConfigId) return
     dolphinWorkflows.value = page?.records || []
     dolphinPagination.total = page?.total || 0
   } catch (error) {
     console.error('加载 Dolphin 工作流失败', error)
+    if (dolphinListGuard.isStale(token) || configId !== form.dolphinConfigId) return
     ElMessage.error('加载 Dolphin 工作流失败')
   } finally {
-    dolphinLoading.value = false
+    if (!dolphinListGuard.isStale(token)) {
+      dolphinLoading.value = false
+    }
   }
 }
 
@@ -581,7 +596,9 @@ const resetState = () => {
   form.relationDecision = ''
   fileName.value = ''
   previewResult.value = null
-  autoLinkToken += 1
+  autoLinkGuard.invalidate()
+  runtimeListGuard.invalidate()
+  dolphinListGuard.invalidate()
   runtimeWorkflows.value = []
   dolphinWorkflows.value = []
   dolphinPagination.pageNum = 1
