@@ -17,6 +17,7 @@ import java.util.List;
  *   <li>发布或审批通过时创建、更新并固化 Dolphin 运行态绑定</li>
  *   <li>切换调度环境时清空旧运行态并把工作流指向目标 Dolphin</li>
  *   <li>修改或删除 Dolphin 环境（两者都是"先统计绑定数量、再写"的读改写）</li>
+ *   <li>{@code WorkflowRuntimeSyncService} 当前无对外入口；未来接入时也必须在首次读库前取锁</li>
  * </ul>
  *
  * <p>为什么不按 Dolphin 环境分别加锁：占用判定落在
