@@ -119,7 +119,13 @@ RESET 时定义 JSON 走 `WorkflowDefinitionAssembler.refreshRuntimeBindings`，
 
 ## Interfaces / Data Model
 
-复用 `data_workflow` 既有字段，仅新增一个非唯一索引 `V51__add_data_workflow_runtime_index.sql`：`idx_data_workflow_runtime (project_code, workflow_code)`，用于支撑提交阶段的加锁复核。
+复用 `data_workflow` 既有字段。`V51__add_data_workflow_runtime_index.sql` 做三件事：
+
+- 新增非唯一索引 `idx_data_workflow_runtime (project_code, workflow_code)`，支撑提交阶段的加锁复核
+- 向 `sys_config` 播种 `workflow.runtime_binding.lock` 一行，作为运行态绑定的全局互斥点
+- 把已绑定运行态但 `dolphin_config_id` 为空的行回填到当前默认环境
+
+前两者是幂等加法；回填只影响此前隐式跟随默认环境的行，把隐式归属变成显式归属。
 
 ### 请求/响应
 
