@@ -15,6 +15,7 @@ import java.util.List;
  * <ul>
  *   <li>导入时把工作流绑定到目标 Dolphin 的既有运行态</li>
  *   <li>发布或审批通过时创建、更新并固化 Dolphin 运行态绑定</li>
+ *   <li>切换调度环境时清空旧运行态并把工作流指向目标 Dolphin</li>
  *   <li>修改或删除 Dolphin 环境（两者都是"先统计绑定数量、再写"的读改写）</li>
  * </ul>
  *

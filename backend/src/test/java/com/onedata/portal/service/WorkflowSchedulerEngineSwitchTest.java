@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -63,6 +65,8 @@ class WorkflowSchedulerEngineSwitchTest {
     private WorkflowTaskRelationService workflowTaskRelationService;
     @Mock
     private WorkflowCommandService workflowCommandService;
+    @Mock
+    private RuntimeBindingLock runtimeBindingLock;
 
     private WorkflowService workflowService;
 
@@ -82,6 +86,7 @@ class WorkflowSchedulerEngineSwitchTest {
                 taskExecutionLogMapper,
                 dolphinSchedulerService,
                 dolphinConfigService,
+                runtimeBindingLock,
                 workflowDefinitionAssembler);
         workflowService = new WorkflowService(
                 dataWorkflowMapper,
@@ -138,6 +143,10 @@ class WorkflowSchedulerEngineSwitchTest {
                 .thenReturn(Collections.singletonList(targetGroup));
 
         DataWorkflow result = workflowService.switchSchedulerEngine(1L, request);
+
+        InOrder inOrder = inOrder(runtimeBindingLock, dataWorkflowMapper);
+        inOrder.verify(runtimeBindingLock).acquire();
+        inOrder.verify(dataWorkflowMapper).selectById(1L);
 
         assertEquals(Long.valueOf(2L), result.getDolphinConfigId());
         assertNull(result.getWorkflowCode());
