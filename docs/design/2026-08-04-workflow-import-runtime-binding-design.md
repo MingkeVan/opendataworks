@@ -54,7 +54,7 @@ JSON 模式下，前端从待导入 JSON 中解析 `processDefinition.code`，�
 
 `linkedWorkflowCode` 是唯一决策输入，后端在事务内复核：
 
-- **ADOPT**（选中了运行态工作流）：`projectCode` 取目标环境解析出的项目编码，`workflowCode` 取所选编码，`dolphinScheduleId` 沿用文件值，`publishStatus="published"`，`dolphinConfigId` 取所选环境。
+- **ADOPT**（选中了运行态工作流）：`projectCode` 取目标环境解析出的项目编码，`workflowCode` 取所选编码，`publishStatus="published"`，`dolphinConfigId` 取所选环境。`dolphinScheduleId` 与 `scheduleState` 从**被关联的目标运行态**解析，解析不到就留空 —— 导入文件里的调度 id 属于来源环境，沿用会让后续上下线、更新调度打到目标环境里另一条无关的 schedule 上。调度 cron、时区等属于定义内容，两种归属都保留。
 - **RESET**（未选中）：`projectCode` 取目标环境项目编码，`workflowCode` / `dolphinScheduleId` / `scheduleState` 置空，`status="draft"`，`publishStatus="never"`，`dolphinConfigId` 取所选环境。调度 cron、时区、告警等属于定义内容，保留。
 
 RESET 时定义 JSON 走 `WorkflowDefinitionAssembler.refreshRuntimeBindings`，复用既有的 `resetDefinitionRuntimeBinding` 与 `enrichMetadataFromCatalog`，清除运行态编码并按目标 Dolphin 目录重新解析 datasource 与 task group 编码。该原语此前只有 `WorkflowExecutionService.switchSchedulerEngine` 使用。
@@ -66,7 +66,15 @@ RESET 时定义 JSON 走 `WorkflowDefinitionAssembler.refreshRuntimeBindings`，
 
 ### 项目编码解析
 
-目标项目编码由所选 Dolphin 配置的 `projectName` 反查得到。预检阶段使用只读解析，项目不存在时返回失败，不自动创建项目 —— 现有 `DolphinSchedulerService.getProjectCode` 在项目缺失时会调用 `createProject`，预检不应产生该副作用。
+目标项目编码由所选 Dolphin 配置的 `projectName` 反查得到。所有只读路径都使用只读解析，项目不存在时返回失败，不自动创建项目 —— 现有 `DolphinSchedulerService.getProjectCode` 在项目缺失时会调用 `createProject`，仅仅打开导入弹窗不该在目标 Dolphin 里凭空建出一个项目。`DolphinRuntimeDefinitionService` 整体是运行态只读服务，其 `resolveProjectCode` 一并改为只读解析。
+
+### 运行态占用判定的隔离与并发
+
+运行态编码只在单个 Dolphin 环境内唯一，跨环境可能重号，因此占用判定按 `(project_code, workflow_code)` 查询后还要按 `dolphin_config_id` 过滤。`dolphin_config_id` 为空的存量行从宽判为占用：宁可多报一次冲突，也不能漏判后在发布时覆盖它的运行态。
+
+提交阶段的复核使用 `SELECT ... FOR UPDATE`：普通一致性读在可重复读隔离级别下看不到并发事务的写入，两个并发导入会同时判定"未占用"然后都绑定成功。加锁读既读到最新已提交数据，又对索引区间加锁把两者串行化。为此新增非唯一索引 `idx_data_workflow_runtime (project_code, workflow_code)`，否则该查询会退化成全表扫描并锁住整张表。
+
+刻意不加唯一约束：`data_workflow` 是逻辑删除，被软删的行仍持有 `workflow_code`，唯一约束会让"删除工作流后重新关联同一运行态"直接失败；且存量数据是否已存在重复绑定无法在改动内验证，迁移失败会阻断部署。
 
 ### 名称冲突
 
@@ -74,7 +82,7 @@ RESET 时定义 JSON 走 `WorkflowDefinitionAssembler.refreshRuntimeBindings`，
 
 ## Interfaces / Data Model
 
-无数据库变更，复用 `data_workflow` 既有字段。
+复用 `data_workflow` 既有字段，仅新增一个非唯一索引 `V49__add_data_workflow_runtime_index.sql`：`idx_data_workflow_runtime (project_code, workflow_code)`，用于支撑提交阶段的加锁复核。
 
 ### 请求/响应
 
@@ -86,15 +94,17 @@ RESET 时定义 JSON 走 `WorkflowDefinitionAssembler.refreshRuntimeBindings`，
 `WorkflowImportPreviewResponse` 新增 `WorkflowImportRuntimeBinding runtimeBinding`：
 
 ```
-decision            ADOPT | RESET
-dolphinConfigId     目标环境 id
-projectCode         目标项目编码
-workflowCode        关联的运行态编码（RESET 时为空）
-runtimeWorkflowName 运行态工作流名称
-releaseState        运行态发布状态
-conflictWorkflowId  占用该运行态的平台工作流 id
+decision             ADOPT | RESET
+dolphinConfigId      目标环境 id
+projectCode          目标项目编码
+workflowCode         关联的运行态编码（RESET 时为空）
+runtimeWorkflowName  运行态工作流名称
+releaseState         运行态发布状态
+scheduleId           目标运行态的调度 id（解析不到为空）
+scheduleReleaseState 目标运行态的调度状态
+conflictWorkflowId   占用该运行态的平台工作流 id
 conflictWorkflowName 占用该运行态的平台工作流名称
-message             面向用户的说明文案
+message              面向用户的说明文案
 ```
 
 `WorkflowImportCommitResponse` 新增 `String appliedRuntimeBinding`。
@@ -108,6 +118,7 @@ message             面向用户的说明文案
 
 - `DolphinSchedulerService.findProjectCode(Long dolphinConfigId)`：只读解析项目编码，不创建项目
 - `DolphinRuntimeDefinitionService.findRuntimeWorkflow(Long dolphinConfigId, Long projectCode, Long workflowCode)`：单条运行态查询，带平台占用信息
+- Dolphin 来源导入读取定义时必须传入所选环境，走 `loadRuntimeDefinitionFromExport(dolphinConfigId, projectCode, workflowCode)` 重载，否则会从默认环境读到同编码的另一条工作流
 
 ## Risks / Alternatives
 

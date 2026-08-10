@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onedata.portal.dto.PageResult;
 import com.onedata.portal.dto.DolphinDatasourceOption;
 import com.onedata.portal.dto.SqlTableAnalyzeResponse;
+import com.onedata.portal.dto.dolphin.DolphinSchedule;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowExportJsonResponse;
 import com.onedata.portal.dto.workflow.WorkflowImportCommitRequest;
@@ -90,7 +91,7 @@ public class WorkflowDefinitionLifecycleService {
             String keyword) {
         DolphinRuntimeDefinitionService.DolphinRuntimeWorkflowPage page = runtimeDefinitionService
                 .listRuntimeWorkflows(dolphinConfigId, projectCode, pageNum, pageSize, keyword);
-        fillLocalBindings(page.getRecords());
+        fillLocalBindings(dolphinConfigId, page.getRecords());
         return PageResult.of(page.getTotal(), page.getRecords());
     }
 
@@ -104,14 +105,14 @@ public class WorkflowDefinitionLifecycleService {
         }
         DolphinRuntimeWorkflowOption option = runtimeDefinitionService
                 .findRuntimeWorkflow(dolphinConfigId, projectCode, workflowCode);
-        fillLocalBinding(option);
+        fillLocalBinding(dolphinConfigId, option);
         return option;
     }
 
     /**
      * 标注这些运行态是否已被平台工作流关联，让前端可以就地提示冲突。整页一次查询，避免逐条查库。
      */
-    private void fillLocalBindings(List<DolphinRuntimeWorkflowOption> options) {
+    private void fillLocalBindings(Long dolphinConfigId, List<DolphinRuntimeWorkflowOption> options) {
         List<DolphinRuntimeWorkflowOption> targets = options == null
                 ? Collections.emptyList()
                 : options.stream()
@@ -123,19 +124,21 @@ public class WorkflowDefinitionLifecycleService {
         Set<Long> workflowCodes = targets.stream()
                 .map(DolphinRuntimeWorkflowOption::getWorkflowCode)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        Map<String, DataWorkflow> boundByRuntime = dataWorkflowMapper.selectList(
+        Map<Long, DataWorkflow> boundByWorkflowCode = dataWorkflowMapper.selectList(
                 Wrappers.<DataWorkflow>lambdaQuery()
                         .in(DataWorkflow::getWorkflowCode, workflowCodes))
                 .stream()
-                .filter(item -> item.getProjectCode() != null && item.getWorkflowCode() != null)
+                .filter(item -> bindsSameRuntime(item, dolphinConfigId, item.getProjectCode()))
                 .collect(Collectors.toMap(
-                        item -> runtimeKey(item.getProjectCode(), item.getWorkflowCode()),
+                        DataWorkflow::getWorkflowCode,
                         item -> item,
                         (first, second) -> first));
 
         for (DolphinRuntimeWorkflowOption option : targets) {
-            DataWorkflow bound = boundByRuntime
-                    .get(runtimeKey(option.getProjectCode(), option.getWorkflowCode()));
+            DataWorkflow bound = boundByWorkflowCode.get(option.getWorkflowCode());
+            if (bound != null && !Objects.equals(bound.getProjectCode(), option.getProjectCode())) {
+                bound = null;
+            }
             option.setSynced(bound != null);
             if (bound != null) {
                 option.setLocalWorkflowId(bound.getId());
@@ -144,23 +147,52 @@ public class WorkflowDefinitionLifecycleService {
         }
     }
 
-    private void fillLocalBinding(DolphinRuntimeWorkflowOption option) {
-        fillLocalBindings(option == null ? Collections.emptyList() : Collections.singletonList(option));
+    private void fillLocalBinding(Long dolphinConfigId, DolphinRuntimeWorkflowOption option) {
+        fillLocalBindings(dolphinConfigId,
+                option == null ? Collections.emptyList() : Collections.singletonList(option));
     }
 
-    private String runtimeKey(Long projectCode, Long workflowCode) {
-        return projectCode + ":" + workflowCode;
+    /**
+     * 运行态编码只在单个 Dolphin 环境内唯一，跨环境可能重号，所以占用判定必须带上环境。
+     * {@code dolphin_config_id} 为空的存量行按"属于默认环境"从宽处理：宁可多报一次冲突，
+     * 也不能漏判后在发布时把别人的运行态覆盖掉。
+     */
+    private boolean bindsSameRuntime(DataWorkflow workflow, Long dolphinConfigId, Long projectCode) {
+        if (workflow == null || workflow.getProjectCode() == null || workflow.getWorkflowCode() == null) {
+            return false;
+        }
+        if (!Objects.equals(workflow.getProjectCode(), projectCode)) {
+            return false;
+        }
+        return workflow.getDolphinConfigId() == null
+                || Objects.equals(workflow.getDolphinConfigId(), dolphinConfigId);
     }
 
-    private DataWorkflow findWorkflowByRuntime(Long projectCode, Long workflowCode) {
+    private DataWorkflow findWorkflowByRuntime(Long dolphinConfigId, Long projectCode, Long workflowCode) {
+        return findWorkflowByRuntime(dolphinConfigId, projectCode, workflowCode, false);
+    }
+
+    /**
+     * @param lockForUpdate 提交阶段用 {@code SELECT ... FOR UPDATE}：既读到最新已提交数据
+     *                      （避免可重复读快照看不到并发写入），又对 (project_code, workflow_code)
+     *                      区间加锁，把并发绑定同一运行态的两个导入串行化。
+     */
+    private DataWorkflow findWorkflowByRuntime(Long dolphinConfigId,
+            Long projectCode,
+            Long workflowCode,
+            boolean lockForUpdate) {
         if (projectCode == null || projectCode <= 0 || workflowCode == null || workflowCode <= 0) {
             return null;
         }
-        return dataWorkflowMapper.selectOne(
+        return dataWorkflowMapper.selectList(
                 Wrappers.<DataWorkflow>lambdaQuery()
                         .eq(DataWorkflow::getProjectCode, projectCode)
                         .eq(DataWorkflow::getWorkflowCode, workflowCode)
-                        .last("LIMIT 1"));
+                        .last(lockForUpdate ? "FOR UPDATE" : ""))
+                .stream()
+                .filter(item -> bindsSameRuntime(item, dolphinConfigId, projectCode))
+                .findFirst()
+                .orElse(null);
     }
 
     public WorkflowImportPreviewResponse preview(WorkflowImportPreviewRequest request) {
@@ -335,7 +367,7 @@ public class WorkflowDefinitionLifecycleService {
             return;
         }
 
-        DataWorkflow occupied = findWorkflowByRuntime(projectCode, linkedWorkflowCode);
+        DataWorkflow occupied = findWorkflowByRuntime(dolphinConfigId, projectCode, linkedWorkflowCode);
         if (occupied != null) {
             binding.setConflictWorkflowId(occupied.getId());
             binding.setConflictWorkflowName(occupied.getWorkflowName());
@@ -350,9 +382,29 @@ public class WorkflowDefinitionLifecycleService {
         binding.setWorkflowCode(linkedWorkflowCode);
         binding.setRuntimeWorkflowName(runtime.getWorkflowName());
         binding.setReleaseState(runtime.getReleaseState());
+        applyTargetSchedule(binding, dolphinConfigId, linkedWorkflowCode);
         binding.setMessage(String.format("将关联目标 Dolphin 已有工作流「%s」(code=%s)，发布时更新该定义",
                 runtime.getWorkflowName(), linkedWorkflowCode));
         context.setRuntimeBinding(binding);
+    }
+
+    /**
+     * 调度 id 必须来自被关联的目标运行态。导入文件里的是来源环境的 id，
+     * 沿用会让后续上下线、更新调度打到目标环境里另一条无关的 schedule 上。
+     * 解析不到就留空，宁可不绑也不能绑错。
+     */
+    private void applyTargetSchedule(WorkflowImportRuntimeBinding binding,
+            Long dolphinConfigId,
+            Long workflowCode) {
+        try {
+            DolphinSchedule schedule = dolphinSchedulerService.getWorkflowSchedule(dolphinConfigId, workflowCode);
+            if (schedule != null) {
+                binding.setScheduleId(schedule.getId());
+                binding.setScheduleReleaseState(schedule.getReleaseState());
+            }
+        } catch (Exception ex) {
+            log.warn("解析目标 Dolphin 调度失败，将不绑定调度 id: workflowCode={}, {}", workflowCode, ex.getMessage());
+        }
     }
 
     private RuntimeWorkflowDefinition resolveRuntimeDefinition(ImportSource source, ImportContext context) {
@@ -363,7 +415,9 @@ public class WorkflowDefinitionLifecycleService {
             }
             try {
                 RuntimeWorkflowDefinition definition = runtimeDefinitionService
-                        .loadRuntimeDefinitionFromExport(source.getProjectCode(), source.getWorkflowCode());
+                        .loadRuntimeDefinitionFromExport(source.getDolphinConfigId(),
+                                source.getProjectCode(),
+                                source.getWorkflowCode());
                 if (StringUtils.hasText(source.getWorkflowName())) {
                     definition.setWorkflowName(source.getWorkflowName().trim());
                 }
@@ -865,7 +919,8 @@ public class WorkflowDefinitionLifecycleService {
      * 事务内兜底：预检到提交之间可能有并发导入抢先占用同一个运行态。
      */
     private void ensureWorkflowConflictAbsent(WorkflowImportRuntimeBinding binding) {
-        DataWorkflow existing = findWorkflowByRuntime(binding.getProjectCode(), binding.getWorkflowCode());
+        DataWorkflow existing = findWorkflowByRuntime(binding.getDolphinConfigId(),
+                binding.getProjectCode(), binding.getWorkflowCode(), true);
         if (existing != null) {
             throw new IllegalStateException(String.format(
                     "该 Dolphin 运行态已被平台工作流「%s」(id=%s) 关联，请直接编辑该工作流，或改为不关联导入",
@@ -1038,6 +1093,9 @@ public class WorkflowDefinitionLifecycleService {
             workflow.setWorkflowCode(binding.getWorkflowCode());
             workflow.setStatus(mapWorkflowStatus(binding.getReleaseState()));
             workflow.setPublishStatus("published");
+            // 调度标识取自目标运行态，不是导入文件
+            workflow.setDolphinScheduleId(binding.getScheduleId());
+            workflow.setScheduleState(binding.getScheduleReleaseState());
         } else {
             // 全新导入：清空运行态标识，让首次发布走创建分支而不是去更新别的定义
             workflow.setWorkflowCode(null);
@@ -1047,12 +1105,9 @@ public class WorkflowDefinitionLifecycleService {
             workflow.setPublishStatus("never");
         }
 
+        // 调度表达式等属于定义内容，两种归属都保留；运行态标识已在上面按归属处理
         RuntimeWorkflowSchedule schedule = definition.getSchedule();
         if (schedule != null) {
-            if (adopt) {
-                workflow.setDolphinScheduleId(schedule.getScheduleId());
-                workflow.setScheduleState(schedule.getReleaseState());
-            }
             workflow.setScheduleCron(schedule.getCrontab());
             workflow.setScheduleTimezone(schedule.getTimezoneId());
             workflow.setScheduleStartTime(parseFlexibleDateTime(schedule.getStartTime()));

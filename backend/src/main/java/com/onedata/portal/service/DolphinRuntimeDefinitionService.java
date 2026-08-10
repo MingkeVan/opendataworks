@@ -961,11 +961,17 @@ public class DolphinRuntimeDefinitionService {
         return "NO".equals(normalized) ? "NO" : "YES";
     }
 
+    /**
+     * 本服务只读运行态，解析项目编码必须走只读查询：
+     * {@code getProjectCode()} 在项目缺失时会顺手在 Dolphin 里建一个项目，
+     * 打开导入弹窗这类纯浏览动作不该产生这种副作用。
+     */
     private long resolveProjectCode(Long projectCode) {
         if (projectCode != null && projectCode > 0) {
             return projectCode;
         }
-        Long currentProjectCode = dolphinSchedulerService.getProjectCode();
+        // 传 null 表示沿用当前 withConfig 作用域内的配置
+        Long currentProjectCode = dolphinSchedulerService.findProjectCode(null);
         if (currentProjectCode == null || currentProjectCode <= 0) {
             throw new IllegalStateException("无法获取 Dolphin projectCode");
         }

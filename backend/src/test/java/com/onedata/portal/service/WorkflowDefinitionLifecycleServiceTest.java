@@ -3,6 +3,7 @@ package com.onedata.portal.service;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.onedata.portal.dto.SqlTableAnalyzeResponse;
+import com.onedata.portal.dto.dolphin.DolphinSchedule;
 import com.onedata.portal.dto.workflow.WorkflowDefinitionRequest;
 import com.onedata.portal.dto.workflow.WorkflowExportJsonResponse;
 import com.onedata.portal.dto.workflow.WorkflowImportCommitRequest;
@@ -13,6 +14,7 @@ import com.onedata.portal.dto.workflow.runtime.DolphinRuntimeWorkflowOption;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskDefinition;
 import com.onedata.portal.dto.workflow.runtime.RuntimeTaskEdge;
 import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowDefinition;
+import com.onedata.portal.dto.workflow.runtime.RuntimeWorkflowSchedule;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
 import com.onedata.portal.entity.WorkflowVersion;
@@ -366,7 +368,7 @@ class WorkflowDefinitionLifecycleServiceTest {
                 new RuntimeTaskEdge(0L, 1L),
                 new RuntimeTaskEdge(1L, 2L)));
 
-        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 2001L)).thenReturn(definition);
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(TARGET_DOLPHIN_CONFIG_ID, 1L, 2001L)).thenReturn(definition);
         stubTargetProject();
         when(sqlTableMatcherService.analyze(eq("SQL_A"), eq("SQL"))).thenReturn(analyze(null, 101L));
         when(sqlTableMatcherService.analyze(eq("SQL_B"), eq("SQL"))).thenReturn(analyze(101L, 102L));
@@ -395,7 +397,7 @@ class WorkflowDefinitionLifecycleServiceTest {
                 new RuntimeTaskEdge(0L, 1L),
                 new RuntimeTaskEdge(1L, 2L)));
 
-        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 3001L)).thenReturn(definition);
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(TARGET_DOLPHIN_CONFIG_ID, 1L, 3001L)).thenReturn(definition);
         stubTargetProject();
         when(sqlTableMatcherService.analyze(eq("SQL_A"), eq("SQL"))).thenReturn(analyze(null, 101L));
         when(sqlTableMatcherService.analyze(eq("SQL_B"), eq("SQL"))).thenReturn(analyze(101L, 102L));
@@ -470,7 +472,7 @@ class WorkflowDefinitionLifecycleServiceTest {
         definition.setTasks(Collections.singletonList(task1));
         definition.setExplicitEdges(Collections.singletonList(new RuntimeTaskEdge(0L, 1L)));
 
-        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(1L, 4001L)).thenReturn(definition);
+        when(runtimeDefinitionService.loadRuntimeDefinitionFromExport(null, 1L, 4001L)).thenReturn(definition);
         DataWorkflow existing = new DataWorkflow();
         existing.setId(123L);
         existing.setWorkflowName("wf_conflict");
@@ -600,11 +602,8 @@ class WorkflowDefinitionLifecycleServiceTest {
         when(runtimeDefinitionService.findRuntimeWorkflow(TARGET_DOLPHIN_CONFIG_ID, TARGET_PROJECT_CODE, 8888L))
                 .thenReturn(runtimeOption(8888L, "wf_runtime_target", "ONLINE"));
 
-        DataWorkflow occupied = new DataWorkflow();
-        occupied.setId(321L);
-        occupied.setWorkflowName("wf_already_bound");
-        // 第一次 selectOne 是工作流重名校验，第二次才是运行态占用校验
-        when(dataWorkflowMapper.selectOne(any())).thenReturn(null, occupied);
+        when(dataWorkflowMapper.selectList(any())).thenReturn(Collections.singletonList(
+                boundWorkflow(321L, "wf_already_bound", TARGET_DOLPHIN_CONFIG_ID, 8888L)));
 
         WorkflowImportPreviewRequest request = new WorkflowImportPreviewRequest();
         request.setDefinitionJson("{\"dummy\":true}");
@@ -615,6 +614,104 @@ class WorkflowDefinitionLifecycleServiceTest {
         assertFalse(Boolean.TRUE.equals(response.getCanImport()));
         assertTrue(response.getErrors().stream().anyMatch(item -> item.contains("wf_already_bound")));
         assertEquals(321L, response.getRuntimeBinding().getConflictWorkflowId());
+    }
+
+    @Test
+    void previewShouldIgnoreSameCodeBoundToAnotherDolphinEnvironment() {
+        RuntimeWorkflowDefinition definition = baseDefinition();
+        definition.setTasks(Collections.singletonList(sqlTask(1L, "t_extract", "SQL_A")));
+        definition.setExplicitEdges(Collections.singletonList(new RuntimeTaskEdge(0L, 1L)));
+
+        when(runtimeDefinitionService.parseRuntimeDefinitionFromJson(any())).thenReturn(definition);
+        stubTargetProject();
+        when(sqlTableMatcherService.analyze(eq("SQL_A"), eq("SQL"))).thenReturn(analyze(null, 101L));
+        when(runtimeDefinitionService.findRuntimeWorkflow(TARGET_DOLPHIN_CONFIG_ID, TARGET_PROJECT_CODE, 8888L))
+                .thenReturn(runtimeOption(8888L, "wf_runtime_target", "ONLINE"));
+        // 同样的编码，但属于另一个 Dolphin 环境，不构成占用
+        when(dataWorkflowMapper.selectList(any())).thenReturn(Collections.singletonList(
+                boundWorkflow(321L, "wf_other_env", 99L, 8888L)));
+
+        WorkflowImportPreviewRequest request = new WorkflowImportPreviewRequest();
+        request.setDefinitionJson("{\"dummy\":true}");
+        request.setDolphinConfigId(TARGET_DOLPHIN_CONFIG_ID);
+        request.setLinkedWorkflowCode(8888L);
+        WorkflowImportPreviewResponse response = service.preview(request);
+
+        assertTrue(Boolean.TRUE.equals(response.getCanImport()));
+        assertEquals("ADOPT", response.getRuntimeBinding().getDecision());
+    }
+
+    @Test
+    void previewShouldTreatLegacyRowWithoutConfigAsOccupying() {
+        RuntimeWorkflowDefinition definition = baseDefinition();
+        definition.setTasks(Collections.singletonList(sqlTask(1L, "t_extract", "SQL_A")));
+        definition.setExplicitEdges(Collections.singletonList(new RuntimeTaskEdge(0L, 1L)));
+
+        when(runtimeDefinitionService.parseRuntimeDefinitionFromJson(any())).thenReturn(definition);
+        stubTargetProject();
+        when(runtimeDefinitionService.findRuntimeWorkflow(TARGET_DOLPHIN_CONFIG_ID, TARGET_PROJECT_CODE, 8888L))
+                .thenReturn(runtimeOption(8888L, "wf_runtime_target", "ONLINE"));
+        // 存量行没有 dolphin_config_id，必须从宽判为占用，否则发布会覆盖它的运行态
+        when(dataWorkflowMapper.selectList(any())).thenReturn(Collections.singletonList(
+                boundWorkflow(400L, "wf_legacy", null, 8888L)));
+
+        WorkflowImportPreviewRequest request = new WorkflowImportPreviewRequest();
+        request.setDefinitionJson("{\"dummy\":true}");
+        request.setDolphinConfigId(TARGET_DOLPHIN_CONFIG_ID);
+        request.setLinkedWorkflowCode(8888L);
+        WorkflowImportPreviewResponse response = service.preview(request);
+
+        assertFalse(Boolean.TRUE.equals(response.getCanImport()));
+        assertTrue(response.getErrors().stream().anyMatch(item -> item.contains("wf_legacy")));
+    }
+
+    @Test
+    void adoptShouldTakeScheduleIdFromTargetRuntimeNotImportFile() {
+        RuntimeWorkflowSchedule sourceSchedule = new RuntimeWorkflowSchedule();
+        sourceSchedule.setScheduleId(70001L);
+        sourceSchedule.setReleaseState("ONLINE");
+        sourceSchedule.setCrontab("0 0 2 * * ? *");
+
+        DolphinSchedule targetSchedule = new DolphinSchedule();
+        targetSchedule.setId(90002L);
+        targetSchedule.setReleaseState("OFFLINE");
+        when(dolphinSchedulerService.getWorkflowSchedule(TARGET_DOLPHIN_CONFIG_ID, 8888L))
+                .thenReturn(targetSchedule);
+        when(runtimeDefinitionService.findRuntimeWorkflow(TARGET_DOLPHIN_CONFIG_ID, TARGET_PROJECT_CODE, 8888L))
+                .thenReturn(runtimeOption(8888L, "wf_runtime_target", "ONLINE"));
+
+        DataWorkflow updated = commitSingleTaskImport(8888L, 91L, sourceSchedule);
+
+        assertEquals(90002L, updated.getDolphinScheduleId(), "调度 id 必须来自目标运行态");
+        assertEquals("OFFLINE", updated.getScheduleState());
+        // 调度表达式属于定义内容，仍然沿用导入文件
+        assertEquals("0 0 2 * * ? *", updated.getScheduleCron());
+    }
+
+    @Test
+    void adoptShouldLeaveScheduleUnboundWhenTargetScheduleUnresolvable() {
+        RuntimeWorkflowSchedule sourceSchedule = new RuntimeWorkflowSchedule();
+        sourceSchedule.setScheduleId(70001L);
+        sourceSchedule.setReleaseState("ONLINE");
+
+        when(dolphinSchedulerService.getWorkflowSchedule(TARGET_DOLPHIN_CONFIG_ID, 8888L)).thenReturn(null);
+        when(runtimeDefinitionService.findRuntimeWorkflow(TARGET_DOLPHIN_CONFIG_ID, TARGET_PROJECT_CODE, 8888L))
+                .thenReturn(runtimeOption(8888L, "wf_runtime_target", "ONLINE"));
+
+        DataWorkflow updated = commitSingleTaskImport(8888L, 92L, sourceSchedule);
+
+        assertNull(updated.getDolphinScheduleId(), "解析不到目标调度时宁可不绑，也不能继承来源 id");
+        assertNull(updated.getScheduleState());
+    }
+
+    private DataWorkflow boundWorkflow(Long id, String name, Long dolphinConfigId, Long workflowCode) {
+        DataWorkflow workflow = new DataWorkflow();
+        workflow.setId(id);
+        workflow.setWorkflowName(name);
+        workflow.setDolphinConfigId(dolphinConfigId);
+        workflow.setProjectCode(TARGET_PROJECT_CODE);
+        workflow.setWorkflowCode(workflowCode);
+        return workflow;
     }
 
     @Test
@@ -667,11 +764,18 @@ class WorkflowDefinitionLifecycleServiceTest {
         assertEquals("online", updated.getStatus());
     }
 
-    /** 跑一次单任务导入提交，返回落库前被填充的工作流实体。 */
     private DataWorkflow commitSingleTaskImport(Long linkedWorkflowCode, Long workflowId) {
+        return commitSingleTaskImport(linkedWorkflowCode, workflowId, null);
+    }
+
+    /** 跑一次单任务导入提交，返回落库前被填充的工作流实体。 */
+    private DataWorkflow commitSingleTaskImport(Long linkedWorkflowCode,
+            Long workflowId,
+            RuntimeWorkflowSchedule sourceSchedule) {
         RuntimeWorkflowDefinition definition = baseDefinition();
         definition.setTasks(Collections.singletonList(sqlTask(1L, "t_extract", "SQL_A")));
         definition.setExplicitEdges(Collections.singletonList(new RuntimeTaskEdge(0L, 1L)));
+        definition.setSchedule(sourceSchedule);
 
         when(runtimeDefinitionService.parseRuntimeDefinitionFromJson(any())).thenReturn(definition);
         stubTargetProject();

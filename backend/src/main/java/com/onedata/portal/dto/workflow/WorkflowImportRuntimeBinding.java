@@ -28,6 +28,14 @@ public class WorkflowImportRuntimeBinding {
     private String releaseState;
 
     /**
+     * 关联运行态在目标 Dolphin 中的调度 id，解析不到时为空。
+     * 绝不沿用导入文件里的调度 id，那是来源环境的。
+     */
+    private Long scheduleId;
+
+    private String scheduleReleaseState;
+
+    /**
      * 已占用该运行态的平台工作流，仅在冲突时填充
      */
     private Long conflictWorkflowId;

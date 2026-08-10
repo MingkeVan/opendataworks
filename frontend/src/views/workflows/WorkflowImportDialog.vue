@@ -329,6 +329,9 @@ const previewLoading = ref(false)
 const commitLoading = ref(false)
 const previewResult = ref(null)
 
+// 自增序号，用于丢弃乱序返回的运行态探测结果
+let autoLinkToken = 0
+
 const selectableConfigCount = computed(
   () => dolphinConfigs.value.filter((item) => item.isActive !== false).length
 )
@@ -426,14 +429,22 @@ const handleDefinitionJsonChange = () => {
 /**
  * 用文件里携带的来源编码在目标 Dolphin 里探一次：命中就默认关联上，
  * 没命中就保持"不关联"，用户不需要理解 workflowCode 这些内部概念。
+ *
+ * 每次探测都先清空旧关联，否则换文件后可能仍挂着上一个文件的运行态，
+ * 最终把 A 的运行态更新成 B 的内容。并发探测用序号丢弃过期响应。
  */
 const autoLinkFromDefinition = async () => {
+  form.linkedWorkflowCode = null
+  const token = ++autoLinkToken
   const hints = parseDefinitionHints(form.definitionJson)
-  if (!hints.workflowCode || !form.dolphinConfigId) return
+  const configId = form.dolphinConfigId
+  if (!hints.workflowCode || !configId) return
   try {
     const found = await workflowApi.findImportDolphinWorkflow(hints.workflowCode, {
-      dolphinConfigId: form.dolphinConfigId
+      dolphinConfigId: configId
     })
+    // 期间用户又换了文件或环境，这次结果已经过期
+    if (token !== autoLinkToken || configId !== form.dolphinConfigId) return
     if (!found?.workflowCode) return
     if (!runtimeWorkflows.value.some((item) => item.workflowCode === found.workflowCode)) {
       runtimeWorkflows.value = [found, ...runtimeWorkflows.value]
@@ -570,6 +581,7 @@ const resetState = () => {
   form.relationDecision = ''
   fileName.value = ''
   previewResult.value = null
+  autoLinkToken += 1
   runtimeWorkflows.value = []
   dolphinWorkflows.value = []
   dolphinPagination.pageNum = 1
