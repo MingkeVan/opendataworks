@@ -360,6 +360,9 @@ const invalidatePreview = () => {
   previewResult.value = null
   previewedSignature.value = ''
   previewGuard.invalidate()
+  // 作废后在途请求的 finally 会因为 stale 而跳过复位，loading 必须由这里释放，
+  // 否则预检中途换环境/换文件或关闭弹窗后按钮会一直转圈
+  previewLoading.value = false
 }
 
 const currentSignature = computed(() => buildPreviewSignature(form))

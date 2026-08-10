@@ -102,6 +102,8 @@ public class DolphinConfigService {
 
     @Transactional
     public DolphinConfig create(DolphinConfig config) {
+        // 新建时若直接设为默认，同样会改变空配置工作流的实际指向
+        runtimeBindingLock.acquire();
         normalize(config, true, null);
         if (Integer.valueOf(1).equals(config.getIsDefault())) {
             resetDefault(null);
@@ -154,6 +156,9 @@ public class DolphinConfigService {
 
     @Transactional
     public void setDefault(Long id) {
+        // 切换默认环境会连带改变所有 dolphin_config_id 为空的工作流实际指向的 Dolphin，
+        // 因此同样要进入运行态绑定的互斥协议，且必须在第一次读库之前取锁
+        runtimeBindingLock.acquire();
         DolphinConfig existing = dolphinConfigMapper.selectById(id);
         if (existing == null) {
             throw new IllegalArgumentException("Dolphin 环境不存在");
@@ -251,9 +256,27 @@ public class DolphinConfigService {
         }
     }
 
+    /**
+     * 统计绑定到该环境的运行态工作流。若它是当前默认环境，还要算上 {@code dolphin_config_id}
+     * 为空的存量行 —— 那些工作流实际就跟着默认环境跑，漏算的话默认环境会被随意改身份或删除，
+     * 把它们静默指向另一套 Dolphin。
+     */
     private long countRuntimeBoundWorkflows(Long id) {
         Long count = dolphinConfigMapper.countRuntimeBoundWorkflows(id);
-        return count == null ? 0L : count;
+        long total = count == null ? 0L : count;
+        if (isCurrentDefault(id)) {
+            Long orphan = dolphinConfigMapper.countRuntimeBoundWorkflowsWithoutConfig();
+            total += orphan == null ? 0L : orphan;
+        }
+        return total;
+    }
+
+    private boolean isCurrentDefault(Long id) {
+        if (id == null) {
+            return false;
+        }
+        DolphinConfig current = getDefaultConfig();
+        return current != null && Objects.equals(current.getId(), id);
     }
 
     private boolean runtimeIdentityChanged(DolphinConfig existing, DolphinConfig next) {

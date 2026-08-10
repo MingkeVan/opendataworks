@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
+import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.entity.TableTaskRelation;
 import com.onedata.portal.entity.WorkflowTaskRelation;
 import com.onedata.portal.mapper.DataTaskMapper;
@@ -263,11 +264,24 @@ public class WorkflowDeployService {
         // Update workflow code in database if it changed
         // Handle both null and different values safely
         Long oldWorkflowCode = workflow.getWorkflowCode();
-        if (oldWorkflowCode == null || deployedCode != oldWorkflowCode.longValue()) {
+        boolean codeChanged = oldWorkflowCode == null || deployedCode != oldWorkflowCode.longValue();
+        // 把实际使用的 Dolphin 环境固化到工作流上。此前只写 workflow_code，绑定了运行态却仍
+        // dolphin_config_id 为空的工作流会跟着"当前默认环境"漂移：默认环境一改，它们就静默
+        // 指向另一套 Dolphin，而按 dolphin_config_id 匹配的绑定检查也看不到它们。
+        boolean configPinned = false;
+        if (workflow.getDolphinConfigId() == null) {
+            Long resolvedConfigId = resolveDeployedConfigId();
+            if (resolvedConfigId != null) {
+                workflow.setDolphinConfigId(resolvedConfigId);
+                configPinned = true;
+            }
+        }
+        if (codeChanged || configPinned) {
             workflow.setWorkflowCode(deployedCode);
             workflow.setUpdatedBy("system");
             workflowMapper.updateById(workflow);
-            log.info("Updated workflow code from {} to {}", oldWorkflowCode, deployedCode);
+            log.info("Updated workflow code from {} to {} (dolphinConfigId={})",
+                    oldWorkflowCode, deployedCode, workflow.getDolphinConfigId());
         }
 
         return DeploymentResult.builder()
@@ -278,6 +292,19 @@ public class WorkflowDeployService {
                 .taskCount(orderedTasks.size())
                 .existingWorkflow(existingWorkflow)
                 .build();
+    }
+
+    /**
+     * 工作流没有绑定环境时，本次发布实际走的是默认环境；把它的 id 取出来固化下去。
+     */
+    private Long resolveDeployedConfigId() {
+        try {
+            DolphinConfig config = dolphinSchedulerService.getConfig(null);
+            return config == null ? null : config.getId();
+        } catch (Exception ex) {
+            log.warn("Failed to resolve deployed dolphin config id: {}", ex.getMessage());
+            return null;
+        }
     }
 
     private Map<Long, TaskDeployMetadata> loadTaskDeployMetadata(DataWorkflow workflow) {

@@ -10,7 +10,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,6 +25,44 @@ class DolphinConfigServiceTest {
 
     @Mock
     private RuntimeBindingLock runtimeBindingLock;
+
+    @Test
+    void deleteShouldCountOrphanBindingsWhenTargetIsCurrentDefault() {
+        DolphinConfigService service = new DolphinConfigService(dolphinConfigMapper, runtimeBindingLock);
+
+        DolphinConfig current = new DolphinConfig();
+        current.setId(1L);
+        current.setIsActive(true);
+        current.setIsDefault(1);
+        when(dolphinConfigMapper.selectById(1L)).thenReturn(current);
+        when(dolphinConfigMapper.selectOne(any())).thenReturn(current);
+        when(dolphinConfigMapper.countRuntimeBoundWorkflows(1L)).thenReturn(0L);
+        // dolphin_config_id 为空但已绑定运行态的存量工作流实际跟随默认环境，
+        // 删除默认环境时必须算进来，否则它们会静默指向另一套 Dolphin
+        when(dolphinConfigMapper.countRuntimeBoundWorkflowsWithoutConfig()).thenReturn(2L);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> service.delete(1L));
+        assertTrue(ex.getMessage().contains("已被运行态工作流绑定"));
+        verify(dolphinConfigMapper, never()).deleteById(anyLong());
+    }
+
+    @Test
+    void deleteShouldIgnoreOrphanBindingsForNonDefaultConfig() {
+        DolphinConfigService service = new DolphinConfigService(dolphinConfigMapper, runtimeBindingLock);
+
+        DolphinConfig target = new DolphinConfig();
+        target.setId(2L);
+        DolphinConfig current = new DolphinConfig();
+        current.setId(1L);
+        when(dolphinConfigMapper.selectById(2L)).thenReturn(target);
+        when(dolphinConfigMapper.selectOne(any())).thenReturn(current);
+        when(dolphinConfigMapper.countRuntimeBoundWorkflows(2L)).thenReturn(0L);
+
+        service.delete(2L);
+
+        verify(dolphinConfigMapper).deleteById(2L);
+        verify(dolphinConfigMapper, never()).countRuntimeBoundWorkflowsWithoutConfig();
+    }
 
     @Test
     void createShouldNormalizeDefaultsAndInsertNamedConfig() {

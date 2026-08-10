@@ -39,3 +39,26 @@ SELECT 'workflow.runtime_binding.lock', '1', '工作流运行态绑定的全局�
 WHERE NOT EXISTS (
     SELECT 1 FROM `sys_config` WHERE `config_key` = 'workflow.runtime_binding.lock'
 );
+
+-- 回填仍然为空的 dolphin_config_id。
+--
+-- V43 做过一次同样的回填，但它只在当时存在默认环境时才执行；此后 WorkflowDeployService
+-- 发布成功时也只写 workflow_code、不写 dolphin_config_id，于是还会不断产生新的空配置绑定。
+-- 这些工作流实际跟随"当前默认环境"运行，一旦默认环境被改身份、删除或切换，它们会静默指向
+-- 另一套 Dolphin，而"是否已被运行态绑定"的检查按 dolphin_config_id 匹配，根本看不到它们。
+-- 这里把已经绑定运行态的空配置行归属到当前默认环境；本次改动同时让发布路径写回该字段，
+-- 之后不再新增空配置绑定。
+SET @default_dolphin_config_id := (
+    SELECT `id` FROM `dolphin_config`
+    WHERE `is_default` = 1 AND `is_active` = 1 AND (`deleted` IS NULL OR `deleted` = 0)
+    ORDER BY `id` DESC
+    LIMIT 1
+);
+
+UPDATE `data_workflow`
+SET `dolphin_config_id` = @default_dolphin_config_id
+WHERE `dolphin_config_id` IS NULL
+  AND `workflow_code` IS NOT NULL
+  AND `workflow_code` > 0
+  AND (`deleted` IS NULL OR `deleted` = 0)
+  AND @default_dolphin_config_id IS NOT NULL;

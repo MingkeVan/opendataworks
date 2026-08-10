@@ -53,9 +53,13 @@ public class DolphinSchedulerService {
     private final DolphinOpenApiClient openApiClient;
     private final AtomicLong taskCodeSequence = new AtomicLong(System.currentTimeMillis());
 
-    // Cache for project code to avoid repeated API calls. Key is Dolphin config id,
-    // with -1 reserved for legacy/default config calls before an id is persisted.
-    private final Map<Long, Long> cachedProjectCodeByConfigId = new ConcurrentHashMap<>();
+    // Cache for project code to avoid repeated API calls.
+    //
+    // Key 必须包含配置身份（URL + 项目名），不能只用配置 id：管理员改掉某个环境的地址或项目名后，
+    // 缓存清理发生在事务提交、锁释放之后（Controller 里调 clearProjectCodeCache），
+    // 等在锁上的导入可能恰好在这两者之间拿到锁，随后命中旧 id 对应的旧 projectCode，
+    // 在新环境里绑定到编码碰巧相同的另一条运行态。把身份编进 key，配置一变缓存自然落空。
+    private final Map<String, Long> cachedProjectCodeByConfigId = new ConcurrentHashMap<>();
     private final ThreadLocal<DolphinConfig> scopedConfig = new ThreadLocal<>();
 
     public DolphinSchedulerService(DolphinConfigService dolphinConfigService,
@@ -119,7 +123,7 @@ public class DolphinSchedulerService {
      */
     public Long getProjectCode(boolean forceRefresh) {
         DolphinConfig activeConfig = getConfig();
-        Long cacheKey = configCacheKey(activeConfig);
+        String cacheKey = configCacheKey(activeConfig);
         if (!forceRefresh && cachedProjectCodeByConfigId.containsKey(cacheKey)) {
             return cachedProjectCodeByConfigId.get(cacheKey);
         }
@@ -183,7 +187,7 @@ public class DolphinSchedulerService {
 
     private Long lookupProjectCodeReadOnly() {
         DolphinConfig activeConfig = getConfig();
-        Long cacheKey = configCacheKey(activeConfig);
+        String cacheKey = configCacheKey(activeConfig);
         Long cached = cachedProjectCodeByConfigId.get(cacheKey);
         if (cached != null) {
             return cached;
@@ -206,8 +210,22 @@ public class DolphinSchedulerService {
         return openApiClient.testConnection(config);
     }
 
-    private Long configCacheKey(DolphinConfig config) {
-        return config != null && config.getId() != null ? config.getId() : -1L;
+    private String configCacheKey(DolphinConfig config) {
+        if (config == null) {
+            return "-1";
+        }
+        return String.join("|",
+                String.valueOf(config.getId()),
+                trimTrailingSlash(config.getUrl()),
+                String.valueOf(config.getProjectName()));
+    }
+
+    private String trimTrailingSlash(String url) {
+        if (!StringUtils.hasText(url)) {
+            return "";
+        }
+        String trimmed = url.trim();
+        return trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
     }
 
     /**

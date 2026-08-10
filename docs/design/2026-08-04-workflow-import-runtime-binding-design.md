@@ -66,6 +66,8 @@ RESET 时定义 JSON 走 `WorkflowDefinitionAssembler.refreshRuntimeBindings`，
 
 ### 项目编码解析
 
+项目编码缓存按**配置身份**（id + URL + projectName）而不是只按配置 id 建键。缓存清理发生在配置事务提交、锁释放之后（Controller 里调 `clearProjectCodeCache`），等在锁上的导入可能恰好在这两者之间拿到锁，命中旧 id 对应的旧 `projectCode`，在新环境里绑到编码碰巧相同的另一条运行态。身份编进 key 后，配置一变缓存自然落空。
+
 目标项目编码由所选 Dolphin 配置的 `projectName` 反查得到。所有只读路径都使用只读解析，项目不存在时返回失败，不自动创建项目 —— 现有 `DolphinSchedulerService.getProjectCode` 在项目缺失时会调用 `createProject`，仅仅打开导入弹窗不该在目标 Dolphin 里凭空建出一个项目。`DolphinRuntimeDefinitionService` 整体是运行态只读服务，其 `resolveProjectCode` 一并改为只读解析。
 
 ### 运行态占用判定的隔离与并发
@@ -84,6 +86,18 @@ RESET 时定义 JSON 走 `WorkflowDefinitionAssembler.refreshRuntimeBindings`，
 第四步单独用不够。目标运行态还没被占用时，占用查询命中的是空结果，InnoDB 只能给出间隙锁；而间隙锁是"纯抑制性"的，可以被多个事务同时持有，两个并发导入会双双读到空。随后两边把 `workflow_code` 从 `NULL` 改成同一个值时，在 `REPEATABLE READ` 下互相等待对方的间隙锁而死锁（由 InnoDB 回滚其中一个，而不是让后者读到"已占用"），在 `READ COMMITTED` 下则因为检索通常不加间隙锁而双双绑定成功。锁一行真实存在的记录才是真正互斥，且不依赖隔离级别。
 
 互斥点取全局一行而不是按 Dolphin 环境分别加锁：占用判定落在 `(project_code, workflow_code)` 上，不同环境完全可能出现相同的 project/workflow 编码，按环境加锁的两个事务会锁住不同的配置行，却对同一个索引间隙执行 `FOR UPDATE`，跨环境并发仍会死锁。绑定运行态是低频人工操作，全局串行更简单也更可靠。
+
+### 空 `dolphin_config_id` 的存量绑定
+
+`dolphin_config_id` 为空但已绑定运行态的工作流，实际是跟着"当前默认环境"跑的：`WorkflowDeployService` 在该字段为空时回落到默认配置。而"环境是否已被运行态绑定"的检查按 `dolphin_config_id` 匹配，完全看不到它们 —— 于是默认环境可以被改身份、删除或切换，把这些工作流静默指向另一套 Dolphin。
+
+三处一起收口：
+
+- `V51` 把已绑定运行态的空配置行回填到当前默认环境（V43 做过一次，但只在当时存在默认环境时才执行）
+- 发布成功后把实际使用的环境 id 固化回工作流，不再产生新的空配置绑定
+- 绑定数量统计在目标是当前默认环境时额外计入空配置行，作为回填时无默认环境等残留情况的兜底
+
+`setDefault` 与新建默认配置也纳入同一把锁：切换默认环境同样会改变这些工作流的实际指向。
 
 该锁同时被 Dolphin 环境的修改与删除路径持有：两者都是"先统计绑定数量、再写"的读改写，不共用同一把锁的话，管理员可以在导入提交前读到"尚未绑定"，随后删除或改掉环境，留下指向已消失环境的工作流。同样出于快照的理由，这些路径也必须在第一次读库之前取锁 —— 其中 `updateConfig()` 尤其容易看漏：它先 `getDefaultConfig()` 再类内自调用 `update()`，自调用不会另起事务，等 `update()` 取到锁时快照早已定死。
 
