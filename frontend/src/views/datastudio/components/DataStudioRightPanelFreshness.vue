@@ -2,14 +2,7 @@
   <div class="meta-section meta-section-fill" v-loading="loading">
     <section class="section-block section-fill">
       <div class="section-header">
-        <div class="fresh-title-row">
-          <div class="section-title">数据新鲜度</div>
-          <!-- 右侧：最近一次检查状态 -->
-          <el-tag v-if="latest" :type="statusType(latest.status)" size="small" effect="dark">
-            {{ statusLabel(latest.status) }}
-          </el-tag>
-          <span v-else class="fresh-muted">未检查</span>
-        </div>
+        <div class="section-title">数据新鲜度</div>
         <div class="section-actions">
           <el-button size="small" :disabled="!tableId || checking" :loading="checking" @click="checkNow">
             立即检查
@@ -19,75 +12,74 @@
       </div>
 
       <el-scrollbar class="meta-scroll">
-        <!-- 最近一次结果：一行紧凑显示 -->
-        <div v-if="latest" class="fresh-latest">
-          <span>最后加载 {{ fmt(latest.maxLoadedAt) }}</span>
-          <span class="dot">·</span>
-          <span>{{ latest.reason === 'never_loaded' ? '从未产出' : ('数据年龄 ' + humanizeAge(latest.ageSeconds)) }}</span>
-          <span class="dot">·</span>
-          <span>检查于 {{ fmt(latest.createdAt || latest.snapshottedAt) }}</span>
+        <!-- 状态横幅：最近一次检查结果，醒目占满宽度 -->
+        <div class="fresh-status" :class="'is-' + (latest ? latest.status : 'none')">
+          <div class="fs-main">
+            <span class="fs-dot"></span>
+            <span class="fs-label">{{ latest ? statusLabel(latest.status) : '未检查' }}</span>
+            <span class="fs-age">
+              <template v-if="!latest">配置契约后点「立即检查」</template>
+              <template v-else-if="latest.reason === 'never_loaded'">从未产出数据</template>
+              <template v-else-if="latest.ageSeconds != null">数据年龄 {{ humanizeAge(latest.ageSeconds) }}</template>
+            </span>
+          </div>
+          <div v-if="latest" class="fs-sub">
+            最后加载 {{ fmt(latest.maxLoadedAt) }}<span class="dot">·</span>检查于 {{ fmt(latest.createdAt || latest.snapshottedAt) }}
+          </div>
         </div>
-        <div v-else class="fresh-muted fresh-latest">尚无检查记录，配置契约后点「立即检查」。</div>
 
-        <!-- 行内契约编辑：选取值方式 → 补一点 → 阈值 → 保存 -->
-        <el-form class="fresh-form" :inline="true" size="small" @submit.prevent>
-          <el-form-item label="取值">
-            <el-select v-model="form.mode" style="width: 132px">
-              <el-option label="字段" value="column" />
-              <el-option label="自定义" value="custom_sql" />
-              <el-option label="分区" value="partition" />
-              <el-option label="元数据" value="metadata" />
+        <!-- 契约：竖排对齐表单，行内编辑，不弹层 -->
+        <el-form class="fresh-form" label-width="66px" label-position="left" size="small" @submit.prevent>
+          <el-form-item label="取值方式">
+            <el-select v-model="form.mode" style="width: 100%">
+              <el-option label="字段 · 列的最大时间" value="column" />
+              <el-option label="自定义查询" value="custom_sql" />
+              <el-option label="分区 · 业务日期" value="partition" />
+              <el-option label="元数据 · 仅发现长期无写入" value="metadata" />
             </el-select>
           </el-form-item>
 
-          <el-form-item v-if="form.mode === 'column'" label="列">
-            <el-input v-model="form.loadedAtField" placeholder="如 etl_time" style="width: 160px" />
+          <el-form-item v-if="form.mode === 'column'" label="加载列">
+            <el-input v-model="form.loadedAtField" placeholder="如 etl_time" />
           </el-form-item>
           <el-form-item v-else-if="form.mode === 'custom_sql'" label="查询">
-            <el-input v-model="form.loadedAtQuery" placeholder="SELECT MAX(order_time) FROM db.tbl" style="width: 260px" />
+            <el-input v-model="form.loadedAtQuery" type="textarea" :rows="2" placeholder="SELECT MAX(order_time) FROM db.tbl" />
           </el-form-item>
-          <el-form-item v-else-if="form.mode === 'partition'" label="格式">
-            <el-input v-model="form.partitionFormat" placeholder="如 yyyyMMdd" style="width: 132px" />
-          </el-form-item>
-          <el-form-item v-else label=" ">
-            <span class="fresh-muted">元数据：只能发现长期无写入，发现不了写入了旧数据</span>
+          <el-form-item v-else-if="form.mode === 'partition'" label="分区格式">
+            <el-input v-model="form.partitionFormat" placeholder="如 yyyyMMdd" />
           </el-form-item>
 
-          <el-form-item label="warn">
-            <el-input-number v-model="form.warnAfterCount" :min="1" :controls="false" class="th-count" />
-            <el-select v-model="form.warnAfterPeriod" class="th-period">
-              <el-option label="分" value="minute" />
-              <el-option label="时" value="hour" />
-              <el-option label="天" value="day" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="error">
-            <el-input-number v-model="form.errorAfterCount" :min="1" :controls="false" class="th-count" />
-            <el-select v-model="form.errorAfterPeriod" class="th-period">
-              <el-option label="分" value="minute" />
-              <el-option label="时" value="hour" />
-              <el-option label="天" value="day" />
-            </el-select>
+          <el-form-item label="时限">
+            <div class="thresholds">
+              <span class="th-group">
+                <span class="th-lab warn">预警</span>
+                <el-input-number v-model="form.warnAfterCount" :min="1" :controls="false" class="th-count" />
+                <el-select v-model="form.warnAfterPeriod" class="th-period">
+                  <el-option label="分" value="minute" /><el-option label="时" value="hour" /><el-option label="天" value="day" />
+                </el-select>
+              </span>
+              <span class="th-group">
+                <span class="th-lab err">超时</span>
+                <el-input-number v-model="form.errorAfterCount" :min="1" :controls="false" class="th-count" />
+                <el-select v-model="form.errorAfterPeriod" class="th-period">
+                  <el-option label="分" value="minute" /><el-option label="时" value="hour" /><el-option label="天" value="day" />
+                </el-select>
+              </span>
+            </div>
           </el-form-item>
 
           <el-form-item label="过滤">
-            <el-input v-model="form.filterExpr" placeholder="可选 WHERE 谓词" style="width: 160px" />
-          </el-form-item>
-          <el-form-item label="启用">
-            <el-switch v-model="form.enabled" />
-          </el-form-item>
-
-          <el-form-item>
-            <el-button type="primary" size="small" :loading="saving" :disabled="!tableId" @click="save">保存</el-button>
-            <el-button
-              v-if="resp && resp.configured"
-              size="small"
-              text
-              type="danger"
-              @click="removeConfig"
-            >删除</el-button>
+            <el-input v-model="form.filterExpr" placeholder="可选 WHERE 谓词" />
           </el-form-item>
         </el-form>
+
+        <div class="fresh-footer">
+          <el-switch v-model="form.enabled" />
+          <span class="sw-lab">启用</span>
+          <span class="spacer"></span>
+          <el-button v-if="resp && resp.configured" size="small" text type="danger" @click="removeConfig">删除</el-button>
+          <el-button type="primary" size="small" :loading="saving" :disabled="!tableId" @click="save">保存</el-button>
+        </div>
       </el-scrollbar>
     </section>
 
@@ -280,41 +272,56 @@ watch(tableId, () => loadFreshness(), { immediate: true })
 </script>
 
 <style scoped>
-.fresh-title-row {
+/* 状态横幅 */
+.fresh-status {
+  border: 1px solid var(--el-border-color-lighter);
+  border-left-width: 3px;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  background: var(--el-fill-color-light);
+}
+.fresh-status.is-error   { border-left-color: var(--el-color-danger);  background: var(--el-color-danger-light-9); }
+.fresh-status.is-warn    { border-left-color: var(--el-color-warning); background: var(--el-color-warning-light-9); }
+.fresh-status.is-pass    { border-left-color: var(--el-color-success); background: var(--el-color-success-light-9); }
+.fresh-status.is-runtime_error { border-left-color: var(--el-color-info); background: var(--el-color-info-light-9); }
+.fresh-status.is-none    { border-left-color: var(--el-border-color); }
+
+.fs-main { display: flex; align-items: center; gap: 8px; }
+.fs-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--el-text-color-secondary); flex: none; }
+.is-error   .fs-dot { background: var(--el-color-danger); }
+.is-warn    .fs-dot { background: var(--el-color-warning); }
+.is-pass    .fs-dot { background: var(--el-color-success); }
+.is-runtime_error .fs-dot { background: var(--el-color-info); }
+.fs-label { font-size: 14px; font-weight: 600; }
+.is-error   .fs-label { color: var(--el-color-danger); }
+.is-warn    .fs-label { color: var(--el-color-warning); }
+.is-pass    .fs-label { color: var(--el-color-success); }
+.fs-age { font-size: 12px; color: var(--el-text-color-secondary); margin-left: auto; }
+.fs-sub { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 6px; }
+.fs-sub .dot { margin: 0 6px; color: var(--el-text-color-disabled); }
+
+/* 表单 */
+.fresh-form { margin-bottom: 4px; }
+.fresh-form :deep(.el-form-item) { margin-bottom: 12px; }
+.fresh-form :deep(.el-form-item__label) { color: var(--el-text-color-regular); }
+
+.thresholds { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.th-group { display: inline-flex; align-items: center; gap: 6px; }
+.th-lab { font-size: 12px; }
+.th-lab.warn { color: var(--el-color-warning); }
+.th-lab.err { color: var(--el-color-danger); }
+.th-count { width: 66px; }
+.th-period { width: 62px; }
+
+/* 底部操作栏 */
+.fresh-footer {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--el-border-color-lighter);
 }
-.fresh-muted {
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-}
-.fresh-latest {
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-  margin: 8px 0 12px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-.fresh-latest .dot {
-  color: var(--el-text-color-disabled);
-}
-.fresh-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.fresh-form :deep(.el-form-item) {
-  margin-right: 12px;
-  margin-bottom: 10px;
-}
-.th-count {
-  width: 68px;
-}
-.th-period {
-  width: 62px;
-  margin-left: 6px;
-}
+.sw-lab { font-size: 12px; color: var(--el-text-color-regular); }
+.spacer { flex: 1; }
 </style>
