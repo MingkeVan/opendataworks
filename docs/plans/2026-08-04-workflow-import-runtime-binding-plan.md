@@ -120,6 +120,7 @@
 ## Rollout / Backout
 
 - 数据库变更仅 `V51__add_data_workflow_runtime_index.sql`：新增非唯一索引 `idx_data_workflow_runtime (project_code, workflow_code)`、向 `sys_config` 播种运行态绑定互斥行、把已绑定运行态但 `dolphin_config_id` 为空的行回填到当前默认环境。前两者是幂等加法；回填只影响此前跟随默认环境的行，把隐式归属变成显式归属，回滚代码后这些行仍指向同一个环境
-- 行为变化：发布成功后会把实际使用的 Dolphin 环境固化到工作流上。此前 `dolphin_config_id` 为空的工作流会随默认环境切换而漂移，之后不再漂移 —— 这是有意收紧
+- 行为变化：发布会在开始前定下本次使用的 Dolphin 环境并在结束时固化到工作流上；配置的新建/修改/删除/设默认也会先把残留的空配置绑定固定到当下的有效默认环境。此前 `dolphin_config_id` 为空的工作流会随默认环境切换而漂移，之后不再漂移 —— 这是有意收紧
+- 行为变化：移除了 `DolphinConfigService` 的进程内配置缓存，配置读取每次查库。单次查询很轻，且其调用点后面都紧跟 Dolphin HTTP 调用
 - 前后端需同版本发布：后端新增必填 `dolphinConfigId`，旧前端不传会在预检阶段收到明确错误而非静默错绑
 - 回滚即回退代码，已导入工作流的运行态字段保持导入时写入的值，不需要额外清理

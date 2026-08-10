@@ -5,6 +5,7 @@ import com.onedata.portal.mapper.DolphinConfigMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -13,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -25,6 +27,27 @@ class DolphinConfigServiceTest {
 
     @Mock
     private RuntimeBindingLock runtimeBindingLock;
+
+    @Test
+    void setDefaultShouldPinResidualBindingsBeforeSwitching() {
+        DolphinConfigService service = new DolphinConfigService(dolphinConfigMapper, runtimeBindingLock);
+
+        DolphinConfig target = new DolphinConfig();
+        target.setId(2L);
+        target.setIsActive(true);
+        DolphinConfig effectiveDefault = new DolphinConfig();
+        effectiveDefault.setId(1L);
+        when(dolphinConfigMapper.selectOne(any())).thenReturn(effectiveDefault);
+        when(dolphinConfigMapper.selectById(2L)).thenReturn(target);
+
+        service.setDefault(2L);
+
+        // 互斥挡不住"先切默认、之后的发布落到新环境"这种顺序漂移，
+        // 必须在切换前把仍跟随旧默认环境的工作流固定下来
+        InOrder inOrder = inOrder(dolphinConfigMapper);
+        inOrder.verify(dolphinConfigMapper).pinRuntimeBoundWorkflowsWithoutConfig(1L);
+        inOrder.verify(dolphinConfigMapper).updateById(any());
+    }
 
     @Test
     void deleteShouldCountOrphanBindingsWhenTargetIsCurrentDefault() {

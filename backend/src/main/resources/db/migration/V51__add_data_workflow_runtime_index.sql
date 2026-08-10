@@ -48,10 +48,13 @@ WHERE NOT EXISTS (
 -- 另一套 Dolphin，而"是否已被运行态绑定"的检查按 dolphin_config_id 匹配，根本看不到它们。
 -- 这里把已经绑定运行态的空配置行归属到当前默认环境；本次改动同时让发布路径写回该字段，
 -- 之后不再新增空配置绑定。
+-- "有效默认环境"必须和运行时的 DolphinConfigService.getDefaultConfig 保持同一套判定：
+-- 优先显式 is_default=1，没有显式默认时回落到最新的启用配置。只认显式标记的话，
+-- 未设默认的环境下工作流其实已经跟着某个配置跑，迁移却什么都不回填。
 SET @default_dolphin_config_id := (
     SELECT `id` FROM `dolphin_config`
-    WHERE `is_default` = 1 AND `is_active` = 1 AND (`deleted` IS NULL OR `deleted` = 0)
-    ORDER BY `id` DESC
+    WHERE `is_active` = 1 AND (`deleted` IS NULL OR `deleted` = 0)
+    ORDER BY `is_default` DESC, `id` DESC
     LIMIT 1
 );
 

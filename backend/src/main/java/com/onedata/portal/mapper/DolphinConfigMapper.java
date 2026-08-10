@@ -5,6 +5,7 @@ import com.onedata.portal.entity.DolphinConfig;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface DolphinConfigMapper extends BaseMapper<DolphinConfig> {
@@ -27,4 +28,15 @@ public interface DolphinConfigMapper extends BaseMapper<DolphinConfig> {
             + "AND workflow_code > 0 "
             + "AND (deleted IS NULL OR deleted = 0)")
     Long countRuntimeBoundWorkflowsWithoutConfig();
+
+    /**
+     * 把仍未绑定环境的运行态工作流固定到指定环境。用于在切换/修改/删除默认环境之前，
+     * 先把这些隐式跟随默认环境的工作流归属到它们当下实际使用的那个环境。
+     */
+    @Update("UPDATE data_workflow SET dolphin_config_id = #{configId} "
+            + "WHERE dolphin_config_id IS NULL "
+            + "AND workflow_code IS NOT NULL "
+            + "AND workflow_code > 0 "
+            + "AND (deleted IS NULL OR deleted = 0)")
+    int pinRuntimeBoundWorkflowsWithoutConfig(@Param("configId") Long configId);
 }
