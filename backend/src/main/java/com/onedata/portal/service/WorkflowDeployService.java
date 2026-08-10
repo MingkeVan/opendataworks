@@ -46,18 +46,13 @@ public class WorkflowDeployService {
     private final TableTaskRelationMapper tableTaskRelationMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
     private final DataWorkflowMapper workflowMapper;
-    private final RuntimeBindingLock runtimeBindingLock;
     private final ObjectMapper objectMapper;
 
     @Transactional
     public DeploymentResult deploy(DataWorkflow workflow) {
-        // 尚未绑定环境的工作流，本次发布要把"实际使用的环境"固化下去，而这个环境来自当时的
-        // 默认配置；不与配置变更互斥的话，中途被切换就会把归属写成另一个环境。
-        // 已绑定的工作流全程走显式 id，不受默认切换影响，也不必参与串行。
+        // 外层 WorkflowPublishService 已在发布事务第一次读库前取得运行态绑定锁。锁不能留在这里：
+        // deploy 加入外层事务时，自动保存和配置解析早已建立 RR 快照并写过 data_workflow。
         boolean needsPinning = workflow.getDolphinConfigId() == null;
-        if (needsPinning) {
-            runtimeBindingLock.acquire();
-        }
 
         // 整次部署只认这一个显式 id。此前每处都写成"未绑定就用默认"，各自独立解析一次默认配置，
         // 管理员在部署中途切换默认，同一次部署的 Dolphin 调用会被分散到两个环境。

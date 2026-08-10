@@ -388,6 +388,7 @@ class WorkflowServiceMetadataPersistenceTest {
         DataWorkflow workflow = baseWorkflow("{}");
         workflow.setWorkflowCode(12345L);
         workflow.setDolphinScheduleId(6789L);
+        workflow.setDolphinConfigId(9L);
         when(dataWorkflowMapper.selectById(1L)).thenReturn(workflow);
 
         WorkflowTaskRelation relation1 = new WorkflowTaskRelation();
@@ -397,13 +398,13 @@ class WorkflowServiceMetadataPersistenceTest {
         relation2.setWorkflowId(1L);
         relation2.setTaskId(20L);
         when(workflowTaskRelationMapper.selectList(any())).thenReturn(Arrays.asList(relation1, relation2));
-        when(dolphinSchedulerService.checkWorkflowExists(12345L)).thenReturn(true);
+        when(dolphinSchedulerService.checkWorkflowExists(9L, 12345L)).thenReturn(true);
 
         service.deleteWorkflow(1L, false);
 
-        verify(dolphinSchedulerService).offlineWorkflowSchedule(6789L);
-        verify(dolphinSchedulerService).setWorkflowReleaseState(12345L, "OFFLINE");
-        verify(dolphinSchedulerService).deleteWorkflow(12345L);
+        verify(dolphinSchedulerService).offlineWorkflowSchedule(9L, 6789L);
+        verify(dolphinSchedulerService).setWorkflowReleaseState(9L, 12345L, "OFFLINE");
+        verify(dolphinSchedulerService).deleteWorkflow(9L, 12345L);
         verify(workflowTaskRelationMapper).hardDeleteByWorkflowId(1L);
         verify(dataWorkflowMapper).deleteById(1L);
         verify(dataLineageMapper, never()).delete(any());

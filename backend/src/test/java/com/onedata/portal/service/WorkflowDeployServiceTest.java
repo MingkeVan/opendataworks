@@ -66,9 +66,6 @@ class WorkflowDeployServiceTest {
 
     private WorkflowDeployService service;
 
-    @Mock
-    private RuntimeBindingLock runtimeBindingLock;
-
     @BeforeEach
     void setUp() {
         service = new WorkflowDeployService(
@@ -77,7 +74,6 @@ class WorkflowDeployServiceTest {
                 tableTaskRelationMapper,
                 dolphinSchedulerService,
                 workflowMapper,
-                runtimeBindingLock,
                 new ObjectMapper());
 
         // 部署开始前会先定下本次使用的 Dolphin 环境；工作流未绑定时解析当前默认环境

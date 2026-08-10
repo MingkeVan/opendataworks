@@ -168,20 +168,24 @@ public class WorkflowCommandService {
         try {
             if (workflow.getWorkflowCode() != null && workflow.getWorkflowCode() > 0) {
                 try {
-                    boolean dolphinWorkflowExists = dolphinSchedulerService.checkWorkflowExists(workflow.getWorkflowCode());
+                    Long dolphinConfigId = workflow.getDolphinConfigId();
+                    boolean dolphinWorkflowExists = dolphinSchedulerService.checkWorkflowExists(
+                            dolphinConfigId, workflow.getWorkflowCode());
                     if (!dolphinWorkflowExists) {
                         log.info("DolphinScheduler中不存在工作流，跳过同步删除: {}", workflow.getWorkflowCode());
                     } else {
                         if (workflow.getDolphinScheduleId() != null && workflow.getDolphinScheduleId() > 0) {
                             try {
-                                dolphinSchedulerService.offlineWorkflowSchedule(workflow.getDolphinScheduleId());
+                                dolphinSchedulerService.offlineWorkflowSchedule(
+                                        dolphinConfigId, workflow.getDolphinScheduleId());
                             } catch (Exception ex) {
                                 log.warn("Failed to offline schedule {} before workflow delete: {}",
                                         workflow.getDolphinScheduleId(), ex.getMessage());
                             }
                         }
-                        dolphinSchedulerService.setWorkflowReleaseState(workflow.getWorkflowCode(), "OFFLINE");
-                        dolphinSchedulerService.deleteWorkflow(workflow.getWorkflowCode());
+                        dolphinSchedulerService.setWorkflowReleaseState(
+                                dolphinConfigId, workflow.getWorkflowCode(), "OFFLINE");
+                        dolphinSchedulerService.deleteWorkflow(dolphinConfigId, workflow.getWorkflowCode());
                         log.info("已删除DolphinScheduler中的工作流定义: {}", workflow.getWorkflowCode());
                     }
                 } catch (Exception e) {

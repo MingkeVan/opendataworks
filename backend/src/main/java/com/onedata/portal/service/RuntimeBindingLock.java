@@ -14,6 +14,7 @@ import java.util.List;
  * <p>凡是会改变"某个 Dolphin 运行态归谁所有"的写路径，都必须先取这把锁：
  * <ul>
  *   <li>导入时把工作流绑定到目标 Dolphin 的既有运行态</li>
+ *   <li>发布或审批通过时创建、更新并固化 Dolphin 运行态绑定</li>
  *   <li>修改或删除 Dolphin 环境（两者都是"先统计绑定数量、再写"的读改写）</li>
  * </ul>
  *
