@@ -59,7 +59,7 @@ describe('DataStudioRightPanelFreshness', () => {
     checkFreshness.mockReset().mockResolvedValue({})
   })
 
-  it('挂载即按当前表拉取契约与历史', async () => {
+  it('挂载即按当前表拉取契约（历史改为按钮点开时才拉）', async () => {
     const activeTab = ref('t1')
     const tabStates = reactive({ t1: { table: { id: 1 } } })
     const wrapper = mountPanel(tabStates, activeTab)
@@ -67,7 +67,8 @@ describe('DataStudioRightPanelFreshness', () => {
 
     expect(wrapper.exists()).toBe(true)
     expect(getFreshness).toHaveBeenCalledWith(1)
-    expect(freshnessHistory).toHaveBeenCalledWith(1, 20)
+    // 历史不在挂载时拉取（收进「历史」按钮，点开才拉）
+    expect(freshnessHistory).not.toHaveBeenCalled()
   })
 
   it('切换表触发重新拉取', async () => {
