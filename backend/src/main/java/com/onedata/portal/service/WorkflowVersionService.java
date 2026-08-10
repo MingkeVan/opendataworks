@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.onedata.portal.entity.WorkflowVersion;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,6 +20,29 @@ public class WorkflowVersionService {
     private static final int SNAPSHOT_SCHEMA_VERSION_DEFINITION = 3;
 
     private final WorkflowVersionMapper workflowVersionMapper;
+
+    /**
+     * 用最终状态重写一份已存在的版本快照。
+     *
+     * <p>只服务于导入：工作流必须先由 {@code createWorkflow} 建出来才能拿到 id，而初始版本快照
+     * 就在那一步生成，此时运行态归属（workflowCode / publishStatus / 调度标识）尚未写入。
+     * 与其额外产生一个"错的初始版本 + 对的第二版本"，不如把这唯一一版就地改成最终状态，
+     * 否则回滚到初始版本会把发布状态和调度恢复错，甚至让下一次发布被误判为首次部署。
+     */
+    @Transactional
+    public WorkflowVersion replaceSnapshot(Long versionId, String snapshot) {
+        if (versionId == null || !StringUtils.hasText(snapshot)) {
+            return null;
+        }
+        WorkflowVersion version = workflowVersionMapper.selectById(versionId);
+        if (version == null) {
+            return null;
+        }
+        version.setStructureSnapshot(snapshot);
+        version.setSnapshotSchemaVersion(SNAPSHOT_SCHEMA_VERSION_DEFINITION);
+        workflowVersionMapper.updateById(version);
+        return version;
+    }
 
     @Transactional
     public WorkflowVersion createVersion(Long workflowId,

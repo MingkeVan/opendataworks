@@ -83,8 +83,10 @@ public class WorkflowDefinitionLifecycleService {
     private final TaskLineageConsistencyChecker lineageConsistencyChecker;
     private final DataWorkflowMapper dataWorkflowMapper;
     private final DolphinConfigMapper dolphinConfigMapper;
+    private final RuntimeBindingLock runtimeBindingLock;
     private final DataTaskMapper dataTaskMapper;
     private final WorkflowVersionMapper workflowVersionMapper;
+    private final WorkflowVersionService workflowVersionService;
     private final ObjectMapper objectMapper;
 
     public PageResult<DolphinRuntimeWorkflowOption> listDolphinWorkflows(Long dolphinConfigId,
@@ -176,18 +178,33 @@ public class WorkflowDefinitionLifecycleService {
     }
 
     /**
-     * 以目标 Dolphin 环境这一行作为互斥点，把"绑定该环境内某个运行态"的并发导入串行化。
-     * 运行态编码本来就只在单个环境内唯一，按环境串行是自然的粒度；导入是低频人工操作，
-     * 这点串行代价可以接受。
+     * 把初始版本快照对齐到导入完成后的最终状态。
+     *
+     * <p>{@code createWorkflow} 在拿到工作流 id 的同时就生成了初始版本，而运行态归属
+     * （workflowCode / publishStatus / status / 调度标识）是之后才写进去的，快照因此会停留在
+     * "未绑定"状态。不修正的话，回滚到这一版会把发布状态和调度恢复错，甚至让下一次发布被误判
+     * 为首次部署，从而在目标 Dolphin 里新建一条重复定义。
      */
-    private void lockDolphinConfigForRuntimeBinding(Long dolphinConfigId) {
-        if (dolphinConfigId == null || dolphinConfigId <= 0) {
+    private void alignInitialVersionSnapshot(DataWorkflow workflow, DataWorkflow normalized) {
+        if (workflow == null || workflow.getCurrentVersionId() == null || normalized == null) {
             return;
         }
-        dolphinConfigMapper.selectList(
-                Wrappers.<DolphinConfig>lambdaQuery()
-                        .eq(DolphinConfig::getId, dolphinConfigId)
-                        .last("FOR UPDATE"));
+        workflowVersionService.replaceSnapshot(workflow.getCurrentVersionId(), normalized.getDefinitionJson());
+    }
+
+    /**
+     * 持锁后复核目标 Dolphin 环境：预检到提交之间它可能已被删除或停用。
+     */
+    private void ensureDolphinConfigStillUsable(Long dolphinConfigId) {
+        DolphinConfig config = dolphinConfigId == null
+                ? null
+                : dolphinConfigMapper.selectById(dolphinConfigId);
+        if (config == null) {
+            throw new IllegalStateException("目标 Dolphin 环境已被删除，请重新选择后再导入");
+        }
+        if (Boolean.FALSE.equals(config.getIsActive())) {
+            throw new IllegalStateException("目标 Dolphin 环境已停用，请重新选择后再导入");
+        }
     }
 
     /**
@@ -257,6 +274,9 @@ public class WorkflowDefinitionLifecycleService {
         workflowRequest.setOperator(operator);
         workflowRequest.setTriggerSource(resolveTriggerSource(context.getSourceType()));
         workflowRequest.setProjectCode(runtimeBinding.getProjectCode());
+        // 必须在建流程之前给出目标环境：createWorkflow 会用工作流自身的 dolphinConfigId
+        // 去归一化定义（解析 datasource / taskGroup 编码），不传就会按默认环境的目录解析。
+        workflowRequest.setDolphinConfigId(runtimeBinding.getDolphinConfigId());
         workflowRequest.setDefinitionJson(normalizedJson);
 
         DataWorkflow workflow = workflowService.createWorkflow(workflowRequest);
@@ -266,7 +286,8 @@ public class WorkflowDefinitionLifecycleService {
                 operator,
                 runtimeBinding);
         dataWorkflowMapper.updateById(workflow);
-        workflowService.normalizeAndPersistMetadata(workflow.getId(), operator);
+        DataWorkflow normalized = workflowService.normalizeAndPersistMetadata(workflow.getId(), operator);
+        alignInitialVersionSnapshot(workflow, normalized);
 
         WorkflowImportCommitResponse response = new WorkflowImportCommitResponse();
         response.setWorkflowId(workflow.getId());
@@ -936,15 +957,13 @@ public class WorkflowDefinitionLifecycleService {
     /**
      * 事务内兜底：预检到提交之间可能有并发导入抢先占用同一个运行态。
      *
-     * <p>这里必须先在 {@code dolphin_config} 对应行上取排他行锁再查占用。只靠占用查询自己的
-     * {@code FOR UPDATE} 是不够的：目标行还不存在时它只能拿到间隙锁，而间隙锁是"纯抑制性"的、
-     * 可以被多个事务同时持有，两个并发导入会双双读到空。之后两边把 {@code workflow_code}
-     * 从 NULL 改成同一个值时，在 REPEATABLE READ 下互相等待对方的间隙锁而死锁，
-     * 在 READ COMMITTED 下则因为不加间隙锁而双双绑定成功。
-     * 锁一行真实存在的记录才是真正互斥的，且不依赖隔离级别。
+     * <p>先取全局运行态绑定锁再查占用，理由见 {@link RuntimeBindingLock}。取锁后还要复核目标
+     * Dolphin 环境仍然存在且启用 —— 管理员可能在预检之后、提交之前把它删掉或停用，
+     * 此时绑定上去会留下一条指向已消失环境的工作流。
      */
     private void ensureWorkflowConflictAbsent(WorkflowImportRuntimeBinding binding) {
-        lockDolphinConfigForRuntimeBinding(binding.getDolphinConfigId());
+        runtimeBindingLock.acquire();
+        ensureDolphinConfigStillUsable(binding.getDolphinConfigId());
         DataWorkflow existing = findWorkflowByRuntime(binding.getDolphinConfigId(),
                 binding.getProjectCode(), binding.getWorkflowCode(), true);
         if (existing != null) {

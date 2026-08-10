@@ -27,6 +27,7 @@ public class DolphinConfigService {
     private static final String DEFAULT_EXECUTION_TYPE = "PARALLEL";
 
     private final DolphinConfigMapper dolphinConfigMapper;
+    private final RuntimeBindingLock runtimeBindingLock;
 
     // Simple in-memory cache variable could serve as L1 cache if Spring Cache is
     // not configured
@@ -113,6 +114,9 @@ public class DolphinConfigService {
 
     @Transactional
     public DolphinConfig update(Long id, DolphinConfig config) {
+        // "统计绑定数量 -> 写入" 是读改写：不加锁的话，并发导入可以在这里读到"尚未绑定"
+        // 之后才提交绑定，运行态身份就会在无人复查的情况下被改掉。
+        runtimeBindingLock.acquire();
         DolphinConfig existing = dolphinConfigMapper.selectById(id);
         if (existing == null) {
             throw new IllegalArgumentException("Dolphin 环境不存在");
@@ -134,6 +138,8 @@ public class DolphinConfigService {
 
     @Transactional
     public void delete(Long id) {
+        // 同 update：与并发导入的运行态绑定互斥，否则会删掉一个刚被绑定上的环境
+        runtimeBindingLock.acquire();
         DolphinConfig existing = dolphinConfigMapper.selectById(id);
         if (existing == null) {
             return;

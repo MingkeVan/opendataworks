@@ -20,9 +20,12 @@ class DolphinConfigServiceTest {
     @Mock
     private DolphinConfigMapper dolphinConfigMapper;
 
+    @Mock
+    private RuntimeBindingLock runtimeBindingLock;
+
     @Test
     void createShouldNormalizeDefaultsAndInsertNamedConfig() {
-        DolphinConfigService service = new DolphinConfigService(dolphinConfigMapper);
+        DolphinConfigService service = new DolphinConfigService(dolphinConfigMapper, runtimeBindingLock);
         DolphinConfig config = new DolphinConfig();
         config.setConfigName(" New Dolphin ");
         config.setUrl("http://new-ds/dolphinscheduler/");
@@ -50,7 +53,7 @@ class DolphinConfigServiceTest {
 
     @Test
     void getEnabledConfigShouldRejectInactiveConfig() {
-        DolphinConfigService service = new DolphinConfigService(dolphinConfigMapper);
+        DolphinConfigService service = new DolphinConfigService(dolphinConfigMapper, runtimeBindingLock);
         DolphinConfig inactive = new DolphinConfig();
         inactive.setId(2L);
         inactive.setConfigName("stopped");
@@ -64,7 +67,7 @@ class DolphinConfigServiceTest {
 
     @Test
     void deleteShouldRejectRuntimeBoundConfig() {
-        DolphinConfigService service = new DolphinConfigService(dolphinConfigMapper);
+        DolphinConfigService service = new DolphinConfigService(dolphinConfigMapper, runtimeBindingLock);
         when(dolphinConfigMapper.selectById(3L)).thenReturn(activeConfig(3L));
         when(dolphinConfigMapper.countRuntimeBoundWorkflows(3L)).thenReturn(1L);
 

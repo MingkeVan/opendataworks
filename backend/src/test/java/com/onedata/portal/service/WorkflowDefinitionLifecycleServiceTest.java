@@ -21,6 +21,7 @@ import com.onedata.portal.entity.WorkflowVersion;
 import com.onedata.portal.mapper.DataTaskMapper;
 import com.onedata.portal.mapper.DataWorkflowMapper;
 import com.onedata.portal.mapper.DolphinConfigMapper;
+import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.mapper.WorkflowVersionMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,6 +84,12 @@ class WorkflowDefinitionLifecycleServiceTest {
     private DolphinConfigMapper dolphinConfigMapper;
 
     @Mock
+    private RuntimeBindingLock runtimeBindingLock;
+
+    @Mock
+    private WorkflowVersionService workflowVersionService;
+
+    @Mock
     private DataTaskMapper dataTaskMapper;
 
     @Mock
@@ -111,14 +118,24 @@ class WorkflowDefinitionLifecycleServiceTest {
                 lineageConsistencyChecker,
                 dataWorkflowMapper,
                 dolphinConfigMapper,
+                runtimeBindingLock,
                 dataTaskMapper,
                 workflowVersionMapper,
+                workflowVersionService,
                 new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     /** 目标 Dolphin 环境可解析出项目编码，运行态归属判定才能继续。 */
     private void stubTargetProject() {
         when(dolphinSchedulerService.findProjectCode(TARGET_DOLPHIN_CONFIG_ID)).thenReturn(TARGET_PROJECT_CODE);
+    }
+
+    /** ADOPT 提交时会持锁复核目标 Dolphin 环境仍存在且启用。 */
+    private void stubTargetConfigUsable() {
+        DolphinConfig config = new DolphinConfig();
+        config.setId(TARGET_DOLPHIN_CONFIG_ID);
+        config.setIsActive(true);
+        when(dolphinConfigMapper.selectById(TARGET_DOLPHIN_CONFIG_ID)).thenReturn(config);
     }
 
     /** 不关联既有运行态时，定义 JSON 会过一次运行态清理；这里让它原样返回以便断言内容。 */
@@ -681,6 +698,7 @@ class WorkflowDefinitionLifecycleServiceTest {
         sourceSchedule.setReleaseState("ONLINE");
         sourceSchedule.setCrontab("0 0 2 * * ? *");
 
+        stubTargetConfigUsable();
         DolphinSchedule targetSchedule = new DolphinSchedule();
         targetSchedule.setId(90002L);
         targetSchedule.setReleaseState("OFFLINE");
@@ -703,6 +721,7 @@ class WorkflowDefinitionLifecycleServiceTest {
         sourceSchedule.setScheduleId(70001L);
         sourceSchedule.setReleaseState("ONLINE");
 
+        stubTargetConfigUsable();
         when(dolphinSchedulerService.getWorkflowSchedule(TARGET_DOLPHIN_CONFIG_ID, 8888L)).thenReturn(null);
         when(runtimeDefinitionService.findRuntimeWorkflow(TARGET_DOLPHIN_CONFIG_ID, TARGET_PROJECT_CODE, 8888L))
                 .thenReturn(runtimeOption(8888L, "wf_runtime_target", "ONLINE"));
@@ -760,16 +779,17 @@ class WorkflowDefinitionLifecycleServiceTest {
     }
 
     @Test
-    void commitShouldLockDolphinConfigBeforeCheckingRuntimeOccupancy() {
+    void commitShouldTakeGlobalLockBeforeCheckingRuntimeOccupancy() {
+        stubTargetConfigUsable();
         when(runtimeDefinitionService.findRuntimeWorkflow(TARGET_DOLPHIN_CONFIG_ID, TARGET_PROJECT_CODE, 8888L))
                 .thenReturn(runtimeOption(8888L, "wf_runtime_target", "ONLINE"));
 
         commitSingleTaskImport(8888L, 93L);
 
-        // 占用判定在目标行还不存在时只能拿到间隙锁，而间隙锁可被多事务同时持有，
-        // 因此必须先锁住 dolphin_config 这一行真实记录才是真互斥。顺序颠倒就等于没锁。
-        InOrder inOrder = inOrder(dolphinConfigMapper, dataWorkflowMapper);
-        inOrder.verify(dolphinConfigMapper).selectList(any());
+        // 占用查询在目标行还不存在时只能拿到间隙锁，而间隙锁可被多事务同时持有，
+        // 所以必须先取全局互斥锁。顺序颠倒就等于没锁。
+        InOrder inOrder = inOrder(runtimeBindingLock, dataWorkflowMapper);
+        inOrder.verify(runtimeBindingLock).acquire();
         inOrder.verify(dataWorkflowMapper).selectList(any());
     }
 
@@ -778,11 +798,49 @@ class WorkflowDefinitionLifecycleServiceTest {
         // 不关联既有运行态时没有可争抢的目标，不该白白串行化导入
         commitSingleTaskImport(null, 94L);
 
-        verify(dolphinConfigMapper, never()).selectList(any());
+        verify(runtimeBindingLock, never()).acquire();
+    }
+
+    @Test
+    void commitShouldRejectWhenTargetDolphinConfigDeletedBeforeCommit() {
+        RuntimeWorkflowDefinition definition = baseDefinition();
+        definition.setTasks(Collections.singletonList(sqlTask(1L, "t_extract", "SQL_A")));
+        definition.setExplicitEdges(Collections.singletonList(new RuntimeTaskEdge(0L, 1L)));
+
+        when(runtimeDefinitionService.parseRuntimeDefinitionFromJson(any())).thenReturn(definition);
+        stubTargetProject();
+        when(sqlTableMatcherService.analyze(eq("SQL_A"), eq("SQL"))).thenReturn(analyze(null, 101L));
+        when(runtimeDefinitionService.findRuntimeWorkflow(TARGET_DOLPHIN_CONFIG_ID, TARGET_PROJECT_CODE, 8888L))
+                .thenReturn(runtimeOption(8888L, "wf_runtime_target", "ONLINE"));
+        // 预检通过后管理员删掉了该环境
+        when(dolphinConfigMapper.selectById(TARGET_DOLPHIN_CONFIG_ID)).thenReturn(null);
+
+        WorkflowImportCommitRequest request = new WorkflowImportCommitRequest();
+        request.setDefinitionJson("{\"dummy\":true}");
+        request.setDolphinConfigId(TARGET_DOLPHIN_CONFIG_ID);
+        request.setLinkedWorkflowCode(8888L);
+        request.setOperator("tester");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> service.commit(request));
+        assertTrue(ex.getMessage().contains("已被删除"));
+    }
+
+    @Test
+    void commitShouldRewriteInitialVersionSnapshotWithFinalState() {
+        stubTargetConfigUsable();
+        when(runtimeDefinitionService.findRuntimeWorkflow(TARGET_DOLPHIN_CONFIG_ID, TARGET_PROJECT_CODE, 8888L))
+                .thenReturn(runtimeOption(8888L, "wf_runtime_target", "ONLINE"));
+
+        commitSingleTaskImport(8888L, 96L);
+
+        // 初始版本快照在 createWorkflow 阶段生成，那时运行态归属还没写进去；
+        // 不回写的话，回滚到这一版会把发布状态和调度恢复错。
+        verify(workflowVersionService).replaceSnapshot(eq(555L), eq("{\"final\":true}"));
     }
 
     @Test
     void commitShouldKeepRuntimeBindingWhenLinked() {
+        stubTargetConfigUsable();
         when(runtimeDefinitionService.findRuntimeWorkflow(TARGET_DOLPHIN_CONFIG_ID, TARGET_PROJECT_CODE, 8888L))
                 .thenReturn(runtimeOption(8888L, "wf_runtime_target", "ONLINE"));
 
@@ -822,7 +880,13 @@ class WorkflowDefinitionLifecycleServiceTest {
         DataWorkflow createdWorkflow = new DataWorkflow();
         createdWorkflow.setId(workflowId);
         createdWorkflow.setWorkflowName("wf_import_demo");
+        createdWorkflow.setCurrentVersionId(555L);
         when(workflowService.createWorkflow(any())).thenReturn(createdWorkflow);
+
+        DataWorkflow normalizedWorkflow = new DataWorkflow();
+        normalizedWorkflow.setId(workflowId);
+        normalizedWorkflow.setDefinitionJson("{\"final\":true}");
+        when(workflowService.normalizeAndPersistMetadata(workflowId, "tester")).thenReturn(normalizedWorkflow);
 
         WorkflowImportCommitRequest request = new WorkflowImportCommitRequest();
         request.setDefinitionJson("{\"dummy\":true}");

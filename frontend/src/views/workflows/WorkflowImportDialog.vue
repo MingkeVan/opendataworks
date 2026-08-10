@@ -395,8 +395,12 @@ const refreshRuntimeSources = async () => {
     await loadDolphinWorkflows()
     return
   }
-  // 先把列表拉回来再补预选项，否则列表结果会把预选项覆盖掉
-  await loadRuntimeWorkflows()
+  // 先把列表拉回来再补预选项，否则列表结果会把预选项覆盖掉。
+  // 整条链共用一个 token：列表请求一旦过期，后面的自动探测也不该再发出去，
+  // 否则用户切走后仍会被上一个环境的探测结果回写。
+  const token = runtimeListGuard.next()
+  await loadRuntimeWorkflows(undefined, token)
+  if (runtimeListGuard.isStale(token)) return
   await autoLinkFromDefinition()
 }
 
@@ -460,10 +464,11 @@ const autoLinkFromDefinition = async () => {
   }
 }
 
-const loadRuntimeWorkflows = async (keyword) => {
+const loadRuntimeWorkflows = async (keyword, chainToken) => {
   const configId = form.dolphinConfigId
   if (!configId) return
-  const token = runtimeListGuard.next()
+  // 由 refreshRuntimeSources 发起时沿用整条链的 token，单独搜索时自取一个
+  const token = chainToken === undefined ? runtimeListGuard.next() : chainToken
   runtimeLoading.value = true
   try {
     const page = await workflowApi.listImportDolphinWorkflows({
@@ -490,6 +495,8 @@ const handleRuntimeSearch = (keyword) => {
 }
 
 const handleLinkedWorkflowChange = () => {
+  // 用户已经明确选定或清空了关联，在途的自动探测结果不能再回写覆盖他的决定
+  autoLinkGuard.invalidate()
   previewResult.value = null
 }
 

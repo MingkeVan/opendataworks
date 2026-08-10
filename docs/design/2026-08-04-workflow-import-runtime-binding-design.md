@@ -72,18 +72,29 @@ RESET 时定义 JSON 走 `WorkflowDefinitionAssembler.refreshRuntimeBindings`，
 
 运行态编码只在单个 Dolphin 环境内唯一，跨环境可能重号，因此占用判定按 `(project_code, workflow_code)` 查询后还要按 `dolphin_config_id` 过滤。`dolphin_config_id` 为空的存量行从宽判为占用：宁可多报一次冲突，也不能漏判后在发布时覆盖它的运行态。
 
-提交阶段的复核分两步：
+提交阶段的复核分三步：
 
-1. 先对 `dolphin_config` 中目标环境那一行取排他行锁（`SELECT ... FOR UPDATE`）。
-2. 再用加锁读查占用。
+1. 取全局运行态绑定锁：`sys_config` 中 `workflow.runtime_binding.lock` 一行的排他行锁。
+2. 复核目标 Dolphin 环境仍存在且启用（预检之后可能已被删除或停用）。
+3. 用加锁读查占用。
 
-第二步单独用不够。目标运行态还没被占用时，占用查询命中的是空结果，InnoDB 只能给出间隙锁；而间隙锁是"纯抑制性"的，可以被多个事务同时持有，两个并发导入会双双读到空。随后两边把 `workflow_code` 从 `NULL` 改成同一个值时，在 `REPEATABLE READ` 下互相等待对方的间隙锁而死锁（由 InnoDB 回滚其中一个，而不是让后者读到"已占用"），在 `READ COMMITTED` 下则因为检索通常不加间隙锁而双双绑定成功。锁一行真实存在的记录才是真正互斥，且不依赖隔离级别，因此用目标环境行作为互斥点 —— 运行态编码本来就只在单个环境内唯一，按环境串行是自然粒度，导入又是低频人工操作。
+第三步单独用不够。目标运行态还没被占用时，占用查询命中的是空结果，InnoDB 只能给出间隙锁；而间隙锁是"纯抑制性"的，可以被多个事务同时持有，两个并发导入会双双读到空。随后两边把 `workflow_code` 从 `NULL` 改成同一个值时，在 `REPEATABLE READ` 下互相等待对方的间隙锁而死锁（由 InnoDB 回滚其中一个，而不是让后者读到"已占用"），在 `READ COMMITTED` 下则因为检索通常不加间隙锁而双双绑定成功。锁一行真实存在的记录才是真正互斥，且不依赖隔离级别。
 
-第二步保留 `FOR UPDATE` 仍有必要：加锁读总是读最新已提交版本，绕开 `REPEATABLE READ` 的快照，否则同一事务里先前的一致性读会让复核看到过期数据。为此新增非唯一索引 `idx_data_workflow_runtime (project_code, workflow_code)`，否则该查询会退化成全表扫描并锁住整张表。
+互斥点取全局一行而不是按 Dolphin 环境分别加锁：占用判定落在 `(project_code, workflow_code)` 上，不同环境完全可能出现相同的 project/workflow 编码，按环境加锁的两个事务会锁住不同的配置行，却对同一个索引间隙执行 `FOR UPDATE`，跨环境并发仍会死锁。绑定运行态是低频人工操作，全局串行更简单也更可靠。
+
+该锁同时被 Dolphin 环境的修改与删除路径持有：两者都是"先统计绑定数量、再写"的读改写，不共用同一把锁的话，管理员可以在导入提交前读到"尚未绑定"，随后删除或改掉环境，留下指向已消失环境的工作流。
+
+第三步保留 `FOR UPDATE` 仍有必要：加锁读总是读最新已提交版本，绕开 `REPEATABLE READ` 的快照，否则同一事务里先前的一致性读会让复核看到过期数据。为此新增非唯一索引 `idx_data_workflow_runtime (project_code, workflow_code)`，否则该查询会退化成全表扫描并锁住整张表。
 
 刻意不加唯一约束：`data_workflow` 是逻辑删除，被软删的行仍持有 `workflow_code`，唯一约束会让"删除工作流后重新关联同一运行态"直接失败；且存量数据是否已存在重复绑定无法在改动内验证，迁移失败会阻断部署。
 
 不关联既有运行态（RESET）时没有可争抢的目标，不取该锁，避免无谓串行化。
+
+### 初始版本快照
+
+`createWorkflow` 在建出工作流的同时就生成初始版本快照，而运行态归属要等工作流有了 id 才能写入，快照因此会停留在"未绑定"状态。不修正的话，回滚到这一版会把发布状态和调度恢复错，甚至让下一次发布被误判为首次部署、在目标 Dolphin 里新建一条重复定义。
+
+处理方式是两步：把 `dolphinConfigId` 提前放进 `WorkflowDefinitionRequest`（`createWorkflow` 用它归一化定义、解析 datasource 与 task group 编码，不传就会按默认环境的目录解析）；导入全部完成后，用最终定义就地重写这一版快照，而不是再追加一个版本，避免留下一个内容错误的初始版本。
 
 ### 名称冲突
 
@@ -91,7 +102,7 @@ RESET 时定义 JSON 走 `WorkflowDefinitionAssembler.refreshRuntimeBindings`，
 
 ## Interfaces / Data Model
 
-复用 `data_workflow` 既有字段，仅新增一个非唯一索引 `V49__add_data_workflow_runtime_index.sql`：`idx_data_workflow_runtime (project_code, workflow_code)`，用于支撑提交阶段的加锁复核。
+复用 `data_workflow` 既有字段，仅新增一个非唯一索引 `V51__add_data_workflow_runtime_index.sql`：`idx_data_workflow_runtime (project_code, workflow_code)`，用于支撑提交阶段的加锁复核。
 
 ### 请求/响应
 
@@ -143,4 +154,4 @@ message              面向用户的说明文案
 - 后端针对预检决策、复核失败、提交落库分支补充单测，其中 `ensureWorkflowConflictAbsent` 此前无任何用例覆盖
 - 前端把 JSON 解析、payload 构建、运行态提示文案抽为纯函数并单测
 - 环境可用时用两个 Dolphin 配置做手工端到端：关联导入、占用阻断、不关联导入、跨环境导入、无配置提示
-- 并发绑定的互斥依赖真实数据库行为，单测只能钉住"先锁环境行、再查占用"的调用顺序。真实 MySQL 双事务并发验证仍需在有数据库的环境补做：两个会话同时提交关联同一运行态的导入，预期一方成功、另一方收到"已被平台工作流关联"，而不是死锁错误或双双成功
+- 并发绑定的互斥依赖真实数据库行为，单测只能钉住"先取全局锁、再查占用"的调用顺序。真实 MySQL 双事务并发验证仍需在有数据库的环境补做：两个会话同时提交关联同一运行态的导入，预期一方成功、另一方收到"已被平台工作流关联"，而不是死锁错误或双双成功
