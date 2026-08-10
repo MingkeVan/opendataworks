@@ -1,5 +1,6 @@
 import {
   buildImportPayload,
+  buildPreviewSignature,
   createRequestGuard,
   describeRuntimeBinding,
   describeRuntimeConflict,
@@ -129,6 +130,52 @@ describe('importFormHelper', () => {
       expect(buildImportPayload(base).relationDecision).toBeUndefined()
       expect(buildImportPayload({ ...base, relationDecision: 'DECLARED' }).relationDecision)
         .toBe('DECLARED')
+    })
+  })
+
+  describe('buildPreviewSignature', () => {
+    const jsonForm = () => ({
+      importMode: 'json',
+      dolphinConfigId: 3,
+      definitionJson: '{"a":1}',
+      linkedWorkflowCode: null,
+      workflowName: 'wf_a'
+    })
+
+    it('changes when the runtime association changes', () => {
+      const before = buildPreviewSignature(jsonForm())
+      const after = buildPreviewSignature({ ...jsonForm(), linkedWorkflowCode: 8888 })
+      // 预检以 RESET 发起、回来时用户已选中运行态，这份结果不能再放行提交
+      expect(before).not.toBe(after)
+    })
+
+    it('changes when the target environment, file or name changes', () => {
+      const base = buildPreviewSignature(jsonForm())
+      expect(buildPreviewSignature({ ...jsonForm(), dolphinConfigId: 4 })).not.toBe(base)
+      expect(buildPreviewSignature({ ...jsonForm(), definitionJson: '{"a":2}' })).not.toBe(base)
+      expect(buildPreviewSignature({ ...jsonForm(), workflowName: 'wf_b' })).not.toBe(base)
+    })
+
+    it('ignores the relation decision, which is chosen after preview returns', () => {
+      const base = buildPreviewSignature(jsonForm())
+      expect(buildPreviewSignature({ ...jsonForm(), relationDecision: 'DECLARED' })).toBe(base)
+    })
+
+    it('tracks the selected row in dolphin mode and ignores json-only fields', () => {
+      const dolphinForm = {
+        importMode: 'dolphin',
+        dolphinConfigId: 3,
+        dolphinWorkflow: { workflowCode: 11 },
+        workflowName: 'wf_a'
+      }
+      const other = { ...dolphinForm, dolphinWorkflow: { workflowCode: 22 } }
+      expect(buildPreviewSignature(dolphinForm)).not.toBe(buildPreviewSignature(other))
+      expect(buildPreviewSignature({ ...dolphinForm, definitionJson: 'ignored' }))
+        .toBe(buildPreviewSignature(dolphinForm))
+    })
+
+    it('is stable for an unchanged form', () => {
+      expect(buildPreviewSignature(jsonForm())).toBe(buildPreviewSignature(jsonForm()))
     })
   })
 

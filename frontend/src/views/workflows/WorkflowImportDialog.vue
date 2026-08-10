@@ -270,6 +270,7 @@ import { workflowApi } from '@/api/workflow'
 import { settingsApi } from '@/api/settings'
 import {
   buildImportPayload,
+  buildPreviewSignature,
   createRequestGuard,
   describeRuntimeBinding,
   describeRuntimeConflict,
@@ -334,6 +335,10 @@ const previewResult = ref(null)
 const autoLinkGuard = createRequestGuard()
 const runtimeListGuard = createRequestGuard()
 const dolphinListGuard = createRequestGuard()
+const previewGuard = createRequestGuard()
+
+// 预检结果对应的表单指纹；与当前表单不一致就不允许提交
+const previewedSignature = ref('')
 
 const selectableConfigCount = computed(
   () => dolphinConfigs.value.filter((item) => item.isActive !== false).length
@@ -347,8 +352,26 @@ const runtimeConflictText = computed(() => describeRuntimeConflict(selectedRunti
 
 const runtimeBindingHint = computed(() => describeRuntimeBinding(previewResult.value?.runtimeBinding))
 
+/**
+ * 作废预检结果：清空已有结果，并让在途的预检响应回来后不再回写。
+ * 只清结果不作废在途请求，旧响应仍会把面板填上并放行提交。
+ */
+const invalidatePreview = () => {
+  previewResult.value = null
+  previewedSignature.value = ''
+  previewGuard.invalidate()
+}
+
+const currentSignature = computed(() => buildPreviewSignature(form))
+
+const previewMatchesForm = computed(
+  () => Boolean(previewedSignature.value) && previewedSignature.value === currentSignature.value
+)
+
 const canCommit = computed(() => {
   if (!previewResult.value?.canImport) return false
+  // 预检之后表单又被改过，这份结果已经不代表将要提交的内容
+  if (!previewMatchesForm.value) return false
   if (runtimeConflictText.value) return false
   if (!previewResult.value?.relationDecisionRequired) return true
   return Boolean(form.relationDecision)
@@ -383,7 +406,7 @@ const goToDolphinSettings = () => {
 }
 
 const handleDolphinConfigChange = () => {
-  previewResult.value = null
+  invalidatePreview()
   form.linkedWorkflowCode = null
   form.dolphinWorkflow = null
   dolphinPagination.pageNum = 1
@@ -425,7 +448,7 @@ const handleFileSelected = async (event) => {
  * 文件换了就重新猜一次名称与关联项，但不覆盖用户已经手工改过的名称。
  */
 const handleDefinitionJsonChange = () => {
-  previewResult.value = null
+  invalidatePreview()
   const hints = parseDefinitionHints(form.definitionJson)
   if (hints.workflowName && !form.workflowName) {
     form.workflowName = hints.workflowName
@@ -497,11 +520,11 @@ const handleRuntimeSearch = (keyword) => {
 const handleLinkedWorkflowChange = () => {
   // 用户已经明确选定或清空了关联，在途的自动探测结果不能再回写覆盖他的决定
   autoLinkGuard.invalidate()
-  previewResult.value = null
+  invalidatePreview()
 }
 
 const handleModeChange = () => {
-  previewResult.value = null
+  invalidatePreview()
   form.relationDecision = ''
   form.linkedWorkflowCode = null
   form.dolphinWorkflow = null
@@ -540,7 +563,7 @@ const loadDolphinWorkflows = async () => {
 
 const handleDolphinCurrentChange = (row) => {
   form.dolphinWorkflow = row || null
-  previewResult.value = null
+  invalidatePreview()
   form.relationDecision = ''
   if (row) {
     form.workflowName = String(row.workflowName || `workflow_${row.workflowCode}`).trim()
@@ -550,21 +573,32 @@ const handleDolphinCurrentChange = (row) => {
 const handlePreview = async () => {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
+  const token = previewGuard.next()
+  const signature = currentSignature.value
   previewLoading.value = true
   try {
     const result = await workflowApi.previewImportDefinition(buildImportPayload(form))
+    // 期间表单又变了，这次结果已经过期
+    if (previewGuard.isStale(token)) return
     previewResult.value = result
+    previewedSignature.value = signature
     form.relationDecision = result?.suggestedRelationDecision || 'INFERRED'
   } catch (error) {
     console.error('导入预检失败', error)
   } finally {
-    previewLoading.value = false
+    if (!previewGuard.isStale(token)) {
+      previewLoading.value = false
+    }
   }
 }
 
 const handleCommit = async () => {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
+  if (!previewMatchesForm.value) {
+    ElMessage.warning('表单已修改，请重新预检后再导入')
+    return
+  }
   if (!canCommit.value) {
     ElMessage.warning('当前预检未通过，无法导入')
     return
@@ -602,7 +636,7 @@ const resetState = () => {
   form.workflowName = ''
   form.relationDecision = ''
   fileName.value = ''
-  previewResult.value = null
+  invalidatePreview()
   autoLinkGuard.invalidate()
   runtimeListGuard.invalidate()
   dolphinListGuard.invalidate()

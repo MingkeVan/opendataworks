@@ -175,6 +175,10 @@ public class DolphinConfigService {
      */
     @Transactional
     public DolphinConfig updateConfig(DolphinConfig newConfig) {
+        // 必须在第一次读库之前取锁：下面的 getDefaultConfig 会确立本事务的 REPEATABLE READ 快照，
+        // 而 update() 是类内自调用、并不会另起事务，等它取到锁时快照已经定死，
+        // 锁后的"是否已被运行态绑定"复核仍会读到旧数据。
+        runtimeBindingLock.acquire();
         DolphinConfig current = getDefaultConfig();
 
         if (current == null) {

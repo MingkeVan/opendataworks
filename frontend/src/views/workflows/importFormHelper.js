@@ -108,6 +108,27 @@ export const buildImportPayload = (form) => {
 }
 
 /**
+ * 预检结果所对应的表单指纹。
+ *
+ * <p>预检是异步的，返回时表单可能已经变了（换了环境、换了文件、改了关联或名称）。
+ * 只清空 previewResult 不够 —— 在途的旧响应回来还会把它填上并放行提交，
+ * 而提交走的是当前表单，两者可以完全不是一回事。提交前比对指纹即可堵住这个窗口。
+ *
+ * <p>刻意不含 relationDecision：它是预检返回后才由用户选的，不应反过来让预检失效。
+ */
+export const buildPreviewSignature = (form) => {
+  const isDolphin = form.importMode === 'dolphin'
+  return JSON.stringify({
+    importMode: form.importMode,
+    dolphinConfigId: form.dolphinConfigId ?? null,
+    definitionJson: isDolphin ? null : (form.definitionJson || ''),
+    linkedWorkflowCode: isDolphin ? null : (form.linkedWorkflowCode ?? null),
+    dolphinWorkflowCode: isDolphin ? (form.dolphinWorkflow?.workflowCode ?? null) : null,
+    workflowName: (form.workflowName || '').trim()
+  })
+}
+
+/**
  * 运行态归属结论 → 提示条。返回 null 表示无需展示。
  */
 export const describeRuntimeBinding = (binding) => {

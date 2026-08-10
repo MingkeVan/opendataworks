@@ -46,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -779,18 +780,19 @@ class WorkflowDefinitionLifecycleServiceTest {
     }
 
     @Test
-    void commitShouldTakeGlobalLockBeforeCheckingRuntimeOccupancy() {
+    void commitShouldTakeGlobalLockBeforeResolvingRuntimeBinding() {
         stubTargetConfigUsable();
         when(runtimeDefinitionService.findRuntimeWorkflow(TARGET_DOLPHIN_CONFIG_ID, TARGET_PROJECT_CODE, 8888L))
                 .thenReturn(runtimeOption(8888L, "wf_runtime_target", "ONLINE"));
 
         commitSingleTaskImport(8888L, 93L);
 
-        // 占用查询在目标行还不存在时只能拿到间隙锁，而间隙锁可被多事务同时持有，
-        // 所以必须先取全局互斥锁。顺序颠倒就等于没锁。
-        InOrder inOrder = inOrder(runtimeBindingLock, dataWorkflowMapper);
+        // 锁必须早于 analyze：analyze 的第一次读会确立本事务的 RR 快照，取锁取晚了，
+        // 之后无论怎么复核读到的都可能是取锁前的旧数据。
+        InOrder inOrder = inOrder(runtimeBindingLock, dolphinSchedulerService, dataWorkflowMapper);
         inOrder.verify(runtimeBindingLock).acquire();
-        inOrder.verify(dataWorkflowMapper).selectList(any());
+        inOrder.verify(dolphinSchedulerService).findProjectCode(TARGET_DOLPHIN_CONFIG_ID);
+        inOrder.verify(dataWorkflowMapper, atLeastOnce()).selectList(any());
     }
 
     @Test

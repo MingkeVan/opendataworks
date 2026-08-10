@@ -239,6 +239,18 @@ public class WorkflowDefinitionLifecycleService {
     public WorkflowImportCommitResponse commit(WorkflowImportCommitRequest request) {
         String operator = normalizeOperator(request != null ? request.getOperator() : null);
         ImportSource source = buildImportSource(request);
+
+        // 要关联既有运行态时，锁必须在 analyze 之前取：analyze 的第一次读会确立本事务的
+        // REPEATABLE READ 快照，取锁取晚了，后面无论怎么复核（目标环境是否还在、运行态是否已被
+        // 占用）读到的都可能是取锁前的旧快照。先取锁再 analyze，整段判定就都基于当前数据，
+        // 且期间没有第二个导入或 Dolphin 环境改动能插进来 —— 环境身份若在预检后被改过，
+        // analyze 会按新配置重新解析项目与运行态，对不上就直接报错，不需要额外的身份指纹。
+        boolean bindsExistingRuntime = source.getLinkedWorkflowCode() != null
+                && source.getLinkedWorkflowCode() > 0;
+        if (bindsExistingRuntime) {
+            runtimeBindingLock.acquire();
+        }
+
         ImportContext context = analyze(source);
         if (!context.getErrors().isEmpty()) {
             throw new IllegalArgumentException("导入预检失败: " + context.getErrors().get(0));
@@ -381,7 +393,14 @@ public class WorkflowDefinitionLifecycleService {
             return;
         }
 
-        Long projectCode = dolphinSchedulerService.findProjectCode(dolphinConfigId);
+        Long projectCode;
+        try {
+            projectCode = dolphinSchedulerService.findProjectCode(dolphinConfigId);
+        } catch (Exception ex) {
+            // 环境被删除或停用时会在这里抛出，转成预检错误而不是 500
+            context.getErrors().add("目标 Dolphin 环境不可用: " + ex.getMessage());
+            return;
+        }
         if (projectCode == null || projectCode <= 0) {
             context.getErrors().add("无法解析目标 Dolphin 项目，请检查该环境的连接配置");
             return;
@@ -957,12 +976,11 @@ public class WorkflowDefinitionLifecycleService {
     /**
      * 事务内兜底：预检到提交之间可能有并发导入抢先占用同一个运行态。
      *
-     * <p>先取全局运行态绑定锁再查占用，理由见 {@link RuntimeBindingLock}。取锁后还要复核目标
-     * Dolphin 环境仍然存在且启用 —— 管理员可能在预检之后、提交之前把它删掉或停用，
-     * 此时绑定上去会留下一条指向已消失环境的工作流。
+     * <p>锁已在 {@code commit} 进入 {@code analyze} 之前取得（理由见 {@link RuntimeBindingLock}
+     * 与 {@code commit} 内的说明），这里只做锁内复核：目标 Dolphin 环境仍然存在且启用，
+     * 且该运行态尚未被别的平台工作流占用。
      */
     private void ensureWorkflowConflictAbsent(WorkflowImportRuntimeBinding binding) {
-        runtimeBindingLock.acquire();
         ensureDolphinConfigStillUsable(binding.getDolphinConfigId());
         DataWorkflow existing = findWorkflowByRuntime(binding.getDolphinConfigId(),
                 binding.getProjectCode(), binding.getWorkflowCode(), true);
