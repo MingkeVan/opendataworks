@@ -27,28 +27,19 @@ public class DolphinConfigService {
     private static final String DEFAULT_EXECUTION_TYPE = "PARALLEL";
 
     private final DolphinConfigMapper dolphinConfigMapper;
-
-    // Simple in-memory cache variable could serve as L1 cache if Spring Cache is
-    // not configured
-    // But here we rely on DB or basic queries. Since config changes rarely, we can
-    // query DB.
-    // To optimize, we can use a volatile field.
-    private volatile DolphinConfig cachedConfig;
+    private final RuntimeBindingLock runtimeBindingLock;
 
     /**
      * Get the active DolphinScheduler configuration.
      * Returns null if no active config exists.
+     *
+     * <p>这里刻意不做进程内缓存。此前用一个 volatile 字段缓存配置对象，而失效发生在事务内部：
+     * 清空之后、事务提交之前，其他线程会从库里读到旧数据把缓存重新填上，事务提交后又没有第二次
+     * 失效，于是缓存可能长期停留在旧 URL / 旧默认环境上。配置查询本身很轻，而它的每个调用点
+     * 紧接着都是一次 Dolphin HTTP 调用，省这一次 SELECT 换来的是难以察觉的错配。
      */
     public DolphinConfig getActiveConfig() {
-        if (cachedConfig != null) {
-            return cachedConfig;
-        }
-        DolphinConfig config = getDefaultConfig();
-
-        if (config != null) {
-            cachedConfig = config;
-        }
-        return config;
+        return getDefaultConfig();
     }
 
     /**
@@ -101,18 +92,24 @@ public class DolphinConfigService {
 
     @Transactional
     public DolphinConfig create(DolphinConfig config) {
+        // 新建时若直接设为默认，同样会改变空配置工作流的实际指向
+        runtimeBindingLock.acquire();
+        pinResidualRuntimeBindings();
         normalize(config, true, null);
         if (Integer.valueOf(1).equals(config.getIsDefault())) {
             resetDefault(null);
         }
         dolphinConfigMapper.insert(config);
-        invalidateCache();
         log.info("Created DolphinScheduler configuration: {}", config.getConfigName());
         return config;
     }
 
     @Transactional
     public DolphinConfig update(Long id, DolphinConfig config) {
+        // "统计绑定数量 -> 写入" 是读改写：不加锁的话，并发导入可以在这里读到"尚未绑定"
+        // 之后才提交绑定，运行态身份就会在无人复查的情况下被改掉。
+        runtimeBindingLock.acquire();
+        pinResidualRuntimeBindings();
         DolphinConfig existing = dolphinConfigMapper.selectById(id);
         if (existing == null) {
             throw new IllegalArgumentException("Dolphin 环境不存在");
@@ -127,13 +124,15 @@ public class DolphinConfigService {
             resetDefault(id);
         }
         dolphinConfigMapper.updateById(config);
-        invalidateCache();
         log.info("Updated DolphinScheduler configuration: {}({})", id, config.getConfigName());
         return dolphinConfigMapper.selectById(id);
     }
 
     @Transactional
     public void delete(Long id) {
+        // 同 update：与并发导入的运行态绑定互斥，否则会删掉一个刚被绑定上的环境
+        runtimeBindingLock.acquire();
+        pinResidualRuntimeBindings();
         DolphinConfig existing = dolphinConfigMapper.selectById(id);
         if (existing == null) {
             return;
@@ -142,12 +141,15 @@ public class DolphinConfigService {
             throw new IllegalStateException("Dolphin 环境已被运行态工作流绑定，不能删除");
         }
         dolphinConfigMapper.deleteById(id);
-        invalidateCache();
         log.info("Deleted DolphinScheduler configuration: {}({})", id, displayName(existing));
     }
 
     @Transactional
     public void setDefault(Long id) {
+        // 切换默认环境会连带改变所有 dolphin_config_id 为空的工作流实际指向的 Dolphin，
+        // 因此同样要进入运行态绑定的互斥协议，且必须在第一次读库之前取锁
+        runtimeBindingLock.acquire();
+        pinResidualRuntimeBindings();
         DolphinConfig existing = dolphinConfigMapper.selectById(id);
         if (existing == null) {
             throw new IllegalArgumentException("Dolphin 环境不存在");
@@ -158,7 +160,6 @@ public class DolphinConfigService {
         resetDefault(id);
         existing.setIsDefault(1);
         dolphinConfigMapper.updateById(existing);
-        invalidateCache();
     }
 
     /**
@@ -169,6 +170,10 @@ public class DolphinConfigService {
      */
     @Transactional
     public DolphinConfig updateConfig(DolphinConfig newConfig) {
+        // 必须在第一次读库之前取锁：下面的 getDefaultConfig 会确立本事务的 REPEATABLE READ 快照，
+        // 而 update() 是类内自调用、并不会另起事务，等它取到锁时快照已经定死，
+        // 锁后的"是否已被运行态绑定"复核仍会读到旧数据。
+        runtimeBindingLock.acquire();
         DolphinConfig current = getDefaultConfig();
 
         if (current == null) {
@@ -183,8 +188,6 @@ public class DolphinConfigService {
             current = update(current.getId(), newConfig);
         }
 
-        // Update cache
-        cachedConfig = current;
         log.info("Updated DolphinScheduler configuration");
         return current;
     }
@@ -241,9 +244,48 @@ public class DolphinConfigService {
         }
     }
 
+    /**
+     * 统计绑定到该环境的运行态工作流。若它是当前默认环境，还要算上 {@code dolphin_config_id}
+     * 为空的存量行 —— 那些工作流实际就跟着默认环境跑，漏算的话默认环境会被随意改身份或删除，
+     * 把它们静默指向另一套 Dolphin。
+     */
     private long countRuntimeBoundWorkflows(Long id) {
         Long count = dolphinConfigMapper.countRuntimeBoundWorkflows(id);
-        return count == null ? 0L : count;
+        long total = count == null ? 0L : count;
+        if (isCurrentDefault(id)) {
+            Long orphan = dolphinConfigMapper.countRuntimeBoundWorkflowsWithoutConfig();
+            total += orphan == null ? 0L : orphan;
+        }
+        return total;
+    }
+
+    /**
+     * 在改动任何配置之前，把仍未绑定环境的运行态工作流固定到它们当下实际使用的环境。
+     *
+     * <p>互斥只能挡住并发，挡不住"先切默认、后续发布就落到新环境"这种顺序漂移。
+     * 这些工作流本来就跟着 {@link #getDefaultConfig()} 解析出的有效默认环境跑，
+     * 在切换前把这层隐式归属落成显式归属，切换之后它们才不会跟着漂走。
+     *
+     * <p>注意用的是"有效默认环境"而不是 {@code is_default = 1}：没有显式默认时运行时会回落到
+     * 最新的启用配置，只认显式标记会漏掉这种状态下的工作流。
+     */
+    private void pinResidualRuntimeBindings() {
+        DolphinConfig effectiveDefault = getDefaultConfig();
+        if (effectiveDefault == null || effectiveDefault.getId() == null) {
+            return;
+        }
+        int pinned = dolphinConfigMapper.pinRuntimeBoundWorkflowsWithoutConfig(effectiveDefault.getId());
+        if (pinned > 0) {
+            log.info("Pinned {} runtime-bound workflows to dolphin config {}", pinned, effectiveDefault.getId());
+        }
+    }
+
+    private boolean isCurrentDefault(Long id) {
+        if (id == null) {
+            return false;
+        }
+        DolphinConfig current = getDefaultConfig();
+        return current != null && Objects.equals(current.getId(), id);
     }
 
     private boolean runtimeIdentityChanged(DolphinConfig existing, DolphinConfig next) {
@@ -258,10 +300,6 @@ public class DolphinConfigService {
             wrapper.ne("id", excludeId);
         }
         dolphinConfigMapper.update(null, wrapper);
-    }
-
-    private void invalidateCache() {
-        cachedConfig = null;
     }
 
     private String defaultText(String value, String defaultValue) {

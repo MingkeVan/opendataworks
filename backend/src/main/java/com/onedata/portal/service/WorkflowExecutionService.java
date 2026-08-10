@@ -30,6 +30,7 @@ public class WorkflowExecutionService {
     private final TaskExecutionLogMapper taskExecutionLogMapper;
     private final DolphinSchedulerService dolphinSchedulerService;
     private final DolphinConfigService dolphinConfigService;
+    private final RuntimeBindingLock runtimeBindingLock;
     private final WorkflowDefinitionAssembler workflowDefinitionAssembler;
 
     public String executeWorkflow(Long workflowId) {
@@ -101,6 +102,9 @@ public class WorkflowExecutionService {
         if (request == null || request.getDolphinConfigId() == null || request.getDolphinConfigId() <= 0) {
             throw new IllegalArgumentException("dolphinConfigId 不能为空");
         }
+        // 切换会把工作流从原运行态解绑并指向目标 Dolphin。必须在外层事务第一次读库前取锁，
+        // 否则目标配置可能在绑定数量检查之后被并发删除，留下悬空的 dolphin_config_id。
+        runtimeBindingLock.acquire();
         DataWorkflow workflow = dataWorkflowMapper.selectById(workflowId);
         if (workflow == null) {
             throw new IllegalArgumentException("Workflow not found: " + workflowId);

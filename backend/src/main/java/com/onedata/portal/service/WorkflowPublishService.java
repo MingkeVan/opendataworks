@@ -99,6 +99,7 @@ public class WorkflowPublishService {
     private final DolphinSchedulerService dolphinSchedulerService;
     private final WorkflowService workflowService;
     private final TaskLineageConsistencyChecker lineageConsistencyChecker;
+    private final RuntimeBindingLock runtimeBindingLock;
     private final ObjectMapper objectMapper;
 
     public WorkflowPublishPreviewResponse previewPublish(Long workflowId) {
@@ -147,6 +148,13 @@ public class WorkflowPublishService {
             throw new IllegalArgumentException("operation is required");
         }
         String operation = request.getOperation().trim().toLowerCase();
+        if ("deploy".equals(operation)) {
+            // deploy 会自动保存当前定义，并可能首次建立运行态绑定。必须在本事务第一次读库前取锁：
+            // 否则外层事务已经建立 RR 快照，WorkflowDeployService 内再加锁也无法让前面的配置解析
+            // 与自动保存重新基于当前数据执行。是否首次部署同样只能读库后才能判断，因此所有 deploy
+            // 在这一层统一串行，保证与 Dolphin 配置写入路径遵守同一锁顺序。
+            runtimeBindingLock.acquire();
+        }
         DataWorkflow workflow = dataWorkflowMapper.selectById(workflowId);
         if (workflow == null) {
             throw new IllegalArgumentException("Workflow not found: " + workflowId);
@@ -1666,6 +1674,10 @@ public class WorkflowPublishService {
     public WorkflowPublishRecord approve(Long workflowId,
             Long recordId,
             WorkflowApprovalRequest request) {
+        if (Boolean.TRUE.equals(request.getApproved())) {
+            // 审批通过会直接部署；同 publish(deploy) 一样，锁必须早于发布记录和工作流的首次读取。
+            runtimeBindingLock.acquire();
+        }
         WorkflowPublishRecord record = publishRecordMapper.selectById(recordId);
         if (record == null || !Objects.equals(record.getWorkflowId(), workflowId)) {
             throw new IllegalArgumentException("发布记录不存在");

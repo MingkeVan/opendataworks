@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.onedata.portal.entity.DataTask;
 import com.onedata.portal.entity.DataWorkflow;
+import com.onedata.portal.entity.DolphinConfig;
 import com.onedata.portal.entity.TableTaskRelation;
 import com.onedata.portal.entity.WorkflowTaskRelation;
 import com.onedata.portal.mapper.DataTaskMapper;
@@ -49,11 +50,14 @@ public class WorkflowDeployService {
 
     @Transactional
     public DeploymentResult deploy(DataWorkflow workflow) {
-        // Ensure project exists (force refresh/create)
-        Long dolphinConfigId = workflow.getDolphinConfigId();
-        Long actualProjectCode = dolphinConfigId == null
-                ? dolphinSchedulerService.getProjectCode(true)
-                : dolphinSchedulerService.getProjectCode(dolphinConfigId, true);
+        // 外层 WorkflowPublishService 已在发布事务第一次读库前取得运行态绑定锁。锁不能留在这里：
+        // deploy 加入外层事务时，自动保存和配置解析早已建立 RR 快照并写过 data_workflow。
+        boolean needsPinning = workflow.getDolphinConfigId() == null;
+
+        // 整次部署只认这一个显式 id。此前每处都写成"未绑定就用默认"，各自独立解析一次默认配置，
+        // 管理员在部署中途切换默认，同一次部署的 Dolphin 调用会被分散到两个环境。
+        Long dolphinConfigId = resolveDeployConfigId(workflow);
+        Long actualProjectCode = dolphinSchedulerService.getProjectCode(dolphinConfigId, true);
 
         List<WorkflowTaskRelation> bindings = workflowTaskRelationMapper.selectList(
                 Wrappers.<WorkflowTaskRelation>lambdaQuery()
@@ -219,41 +223,26 @@ public class WorkflowDeployService {
         boolean existingWorkflow = workflowCode > 0;
         if (existingWorkflow) {
             // Check if the workflow definition actually exists in DolphinScheduler
-            boolean workflowExists = dolphinConfigId == null
-                    ? dolphinSchedulerService.checkWorkflowExists(workflowCode)
-                    : dolphinSchedulerService.checkWorkflowExists(dolphinConfigId, workflowCode);
+            boolean workflowExists = dolphinSchedulerService.checkWorkflowExists(dolphinConfigId, workflowCode);
             if (!workflowExists) {
                 log.warn("Workflow {} no longer exists in DolphinScheduler, creating new definition", workflowCode);
                 existingWorkflow = false;
                 workflowCode = 0L; // Reset to 0 to force creation
             } else {
                 log.info("Workflow {} already exists, switch OFFLINE before redeploy", workflowCode);
-                if (dolphinConfigId == null) {
-                    dolphinSchedulerService.setWorkflowReleaseState(workflowCode, "OFFLINE");
-                } else {
-                    dolphinSchedulerService.setWorkflowReleaseState(dolphinConfigId, workflowCode, "OFFLINE");
-                }
+                dolphinSchedulerService.setWorkflowReleaseState(dolphinConfigId, workflowCode, "OFFLINE");
             }
         }
 
-        long deployedCode = dolphinConfigId == null
-                ? dolphinSchedulerService.syncWorkflow(
-                        workflowCode,
-                        workflow.getWorkflowName(),
-                        workflow.getDescription(),
-                        definitions,
-                        relationPayloads,
-                        locationPayloads,
-                        workflow.getGlobalParams())
-                : dolphinSchedulerService.syncWorkflow(
-                        dolphinConfigId,
-                        workflowCode,
-                        workflow.getWorkflowName(),
-                        workflow.getDescription(),
-                        definitions,
-                        relationPayloads,
-                        locationPayloads,
-                        workflow.getGlobalParams());
+        long deployedCode = dolphinSchedulerService.syncWorkflow(
+                dolphinConfigId,
+                workflowCode,
+                workflow.getWorkflowName(),
+                workflow.getDescription(),
+                definitions,
+                relationPayloads,
+                locationPayloads,
+                workflow.getGlobalParams());
 
         updateTaskProcessCode(orderedTasks, deployedCode);
 
@@ -263,11 +252,21 @@ public class WorkflowDeployService {
         // Update workflow code in database if it changed
         // Handle both null and different values safely
         Long oldWorkflowCode = workflow.getWorkflowCode();
-        if (oldWorkflowCode == null || deployedCode != oldWorkflowCode.longValue()) {
+        boolean codeChanged = oldWorkflowCode == null || deployedCode != oldWorkflowCode.longValue();
+        // 把实际使用的 Dolphin 环境固化到工作流上。此前只写 workflow_code，绑定了运行态却仍
+        // dolphin_config_id 为空的工作流会跟着"当前默认环境"漂移：默认环境一改，它们就静默
+        // 指向另一套 Dolphin，而按 dolphin_config_id 匹配的绑定检查也看不到它们。
+        boolean configPinned = false;
+        if (needsPinning && dolphinConfigId != null) {
+            workflow.setDolphinConfigId(dolphinConfigId);
+            configPinned = true;
+        }
+        if (codeChanged || configPinned) {
             workflow.setWorkflowCode(deployedCode);
             workflow.setUpdatedBy("system");
             workflowMapper.updateById(workflow);
-            log.info("Updated workflow code from {} to {}", oldWorkflowCode, deployedCode);
+            log.info("Updated workflow code from {} to {} (dolphinConfigId={})",
+                    oldWorkflowCode, deployedCode, workflow.getDolphinConfigId());
         }
 
         return DeploymentResult.builder()
@@ -278,6 +277,21 @@ public class WorkflowDeployService {
                 .taskCount(orderedTasks.size())
                 .existingWorkflow(existingWorkflow)
                 .build();
+    }
+
+    /**
+     * 在部署开始前定下本次要用的 Dolphin 环境：已绑定就用绑定值，未绑定则解析当前默认环境。
+     * 解析一次并贯穿整次部署，避免中途默认切换导致调用分散或归属写错。
+     */
+    private Long resolveDeployConfigId(DataWorkflow workflow) {
+        if (workflow.getDolphinConfigId() != null) {
+            return workflow.getDolphinConfigId();
+        }
+        DolphinConfig config = dolphinSchedulerService.getConfig(null);
+        if (config == null || config.getId() == null) {
+            throw new IllegalStateException("未找到可用的 Dolphin 环境，无法发布");
+        }
+        return config.getId();
     }
 
     private Map<Long, TaskDeployMetadata> loadTaskDeployMetadata(DataWorkflow workflow) {

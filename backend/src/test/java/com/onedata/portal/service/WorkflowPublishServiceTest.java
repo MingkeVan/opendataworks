@@ -2,6 +2,7 @@ package com.onedata.portal.service;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.onedata.portal.dto.workflow.WorkflowApprovalRequest;
 import com.onedata.portal.dto.workflow.WorkflowPublishPreviewResponse;
 import com.onedata.portal.dto.workflow.WorkflowPublishRepairRequest;
 import com.onedata.portal.dto.workflow.WorkflowPublishRepairResponse;
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -51,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -108,6 +111,9 @@ class WorkflowPublishServiceTest {
     @Mock
     private com.onedata.portal.service.lineage.TaskLineageConsistencyChecker lineageConsistencyChecker;
 
+    @Mock
+    private RuntimeBindingLock runtimeBindingLock;
+
     @BeforeEach
     void setUp() {
         WorkflowRuntimeDiffService.RuntimeSnapshot snapshot = new WorkflowRuntimeDiffService.RuntimeSnapshot();
@@ -137,6 +143,47 @@ class WorkflowPublishServiceTest {
         IllegalStateException ex = assertThrows(IllegalStateException.class, () -> service.publish(1L, request));
         assertTrue(ex.getMessage().contains("PUBLISH_DIFF_CONFIRM_REQUIRED"));
         verify(workflowDeployService, never()).deploy(any());
+    }
+
+    @Test
+    void publishDeployShouldAcquireRuntimeBindingLockBeforeFirstDatabaseRead() {
+        when(dataWorkflowMapper.selectById(1L)).thenReturn(null);
+
+        WorkflowPublishRequest request = new WorkflowPublishRequest();
+        request.setOperation("deploy");
+
+        assertThrows(IllegalArgumentException.class, () -> service.publish(1L, request));
+
+        InOrder inOrder = inOrder(runtimeBindingLock, dataWorkflowMapper);
+        inOrder.verify(runtimeBindingLock).acquire();
+        inOrder.verify(dataWorkflowMapper).selectById(1L);
+    }
+
+    @Test
+    void approveShouldAcquireRuntimeBindingLockBeforeFirstDatabaseRead() {
+        WorkflowPublishRecord pending = new WorkflowPublishRecord();
+        pending.setWorkflowId(1L);
+        pending.setVersionId(101L);
+        pending.setOperation("deploy");
+        pending.setStatus("pending_approval");
+        when(publishRecordMapper.selectById(99L)).thenReturn(pending);
+
+        DataWorkflow workflow = workflow(1L, null, 101L);
+        when(dataWorkflowMapper.selectById(1L)).thenReturn(workflow);
+        when(workflowVersionMapper.selectById(101L)).thenReturn(version(101L, 1));
+        when(workflowDeployService.deploy(workflow))
+                .thenReturn(new WorkflowDeployService.DeploymentResult(90001L, 11L, 1, false));
+
+        WorkflowApprovalRequest request = new WorkflowApprovalRequest();
+        request.setApproved(true);
+        request.setApprover("reviewer");
+
+        WorkflowPublishRecord approved = service.approve(1L, 99L, request);
+
+        assertEquals("success", approved.getStatus());
+        InOrder inOrder = inOrder(runtimeBindingLock, publishRecordMapper);
+        inOrder.verify(runtimeBindingLock).acquire();
+        inOrder.verify(publishRecordMapper).selectById(99L);
     }
 
     @Test
@@ -1126,6 +1173,7 @@ class WorkflowPublishServiceTest {
                 dolphinSchedulerService,
                 workflowService,
                 lineageConsistencyChecker,
+                runtimeBindingLock,
                 new com.fasterxml.jackson.databind.ObjectMapper());
     }
 

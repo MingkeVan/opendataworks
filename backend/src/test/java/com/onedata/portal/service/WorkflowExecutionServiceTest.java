@@ -44,6 +44,8 @@ class WorkflowExecutionServiceTest {
     @Mock
     private DolphinConfigService dolphinConfigService;
     @Mock
+    private RuntimeBindingLock runtimeBindingLock;
+    @Mock
     private WorkflowDefinitionAssembler workflowDefinitionAssembler;
 
     private WorkflowExecutionService service;
@@ -56,6 +58,7 @@ class WorkflowExecutionServiceTest {
                 taskExecutionLogMapper,
                 dolphinSchedulerService,
                 dolphinConfigService,
+                runtimeBindingLock,
                 workflowDefinitionAssembler);
     }
 

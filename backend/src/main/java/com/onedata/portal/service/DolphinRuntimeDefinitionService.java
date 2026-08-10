@@ -89,6 +89,39 @@ public class DolphinRuntimeDefinitionService {
                 () -> listRuntimeWorkflows(projectCode, pageNum, pageSize, keyword));
     }
 
+    /**
+     * 按编码精确查询单条运行态工作流，不存在时返回 null。
+     * 用于导入表单按文件里的 workflowCode 预选关联项，避免它不在分页第一页而选不中。
+     */
+    public DolphinRuntimeWorkflowOption findRuntimeWorkflow(Long dolphinConfigId,
+            Long projectCode,
+            Long workflowCode) {
+        if (workflowCode == null || workflowCode <= 0) {
+            return null;
+        }
+        return dolphinSchedulerService.withConfig(dolphinConfigId, () -> {
+            long resolvedProjectCode = resolveProjectCode(projectCode);
+            JsonNode raw;
+            try {
+                raw = openApiClient.getProcessDefinition(resolvedProjectCode, workflowCode);
+            } catch (Exception ex) {
+                log.debug("Runtime workflow {} not found in project {}: {}",
+                        workflowCode, resolvedProjectCode, ex.getMessage());
+                return null;
+            }
+            if (raw == null || raw.isNull() || raw.isMissingNode()) {
+                return null;
+            }
+            JsonNode definition = unwrapDefinition(raw);
+            DolphinRuntimeWorkflowOption option = new DolphinRuntimeWorkflowOption();
+            option.setProjectCode(resolvedProjectCode);
+            option.setWorkflowCode(workflowCode);
+            option.setWorkflowName(readText(definition, "name", "workflowName"));
+            option.setReleaseState(readText(definition, "releaseState", "publishStatus", "scheduleReleaseState"));
+            return option;
+        });
+    }
+
     public RuntimeWorkflowDefinition loadRuntimeDefinition(Long projectCode, Long workflowCode) {
         if (workflowCode == null || workflowCode <= 0) {
             throw new IllegalArgumentException("workflowCode 不能为空");
@@ -928,11 +961,17 @@ public class DolphinRuntimeDefinitionService {
         return "NO".equals(normalized) ? "NO" : "YES";
     }
 
+    /**
+     * 本服务只读运行态，解析项目编码必须走只读查询：
+     * {@code getProjectCode()} 在项目缺失时会顺手在 Dolphin 里建一个项目，
+     * 打开导入弹窗这类纯浏览动作不该产生这种副作用。
+     */
     private long resolveProjectCode(Long projectCode) {
         if (projectCode != null && projectCode > 0) {
             return projectCode;
         }
-        Long currentProjectCode = dolphinSchedulerService.getProjectCode();
+        // 传 null 表示沿用当前 withConfig 作用域内的配置
+        Long currentProjectCode = dolphinSchedulerService.findProjectCode(null);
         if (currentProjectCode == null || currentProjectCode <= 0) {
             throw new IllegalStateException("无法获取 Dolphin projectCode");
         }
