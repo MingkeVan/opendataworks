@@ -277,6 +277,9 @@ When working in this repository, optimize for:
   - then run the smallest relevant frontend build, test, or lint command
 - Backend or platform changes:
   - run the smallest relevant backend test or compile check for the touched area
+  - for mapper-layer SQL contract tests, prefer an in-memory DuckDB (`jdbc:duckdb:`) so the test needs no local MySQL and no Spring context; the existing `@SpringBootTest` integration tests require a real MySQL on `localhost:3306` and are not a fit for a focused SQL guard
+  - lock the production SQL itself, not a copy: reflect the `@Select`/`@Update` value off the mapper method, swap `#{param}` for a JDBC `?`, then execute it against DuckDB (see `TableTaskRelationMapperWriteTablesSqlTest`)
+  - keep the DuckDB driver at a Java-8-compatible line (`org.duckdb:duckdb_jdbc:0.10.x`) to match the backend baseline; write DuckDB-portable DDL in the test (`BIGINT`/`VARCHAR`/`INTEGER`, no MySQL-only types)
 - DataAgent changes:
   - prefer focused `pytest` coverage for the touched module or contract
   - if code paths are sensitive to prompt or runtime configuration, add or update a targeted regression test
