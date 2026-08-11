@@ -66,6 +66,16 @@ _OFFLOADED_TOOL_RESULT_SUFFIXES = frozenset({".txt", ".json"})
 # word, not an operator.
 _BASH_OPERATOR_CHARS = frozenset("();<>|&")
 _BASH_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# A word shaped like ``<name>=<value>``: an env assignment (``FOO=/x``), a
+# short/long option with an inline value (``-o=/x``, ``--file=/x``), or a tool's
+# own key syntax (``dd if=/x``). The name part is deliberately strict — letters,
+# digits, ``_``/``-``, at most two leading dashes — so words that merely contain
+# "=" after other punctuation (``sed 's/a=/b/'``) are not read as assignments.
+_BASH_OPTION_ASSIGNMENT_RE = re.compile(r"^-{0,2}[A-Za-z_][A-Za-z0-9_-]*=")
+# Separators splitting an assignment value into individual paths: "=" for nested
+# keys (``--define=key=/x``) and ":" for joined path lists (``PYTHONPATH=/a:/b``),
+# so each element is checked on its own instead of the whole value being rejected.
+_BASH_ASSIGNMENT_VALUE_SPLIT_RE = re.compile(r"[=:]")
 # The offloaded tool-result file lives outside the workspace, so the only Bash use
 # the boundary hook permits is *viewing* it. These command words behave as simple
 # read filters for path arguments, so granting the tool-result exception to their
@@ -306,6 +316,31 @@ def _bash_references_offloaded_tool_result(tokens: list[str], tool_result_root: 
     return False
 
 
+def _bash_token_path_candidates(normalized: str) -> list[str]:
+    """Absolute paths carried by one Bash word.
+
+    A word that is itself an absolute path is its own candidate. Paths also hide
+    inside ``key=value`` words — ``dd if=/etc/shadow``, ``tar --file=/etc/passwd``,
+    ``FOO=/etc/shadow cat $FOO`` — which would otherwise skip the boundary check
+    entirely because the word does not start with "/". Checking the assignment
+    itself is what catches the variable-indirection case: the path literal is
+    visible here even though ``$FOO`` at the use site is not resolvable.
+
+    Only ``/``-rooted segments are returned; relative values (``LANG=en_US.UTF-8``,
+    ``--pretty=format:%H``) carry nothing for the boundary to check.
+    """
+    if normalized.startswith("/"):
+        return [normalized]
+    if not _BASH_OPTION_ASSIGNMENT_RE.match(normalized):
+        return []
+    value = normalized.split("=", 1)[1]
+    return [
+        segment
+        for segment in _BASH_ASSIGNMENT_VALUE_SPLIT_RE.split(value)
+        if segment.startswith("/")
+    ]
+
+
 def _classify_bash_operator(token: str) -> str | None:
     """Return ``"redirect"``/``"separator"`` when ``token`` is a shell operator.
 
@@ -368,22 +403,21 @@ def _validate_bash_workspace_boundary(
             continue
         if _path_has_parent_segment(normalized):
             return "Bash command uses a parent directory segment; stay inside the current agent workspace."
-        if not normalized.startswith("/"):
-            continue
-        candidate = Path(normalized).expanduser().resolve(strict=False)
-        if allowed_executable and candidate == allowed_executable:
-            continue
-        if _is_discard_sink(candidate):
-            continue
-        if _path_is_allowed(candidate, allowed_roots):
-            continue
-        if (
-            not is_redirect_target
-            and segment_command in _BASH_READONLY_COMMANDS
-            and _is_offloaded_tool_result_path(candidate, tool_result_root)
-        ):
-            continue
-        return f"Bash command references absolute path outside workspace: {normalized}"
+        for value in _bash_token_path_candidates(normalized):
+            candidate = Path(value).expanduser().resolve(strict=False)
+            if allowed_executable and candidate == allowed_executable:
+                continue
+            if _is_discard_sink(candidate):
+                continue
+            if _path_is_allowed(candidate, allowed_roots):
+                continue
+            if (
+                not is_redirect_target
+                and segment_command in _BASH_READONLY_COMMANDS
+                and _is_offloaded_tool_result_path(candidate, tool_result_root)
+            ):
+                continue
+            return f"Bash command references absolute path outside workspace: {value}"
     return None
 
 
