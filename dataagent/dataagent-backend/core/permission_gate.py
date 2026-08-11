@@ -125,8 +125,10 @@ def plan_denies_tool(tool_name: str) -> bool:
 
     ``Bash`` is deliberately not denied: it is the read-only research vector (skill
     scripts, read-only SQL) and is auto-allowed upstream via ``allowed_tools`` (the
-    callback never sees it), and its filesystem writes are confined to the ephemeral
-    per-topic workspace by the runtime boundary hook. This is an accepted trust
+    callback never sees it), and its filesystem writes are confined by the runtime
+    boundary hook to the ephemeral per-topic workspace plus the deployment's declared
+    scratch dirs (``dataagent_workspace_scratch_dirs``, ``/tmp`` by default, and in
+    sandbox mode a per-container tmpfs). This is an accepted trust
     boundary, not a hard guarantee: the sandbox forwards DB/portal credentials
     (``MYSQL_`` / ``DATAAGENT_PORTAL_`` / ``ODW_`` env) into the child, so Bash could
     in principle reach platform state outside the gated MCP path. Plan mode relies on

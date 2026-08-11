@@ -117,6 +117,13 @@ class Settings(BaseSettings):
     # workspace; a writable tmpfs is mounted at /tmp for transient scratch.
     dataagent_sandbox_read_only_rootfs: bool = False
     dataagent_sandbox_tmpfs_size: str = "512m"
+    # Directories the runtime boundary hook allows on top of the topic workspace
+    # and the enabled Skill roots. Comma-separated absolute paths. Default "/tmp"
+    # matches the writable tmpfs the sandbox mounts into the child container, so
+    # transient scratch files stop being denied as "outside workspace". Read and
+    # write share this one list; final deliverables still belong in the workspace
+    # `output/` dir. Set to "" to restore workspace-only file access.
+    dataagent_workspace_scratch_dirs: str = "/tmp"
     # Warm child container reuse. When the container backend is active, keep a
     # finished child alive for an idle window so same-conversation follow-ups
     # reuse it instead of paying full container/SDK cold-start each turn.
@@ -173,3 +180,27 @@ def resolve_sql_read_timeout_seconds(cfg: Settings, execution_mode) -> int:
     if is_background_execution_mode(execution_mode):
         return int(getattr(cfg, "agent_background_sql_read_timeout_seconds", 0) or 900)
     return int(getattr(cfg, "agent_interactive_sql_read_timeout_seconds", 0) or 300)
+
+
+def resolve_workspace_scratch_dirs(cfg: Settings) -> list[str]:
+    """解析工作区边界之外仍允许读写的目录白名单。
+
+    唯一解析入口，供边界钩子装配和系统提示词共用，避免两处对同一份配置给出不同结论。
+    只接受绝对路径，拒绝根目录 ``/`` 和含 ``..`` 的路径，去掉尾部 ``/`` 后按顺序去重。
+    非法项直接丢弃：配置写错只会收紧白名单，不会意外放开更多目录。
+    """
+    raw = str(getattr(cfg, "dataagent_workspace_scratch_dirs", "") or "")
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for item in raw.split(","):
+        text = item.strip()
+        if not text.startswith("/"):
+            continue
+        if any(part == ".." for part in text.split("/")):
+            continue
+        normalized = text.rstrip("/")
+        if not normalized or normalized in seen:
+            continue
+        resolved.append(normalized)
+        seen.add(normalized)
+    return resolved

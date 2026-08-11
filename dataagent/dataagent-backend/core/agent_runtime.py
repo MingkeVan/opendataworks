@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from config import resolve_sql_read_timeout_seconds
+from config import get_settings, resolve_sql_read_timeout_seconds, resolve_workspace_scratch_dirs
 from core.provider_runtime import build_provider_env as _build_provider_env
 from core.provider_runtime import normalize_provider_id as _normalize_provider_id
 from core.provider_runtime import safe_base_url_for_log as _safe_base_url_for_log
@@ -196,7 +196,17 @@ def _is_offloaded_tool_result_path(candidate: Path, tool_result_root: Path | Non
     )
 
 
-def _build_workspace_allowed_roots(project_cwd: str | Path, skill_runtime: dict[str, Any] | None) -> list[Path]:
+def _build_workspace_allowed_roots(
+    project_cwd: str | Path,
+    skill_runtime: dict[str, Any] | None,
+    scratch_dirs: list[str] | None = None,
+) -> list[Path]:
+    """Roots the boundary hook accepts for both reads and writes.
+
+    ``scratch_dirs`` are extra absolute directories outside the workspace that the
+    deployment declares writable (see ``resolve_workspace_scratch_dirs``); the
+    caller resolves them from config so this stays a pure function of its inputs.
+    """
     roots = [Path(project_cwd).expanduser().resolve(strict=False)]
     enabled_folders = set(_dedupe_strings((skill_runtime or {}).get("enabled_folders")))
     enabled_roots = dict((skill_runtime or {}).get("enabled_roots") or {})
@@ -212,6 +222,9 @@ def _build_workspace_allowed_roots(project_cwd: str | Path, skill_runtime: dict[
         sibling_platform_root = Path(primary_root).expanduser().resolve(strict=False).parent / PLATFORM_TOOLS_SKILL_FOLDER
         if sibling_platform_root.exists():
             roots.append(sibling_platform_root.resolve(strict=False))
+
+    for scratch_dir in _dedupe_strings(scratch_dirs):
+        roots.append(Path(scratch_dir).expanduser().resolve(strict=False))
 
     deduped: list[Path] = []
     seen: set[str] = set()
@@ -405,7 +418,9 @@ def _build_workspace_boundary_hooks(
     runtime_env: dict[str, str] | None,
 ) -> dict[str, list[Any]]:
     workspace = Path(project_cwd).expanduser().resolve(strict=False)
-    allowed_roots = _build_workspace_allowed_roots(workspace, skill_runtime)
+    allowed_roots = _build_workspace_allowed_roots(
+        workspace, skill_runtime, resolve_workspace_scratch_dirs(get_settings())
+    )
 
     async def _pre_tool_use(input_data: dict[str, Any], tool_use_id: str | None, context: dict[str, Any]) -> dict[str, Any]:
         tool_name = str((input_data or {}).get("tool_name") or "")
@@ -434,6 +449,16 @@ def _build_system_prompt(
     enabled_skills = list((skill_runtime or {}).get("enabled_folders") or [])
     enabled_skills_text = "、".join(enabled_skills) if enabled_skills else "未配置"
     lines = [_load_system_prompt_template(), "", "# 运行时上下文", f"- 已启用 Skills：当前已启用：{enabled_skills_text}。"]
+    # Same config source as the boundary hook, so the prompt never advertises a
+    # scratch dir the hook would then deny (or hide one it would allow).
+    scratch_dirs = resolve_workspace_scratch_dirs(get_settings())
+    if scratch_dirs:
+        lines.append(
+            f"- 可写临时目录：{'、'.join(scratch_dirs)}。仅存放中间过程文件，"
+            "运行结束即可能失效；最终交付文件仍必须写入工作区 `output/`。"
+        )
+    else:
+        lines.append("- 可写临时目录：无。所有文件读写都必须在当前会话工作区内完成。")
     custom_prompt = str((agent_snapshot or {}).get("system_prompt") or "").strip()
     if custom_prompt:
         lines.extend(["", "# 智能体系统提示词", custom_prompt])
