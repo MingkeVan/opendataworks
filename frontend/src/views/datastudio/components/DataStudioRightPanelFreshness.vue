@@ -55,6 +55,7 @@
             <template #label><span class="lbl">时间来源<Help :tip="TIP.source" /></span></template>
             <span class="fv-mode">{{ modeLabel(effectiveMode) }}</span>
             <code v-if="viewValueExpr" class="fv-code">{{ viewValueExpr }}</code>
+            <span v-else-if="effectiveMode === 'metadata'" class="fv-hint">读表最后更新时间</span>
           </el-descriptions-item>
           <el-descriptions-item>
             <template #label><span class="lbl">时限<Help :tip="TIP.thresholds" /></span></template>
@@ -77,10 +78,11 @@
           <el-form-item>
             <template #label><span class="lbl">时间来源<Help :tip="TIP.source" /></span></template>
             <el-select v-model="form.mode" style="width: 100%">
-              <el-option label="表字段 · 取列的最大时间" value="column" />
-              <el-option label="自定义查询" value="custom_sql" />
-              <el-option label="表元数据 · 仅发现长期无写入" value="metadata" />
+              <el-option label="表字段 · 取某列的最大值" value="column" />
+              <el-option label="自定义查询 · 写 SQL 取最新时间" value="custom_sql" />
+              <el-option label="表元数据 · 读表最后更新时间" value="metadata" />
             </el-select>
+            <div v-if="form.mode === 'metadata'" class="mode-hint">不看数据内容，只能发现长期无写入</div>
           </el-form-item>
 
           <el-form-item v-if="form.mode === 'column'">
@@ -178,16 +180,16 @@ const Help = (props) =>
   )
 Help.props = ['tip']
 
+// 每个术语一句话；具体取值方式由各选项/字段就地自解释，不堆在一处。
 const TIP = {
-  status: '最近一次检查结果：正常 / 预警 / 过期 / 检查失败。',
-  source:
-    '数据的「最新时间」从哪里取。表字段：取某列（如 etl_time）的最大值；自定义查询：自己写一段 SQL 返回最新时间；表元数据：不读数据内容，改读仓库记录的表「最后更新时间」，无需时间列，但只能发现长期无写入。',
-  thresholds: '数据落后多久判为预警 / 过期。',
-  maxLoadedAt: '按「时间来源」算出的最新一条数据时间。',
-  snapshottedAt: '本次新鲜度检查执行的时刻。',
-  loadedAtField: '取该列的最大值作为最新数据时间，常用如 etl_time、update_time。',
-  loadedAtQuery: '自己写 SQL，返回一行一列的最新数据时间。例：SELECT MAX(order_time) FROM db.tbl。',
-  filter: '只统计满足条件的行。例：dt = current_date - 1。',
+  status: '最近一次检查结果',
+  source: '用什么方式确定数据的最新时间',
+  thresholds: '数据落后多久判为预警 / 过期',
+  maxLoadedAt: '按时间来源算出的最新一条数据时间',
+  snapshottedAt: '本次检查执行的时刻',
+  loadedAtField: '取该列的最大值当作最新数据时间',
+  loadedAtQuery: '写一段 SQL 返回最新数据时间',
+  filter: '只统计满足条件的行，如 dt = current_date - 1',
 }
 
 const ctx = inject('dataStudioCtx', null)
@@ -429,6 +431,7 @@ watch(tableId, () => {
 .fv-status { display: flex; align-items: center; gap: 8px; }
 .fv-age { font-size: 12px; color: var(--el-text-color-secondary); }
 .fv-mode { font-weight: 600; }
+.fv-hint { margin-left: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
 .fv-code {
   margin-left: 8px;
   padding: 1px 6px;
@@ -447,6 +450,8 @@ watch(tableId, () => {
 
 .opt-name { float: left; }
 .opt-type { float: right; color: var(--el-text-color-secondary); font-size: 12px; }
+
+.mode-hint { margin-top: 4px; font-size: 12px; line-height: 1.5; color: var(--el-text-color-secondary); }
 
 .thresholds { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .th-group { display: inline-flex; align-items: center; gap: 6px; }
