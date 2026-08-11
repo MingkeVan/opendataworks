@@ -8,6 +8,7 @@ SCHED_ONLINE = "mcp__portal__portal_workflow_schedule_online"
 CREATE_TASK = "mcp__portal__portal_create_task"
 CREATE_TABLE = "mcp__portal__portal_create_table"
 PREVIEW_CREATE_TABLE = "mcp__portal__portal_preview_create_table"
+UPDATE_TABLE_METADATA = "mcp__portal__portal_update_table_metadata"
 ANALYZE = "mcp__portal__portal_analyze_sql"
 READ = "mcp__portal__portal_search_tables"
 
@@ -76,6 +77,17 @@ def test_post_plan_mode_is_accept_edits() -> None:
     assert pg.post_plan_mode() == "acceptEdits"
     assert pg.requires_confirmation(CREATE_TASK, pg.post_plan_mode()) is False
     assert pg.requires_confirmation(PUBLISH, pg.post_plan_mode()) is True
+
+
+def test_update_table_metadata_is_draft_write_not_high_risk() -> None:
+    # Reversible metadata completion: draft-level write (confirm under default,
+    # auto under acceptEdits, denied under plan), not high-risk like create_table.
+    assert pg.is_write_tool(UPDATE_TABLE_METADATA)
+    assert pg.is_write_tool("portal_update_table_metadata")
+    assert not pg.is_high_risk_tool(UPDATE_TABLE_METADATA)
+    assert pg.requires_confirmation(UPDATE_TABLE_METADATA, "default") is True
+    assert pg.requires_confirmation(UPDATE_TABLE_METADATA, "acceptEdits") is False
+    assert pg.plan_denies_tool(UPDATE_TABLE_METADATA) is True
 
 
 def test_create_table_is_high_risk_and_preview_is_read_only() -> None:

@@ -87,6 +87,9 @@ class BackendApiClient:
     async def analyze_sql(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._request("POST", "/v1/ai/sql/analyze", json=payload)
 
+    async def update_table_metadata(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._request("POST", "/v1/ai/metadata/complete", json=payload)
+
     async def _request(
         self,
         method: str,

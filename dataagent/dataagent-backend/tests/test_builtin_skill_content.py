@@ -462,3 +462,16 @@ def test_methodology_dag_registry_entries_declare_an_executable_caliber():
             assert payload.get(field), f"{path.name} 缺少 {field}"
         assert payload["target"] in payload["nodes"], f"{path.name} 的 target 不是已定义节点"
 
+
+
+def test_data_dev_skill_documents_metadata_completion():
+    """data-dev 技能必须记录「完善已有表元数据」的入口工具与批量扫描+逐个完善配方。"""
+    snapshot = _skill_text_snapshot(DATA_DEV_SKILL_ROOT)
+    for token in (
+        "portal_update_table_metadata",
+        "完善已有表",
+        "批量扫描",
+        "loaded_at_field",
+        "数据新鲜度",
+    ):
+        assert token in snapshot, f"data-dev 技能缺少: {token}"

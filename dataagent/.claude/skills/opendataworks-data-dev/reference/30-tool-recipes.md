@@ -99,6 +99,45 @@ portal_workflow_schedule_online  { workflow_id, preview_token }   # 高危
 portal_workflow_schedule_offline { workflow_id }
 ```
 
+## 7. 完善已有表的元数据（批量扫描 + 逐个完善）
+
+给一张**已存在**的表补齐元数据：表描述、字段注释、受控属性（分层/业务域/数据域）、数据新鲜度契约。写工具是 `portal_update_table_metadata`（草稿级，`default` 下触发确认）。这不是建表——建新表仍走第 2 节。
+
+批量扫描找缺口（复用读工具，无专门扫描接口）：
+
+```
+portal_search_tables  { database, table_limit }          # 或 portal_export_metadata { kind:"tables", database }
+  -> 据「表注释为空 / 与表名相同、字段注释缺失」挑出元数据薄弱的表，排出待完善清单
+```
+
+逐表完善：
+
+```
+portal_get_table_ddl { database, table }   # 或 { table_id }  -> 字段清单、现有注释、DDL
+# 基于 DDL/字段/血缘提案。受控值只能取平台清单内编码；时间列必须是真实字段
+portal_update_table_metadata {
+  table_id,                                                  # 或 database + table
+  table_comment?,
+  attributes?: { layer?, business_domain?, data_domain? },   # 清单外的编码服务端一律丢弃
+  fields?: [ { field_name, comment }, ... ],                 # field_name 必须是真实字段
+  freshness?: {                                              # 数据新鲜度契约，mode 默认 column
+    mode?:"column", loaded_at_field,                         # loaded_at_field 必须是真实时间列
+    warn_after_count?:1, warn_after_period?:"day",           # 默认 T-1：预警/过期各 1 天
+    error_after_count?:1, error_after_period?:"day"
+  },
+  title?:"完善元数据 <库>.<表>", summary?:"<本次补了哪些>"
+}
+  -> 返回逐段 applied / skipped / failed；skipped 多为「值不在平台清单」或「字段不存在」
+```
+
+要点：
+
+- 逐个完善 = 对清单里的表逐张调用，一张一确认，不要指望一次把整批自动写完。
+- 受控属性与时间列都在**服务端硬校验**：编造的编码/列会被丢弃并写进 `skipped`，据此纠正后只重试该表。
+- `data_domain` 必须归属所选 `business_domain`，否则被丢弃（业务域被丢时数据域一并丢）。
+- 枚举取值本工具不写；`fields[].comment` 只写字段业务含义。
+- 缺 `layer` 时服务端回落到表上已有分层；表本身也没有分层则该段进 `skipped`，需一并给出 `attributes.layer`。
+
 ## 失败恢复
 
 - `portal_create_table` 失败 → 读取报错(表已存在/字段或类型非法/集群不可达);回 `40-ddl-standards.md` 修正后重新预览,不要盲目重试同一请求。

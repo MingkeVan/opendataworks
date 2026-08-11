@@ -127,6 +127,66 @@ class CreateTableInput(BaseModel):
     doris_ddl: str | None = Field(default=None, description="高级:直接提供完整 Doris CREATE TABLE DDL")
 
 
+class UpdateTableAttributesInput(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid", str_strip_whitespace=True, alias_generator=to_camel, populate_by_name=True
+    )
+
+    layer: str | None = Field(default=None, description="数仓分层:ODS/DWD/DIM/DWS/ADS(清单外一律丢弃)")
+    business_domain: str | None = Field(default=None, description="业务域编码(必须是平台已有编码)")
+    data_domain: str | None = Field(default=None, description="数据域编码(必须存在且归属所选业务域)")
+
+
+class UpdateTableFieldCommentInput(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid", str_strip_whitespace=True, alias_generator=to_camel, populate_by_name=True
+    )
+
+    field_name: str | None = Field(default=None, description="字段名(与 field_id 二选一)")
+    field_id: int | None = Field(default=None, description="字段 ID(与 field_name 二选一)")
+    comment: str = Field(..., description="字段业务注释")
+
+
+class UpdateTableFreshnessInput(BaseModel):
+    """数据新鲜度契约,对齐平台 TableFreshnessRequest;mode 默认 column。"""
+
+    model_config = ConfigDict(
+        extra="forbid", str_strip_whitespace=True, alias_generator=to_camel, populate_by_name=True
+    )
+
+    mode: Literal["column", "custom_sql", "metadata"] | None = Field(default=None, description="取值方式,默认 column")
+    loaded_at_field: str | None = Field(default=None, description="column 模式:取最大值的时间列(必须是真实字段)")
+    loaded_at_query: str | None = Field(default=None, description="custom_sql 模式:返回最新时间的 SQL")
+    filter_expr: str | None = Field(default=None, description="可选 WHERE 谓词")
+    warn_after_count: int | None = Field(default=None, ge=1, description="预警阈值数量,默认 1")
+    warn_after_period: Literal["minute", "hour", "day"] | None = Field(default=None, description="预警阈值单位,默认 day")
+    error_after_count: int | None = Field(default=None, ge=1, description="过期阈值数量,默认 1")
+    error_after_period: Literal["minute", "hour", "day"] | None = Field(default=None, description="过期阈值单位,默认 day")
+    enabled: bool | None = Field(default=None, description="是否启用,默认 true")
+
+
+class UpdateTableMetadataInput(BaseModel):
+    """完善一张已存在表的元数据。用 table_id 或 database+table 定位;各段可选、独立应用。"""
+
+    model_config = ConfigDict(
+        extra="forbid", str_strip_whitespace=True, alias_generator=to_camel, populate_by_name=True
+    )
+
+    table_id: int | None = Field(default=None, description="表 ID(优先)")
+    database: str | None = Field(default=None, description="库名(与 table 一起在缺 table_id 时定位)")
+    table: str | None = Field(default=None, description="表名(与 database 一起在缺 table_id 时定位)")
+    table_comment: str | None = Field(default=None, description="表业务描述")
+    attributes: UpdateTableAttributesInput | None = Field(default=None, description="受控属性:分层/业务域/数据域")
+    fields: list[UpdateTableFieldCommentInput] | None = Field(default=None, description="逐字段注释")
+    freshness: UpdateTableFreshnessInput | None = Field(default=None, description="数据新鲜度契约")
+
+    @model_validator(mode="after")
+    def validate_locator(self) -> "UpdateTableMetadataInput":
+        if self.table_id is None and (not self.database or not self.table):
+            raise ValueError("table_id 或 database + table 至少提供一组")
+        return self
+
+
 class CreateTaskInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -352,6 +412,14 @@ def build_mcp_server(service: PortalToolService) -> FastMCP:
     async def portal_create_table(params: CreateTableInput) -> dict[str, Any]:
         """Create a new target table: persist metadata and execute the DDL on the engine (Doris). High-risk and irreversible; requires dorisClusterId to execute. Preview first with portal_preview_create_table."""
         return await service.create_table(params.model_dump(by_alias=True, exclude_none=True))
+
+    @mcp.tool(
+        name="portal_update_table_metadata",
+        annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+    )
+    async def portal_update_table_metadata(params: UpdateTableMetadataInput) -> dict[str, Any]:
+        """Complete the metadata of an existing table: table comment, controlled attributes (layer / business-domain / data-domain), per-field comments, and the data-freshness contract. Locate the table by table_id (preferred) or database + table. Discover weak/missing metadata first with portal_search_tables / portal_export_metadata, then read context with portal_get_table_ddl. Controlled values outside the platform lists are dropped server-side; freshness loaded_at_field must be a real column. Each section is applied independently and the result lists applied / skipped / failed."""
+        return await service.update_table_metadata(params.model_dump(by_alias=True, exclude_none=True))
 
     @mcp.tool(
         name="portal_create_task",

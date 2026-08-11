@@ -35,6 +35,9 @@ class PortalToolService:
     async def create_table(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._wrap(self.backend_client.create_table(payload))
 
+    async def update_table_metadata(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._wrap(self.backend_client.update_table_metadata(payload))
+
     async def create_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._wrap(self.backend_client.create_task(payload))
 

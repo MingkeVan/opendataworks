@@ -40,6 +40,10 @@ DRAFT_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
         "portal_update_workflow",
         "portal_upsert_schedule",
         "portal_workflow_schedule_offline",
+        # Completes metadata on an existing table (comments / controlled attributes /
+        # freshness). Reversible and lower-risk than create_table, so draft-level:
+        # confirmed under default, auto-allowed under acceptEdits, denied under plan.
+        "portal_update_table_metadata",
     }
 )
 

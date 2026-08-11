@@ -7,19 +7,28 @@ import com.onedata.portal.agentapi.dto.AgentInspectResponse;
 import com.onedata.portal.agentapi.dto.AgentLineageRecord;
 import com.onedata.portal.agentapi.dto.AgentLineageResponse;
 import com.onedata.portal.agentapi.dto.AgentTableMetadata;
+import com.onedata.portal.agentapi.dto.AgentMetadataCompleteRequest;
+import com.onedata.portal.agentapi.dto.AgentMetadataCompleteResponse;
 import com.onedata.portal.agentapi.dto.AgentTableDdlResponse;
 import com.onedata.portal.agentapi.scope.AgentDataScopeContext;
+import com.onedata.portal.dto.TableFreshnessRequest;
+import com.onedata.portal.entity.BusinessDomain;
+import com.onedata.portal.entity.DataDomain;
 import com.onedata.portal.entity.DataField;
 import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.entity.DorisDbUser;
+import com.onedata.portal.mapper.BusinessDomainMapper;
+import com.onedata.portal.mapper.DataDomainMapper;
 import com.onedata.portal.mapper.DataFieldMapper;
 import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTableMapper;
 import com.onedata.portal.mapper.DorisClusterMapper;
 import com.onedata.portal.mapper.DorisDbUserMapper;
+import com.onedata.portal.service.DataTableService;
 import com.onedata.portal.service.LineageService;
+import com.onedata.portal.service.freshness.TableFreshnessService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
@@ -61,6 +70,10 @@ public class BackendAgentMetadataService implements AgentMetadataService {
     private final LineageService lineageService;
     private final DataSourceProperties dataSourceProperties;
     private final AgentJdbcExecutor agentJdbcExecutor;
+    private final DataTableService dataTableService;
+    private final TableFreshnessService tableFreshnessService;
+    private final BusinessDomainMapper businessDomainMapper;
+    private final DataDomainMapper dataDomainMapper;
 
     @Override
     public AgentInspectResponse inspect(String database, String table, String keyword, int tableLimit) {
@@ -368,6 +381,232 @@ public class BackendAgentMetadataService implements AgentMetadataService {
             rows.add(row);
         }
         return capExportRows(rows, "datasource");
+    }
+
+    @Override
+    public AgentMetadataCompleteResponse complete(AgentMetadataCompleteRequest request, String operator) {
+        if (request == null) {
+            throw new IllegalArgumentException("request 不能为空");
+        }
+        DataTable table = resolveWritableTable(request);
+        AgentDataScopeContext.requireAllowed(table.getClusterId(), table.getDbName());
+
+        AgentMetadataCompleteResponse response = new AgentMetadataCompleteResponse();
+        response.setTableId(table.getId());
+        response.setDatabase(table.getDbName());
+        response.setTable(table.getTableName());
+
+        applyTableComment(request.getTableComment(), table.getId(), table.getClusterId(), response);
+        applyAttributes(request.getAttributes(), table, response);
+        applyFieldComments(request.getFields(), table, response);
+        applyFreshness(request.getFreshness(), table, operator, response);
+        return response;
+    }
+
+    private DataTable resolveWritableTable(AgentMetadataCompleteRequest request) {
+        if (request.getTableId() != null) {
+            DataTable table = dataTableMapper.selectById(request.getTableId());
+            if (table == null) {
+                throw new IllegalArgumentException("tableId `" + request.getTableId() + "` 不存在");
+            }
+            return table;
+        }
+        String database = trimToNull(request.getDatabase());
+        String tableName = trimToNull(request.getTable());
+        if (!StringUtils.hasText(database) || !StringUtils.hasText(tableName)) {
+            throw new IllegalArgumentException("tableId 或 database + table 至少提供一组");
+        }
+        DataTable table = resolveDdlTable(database, tableName, null);
+        if (table == null) {
+            throw new IllegalArgumentException("未找到表 " + database + "." + tableName);
+        }
+        return table;
+    }
+
+    private void applyTableComment(String tableComment, Long tableId, Long clusterId, AgentMetadataCompleteResponse response) {
+        String comment = trimToNull(tableComment);
+        if (comment == null) {
+            return;
+        }
+        try {
+            dataTableService.updateTableComment(tableId, comment, clusterId);
+            response.getApplied().add("table_comment");
+        } catch (Exception e) {
+            response.getFailed().add("table_comment: " + rootMessage(e));
+        }
+    }
+
+    // 受控属性：分层/业务域/数据域，服务端硬校验后写回（对齐前端 filterTableAttributes 口径）
+    private void applyAttributes(
+            AgentMetadataCompleteRequest.Attributes attributes,
+            DataTable table,
+            AgentMetadataCompleteResponse response
+    ) {
+        if (attributes == null) {
+            return;
+        }
+        boolean anyProvided = StringUtils.hasText(attributes.getLayer())
+                || StringUtils.hasText(attributes.getBusinessDomain())
+                || StringUtils.hasText(attributes.getDataDomain());
+        if (!anyProvided) {
+            return;
+        }
+
+        String layer;
+        try {
+            layer = dataTableService.normalizeLayer(attributes.getLayer(), false);
+        } catch (Exception e) {
+            layer = null; // 非法分层丢弃
+        }
+        String businessDomain = validateBusinessDomain(attributes.getBusinessDomain());
+        String dataDomain = validateDataDomain(attributes.getDataDomain(), businessDomain);
+
+        if (layer == null && businessDomain == null && dataDomain == null) {
+            response.getSkipped().add("attributes: 建议值均不在平台清单内，未写入");
+            return;
+        }
+        // updateTable 强制分层非空：缺分层时回落到表上已有分层
+        String effectiveLayer = layer != null ? layer : trimToNull(table.getLayer());
+        if (effectiveLayer == null) {
+            response.getSkipped().add("attributes: 缺少有效分层，且表上也未设置分层");
+            return;
+        }
+
+        DataTable patch = new DataTable();
+        patch.setId(table.getId());
+        patch.setLayer(effectiveLayer);
+        if (businessDomain != null) {
+            patch.setBusinessDomain(businessDomain);
+        }
+        if (dataDomain != null) {
+            patch.setDataDomain(dataDomain);
+        }
+        try {
+            dataTableService.updateTable(table.getId(), patch, table.getClusterId());
+            table.setLayer(effectiveLayer);
+            if (businessDomain != null) {
+                table.setBusinessDomain(businessDomain);
+            }
+            if (dataDomain != null) {
+                table.setDataDomain(dataDomain);
+            }
+            response.getApplied().add("attributes");
+        } catch (Exception e) {
+            response.getFailed().add("attributes: " + rootMessage(e));
+        }
+    }
+
+    private String validateBusinessDomain(String raw) {
+        String code = trimToNull(raw);
+        if (code == null) {
+            return null;
+        }
+        BusinessDomain match = businessDomainMapper.selectOne(
+                new LambdaQueryWrapper<BusinessDomain>().eq(BusinessDomain::getDomainCode, code).last("LIMIT 1"));
+        return match == null ? null : code;
+    }
+
+    private String validateDataDomain(String raw, String businessDomain) {
+        String code = trimToNull(raw);
+        if (code == null || businessDomain == null) {
+            return null;
+        }
+        DataDomain match = dataDomainMapper.selectOne(
+                new LambdaQueryWrapper<DataDomain>().eq(DataDomain::getDomainCode, code).last("LIMIT 1"));
+        if (match == null) {
+            return null;
+        }
+        // 数据域必须归属所选业务域，否则是跨域的无效组合
+        return businessDomain.equals(trimToNull(match.getBusinessDomain())) ? code : null;
+    }
+
+    // 逐字段注释：解析 fieldName/fieldId 到真实字段，只改注释走 Doris 轻量 ALTER；逐字段汇总失败
+    private void applyFieldComments(
+            List<AgentMetadataCompleteRequest.FieldComment> fields,
+            DataTable table,
+            AgentMetadataCompleteResponse response
+    ) {
+        if (fields == null || fields.isEmpty()) {
+            return;
+        }
+        List<DataField> existing = dataFieldMapper.selectList(
+                new LambdaQueryWrapper<DataField>().eq(DataField::getTableId, table.getId()));
+        Map<Long, DataField> byId = new LinkedHashMap<>();
+        Map<String, DataField> byName = new LinkedHashMap<>();
+        for (DataField field : existing) {
+            if (field.getId() != null) {
+                byId.put(field.getId(), field);
+            }
+            if (StringUtils.hasText(field.getFieldName())) {
+                byName.put(field.getFieldName().trim().toLowerCase(Locale.ROOT), field);
+            }
+        }
+
+        for (AgentMetadataCompleteRequest.FieldComment item : fields) {
+            if (item == null) {
+                continue;
+            }
+            DataField original = null;
+            if (item.getFieldId() != null) {
+                original = byId.get(item.getFieldId());
+            }
+            if (original == null && StringUtils.hasText(item.getFieldName())) {
+                original = byName.get(item.getFieldName().trim().toLowerCase(Locale.ROOT));
+            }
+            String label = StringUtils.hasText(item.getFieldName())
+                    ? item.getFieldName().trim()
+                    : String.valueOf(item.getFieldId());
+            if (original == null) {
+                response.getSkipped().add("field:" + label + ": 表中不存在该字段");
+                continue;
+            }
+            // 只改注释：沿用既有定义，仅替换 comment，触发后端 comment-only 的轻量 ALTER
+            original.setFieldComment(item.getComment() == null ? "" : item.getComment().trim());
+            try {
+                dataTableService.updateField(table.getId(), original.getId(), original, table.getClusterId());
+                response.getApplied().add("field:" + original.getFieldName());
+            } catch (Exception e) {
+                response.getFailed().add("field:" + original.getFieldName() + ": " + rootMessage(e));
+            }
+        }
+    }
+
+    private void applyFreshness(
+            AgentMetadataCompleteRequest.Freshness freshness,
+            DataTable table,
+            String operator,
+            AgentMetadataCompleteResponse response
+    ) {
+        if (freshness == null) {
+            return;
+        }
+        TableFreshnessRequest request = new TableFreshnessRequest();
+        request.setMode(StringUtils.hasText(freshness.getMode()) ? freshness.getMode().trim() : "column");
+        request.setLoadedAtField(freshness.getLoadedAtField());
+        request.setLoadedAtQuery(freshness.getLoadedAtQuery());
+        request.setFilterExpr(freshness.getFilterExpr());
+        request.setWarnAfterCount(freshness.getWarnAfterCount());
+        request.setWarnAfterPeriod(freshness.getWarnAfterPeriod());
+        request.setErrorAfterCount(freshness.getErrorAfterCount());
+        request.setErrorAfterPeriod(freshness.getErrorAfterPeriod());
+        if (freshness.getEnabled() != null) {
+            request.setEnabled(freshness.getEnabled());
+        }
+        try {
+            tableFreshnessService.saveFreshness(table.getId(), request, trimToNull(operator));
+            response.getApplied().add("freshness");
+        } catch (Exception e) {
+            response.getFailed().add("freshness: " + rootMessage(e));
+        }
+    }
+
+    private String rootMessage(Throwable e) {
+        Throwable cursor = e;
+        while (cursor.getCause() != null && cursor.getCause() != cursor) {
+            cursor = cursor.getCause();
+        }
+        String message = cursor.getMessage();
+        return StringUtils.hasText(message) ? message : cursor.getClass().getSimpleName();
     }
 
     private List<Map<String, Object>> capExportRows(List<Map<String, Object>> rows, String exportKind) {

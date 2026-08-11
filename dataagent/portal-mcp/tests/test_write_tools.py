@@ -107,6 +107,7 @@ async def test_build_mcp_server_registers_write_tools():
         "portal_workflow_schedule_online",
         "portal_workflow_schedule_offline",
         "portal_analyze_sql",
+        "portal_update_table_metadata",
     }:
         assert expected in names, f"missing tool {expected}"
     # read tools still present
@@ -262,3 +263,71 @@ def test_create_task_requires_both_lineage_fields():
     ok = CreateTaskInput(task={"taskName": "t"}, input_table_ids=[], output_table_ids=[9])
     assert ok.input_table_ids == []
     assert ok.output_table_ids == [9]
+
+
+def test_update_table_metadata_requires_locator():
+    from portal_mcp.app import UpdateTableMetadataInput
+
+    # Neither table_id nor database+table -> invalid.
+    with pytest.raises(ValidationError):
+        UpdateTableMetadataInput(table_comment="x")
+    with pytest.raises(ValidationError):
+        UpdateTableMetadataInput(database="dwd", table_comment="x")  # table missing
+
+    ok = UpdateTableMetadataInput(table_id=1, table_comment="订单明细")
+    assert ok.table_id == 1
+    ok2 = UpdateTableMetadataInput(database="dwd", table="dwd_order", table_comment="x")
+    assert ok2.table == "dwd_order"
+
+
+def test_update_table_metadata_serializes_to_camel_case():
+    from portal_mcp.app import UpdateTableMetadataInput
+
+    inp = UpdateTableMetadataInput(
+        table_id=42,
+        table_comment="订单明细表",
+        attributes={"layer": "DWD", "business_domain": "TRADE", "data_domain": "ORDER"},
+        fields=[{"field_name": "etl_time", "comment": "ETL 加载时间"}],
+        freshness={
+            "loaded_at_field": "etl_time",
+            "warn_after_count": 1,
+            "warn_after_period": "day",
+            "error_after_count": 1,
+            "error_after_period": "day",
+        },
+    )
+    payload = inp.model_dump(by_alias=True, exclude_none=True)
+
+    assert payload["tableId"] == 42
+    assert payload["tableComment"] == "订单明细表"
+    assert payload["attributes"]["businessDomain"] == "TRADE"
+    assert payload["attributes"]["dataDomain"] == "ORDER"
+    assert payload["fields"][0]["fieldName"] == "etl_time"
+    assert payload["freshness"]["loadedAtField"] == "etl_time"
+    assert payload["freshness"]["warnAfterCount"] == 1
+    # snake_case must not leak into the backend payload
+    assert "business_domain" not in payload["attributes"]
+    assert "loaded_at_field" not in payload["freshness"]
+
+
+@pytest.mark.anyio
+async def test_update_table_metadata_tool_forwards_camel_payload():
+    backend = RecordingBackend()
+    mcp = build_mcp_server(PortalToolService(backend))
+
+    await _call_tool(
+        mcp,
+        "portal_update_table_metadata",
+        {
+            "table_id": 7,
+            "attributes": {"layer": "DWD"},
+            "freshness": {"loaded_at_field": "etl_time"},
+        },
+    )
+
+    name, args, _ = backend.calls[-1]
+    assert name == "update_table_metadata"
+    payload = args[0]
+    assert payload["tableId"] == 7
+    assert payload["attributes"]["layer"] == "DWD"
+    assert payload["freshness"]["loadedAtField"] == "etl_time"

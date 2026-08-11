@@ -1,6 +1,6 @@
 ---
 name: opendataworks-data-dev
-description: "当请求需要在 OpenDataWorks 上进行数据开发时使用：生成/润色 SQL、按引擎规范建表、创建数据任务、组装工作流、发布与上线、配置调度。依赖 portal MCP 的写工具与对话内权限确认。不用于纯问数、业务语义或本体建模。"
+description: "当请求需要在 OpenDataWorks 上进行数据开发时使用：生成/润色 SQL、按引擎规范建表、创建数据任务、组装工作流、发布与上线、配置调度，以及批量扫描并逐个完善已有表的元数据（表/字段注释、分层归属、数据新鲜度）。依赖 portal MCP 的写工具与对话内权限确认。不用于纯问数、业务语义或本体建模。"
 compatibility: "需要可见的 portal MCP 写工具(portal_create_table/portal_create_task/portal_create_workflow/portal_preview_publish/portal_publish_workflow 等)。高危操作(建表/发布/上线)在 default/acceptEdits 权限模式下会触发对话内确认。"
 tools: [Bash, Read]
 ---
@@ -21,6 +21,7 @@ tools: [Bash, Read]
 - 组装工作流（绑定任务、设置依赖边）。
 - 发布(deploy)、上线/下线(online/offline)、调度配置与上线/下线。
 - 发布前强制预览，把差异/告警交给用户确认。
+- 完善已有表的元数据：表描述、字段注释、受控属性(分层/业务域/数据域)、数据新鲜度契约（批量扫描找缺口 + 逐个完善，见 `reference/30-tool-recipes.md` 第 7 节）。
 
 不负责：
 
@@ -39,6 +40,7 @@ tools: [Bash, Read]
 - 工作流：`portal_create_workflow`、`portal_update_workflow`、`portal_get_workflow`、`portal_list_workflows`。
 - 发布：`portal_preview_publish` →（确认）→ `portal_publish_workflow`。
 - 调度：`portal_upsert_schedule`、`portal_workflow_schedule_online`、`portal_workflow_schedule_offline`。
+- 完善元数据：`portal_update_table_metadata`（给已有表补齐描述/字段注释/受控属性/数据新鲜度，草稿级写工具）。
 
 字段契约见 `reference/10-task-fields.md`，生命周期与状态机见 `reference/20-workflow-lifecycle.md`，建表 DDL 规范见 `reference/40-ddl-standards.md`，常见加工场景模板见 `reference/50-sql-scenarios.md`，命名/校验规则见 `assets/dev-policies.json`，引擎建表默认值见 `assets/engine-ddl-rules.json`，任务模板见 `assets/task-template.json`。
 
@@ -78,7 +80,12 @@ tools: [Bash, Read]
 6. **调度**
    - `portal_upsert_schedule` 配置 cron/时区等；`portal_workflow_schedule_online`（需 preview_token，高危）启用；`portal_workflow_schedule_offline` 停用。
 
-7. **失败恢复**
+7. **完善已有表的元数据（批量扫描 + 逐个完善）**
+   - 用 `portal_search_tables` / `portal_export_metadata` 扫出注释缺失/薄弱的表，排出待完善清单（复用读工具，无专门扫描接口）。
+   - 逐张表：`portal_get_table_ddl` 取字段与现有注释 → 基于 DDL/字段/血缘提案 → `portal_update_table_metadata` 写回（草稿级，`default` 触发确认）。一张一确认，不要一次批量自动写。
+   - 受控属性只填平台清单内编码、`freshness.loaded_at_field` 必须是真实时间列；服务端会丢弃清单外的编码/列并写进 `skipped`，据此纠正后只重试该表。枚举取值本工具不写。详见 `reference/30-tool-recipes.md` 第 7 节。
+
+8. **失败恢复**
    - 发布失败时读取后端返回的报错与 `workflow_publish_record` 信息，判断是结构问题（回 draft 修改后重走预览）还是引擎问题（提示用户检查 DolphinScheduler 配置）；不要盲目重试同一请求。
    - 建表失败时读取后端报错(如表已存在、字段/类型非法、集群不可达)，回到 DDL 规范修正后重新预览；不要盲目重试同一请求。
 
