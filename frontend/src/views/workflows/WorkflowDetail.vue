@@ -485,7 +485,7 @@
                   <el-tag type="info" effect="plain">写出表 {{ freshness.summary.total }}</el-tag>
                   <el-tag type="success" effect="plain">正常 {{ freshness.summary.pass }}</el-tag>
                   <el-tag type="warning" effect="plain">预警 {{ freshness.summary.warn }}</el-tag>
-                  <el-tag type="danger" effect="plain">超时 {{ freshness.summary.error }}</el-tag>
+                  <el-tag type="danger" effect="plain">过期 {{ freshness.summary.error }}</el-tag>
                   <el-tag type="info" effect="plain">检查失败 {{ freshness.summary.runtimeError }}</el-tag>
                   <el-tag effect="plain">未配置 {{ freshness.summary.unconfigured }}</el-tag>
                 </div>
@@ -540,7 +540,7 @@
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column label="数据最后加载" min-width="170">
+                <el-table-column label="最新数据时间" min-width="170">
                   <template #default="{ row }">{{ row.maxLoadedAt ? formatDateTime(row.maxLoadedAt) : '-' }}</template>
                 </el-table-column>
                 <el-table-column label="数据年龄" min-width="120">
@@ -945,7 +945,7 @@ const freshnessLoaded = ref(false)
 const FRESHNESS_STATUS = {
   pass: { label: '正常', type: 'success' },
   warn: { label: '预警', type: 'warning' },
-  error: { label: '超时', type: 'danger' },
+  error: { label: '过期', type: 'danger' },
   runtime_error: { label: '检查失败', type: 'info' }
 }
 const freshnessStatusLabel = (s) => FRESHNESS_STATUS[s]?.label || s || '-'

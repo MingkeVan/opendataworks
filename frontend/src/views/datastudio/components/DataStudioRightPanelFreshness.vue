@@ -169,7 +169,7 @@ import { ElMessage, ElMessageBox, ElTooltip, ElIcon } from 'element-plus'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import { tableApi } from '@/api/table'
 
-// 术语后的帮助图标：悬浮展示字段解释（含 dbt 对应键）。
+// 术语后的帮助图标：悬浮展示字段解释。
 const Help = (props) =>
   h(
     ElTooltip,
@@ -179,15 +179,15 @@ const Help = (props) =>
 Help.props = ['tip']
 
 const TIP = {
-  status: '最近一次检查结果。正常 / 预警 / 过期 / 检查失败，对应 dbt 的 pass / warn / error / runtime error。',
+  status: '最近一次检查结果：正常 / 预警 / 过期 / 检查失败。',
   source:
-    '如何取得数据的「最新时间」。表字段=取某列的最大值（dbt loaded_at_field）；自定义查询=自定义 SQL（dbt loaded_at_query）；表元数据=读仓库元数据（dbt metadata）。',
-  thresholds: '数据落后多久判为预警 / 过期，对应 dbt 的 warn_after / error_after。',
-  maxLoadedAt: '按「时间来源」算出的最新一条数据时间，对应 dbt 的 max_loaded_at。',
-  snapshottedAt: '本次新鲜度检查执行的时刻，对应 dbt 的 snapshotted_at。',
-  loadedAtField: '取该列的最大值作为最新数据时间，对应 dbt 的 loaded_at_field。',
-  loadedAtQuery: '自定义 SQL，返回一行一列的最新数据时间，对应 dbt 的 loaded_at_query。',
-  filter: '只统计满足条件的行，对应 dbt 的 filter。例：dt = current_date - 1。',
+    '数据的「最新时间」从哪里取。表字段：取某列（如 etl_time）的最大值；自定义查询：自己写一段 SQL 返回最新时间；表元数据：不读数据内容，改读仓库记录的表「最后更新时间」，无需时间列，但只能发现长期无写入。',
+  thresholds: '数据落后多久判为预警 / 过期。',
+  maxLoadedAt: '按「时间来源」算出的最新一条数据时间。',
+  snapshottedAt: '本次新鲜度检查执行的时刻。',
+  loadedAtField: '取该列的最大值作为最新数据时间，常用如 etl_time、update_time。',
+  loadedAtQuery: '自己写 SQL，返回一行一列的最新数据时间。例：SELECT MAX(order_time) FROM db.tbl。',
+  filter: '只统计满足条件的行。例：dt = current_date - 1。',
 }
 
 const ctx = inject('dataStudioCtx', null)
