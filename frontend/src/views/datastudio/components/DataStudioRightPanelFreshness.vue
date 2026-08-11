@@ -31,49 +31,60 @@
         <el-empty
           v-else-if="!editing && !configured"
           :image-size="70"
-          description="尚未配置新鲜度契约"
+          description="尚未配置新鲜度"
         >
-          <el-button type="primary" size="small" @click="beginEdit">配置契约</el-button>
+          <el-button type="primary" size="small" @click="beginEdit">配置新鲜度</el-button>
         </el-empty>
 
         <!-- 查看态：只读描述卡 -->
         <el-descriptions v-else-if="!editing" :column="1" border size="small" class="fresh-view">
-          <el-descriptions-item label="状态">
+          <el-descriptions-item>
+            <template #label><span class="lbl">状态<Help :tip="TIP.status" /></span></template>
             <div class="fv-status">
               <el-tag :type="latest ? statusType(latest.status) : 'info'" size="small" effect="plain">
                 {{ latest ? statusLabel(latest.status) : '未检查' }}
               </el-tag>
               <span class="fv-age">
-                <template v-if="!latest">配置契约后点「立即检查」</template>
+                <template v-if="!latest">配置后点「立即检查」</template>
                 <template v-else-if="latest.reason === 'never_loaded'">从未产出数据</template>
                 <template v-else-if="latest.ageSeconds != null">数据年龄 {{ humanizeAge(latest.ageSeconds) }}</template>
               </span>
             </div>
           </el-descriptions-item>
-          <el-descriptions-item label="取值">
+          <el-descriptions-item>
+            <template #label><span class="lbl">时间来源<Help :tip="TIP.source" /></span></template>
             <span class="fv-mode">{{ modeLabel(effectiveMode) }}</span>
             <code v-if="viewValueExpr" class="fv-code">{{ viewValueExpr }}</code>
           </el-descriptions-item>
-          <el-descriptions-item label="时限">
+          <el-descriptions-item>
+            <template #label><span class="lbl">时限<Help :tip="TIP.thresholds" /></span></template>
             <span class="th-lab warn">预警</span> {{ thresholdText('warn') }}
             <span class="dot">·</span>
-            <span class="th-lab err">超时</span> {{ thresholdText('error') }}
+            <span class="th-lab err">过期</span> {{ thresholdText('error') }}
           </el-descriptions-item>
-          <el-descriptions-item label="最新数据">{{ fmt(latest && latest.maxLoadedAt) }}</el-descriptions-item>
-          <el-descriptions-item label="检查时间">{{ fmt(latest && (latest.createdAt || latest.snapshottedAt)) }}</el-descriptions-item>
+          <el-descriptions-item>
+            <template #label><span class="lbl">最新数据时间<Help :tip="TIP.maxLoadedAt" /></span></template>
+            {{ fmt(latest && latest.maxLoadedAt) }}
+          </el-descriptions-item>
+          <el-descriptions-item>
+            <template #label><span class="lbl">检查时间<Help :tip="TIP.snapshottedAt" /></span></template>
+            {{ fmt(latest && (latest.createdAt || latest.snapshottedAt)) }}
+          </el-descriptions-item>
         </el-descriptions>
 
         <!-- 编辑态：行内表单，不弹层 -->
-        <el-form v-else class="fresh-form" label-width="66px" label-position="left" size="small" @submit.prevent>
-          <el-form-item label="取值方式">
+        <el-form v-else class="fresh-form" label-width="92px" label-position="left" size="small" @submit.prevent>
+          <el-form-item>
+            <template #label><span class="lbl">时间来源<Help :tip="TIP.source" /></span></template>
             <el-select v-model="form.mode" style="width: 100%">
-              <el-option label="字段 · 列的最大时间" value="column" />
+              <el-option label="表字段 · 取列的最大时间" value="column" />
               <el-option label="自定义查询" value="custom_sql" />
-              <el-option label="元数据 · 仅发现长期无写入" value="metadata" />
+              <el-option label="表元数据 · 仅发现长期无写入" value="metadata" />
             </el-select>
           </el-form-item>
 
-          <el-form-item v-if="form.mode === 'column'" label="列">
+          <el-form-item v-if="form.mode === 'column'">
+            <template #label><span class="lbl">时间字段<Help :tip="TIP.loadedAtField" /></span></template>
             <el-select
               v-model="form.loadedAtField"
               filterable
@@ -89,11 +100,13 @@
               </el-option>
             </el-select>
           </el-form-item>
-          <el-form-item v-else-if="form.mode === 'custom_sql'" label="查询">
+          <el-form-item v-else-if="form.mode === 'custom_sql'">
+            <template #label><span class="lbl">自定义查询<Help :tip="TIP.loadedAtQuery" /></span></template>
             <el-input v-model="form.loadedAtQuery" type="textarea" :rows="2" placeholder="SELECT MAX(order_time) FROM db.tbl" />
           </el-form-item>
 
-          <el-form-item label="时限">
+          <el-form-item>
+            <template #label><span class="lbl">时限<Help :tip="TIP.thresholds" /></span></template>
             <div class="thresholds">
               <span class="th-group">
                 <span class="th-lab warn">预警</span>
@@ -103,7 +116,7 @@
                 </el-select>
               </span>
               <span class="th-group">
-                <span class="th-lab err">超时</span>
+                <span class="th-lab err">过期</span>
                 <el-input-number v-model="form.errorAfterCount" :min="1" :controls="false" class="th-count" />
                 <el-select v-model="form.errorAfterPeriod" class="th-period">
                   <el-option label="分" value="minute" /><el-option label="时" value="hour" /><el-option label="天" value="day" />
@@ -112,7 +125,8 @@
             </div>
           </el-form-item>
 
-          <el-form-item label="过滤">
+          <el-form-item>
+            <template #label><span class="lbl">过滤<Help :tip="TIP.filter" /></span></template>
             <el-input v-model="form.filterExpr" placeholder="可选 WHERE 谓词" />
           </el-form-item>
 
@@ -137,7 +151,7 @@
         <el-table-column label="数据年龄" min-width="110">
           <template #default="{ row }">{{ humanizeAge(row.ageSeconds) }}</template>
         </el-table-column>
-        <el-table-column label="取值" width="100">
+        <el-table-column label="时间来源" width="110">
           <template #default="{ row }">{{ modeLabel(row.mode) }}</template>
         </el-table-column>
         <el-table-column label="触发" width="80">
@@ -150,9 +164,31 @@
 </template>
 
 <script setup>
-import { computed, inject, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { computed, h, inject, reactive, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox, ElTooltip, ElIcon } from 'element-plus'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import { tableApi } from '@/api/table'
+
+// 术语后的帮助图标：悬浮展示字段解释（含 dbt 对应键）。
+const Help = (props) =>
+  h(
+    ElTooltip,
+    { content: props.tip, placement: 'top', 'raw-content': false },
+    { default: () => h(ElIcon, { class: 'lbl-help' }, { default: () => h(QuestionFilled) }) }
+  )
+Help.props = ['tip']
+
+const TIP = {
+  status: '最近一次检查结果。正常 / 预警 / 过期 / 检查失败，对应 dbt 的 pass / warn / error / runtime error。',
+  source:
+    '如何取得数据的「最新时间」。表字段=取某列的最大值（dbt loaded_at_field）；自定义查询=自定义 SQL（dbt loaded_at_query）；表元数据=读仓库元数据（dbt metadata）。',
+  thresholds: '数据落后多久判为预警 / 过期，对应 dbt 的 warn_after / error_after。',
+  maxLoadedAt: '按「时间来源」算出的最新一条数据时间，对应 dbt 的 max_loaded_at。',
+  snapshottedAt: '本次新鲜度检查执行的时刻，对应 dbt 的 snapshotted_at。',
+  loadedAtField: '取该列的最大值作为最新数据时间，对应 dbt 的 loaded_at_field。',
+  loadedAtQuery: '自定义 SQL，返回一行一列的最新数据时间，对应 dbt 的 loaded_at_query。',
+  filter: '只统计满足条件的行，对应 dbt 的 filter。例：dt = current_date - 1。',
+}
 
 const ctx = inject('dataStudioCtx', null)
 if (!ctx) {
@@ -203,13 +239,13 @@ const fmt = (value) => (value ? formatDateTime(value) : '-')
 const STATUS = {
   pass: { label: '正常', type: 'success' },
   warn: { label: '预警', type: 'warning' },
-  error: { label: '超时', type: 'danger' },
+  error: { label: '过期', type: 'danger' },
   runtime_error: { label: '检查失败', type: 'info' },
 }
 const statusLabel = (s) => STATUS[s]?.label || s || '-'
 const statusType = (s) => STATUS[s]?.type || 'info'
 
-const MODE = { column: '字段', custom_sql: '自定义', metadata: '元数据' }
+const MODE = { column: '表字段', custom_sql: '自定义查询', metadata: '表元数据' }
 const modeLabel = (m) => MODE[m] || m || '-'
 
 const PERIOD = { minute: '分钟', hour: '小时', day: '天' }
@@ -341,7 +377,7 @@ const save = async () => {
 
 const removeConfig = async () => {
   try {
-    await ElMessageBox.confirm('删除后该表将不再检查新鲜度。确认删除契约？', '提示', { type: 'warning' })
+    await ElMessageBox.confirm('删除后该表将不再检查新鲜度。确认删除？', '提示', { type: 'warning' })
   } catch {
     return
   }
@@ -376,9 +412,18 @@ watch(tableId, () => {
 </script>
 
 <style scoped>
+/* 术语标签 + 帮助图标 */
+.lbl { display: inline-flex; align-items: center; gap: 3px; }
+.lbl-help {
+  font-size: 13px;
+  color: var(--el-text-color-placeholder);
+  cursor: help;
+}
+.lbl-help:hover { color: var(--el-color-primary); }
+
 /* 查看态描述卡 */
 .fresh-view :deep(.el-descriptions__label) {
-  width: 72px;
+  width: 108px;
   color: var(--el-text-color-regular);
 }
 .fv-status { display: flex; align-items: center; gap: 8px; }
