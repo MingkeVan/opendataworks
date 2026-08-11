@@ -49,6 +49,13 @@ _FILE_BOUNDARY_PATH_KEYS = {
     "NotebookEdit": ("notebook_path",),
 }
 _BASH_PARENT_SEGMENT_RE = re.compile(r"(^|[\s;&|()])\.\.(?=$|[/\s;&|()])")
+# Not a filesystem location but a discard sink: writes store nothing and reads hit
+# EOF immediately. `> /dev/null 2>&1` is ubiquitous in shell commands, so denying
+# it as "outside workspace" is pure friction with no isolation value. This is not
+# part of the configurable scratch allow-list (``dataagent_workspace_scratch_dirs``)
+# because it is a fixed POSIX property, not a deployment choice. Matched exactly:
+# the rest of /dev — and any path under /dev/null — stays outside the boundary.
+_DISCARD_SINK_PATHS: frozenset[Path] = frozenset({Path("/dev/null")})
 _URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 # Claude Code offloads oversized tool results as either a ".txt" (string result)
 # or ".json" (structured result) file under the per-project tool-results dir.
@@ -140,6 +147,11 @@ def _path_is_under(path: Path, root: Path) -> bool:
 
 def _path_is_allowed(path: Path, allowed_roots: list[Path]) -> bool:
     return any(_path_is_under(path, root) for root in allowed_roots)
+
+
+def _is_discard_sink(path: Path) -> bool:
+    """Whether ``path`` is a no-op sink the boundary never needs to guard."""
+    return path in _DISCARD_SINK_PATHS
 
 
 def _resolve_claude_project_data_dir(workspace: Path, runtime_env: dict[str, str] | None) -> Path | None:
@@ -361,6 +373,8 @@ def _validate_bash_workspace_boundary(
         candidate = Path(normalized).expanduser().resolve(strict=False)
         if allowed_executable and candidate == allowed_executable:
             continue
+        if _is_discard_sink(candidate):
+            continue
         if _path_is_allowed(candidate, allowed_roots):
             continue
         if (
@@ -405,6 +419,8 @@ def _validate_workspace_tool_boundary(
             return f"{normalized_tool} {key} uses a parent directory segment; stay inside the current agent workspace."
         candidate = _resolve_workspace_candidate(value, workspace)
         if _path_is_allowed(candidate, allowed_roots):
+            continue
+        if _is_discard_sink(candidate):
             continue
         if _is_offloaded_tool_result_path(candidate, tool_result_root):
             continue
