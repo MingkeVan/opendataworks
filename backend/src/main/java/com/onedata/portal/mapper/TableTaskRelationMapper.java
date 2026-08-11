@@ -19,8 +19,10 @@ public interface TableTaskRelationMapper extends BaseMapper<TableTaskRelation> {
      */
     @Select("SELECT DISTINCT r.table_id " +
         "FROM table_task_relation r " +
+        "JOIN workflow_task_relation wtr ON r.task_id = wtr.task_id " +
         "JOIN data_task t ON r.task_id = t.id " +
-        "WHERE t.workflow_id = #{workflowId} " +
+        "WHERE wtr.workflow_id = #{workflowId} " +
+        "  AND wtr.deleted = 0 " +
         "  AND r.relation_type = 'write' " +
         "  AND r.deleted = 0 " +
         "  AND t.deleted = 0")
