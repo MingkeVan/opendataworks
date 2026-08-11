@@ -498,7 +498,17 @@
                   <template #default="{ row }">{{ formatDateTime(row.checkedAt) }}</template>
                 </el-table-column>
                 <el-table-column label="触发实例" min-width="110">
-                  <template #default="{ row }">#{{ row.workflowInstanceId }}</template>
+                  <template #default="{ row }">
+                    <a
+                      v-if="row.workflowInstanceId && buildDolphinInstanceUrl(row.workflowInstanceId)"
+                      :href="buildDolphinInstanceUrl(row.workflowInstanceId)"
+                      target="_blank"
+                      rel="noopener"
+                      class="instance-link"
+                    >#{{ row.workflowInstanceId }}</a>
+                    <span v-else-if="row.workflowInstanceId">#{{ row.workflowInstanceId }}</span>
+                    <span v-else>-</span>
+                  </template>
                 </el-table-column>
                 <el-table-column label="问题表数" min-width="130">
                   <template #default="{ row }">
@@ -1484,6 +1494,17 @@ const canJumpToDolphin = (workflow) => {
   )
 }
 
+// Dolphin 工作流实例详情地址，供新鲜度检查记录的「触发实例」链接使用。
+// 与后端 DolphinExecutionMapper.workflowInstanceUrl 保持同一路径形态。
+const buildDolphinInstanceUrl = (instanceId) => {
+  const wf = workflow.value?.workflow
+  if (!dolphinWebuiUrl.value || !wf?.projectCode || !wf?.workflowCode || !instanceId) {
+    return ''
+  }
+  const base = dolphinWebuiUrl.value.replace(/\/+$/, '')
+  return `${base}/ui/projects/${wf.projectCode}/workflow/instances/${instanceId}?code=${wf.workflowCode}`
+}
+
 const openDolphin = (workflow) => {
   const url = buildDolphinWorkflowUrl(workflow)
   if (!url) {
@@ -2046,6 +2067,13 @@ watch(
 }
 .freshness-section-title:first-of-type {
   margin-top: 0;
+}
+.instance-link {
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+.instance-link:hover {
+  text-decoration: underline;
 }
 
 .workflow-detail {
