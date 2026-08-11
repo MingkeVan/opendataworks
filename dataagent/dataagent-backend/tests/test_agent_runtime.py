@@ -432,6 +432,53 @@ def test_workspace_boundary_allows_configured_scratch_dir(tmp_path: Path):
     assert "outside workspace" in denial
 
 
+def test_workspace_boundary_allows_dev_null_redirects(tmp_path: Path):
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable}
+    # No scratch dirs configured: /dev/null is allowed on its own, not by virtue of
+    # some directory being whitelisted.
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
+
+    for command in (
+        "python export.py > /dev/null 2>&1",
+        "grep -q pattern data.csv 2>/dev/null",
+        "python check.py 1>/dev/null",
+        "cat /dev/null > notes.md",
+    ):
+        assert agent_runtime._validate_workspace_tool_boundary(
+            "Bash", {"command": command}, workspace, allowed_roots, runtime_env
+        ) is None, command
+
+
+def test_workspace_boundary_still_denies_rest_of_dev(tmp_path: Path):
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable}
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
+
+    # The sink is matched exactly: neighbouring devices and anything "under"
+    # /dev/null must not ride along.
+    for command in (
+        "cat /dev/zero",
+        "head -c 16 /dev/urandom",
+        "cat /dev/null/passwd",
+        "ls /dev",
+        "echo leaked > /dev/sda",
+    ):
+        denial = agent_runtime._validate_workspace_tool_boundary(
+            "Bash", {"command": command}, workspace, allowed_roots, runtime_env
+        )
+        assert denial is not None, command
+        assert "outside workspace" in denial
+
+    denial = agent_runtime._validate_workspace_tool_boundary(
+        "Write", {"file_path": "/dev/sda"}, workspace, allowed_roots, runtime_env
+    )
+    assert denial is not None
+    assert "outside workspace" in denial
+
+
 def test_workspace_boundary_hook_allows_scratch_dir_from_config(tmp_path: Path, monkeypatch):
     workspace = tmp_path / "runtime" / "topic_1" / "workspace"
     workspace.mkdir(parents=True)

@@ -64,6 +64,11 @@ DataAgent 运行时用 `PreToolUse` 边界钩子约束 agent 的文件访问范�
 6. `sandbox_runner_main` 把 `DATAAGENT_WORKSPACE_SCRATCH_DIRS` 加入
    `_FORWARDED_ENV_KEYS`。边界钩子实际是在子容器进程里执行的，不转发这个 env，
    沙箱模式下配置不会生效。
+7. `/dev/null` 由固定常量 `_DISCARD_SINK_PATHS` 精确匹配放行，不进可配置白名单。
+   它不是目录而是丢弃设备：写入不留任何状态，读取直接 EOF，`> /dev/null 2>&1`
+   在 shell 命令里极其常见，按「越界」拒绝只有摩擦没有隔离收益。
+   这是 POSIX 的固定性质而非部署选择，因此不做成配置项；匹配是精确相等的，
+   `/dev` 下其它设备和 `/dev/null/<x>` 仍然拒绝。
 
 ## Interfaces and Compatibility
 
@@ -84,3 +89,20 @@ DataAgent 运行时用 `PreToolUse` 边界钩子约束 agent 的文件访问范�
   这类部署应按需把该配置改成一个专用目录（例如 `/var/lib/dataagent/scratch`）或置空。
 - 临时目录里的文件不会出现在会话文件列表，也无法通过前端下载。
   这是有意的：交付物路径契约仍然只有工作区 `output/`。
+
+## Known Gap（既有问题，不在本次变更范围内）
+
+`_validate_bash_workspace_boundary` 只校验以 `/` 开头的 token，因此嵌在
+`key=value` / `--flag=path` 里的绝对路径、以及经 shell 变量间接引用的路径
+不会被检查：
+
+- `cat /etc/shadow` → 拒绝
+- `dd if=/etc/shadow of=out.bin` → 放行
+- `tar --file=/etc/passwd -x` → 放行
+- `FOO=/etc/shadow cat $FOO` → 放行
+
+这是边界钩子既有的缺口，与本次白名单变更无关，本次也未修改。修复需要解析
+token 中 `=` 之后的路径值，会改变一批现有命令的判定结果（例如
+`--opt=/tmp/x` 应放行、`LANG=en_US.UTF-8` 不能误判），影响面和误拒风险都需要
+单独评估，应作为独立变更处理。当前 Bash 边界仍是「信任模型自觉」的信任边界，
+不是硬保证——这一点与 `permission_gate.plan_denies_tool` 中已有的说明一致。
