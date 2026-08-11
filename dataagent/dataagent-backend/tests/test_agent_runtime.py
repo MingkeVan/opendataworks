@@ -12,7 +12,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from core import agent_runtime
 from core.claude_cli import resolve_claude_cli_path
-from config import Settings
+from config import Settings, resolve_workspace_scratch_dirs
 
 
 def test_build_runtime_env_does_not_expose_direct_db_connection_settings(monkeypatch):
@@ -378,6 +378,92 @@ def test_workspace_boundary_allows_workspace_and_enabled_skill_roots(tmp_path: P
     )
     assert denial is not None
     assert "outside workspace" in denial
+
+
+def test_resolve_workspace_scratch_dirs_defaults_to_tmp():
+    # /tmp is what the sandbox mounts as the child container's writable tmpfs, so
+    # the boundary allow-list has to agree with it out of the box.
+    assert resolve_workspace_scratch_dirs(Settings()) == ["/tmp"]
+
+
+def test_resolve_workspace_scratch_dirs_drops_unsafe_entries():
+    cfg = SimpleNamespace(
+        dataagent_workspace_scratch_dirs=(
+            "/tmp/, ,relative/dir,/,//,/var/lib/dataagent/scratch,"
+            "/tmp,/opt/../etc,~/scratch"
+        )
+    )
+
+    # Relative paths, bare root, and parent segments are dropped; trailing slashes
+    # normalize so "/tmp/" and "/tmp" collapse to one entry in first-seen order.
+    assert resolve_workspace_scratch_dirs(cfg) == ["/tmp", "/var/lib/dataagent/scratch"]
+
+
+def test_resolve_workspace_scratch_dirs_empty_disables_allowance():
+    assert resolve_workspace_scratch_dirs(SimpleNamespace(dataagent_workspace_scratch_dirs="")) == []
+
+
+def test_workspace_boundary_allows_configured_scratch_dir(tmp_path: Path):
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable}
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(
+        workspace, {"enabled_roots": {}}, [str(scratch)]
+    )
+
+    assert agent_runtime._validate_workspace_tool_boundary(
+        "Write", {"file_path": str(scratch / "chunk.csv")}, workspace, allowed_roots, runtime_env
+    ) is None
+    assert agent_runtime._validate_workspace_tool_boundary(
+        "Read", {"file_path": str(scratch / "chunk.csv")}, workspace, allowed_roots, runtime_env
+    ) is None
+    # Redirect targets are validated too, so a scratch redirect must pass.
+    assert agent_runtime._validate_workspace_tool_boundary(
+        "Bash", {"command": f"sort input.csv > {scratch}/sorted.csv"}, workspace, allowed_roots, runtime_env
+    ) is None
+
+    # The allowance is exactly the configured root: its siblings stay denied.
+    denial = agent_runtime._validate_workspace_tool_boundary(
+        "Write", {"file_path": str(tmp_path / "elsewhere.csv")}, workspace, allowed_roots, runtime_env
+    )
+    assert denial is not None
+    assert "outside workspace" in denial
+
+
+def test_workspace_boundary_hook_allows_scratch_dir_from_config(tmp_path: Path, monkeypatch):
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(
+        agent_runtime,
+        "get_settings",
+        lambda: SimpleNamespace(dataagent_workspace_scratch_dirs=str(scratch)),
+    )
+    hooks = agent_runtime._build_workspace_boundary_hooks(
+        workspace, {"enabled_roots": {}}, {"DATAAGENT_PYTHON_BIN": sys.executable}
+    )
+    hook = hooks["PreToolUse"][0].hooks[0]
+
+    allowed = asyncio.run(
+        hook(
+            {"tool_name": "Write", "tool_input": {"file_path": f"{scratch}/step1.json"}},
+            "tool-write-1",
+            {"signal": None},
+        )
+    )
+    denied = asyncio.run(
+        hook(
+            {"tool_name": "Write", "tool_input": {"file_path": str(tmp_path / "escape.json")}},
+            "tool-write-2",
+            {"signal": None},
+        )
+    )
+
+    assert allowed == {"continue_": True, "suppressOutput": True}
+    assert denied["decision"] == "block"
 
 
 def _encode_claude_project_key(workspace: Path) -> str:
@@ -776,6 +862,33 @@ def test_build_system_prompt_reads_markdown_and_appends_runtime_context():
     assert "workflow_publish_record" not in prompt
 
 
+def test_build_system_prompt_declares_writable_scratch_dirs(monkeypatch):
+    monkeypatch.setattr(
+        agent_runtime,
+        "get_settings",
+        lambda: SimpleNamespace(dataagent_workspace_scratch_dirs="/tmp,/var/lib/dataagent/scratch"),
+    )
+
+    prompt = agent_runtime._build_system_prompt(None, {"enabled_folders": []})
+
+    # The prompt must advertise exactly what the boundary hook allows, and keep the
+    # deliverable path contract (workspace output/) intact.
+    assert "可写临时目录：/tmp、/var/lib/dataagent/scratch" in prompt
+    assert "`output/`" in prompt
+
+
+def test_build_system_prompt_declares_no_scratch_dir_when_disabled(monkeypatch):
+    monkeypatch.setattr(
+        agent_runtime,
+        "get_settings",
+        lambda: SimpleNamespace(dataagent_workspace_scratch_dirs=""),
+    )
+
+    prompt = agent_runtime._build_system_prompt(None, {"enabled_folders": []})
+
+    assert "可写临时目录：无" in prompt
+
+
 def test_build_system_prompt_includes_methodology_and_non_negotiables():
     prompt = agent_runtime._build_system_prompt(None, {"enabled_folders": ["opendataworks-business-knowledge"]})
 
@@ -784,7 +897,8 @@ def test_build_system_prompt_includes_methodology_and_non_negotiables():
         "无论用户使用何种语言提问，必须始终使用简体中文回复",
         "不编造表、字段、指标、口径、数据结果",
         "不执行有副作用的操作",
-        "文件读写只在当前会话工作区目录内进行",
+        "文件读写只在当前会话工作区目录、以及「运行时上下文」声明的可写临时目录内进行",
+        "最终交付文件必须写入工作区 `output/`",
         "不伪造成功结果",
         "先提出最小澄清问题",
         "必须显式说明默认假设",

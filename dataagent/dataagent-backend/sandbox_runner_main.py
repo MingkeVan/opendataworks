@@ -112,6 +112,10 @@ _FORWARDED_ENV_KEYS = {
     "TZ",
     "PYTHONPATH",
     "SKILLS_ROOT_DIR",
+    # The workspace boundary hook runs inside the child container, so the scratch
+    # allow-list has to travel with it; without this the child falls back to the
+    # workspace-only default and denies /tmp despite the tmpfs mounted for it.
+    "DATAAGENT_WORKSPACE_SCRATCH_DIRS",
 }
 
 
