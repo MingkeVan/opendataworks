@@ -22,7 +22,8 @@ export function buildMetadataPrompt(context = {}) {
     columnValueProfiles = [],
     layerOptions = [],
     businessDomains = [],
-    dataDomains = []
+    dataDomains = [],
+    currentFreshness = null
   } = context
 
   const fieldLines =
@@ -108,6 +109,10 @@ export function buildMetadataPrompt(context = {}) {
     '数据域:',
     dataDomainLines,
     '',
+    '# 数据新鲜度(可选建议)',
+    '从字段里挑一个能代表"数据最新时间"的时间列(DATE/DATETIME/TIMESTAMP，如 etl_time、update_time)作为 loaded_at_field；没有合适时间列就返回 null。',
+    line('现有新鲜度配置', describeFreshnessConfig(currentFreshness)),
+    '',
     '# 要求',
     '1. 推导表级业务说明(table_comment) 与每个字段业务含义(comment)，使用简体中文。',
     '2. comment 先给字段业务含义；若能从关联任务代码推断该字段加工逻辑，追加一句「加工逻辑：……」，点明来源表、分组维度与计算方式。',
@@ -115,9 +120,10 @@ export function buildMetadataPrompt(context = {}) {
     '4. 只依据给定上下文推导，不编造无依据的含义；无把握时给保守简短说明。',
     '5. field_name 必须与上面字段列表完全一致，并覆盖全部字段。',
     '6. table_attributes 推断该表的分层与归属：layer / business_domain / data_domain 的取值必须逐字复制「可选的表属性取值」中的编码；data_domain 必须属于所选 business_domain；任一项无法确定就留空字符串，不要猜。',
-    '7. 只输出一个 JSON 代码块，不要任何解释文字。结构严格如下：',
+    '7. freshness 推荐该表的数据新鲜度判定：loaded_at_field 必须逐字复制上面字段列表中的某个真实时间列(DATE/DATETIME/TIMESTAMP)；没有合适的时间列就把 freshness 设为 null。阈值默认按 T-1，warn_after 与 error_after 都为 count=1、period=day（period 只能是 minute/hour/day）。',
+    '8. 只输出一个 JSON 代码块，不要任何解释文字。结构严格如下：',
     '```json',
-    '{"table_comment":"...","table_attributes":{"layer":"DWD","business_domain":"","data_domain":""},"fields":[{"field_name":"...","comment":"...","enum_values":[{"value":"0","label":"待支付"}]}]}',
+    '{"table_comment":"...","table_attributes":{"layer":"DWD","business_domain":"","data_domain":""},"freshness":{"loaded_at_field":"etl_time","warn_after_count":1,"warn_after_period":"day","error_after_count":1,"error_after_period":"day"},"fields":[{"field_name":"...","comment":"...","enum_values":[{"value":"0","label":"待支付"}]}]}',
     '```'
   ].join('\n')
 }
@@ -237,6 +243,18 @@ export function parseMetadataResponse(text) {
   const rawAttrs = parsed.table_attributes ?? parsed.tableAttributes
   const attrs = rawAttrs && typeof rawAttrs === 'object' && !Array.isArray(rawAttrs) ? rawAttrs : {}
 
+  const rawFresh = parsed.freshness
+  const freshness =
+    rawFresh && typeof rawFresh === 'object' && !Array.isArray(rawFresh)
+      ? {
+          loadedAtField: String(rawFresh.loaded_at_field ?? rawFresh.loadedAtField ?? '').trim(),
+          warnAfterCount: rawFresh.warn_after_count ?? rawFresh.warnAfterCount,
+          warnAfterPeriod: rawFresh.warn_after_period ?? rawFresh.warnAfterPeriod,
+          errorAfterCount: rawFresh.error_after_count ?? rawFresh.errorAfterCount,
+          errorAfterPeriod: rawFresh.error_after_period ?? rawFresh.errorAfterPeriod
+        }
+      : null
+
   return {
     tableComment: String(parsed.table_comment ?? parsed.tableComment ?? '').trim(),
     tableAttributes: {
@@ -244,8 +262,96 @@ export function parseMetadataResponse(text) {
       businessDomain: String(attrs.business_domain ?? attrs.businessDomain ?? '').trim(),
       dataDomain: String(attrs.data_domain ?? attrs.dataDomain ?? '').trim()
     },
+    freshness,
     fields
   }
+}
+
+// --- 数据新鲜度：建议与现有配置的归一化 / 展示 / 硬过滤 -----------------------
+
+const FRESHNESS_PERIODS = new Set(['minute', 'hour', 'day'])
+const FRESHNESS_PERIOD_CN = { minute: '分钟', hour: '小时', day: '天' }
+const normFreshnessPeriod = (p) => (FRESHNESS_PERIODS.has(String(p)) ? String(p) : 'day')
+const normFreshnessCount = (c) => {
+  const n = Math.trunc(Number(c))
+  return Number.isFinite(n) && n >= 1 ? n : 1
+}
+
+/**
+ * 硬过滤 AI 给出的新鲜度建议：loaded_at_field 必须是该表真实字段，否则整体丢弃（返回 null）。
+ *
+ * 与 filterEnumValuesByObserved / filterTableAttributes 同一约定——prompt 只是要求，
+ * 写回前一律在这里约束：模型挑了不存在的列（编造）就不产出建议，宁缺毋滥。v1 仅支持 column 模式。
+ */
+export function filterFreshness(freshness, options = {}) {
+  const { fields = [] } = options
+  if (!freshness || typeof freshness !== 'object') return null
+  const raw = String(freshness.loadedAtField ?? freshness.loaded_at_field ?? '').trim()
+  if (!raw) return null
+  const realName = (fields || [])
+    .map((f) => String(f?.fieldName || '').trim())
+    .find((name) => name && name.toLowerCase() === raw.toLowerCase())
+  if (!realName) return null
+  return {
+    mode: 'column',
+    loadedAtField: realName,
+    warnAfterCount: normFreshnessCount(freshness.warnAfterCount ?? freshness.warn_after_count),
+    warnAfterPeriod: normFreshnessPeriod(freshness.warnAfterPeriod ?? freshness.warn_after_period),
+    errorAfterCount: normFreshnessCount(freshness.errorAfterCount ?? freshness.error_after_count),
+    errorAfterPeriod: normFreshnessPeriod(freshness.errorAfterPeriod ?? freshness.error_after_period),
+    enabled: true
+  }
+}
+
+/**
+ * 归一化现有 column 模式契约用于与建议比对；非 column 模式或缺列返回 null。
+ */
+export function normalizeFreshnessConfig(config) {
+  if (!config || typeof config !== 'object') return null
+  if (String(config.mode || 'column') !== 'column') return null
+  const field = String(config.loadedAtField || '').trim()
+  if (!field) return null
+  return {
+    mode: 'column',
+    loadedAtField: field,
+    warnAfterCount: normFreshnessCount(config.warnAfterCount),
+    warnAfterPeriod: normFreshnessPeriod(config.warnAfterPeriod),
+    errorAfterCount: normFreshnessCount(config.errorAfterCount),
+    errorAfterPeriod: normFreshnessPeriod(config.errorAfterPeriod),
+    enabled: config.enabled !== false
+  }
+}
+
+/** 归一化契约的一行中文描述，如「字段 · etl_time ｜ 预警 1天 · 过期 1天」。 */
+export function formatFreshnessContract(contract) {
+  if (!contract || typeof contract !== 'object') return ''
+  const field = String(contract.loadedAtField || '').trim()
+  if (!field) return ''
+  const warn = `${contract.warnAfterCount}${FRESHNESS_PERIOD_CN[contract.warnAfterPeriod] || contract.warnAfterPeriod}`
+  const err = `${contract.errorAfterCount}${FRESHNESS_PERIOD_CN[contract.errorAfterPeriod] || contract.errorAfterPeriod}`
+  return `字段 · ${field} ｜ 预警 ${warn} · 过期 ${err}`
+}
+
+/** 现有配置的展示文案（含非 column 模式与未配置）。 */
+export function describeFreshnessConfig(config) {
+  if (!config || typeof config !== 'object') return '未配置'
+  const mode = String(config.mode || 'column')
+  if (mode === 'column') return formatFreshnessContract(normalizeFreshnessConfig(config)) || '未配置'
+  if (mode === 'custom_sql') return '自定义查询（已配置）'
+  if (mode === 'metadata') return '表元数据（已配置）'
+  return '已配置'
+}
+
+/** 两个归一化 column 契约是否等价（用于判断建议是否与现状一致）。 */
+export function sameFreshnessContract(a, b) {
+  if (!a || !b) return false
+  return (
+    a.loadedAtField === b.loadedAtField &&
+    a.warnAfterCount === b.warnAfterCount &&
+    a.warnAfterPeriod === b.warnAfterPeriod &&
+    a.errorAfterCount === b.errorAfterCount &&
+    a.errorAfterPeriod === b.errorAfterPeriod
+  )
 }
 
 /**

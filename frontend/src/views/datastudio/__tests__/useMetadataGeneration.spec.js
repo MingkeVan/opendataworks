@@ -16,7 +16,9 @@ const { nl2sqlApiMock, settingsApiMock, elMessageMock, tableApiMock, domainApiMo
     updateField: vi.fn(),
     getFields: vi.fn(),
     profileColumnValues: vi.fn(),
-    update: vi.fn()
+    update: vi.fn(),
+    getFreshness: vi.fn(),
+    saveFreshness: vi.fn()
   },
   domainApiMock: {
     businessDomainApi: { list: vi.fn() },
@@ -90,6 +92,8 @@ describe('useMetadataGeneration agent 解析', () => {
     nl2sqlApiMock.getTask.mockResolvedValue({ task_status: 'finished' })
     nl2sqlApiMock.getTaskMessage.mockResolvedValue(okMessage)
     tableApiMock.profileColumnValues.mockResolvedValue([])
+    tableApiMock.getFreshness.mockResolvedValue({ configured: false, config: null })
+    tableApiMock.saveFreshness.mockResolvedValue({})
     domainApiMock.businessDomainApi.list.mockResolvedValue([])
     domainApiMock.dataDomainApi.list.mockResolvedValue([])
   })
@@ -248,5 +252,75 @@ describe('useMetadataGeneration agent 解析', () => {
     await adoptMetadata('t1', { attributes: [{ key: 'businessDomain', value: 'TRADE' }] })
 
     expect(tableApiMock.update).toHaveBeenCalledWith(1, { layer: 'ODS', businessDomain: 'TRADE' }, 'c1')
+  })
+
+  it('新鲜度建议命中真实字段时进入结果并可采纳', async () => {
+    nl2sqlApiMock.getTaskMessage.mockResolvedValue({
+      blocks: [
+        {
+          type: 'main_text',
+          text:
+            '```json\n' +
+            JSON.stringify({
+              table_comment: '订单表',
+              freshness: {
+                loaded_at_field: 'status',
+                warn_after_count: 1,
+                warn_after_period: 'day',
+                error_after_count: 1,
+                error_after_period: 'day'
+              },
+              fields: []
+            }) +
+            '\n```'
+        }
+      ]
+    })
+    const { generateMetadata, metadataResult } = useMetadataGeneration(buildDeps())
+
+    await generateMetadata('t1')
+
+    expect(tableApiMock.getFreshness).toHaveBeenCalledWith(1)
+    expect(metadataResult.value.freshness.hasRecommendation).toBe(true)
+    expect(metadataResult.value.freshness.suggested).toMatchObject({ mode: 'column', loadedAtField: 'status' })
+  })
+
+  it('AI 挑了不存在的时间列时不产出新鲜度建议', async () => {
+    nl2sqlApiMock.getTaskMessage.mockResolvedValue({
+      blocks: [
+        {
+          type: 'main_text',
+          text:
+            '```json\n' +
+            JSON.stringify({ table_comment: '订单表', freshness: { loaded_at_field: 'ghost_col' }, fields: [] }) +
+            '\n```'
+        }
+      ]
+    })
+    const { generateMetadata, metadataResult } = useMetadataGeneration(buildDeps())
+
+    await generateMetadata('t1')
+
+    expect(metadataResult.value.freshness.hasRecommendation).toBe(false)
+    expect(metadataResult.value.freshness.suggested).toBeNull()
+  })
+
+  it('采纳新鲜度建议时走 tableApi.saveFreshness', async () => {
+    tableApiMock.getFields.mockResolvedValue([])
+    const deps = buildDeps()
+    const { adoptMetadata } = useMetadataGeneration(deps)
+    const contract = {
+      mode: 'column',
+      loadedAtField: 'status',
+      warnAfterCount: 1,
+      warnAfterPeriod: 'day',
+      errorAfterCount: 1,
+      errorAfterPeriod: 'day',
+      enabled: true
+    }
+
+    await adoptMetadata('t1', { freshness: contract })
+
+    expect(tableApiMock.saveFreshness).toHaveBeenCalledWith(1, contract)
   })
 })

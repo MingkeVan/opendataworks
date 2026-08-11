@@ -9,10 +9,15 @@ import { buildFieldPayload } from '../fieldEdit'
 import {
   buildMetadataPrompt,
   buildObservedValueIndex,
+  describeFreshnessConfig,
   filterEnumValuesByObserved,
+  filterFreshness,
   filterTableAttributes,
   formatFieldComment,
-  parseMetadataResponse
+  formatFreshnessContract,
+  normalizeFreshnessConfig,
+  parseMetadataResponse,
+  sameFreshnessContract
 } from '../metadataGeneration'
 
 // 智能元数据：复用智能问数的发送消息端点发起后台任务，解析助手消息中的格式化内容，
@@ -144,6 +149,17 @@ export function useMetadataGeneration({
     }
   }
 
+  // 现有新鲜度契约：既喂给模型（避免重复建议），也用于弹窗展示「当前值」
+  const collectCurrentFreshness = async (state) => {
+    try {
+      const resp = await tableApi.getFreshness(state.table.id)
+      return resp?.configured ? resp.config || null : null
+    } catch (error) {
+      console.warn('获取现有新鲜度契约失败', error)
+      return null
+    }
+  }
+
   // 分层/业务域/数据域的候选取值：既喂给模型，也用于写回前硬过滤
   const collectAttributeOptions = async () => {
     const [businessDomains, dataDomains] = await Promise.all([
@@ -172,7 +188,21 @@ export function useMetadataGeneration({
     })
   }
 
-  const buildResult = (tabId, state, parsed, columnValueProfiles, attributeOptions) => {
+  // 新鲜度建议块：loaded_at_field 必须是真实字段（filterFreshness 已约束），
+  // 与现有 column 契约一致时不算「可采纳建议」。
+  const buildFreshnessBlock = (state, parsed, currentFreshness) => {
+    const suggested = filterFreshness(parsed.freshness, { fields: state.fields || [] })
+    const current = normalizeFreshnessConfig(currentFreshness)
+    const hasRecommendation = !!suggested && !sameFreshnessContract(current, suggested)
+    return {
+      currentText: describeFreshnessConfig(currentFreshness),
+      suggested,
+      suggestedText: suggested ? formatFreshnessContract(suggested) : '',
+      hasRecommendation
+    }
+  }
+
+  const buildResult = (tabId, state, parsed, columnValueProfiles, attributeOptions, currentFreshness) => {
     const currentByName = new Map((state.fields || []).map((field) => [field.fieldName, field]))
     const observedByField = buildObservedValueIndex(columnValueProfiles)
     const fields = parsed.fields
@@ -210,6 +240,7 @@ export function useMetadataGeneration({
         hasRecommendation: !!parsed.tableComment && parsed.tableComment !== tableComment
       },
       attributes: buildAttributeRows(state, parsed, attributeOptions),
+      freshness: buildFreshnessBlock(state, parsed, currentFreshness),
       fields
     }
   }
@@ -242,6 +273,7 @@ export function useMetadataGeneration({
       const relatedTasks = await collectRelatedTasks(state)
       const columnValueProfiles = await collectColumnValueProfiles(state)
       const attributeOptions = await collectAttributeOptions()
+      const currentFreshness = await collectCurrentFreshness(state)
       const prompt = buildMetadataPrompt({
         dbName: state.table.dbName,
         tableName: state.table.tableName,
@@ -258,6 +290,7 @@ export function useMetadataGeneration({
         downstreamTables: state.lineage?.downstreamTables || [],
         relatedTasks,
         columnValueProfiles,
+        currentFreshness,
         ...attributeOptions
       })
 
@@ -281,11 +314,12 @@ export function useMetadataGeneration({
       await waitForResult(taskId)
       const parsed = parseMetadataResponse(messageText(await nl2sqlApi.getTaskMessage(taskId)))
 
-      metadataResult.value = buildResult(tabId, state, parsed, columnValueProfiles, attributeOptions)
+      metadataResult.value = buildResult(tabId, state, parsed, columnValueProfiles, attributeOptions, currentFreshness)
       metadataDialogVisible.value = true
       if (
         !metadataResult.value.table.hasRecommendation &&
         !metadataResult.value.attributes.some((item) => item.hasRecommendation) &&
+        !metadataResult.value.freshness.hasRecommendation &&
         !metadataResult.value.fields.some((field) => field.hasRecommendation)
       ) {
         ElMessage.warning('AI 未生成可采纳的元数据建议')
@@ -297,11 +331,11 @@ export function useMetadataGeneration({
     }
   }
 
-  // payload: { table: { text } | null, attributes: [{ key, value }], fields: [{ fieldName, text }] }
+  // payload: { table: { text } | null, attributes: [{ key, value }], freshness: contract | null, fields: [{ fieldName, text }] }
   const adoptMetadata = async (tabId, payload = {}) => {
     const state = tabStates[tabId]
     if (!state?.table?.id) return
-    const { table = null, attributes = [], fields = [] } = payload
+    const { table = null, attributes = [], freshness = null, fields = [] } = payload
 
     metadataAdopting.value = true
     try {
@@ -348,6 +382,11 @@ export function useMetadataGeneration({
           buildFieldPayload({ ...original, fieldComment: item.text }),
           clusterId.value || null
         )
+      }
+
+      // 新鲜度契约：走既有 upsert 接口（loaded_at_field 已在建议阶段校验为真实字段）
+      if (freshness && String(freshness.loadedAtField || '').trim()) {
+        await tableApi.saveFreshness(state.table.id, freshness)
       }
 
       // 刷新字段：内联列的「已采纳」态与元数据完善度随之更新

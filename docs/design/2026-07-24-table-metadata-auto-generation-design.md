@@ -198,6 +198,25 @@
 弹窗「表名与表描述」tab 更名为「表信息」，在表描述下方增加属性表格（是否采纳 / 属性 / 当前值 / 生成推荐值），
 无推荐的行禁用勾选，与字段描述 tab 的交互一致。
 
+## 数据新鲜度也纳入生成（2026-08-11）
+
+新鲜度契约（`table_freshness_config`）本质也是表级元数据，本次让「智能元数据」一并生成并可采纳，
+复用既有 `PUT /v1/tables/{id}/freshness`（`tableApi.saveFreshness`），零后端改动。
+
+与表属性同一套「受控 + 硬过滤」模式：
+
+- **prompt**：新增「# 数据新鲜度(可选建议)」段，回显现有契约，要求模型从字段里挑一个能代表
+  "数据最新时间"的时间列作为 `loaded_at_field`；没有合适时间列就返回 `null`。阈值默认按 T-1
+  （`warn_after` / `error_after` 都为 `count=1, period=day`）。JSON 结构新增 `freshness` 键。
+- **硬过滤**：`filterFreshness` 是约束层——`loaded_at_field` 必须是该表真实字段，否则整体丢弃
+  （防止模型编造列名）；`period` 只认 `minute/hour/day`，非法回落 `day`；`count` 非正整数回落 `1`。
+  v1 仅支持 `column` 模式的建议（`custom_sql` / `metadata` 不由模型推断）。
+- **是否可采纳**：`normalizeFreshnessConfig` + `sameFreshnessContract` 判断建议是否与现有 column 契约一致，
+  一致则不算可采纳建议。现有 `custom_sql`/`metadata` 配置只做展示、不参与等价比较。
+- **弹窗**：「表信息」tab 在属性表格下方新增「数据新鲜度」区块（当前契约 / 生成推荐契约 + 采纳勾选），
+  与表描述、属性的交互一致；计入「已选 N 项」。
+- **枚举暂不在此扩展**：新鲜度只写 `column` 契约，不涉及枚举取值防线。
+
 ## Risks and Tradeoffs
 
 - 依赖 `da_agent_settings` 已配置可用 provider/model；未配置时生成失败并提示，不影响表详情其余功能。
@@ -208,6 +227,6 @@
 
 ## Verification
 
-- 前端单测覆盖 prompt 组装、JSON 提取与解析、枚举合并、弱描述判定与完善度计算。
+- 前端单测覆盖 prompt 组装、JSON 提取与解析、枚举合并、弱描述判定、完善度计算，以及新鲜度建议的硬过滤与采纳（`filterFreshness` / `saveFreshness`）。
 - 前端全量测试与生产构建。
 - 具备本地环境时补一次端到端 smoke（生成 → 弹窗 → 采纳 → 写回刷新）；否则显式说明未覆盖层。

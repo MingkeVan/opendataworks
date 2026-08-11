@@ -99,6 +99,27 @@
           </el-table-column>
         </el-table>
         <div class="smd-attr-hint">推荐值只会取自平台已有的分层与业务域/数据域编码，清单外的取值会被丢弃。</div>
+
+        <div v-if="result.freshness" class="smd-fresh">
+          <div class="smd-fresh-title">数据新鲜度</div>
+          <div class="smd-line">
+            <span class="smd-label">当前契约</span>
+            <el-input :model-value="result.freshness.currentText" size="small" disabled />
+          </div>
+          <div class="smd-line">
+            <span class="smd-label">
+              <el-checkbox v-model="adoptFreshness" :disabled="!result.freshness.hasRecommendation" />
+              生成推荐契约
+            </span>
+            <el-input
+              :model-value="result.freshness.hasRecommendation ? result.freshness.suggestedText : ''"
+              size="small"
+              disabled
+              :placeholder="result.freshness.hasRecommendation ? '' : '暂无推荐或与当前一致'"
+            />
+          </div>
+          <div class="smd-attr-hint">推荐的时间列只会取自该表真实字段，采纳后按 T-1 语义（预警/过期各 1 天）写入新鲜度契约。</div>
+        </div>
       </el-tab-pane>
     </el-tabs>
 
@@ -151,6 +172,7 @@ const keyword = ref('')
 const selected = reactive({})
 const selectedAttrs = reactive({})
 const adoptTable = ref(false)
+const adoptFreshness = ref(false)
 const tableText = ref('')
 const localFields = ref([])
 
@@ -168,6 +190,7 @@ watch(
     })
     adoptTable.value = !!value?.table?.hasRecommendation
     tableText.value = value?.table?.suggestedComment || ''
+    adoptFreshness.value = !!value?.freshness?.hasRecommendation
     tab.value = 'fields'
   },
   { immediate: true }
@@ -206,11 +229,16 @@ const selectedAttributes = computed(() =>
   (result.value?.attributes || []).filter((item) => item.hasRecommendation && selectedAttrs[item.key])
 )
 
+const adoptFreshnessActive = computed(
+  () => adoptFreshness.value && !!result.value?.freshness?.hasRecommendation
+)
+
 const totalSelected = computed(
   () =>
     selectedFields.value.length +
     selectedAttributes.value.length +
-    (adoptTable.value && result.value?.table?.hasRecommendation ? 1 : 0)
+    (adoptTable.value && result.value?.table?.hasRecommendation ? 1 : 0) +
+    (adoptFreshnessActive.value ? 1 : 0)
 )
 
 const currentTabId = () => String(result.value?.tabId || activeTab.value || '')
@@ -219,6 +247,7 @@ const onAdopt = () => {
   adoptMetadata(currentTabId(), {
     table: adoptTable.value && result.value?.table?.hasRecommendation ? { text: tableText.value } : null,
     attributes: selectedAttributes.value.map((item) => ({ key: item.key, value: item.suggestedValue })),
+    freshness: adoptFreshnessActive.value ? result.value.freshness.suggested : null,
     fields: selectedFields.value.map((field) => ({ fieldName: field.fieldName, text: field.editedComment }))
   })
 }
@@ -280,6 +309,19 @@ const regenerate = () => generateMetadata(currentTabId(), { force: true })
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.smd-fresh {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.smd-fresh-title {
+  font-weight: 600;
 }
 
 .smd-footer {

@@ -3,13 +3,18 @@ import {
   buildMetadataPrompt,
   buildObservedValueIndex,
   computeMetadataCompleteness,
+  describeFreshnessConfig,
   extractJsonBlock,
   filterEnumValuesByObserved,
+  filterFreshness,
   formatFieldComment,
+  formatFreshnessContract,
   filterTableAttributes,
   isWeakDescription,
   normalizeColumnValueProfiles,
-  parseMetadataResponse
+  normalizeFreshnessConfig,
+  parseMetadataResponse,
+  sameFreshnessContract
 } from '../metadataGeneration'
 
 describe('metadataGeneration', () => {
@@ -213,5 +218,90 @@ describe('metadataGeneration', () => {
     ).toBe(50)
     expect(computeMetadataCompleteness({ tableComment: '', fields: [] })).toBe(0)
     expect(computeMetadataCompleteness({ tableComment: '订单表', fields: [{ fieldName: 'a', fieldComment: '甲' }] })).toBe(100)
+  })
+
+  it('buildMetadataPrompt 内嵌数据新鲜度段与 JSON 结构，并回显现有配置', () => {
+    const prompt = buildMetadataPrompt({
+      tableName: 'orders',
+      fields: [{ fieldName: 'etl_time', fieldType: 'DATETIME' }],
+      currentFreshness: {
+        mode: 'column',
+        loadedAtField: 'etl_time',
+        warnAfterCount: 1,
+        warnAfterPeriod: 'day',
+        errorAfterCount: 1,
+        errorAfterPeriod: 'day'
+      }
+    })
+    expect(prompt).toContain('# 数据新鲜度(可选建议)')
+    expect(prompt).toContain('loaded_at_field')
+    expect(prompt).toContain('现有新鲜度配置: 字段 · etl_time ｜ 预警 1天 · 过期 1天')
+  })
+
+  it('parseMetadataResponse 解析 freshness，缺失时为 null', () => {
+    const withFresh = parseMetadataResponse(
+      '{"table_comment":"订单","freshness":{"loaded_at_field":"etl_time","warn_after_count":1,"warn_after_period":"day","error_after_count":2,"error_after_period":"day"},"fields":[]}'
+    )
+    expect(withFresh.freshness).toMatchObject({ loadedAtField: 'etl_time', errorAfterCount: 2 })
+
+    const without = parseMetadataResponse('{"table_comment":"订单","fields":[]}')
+    expect(without.freshness).toBeNull()
+  })
+
+  it('filterFreshness 只认真实时间列，编造列一律丢弃', () => {
+    const fields = [{ fieldName: 'etl_time' }, { fieldName: 'id' }]
+    expect(
+      filterFreshness(
+        { loadedAtField: 'ETL_TIME', warnAfterCount: 1, warnAfterPeriod: 'day', errorAfterCount: 1, errorAfterPeriod: 'day' },
+        { fields }
+      )
+    ).toEqual({
+      mode: 'column',
+      loadedAtField: 'etl_time',
+      warnAfterCount: 1,
+      warnAfterPeriod: 'day',
+      errorAfterCount: 1,
+      errorAfterPeriod: 'day',
+      enabled: true
+    })
+    // 表里没有的列 -> 整体丢弃
+    expect(filterFreshness({ loadedAtField: 'not_a_col' }, { fields })).toBeNull()
+    expect(filterFreshness(null, { fields })).toBeNull()
+  })
+
+  it('filterFreshness 归一化非法阈值：period 回落 day、count 回落 1', () => {
+    expect(
+      filterFreshness(
+        { loadedAtField: 'etl_time', warnAfterCount: 0, warnAfterPeriod: 'week', errorAfterCount: 3, errorAfterPeriod: 'hour' },
+        { fields: [{ fieldName: 'etl_time' }] }
+      )
+    ).toMatchObject({ warnAfterCount: 1, warnAfterPeriod: 'day', errorAfterCount: 3, errorAfterPeriod: 'hour' })
+  })
+
+  it('normalizeFreshnessConfig 只归一化 column 模式，其余返回 null', () => {
+    expect(normalizeFreshnessConfig({ mode: 'column', loadedAtField: 'ct', warnAfterCount: 1, warnAfterPeriod: 'day', errorAfterCount: 1, errorAfterPeriod: 'day' }))
+      .toMatchObject({ loadedAtField: 'ct' })
+    expect(normalizeFreshnessConfig({ mode: 'metadata' })).toBeNull()
+    expect(normalizeFreshnessConfig(null)).toBeNull()
+  })
+
+  it('describeFreshnessConfig 覆盖未配置与非 column 模式', () => {
+    expect(describeFreshnessConfig(null)).toBe('未配置')
+    expect(describeFreshnessConfig({ mode: 'custom_sql' })).toBe('自定义查询（已配置）')
+    expect(describeFreshnessConfig({ mode: 'metadata' })).toBe('表元数据（已配置）')
+  })
+
+  it('sameFreshnessContract 用于判断建议是否与现状一致', () => {
+    const a = { loadedAtField: 'etl_time', warnAfterCount: 1, warnAfterPeriod: 'day', errorAfterCount: 1, errorAfterPeriod: 'day' }
+    expect(sameFreshnessContract(a, { ...a })).toBe(true)
+    expect(sameFreshnessContract(a, { ...a, errorAfterCount: 2 })).toBe(false)
+    expect(sameFreshnessContract(null, a)).toBe(false)
+  })
+
+  it('formatFreshnessContract 输出一行中文描述', () => {
+    expect(
+      formatFreshnessContract({ loadedAtField: 'etl_time', warnAfterCount: 1, warnAfterPeriod: 'day', errorAfterCount: 2, errorAfterPeriod: 'hour' })
+    ).toBe('字段 · etl_time ｜ 预警 1天 · 过期 2小时')
+    expect(formatFreshnessContract(null)).toBe('')
   })
 })
