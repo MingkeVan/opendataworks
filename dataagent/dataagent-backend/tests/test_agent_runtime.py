@@ -479,6 +479,59 @@ def test_workspace_boundary_still_denies_rest_of_dev(tmp_path: Path):
     assert "outside workspace" in denial
 
 
+def test_workspace_boundary_denies_paths_hidden_in_assignments(tmp_path: Path):
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable}
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(workspace, {"enabled_roots": {}})
+
+    # A word does not have to start with "/" to carry an absolute path. Checking
+    # the assignment is also what catches variable indirection: $FOO is opaque at
+    # the use site, but the literal is visible where it is assigned.
+    for command in (
+        "dd if=/etc/shadow of=out.bin",
+        "tar --file=/etc/passwd -x",
+        "FOO=/etc/shadow cat $FOO",
+        "PYTHONPATH=/opt/secret python run.py",
+        "java -Dlog=/var/log/app.log -jar app.jar",
+        "tool --define=key=/etc/shadow",
+    ):
+        denial = agent_runtime._validate_workspace_tool_boundary(
+            "Bash", {"command": command}, workspace, allowed_roots, runtime_env
+        )
+        assert denial is not None, command
+        assert "outside workspace" in denial
+
+
+def test_workspace_boundary_assignment_check_does_not_overreach(tmp_path: Path):
+    workspace = tmp_path / "runtime" / "topic_1" / "workspace"
+    workspace.mkdir(parents=True)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    runtime_env = {"DATAAGENT_PYTHON_BIN": sys.executable}
+    allowed_roots = agent_runtime._build_workspace_allowed_roots(
+        workspace, {"enabled_roots": {}}, [str(scratch)]
+    )
+
+    for command in (
+        # Relative values carry nothing for the boundary to check.
+        "LANG=en_US.UTF-8 python run.py",
+        "git log --pretty=format:%H",
+        "awk -F=, '{print $1}' data.csv",
+        # "=" reached through other punctuation is not an assignment; treating
+        # sed scripts as one would deny a perfectly local command.
+        "sed 's/a=/b/g' notes.md",
+        # Assignments pointing at allowed roots must still pass, element by
+        # element for joined path lists.
+        f"MPLCONFIGDIR={scratch}/mpl python plot.py",
+        f"tar --file={workspace}/out.tar -c data",
+        f"PYTHONPATH={workspace}/lib:{scratch}/lib python run.py",
+    ):
+        assert agent_runtime._validate_workspace_tool_boundary(
+            "Bash", {"command": command}, workspace, allowed_roots, runtime_env
+        ) is None, command
+
+
 def test_workspace_boundary_hook_allows_scratch_dir_from_config(tmp_path: Path, monkeypatch):
     workspace = tmp_path / "runtime" / "topic_1" / "workspace"
     workspace.mkdir(parents=True)

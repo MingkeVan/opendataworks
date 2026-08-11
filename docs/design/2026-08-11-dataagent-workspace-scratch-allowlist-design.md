@@ -90,19 +90,32 @@ DataAgent 运行时用 `PreToolUse` 边界钩子约束 agent 的文件访问范�
 - 临时目录里的文件不会出现在会话文件列表，也无法通过前端下载。
   这是有意的：交付物路径契约仍然只有工作区 `output/`。
 
-## Known Gap（既有问题，不在本次变更范围内）
+## 赋值式参数中的隐藏路径（后续补充）
 
-`_validate_bash_workspace_boundary` 只校验以 `/` 开头的 token，因此嵌在
+`_validate_bash_workspace_boundary` 原先只校验以 `/` 开头的 token，因此嵌在
 `key=value` / `--flag=path` 里的绝对路径、以及经 shell 变量间接引用的路径
-不会被检查：
+完全不过检查：
 
 - `cat /etc/shadow` → 拒绝
 - `dd if=/etc/shadow of=out.bin` → 放行
 - `tar --file=/etc/passwd -x` → 放行
 - `FOO=/etc/shadow cat $FOO` → 放行
 
-这是边界钩子既有的缺口，与本次白名单变更无关，本次也未修改。修复需要解析
-token 中 `=` 之后的路径值，会改变一批现有命令的判定结果（例如
-`--opt=/tmp/x` 应放行、`LANG=en_US.UTF-8` 不能误判），影响面和误拒风险都需要
-单独评估，应作为独立变更处理。当前 Bash 边界仍是「信任模型自觉」的信任边界，
-不是硬保证——这一点与 `permission_gate.plan_denies_tool` 中已有的说明一致。
+现由 `_bash_token_path_candidates` 统一提取一个 word 携带的绝对路径：
+
+1. word 本身以 `/` 开头时，它就是候选路径（原有行为）。
+2. word 形如 `<name>=<value>` 时，取 `=` 之后的值，按 `=` 和 `:` 拆分，
+   其中以 `/` 开头的段作为候选路径。
+
+`<name>` 的形状刻意收紧为「至多两个前导 `-` + 字母/数字/`_`/`-`」，
+使 `sed 's/a=/b/g'` 这类「`=` 出现在其它标点之后」的 word 不被当成赋值，
+避免误拒本地命令。按 `:` 拆分让 `PYTHONPATH=/a:/b` 逐段判定，
+而不是整体拒绝。相对值（`LANG=en_US.UTF-8`、`--pretty=format:%H`）
+不产生候选路径。
+
+校验赋值本身也是捕获变量间接引用的手段：`$FOO` 在使用处不可解析，
+但字面量在赋值处可见。
+
+这仍不是硬保证：命令替换、间接拼接等形式依旧可以绕过静态检查。
+Bash 边界的定位与 `permission_gate.plan_denies_tool` 中的说明一致——
+它是信任边界，不是沙箱本身；真正的写隔离由沙箱只读根文件系统和挂载策略提供。
