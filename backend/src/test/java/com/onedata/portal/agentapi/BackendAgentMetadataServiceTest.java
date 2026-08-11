@@ -2,20 +2,29 @@ package com.onedata.portal.agentapi;
 
 import com.onedata.portal.agentapi.dto.AgentDatasourceResolution;
 import com.onedata.portal.agentapi.dto.AgentInspectResponse;
+import com.onedata.portal.agentapi.dto.AgentMetadataCompleteRequest;
+import com.onedata.portal.agentapi.dto.AgentMetadataCompleteResponse;
 import com.onedata.portal.agentapi.dto.AgentTableDdlResponse;
 import com.onedata.portal.agentapi.service.AgentJdbcExecutor;
 import com.onedata.portal.agentapi.service.BackendAgentMetadataService;
+import com.onedata.portal.dto.TableFreshnessRequest;
+import com.onedata.portal.entity.BusinessDomain;
+import com.onedata.portal.entity.DataDomain;
 import com.onedata.portal.entity.DataField;
 import com.onedata.portal.entity.DataLineage;
 import com.onedata.portal.entity.DataTable;
 import com.onedata.portal.entity.DorisCluster;
 import com.onedata.portal.entity.DorisDbUser;
+import com.onedata.portal.mapper.BusinessDomainMapper;
+import com.onedata.portal.mapper.DataDomainMapper;
 import com.onedata.portal.mapper.DataFieldMapper;
 import com.onedata.portal.mapper.DataLineageMapper;
 import com.onedata.portal.mapper.DataTableMapper;
 import com.onedata.portal.mapper.DorisClusterMapper;
 import com.onedata.portal.mapper.DorisDbUserMapper;
+import com.onedata.portal.service.DataTableService;
 import com.onedata.portal.service.LineageService;
+import com.onedata.portal.service.freshness.TableFreshnessService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -33,6 +42,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -61,6 +74,18 @@ class BackendAgentMetadataServiceTest {
 
     @Mock
     private AgentJdbcExecutor agentJdbcExecutor;
+
+    @Mock
+    private DataTableService dataTableService;
+
+    @Mock
+    private TableFreshnessService tableFreshnessService;
+
+    @Mock
+    private BusinessDomainMapper businessDomainMapper;
+
+    @Mock
+    private DataDomainMapper dataDomainMapper;
 
     @InjectMocks
     private BackendAgentMetadataService backendAgentMetadataService;
@@ -304,5 +329,130 @@ class BackendAgentMetadataServiceTest {
         assertEquals("销售日报", response.getTableComment());
         assertEquals("CREATE TABLE ads_sales_di (...)", response.getDdl());
         assertEquals("stat_day", response.getFields().get(0).getFieldName());
+    }
+
+    @Test
+    void completeAppliesAllSectionsForValidRequest() {
+        DataTable table = new DataTable();
+        table.setId(1L);
+        table.setDbName("dwd");
+        table.setTableName("dwd_order");
+        table.setLayer(null);
+        when(dataTableMapper.selectById(1L)).thenReturn(table);
+        when(dataTableService.normalizeLayer("DWD", false)).thenReturn("DWD");
+        BusinessDomain businessDomain = new BusinessDomain();
+        businessDomain.setDomainCode("TRADE");
+        when(businessDomainMapper.selectOne(any())).thenReturn(businessDomain);
+        DataDomain dataDomain = new DataDomain();
+        dataDomain.setDomainCode("ORDER");
+        dataDomain.setBusinessDomain("TRADE");
+        when(dataDomainMapper.selectOne(any())).thenReturn(dataDomain);
+        DataField field = new DataField();
+        field.setId(11L);
+        field.setTableId(1L);
+        field.setFieldName("etl_time");
+        field.setFieldComment("");
+        when(dataFieldMapper.selectList(any())).thenReturn(Collections.singletonList(field));
+
+        AgentMetadataCompleteRequest request = new AgentMetadataCompleteRequest();
+        request.setTableId(1L);
+        request.setTableComment("订单明细表");
+        AgentMetadataCompleteRequest.Attributes attributes = new AgentMetadataCompleteRequest.Attributes();
+        attributes.setLayer("DWD");
+        attributes.setBusinessDomain("TRADE");
+        attributes.setDataDomain("ORDER");
+        request.setAttributes(attributes);
+        AgentMetadataCompleteRequest.FieldComment fieldComment = new AgentMetadataCompleteRequest.FieldComment();
+        fieldComment.setFieldName("etl_time");
+        fieldComment.setComment("ETL 加载时间");
+        request.setFields(Collections.singletonList(fieldComment));
+        AgentMetadataCompleteRequest.Freshness freshness = new AgentMetadataCompleteRequest.Freshness();
+        freshness.setLoadedAtField("etl_time");
+        freshness.setWarnAfterCount(1);
+        freshness.setWarnAfterPeriod("day");
+        freshness.setErrorAfterCount(1);
+        freshness.setErrorAfterPeriod("day");
+        request.setFreshness(freshness);
+
+        AgentMetadataCompleteResponse response = backendAgentMetadataService.complete(request, "agent:topic-1");
+
+        assertTrue(response.getApplied().contains("table_comment"));
+        assertTrue(response.getApplied().contains("attributes"));
+        assertTrue(response.getApplied().contains("field:etl_time"));
+        assertTrue(response.getApplied().contains("freshness"));
+        assertTrue(response.getSkipped().isEmpty());
+        assertTrue(response.getFailed().isEmpty());
+        verify(dataTableService).updateTableComment(1L, "订单明细表", null);
+        verify(dataTableService).updateTable(eq(1L), any(DataTable.class), isNull());
+        verify(dataTableService).updateField(eq(1L), eq(11L), any(DataField.class), isNull());
+        verify(tableFreshnessService).saveFreshness(eq(1L), any(TableFreshnessRequest.class), eq("agent:topic-1"));
+    }
+
+    @Test
+    void completeSkipsInvalidAttributesAndUnknownFields() {
+        DataTable table = new DataTable();
+        table.setId(2L);
+        table.setDbName("dwd");
+        table.setTableName("t2");
+        table.setLayer(null);
+        when(dataTableMapper.selectById(2L)).thenReturn(table);
+        when(dataTableService.normalizeLayer("DWM", false)).thenThrow(new RuntimeException("数据分层非法"));
+        when(businessDomainMapper.selectOne(any())).thenReturn(null); // FAKE 不在平台清单
+        DataField field = new DataField();
+        field.setId(21L);
+        field.setTableId(2L);
+        field.setFieldName("etl_time");
+        when(dataFieldMapper.selectList(any())).thenReturn(Collections.singletonList(field));
+
+        AgentMetadataCompleteRequest request = new AgentMetadataCompleteRequest();
+        request.setTableId(2L);
+        AgentMetadataCompleteRequest.Attributes attributes = new AgentMetadataCompleteRequest.Attributes();
+        attributes.setLayer("DWM");
+        attributes.setBusinessDomain("FAKE");
+        request.setAttributes(attributes);
+        AgentMetadataCompleteRequest.FieldComment fieldComment = new AgentMetadataCompleteRequest.FieldComment();
+        fieldComment.setFieldName("ghost");
+        fieldComment.setComment("x");
+        request.setFields(Collections.singletonList(fieldComment));
+
+        AgentMetadataCompleteResponse response = backendAgentMetadataService.complete(request, null);
+
+        assertTrue(response.getSkipped().stream().anyMatch(item -> item.contains("attributes")));
+        assertTrue(response.getSkipped().stream().anyMatch(item -> item.contains("field:ghost")));
+        verify(dataTableService, never()).updateTable(any(), any(), any());
+        verify(dataTableService, never()).updateField(any(), any(), any(), any());
+    }
+
+    @Test
+    void completeSkipsAttributesWhenNoEffectiveLayer() {
+        DataTable table = new DataTable();
+        table.setId(3L);
+        table.setDbName("dwd");
+        table.setTableName("t3");
+        table.setLayer(null);
+        when(dataTableMapper.selectById(3L)).thenReturn(table);
+        BusinessDomain businessDomain = new BusinessDomain();
+        businessDomain.setDomainCode("TRADE");
+        when(businessDomainMapper.selectOne(any())).thenReturn(businessDomain);
+
+        AgentMetadataCompleteRequest request = new AgentMetadataCompleteRequest();
+        request.setTableId(3L);
+        AgentMetadataCompleteRequest.Attributes attributes = new AgentMetadataCompleteRequest.Attributes();
+        attributes.setBusinessDomain("TRADE"); // 未给分层，表上也无分层
+        request.setAttributes(attributes);
+
+        AgentMetadataCompleteResponse response = backendAgentMetadataService.complete(request, null);
+
+        assertTrue(response.getSkipped().stream().anyMatch(item -> item.contains("缺少有效分层")));
+        verify(dataTableService, never()).updateTable(any(), any(), any());
+    }
+
+    @Test
+    void completeRejectsRequestWithoutLocator() {
+        AgentMetadataCompleteRequest request = new AgentMetadataCompleteRequest();
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> backendAgentMetadataService.complete(request, null)
+        );
     }
 }
