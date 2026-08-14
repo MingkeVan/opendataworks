@@ -1,10 +1,22 @@
 const pendingRouteLoaders = new WeakMap()
 let hasScheduledRouteWarmup = false
 
+// 路由组件经 lazyView 包装后是异步组件对象，原始 loader 挂在 __routeLoader 上；
+// 裸 loader 形态仍然兼容。
+const toRouteLoader = (component) => {
+  if (typeof component?.__routeLoader === 'function') {
+    return component.__routeLoader
+  }
+  if (typeof component === 'function') {
+    return component
+  }
+  return null
+}
+
 const getAsyncLoaders = (router, path) => {
   return router.resolve(path).matched.flatMap((record) => {
     const components = record.components ? Object.values(record.components) : [record.component]
-    return components.filter((component) => typeof component === 'function')
+    return components.map(toRouteLoader).filter(Boolean)
   })
 }
 

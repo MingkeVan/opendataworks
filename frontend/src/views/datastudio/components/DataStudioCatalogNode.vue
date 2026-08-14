@@ -199,8 +199,10 @@ const {
   pointer-events: none;
 }
 
+/* .el-tree-node__content 是 flex 容器，节点占满展开图标之后的剩余宽度 */
 .catalog-node {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   border-radius: 8px;
 }
 
@@ -319,6 +321,7 @@ const {
   z-index: 0;
 }
 
+/* 不设宽度上限：侧栏可拖到 840px，表名要跟着吃满剩余宽度，放不下时才省略号 */
 .table-name {
   font-size: 13px;
   font-weight: 600;
@@ -328,7 +331,6 @@ const {
   text-overflow: ellipsis;
   flex: 1;
   min-width: 0;
-  max-width: 200px;
 }
 
 .metadata-warning-icon {
