@@ -12,7 +12,12 @@
       @tab-add="() => emit('tab-add')"
       @edit="handleEdit"
     >
-      <el-tab-pane v-for="tab in tabs" :key="String(tab[keyField])" :name="String(tab[keyField])">
+      <el-tab-pane
+        v-for="tab in tabs"
+        :key="String(tab[keyField])"
+        :name="String(tab[keyField])"
+        :lazy="lazy"
+      >
         <template #label>
           <div class="persistent-tabs__label" @contextmenu.prevent="openMenu($event, tab)">
             <slot name="label" :tab="tab">
@@ -80,6 +85,13 @@ const props = defineProps({
     default: false
   },
   editable: {
+    type: Boolean,
+    default: false
+  },
+  // 只在标签页首次激活时渲染其内容，激活过的保持挂载（el-tab-pane 的 loaded 语义）。
+  // 恢复十几个标签页时，默认行为会把每个面板的内容一次性挂载完（含各自的 CodeMirror
+  // 编辑器实例），主线程一卡就是几秒。持久化读的是 tabStates，不依赖面板是否渲染。
+  lazy: {
     type: Boolean,
     default: false
   }

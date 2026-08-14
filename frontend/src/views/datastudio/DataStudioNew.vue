@@ -77,6 +77,7 @@
             type="card"
             closable
             addable
+            lazy
             class="workspace-tabs"
             style="height: 100%;"
             @tab-remove="handleTabRemove"

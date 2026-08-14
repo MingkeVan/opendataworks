@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { isDemoMode } from '@/demo/runtime'
+import { lazyView } from '@/router/lazyView'
 import { useAuthStore } from '@/stores/auth'
 
 const demoHomePath = '/dashboard'
@@ -9,24 +10,24 @@ const routes = [
   {
     path: '/login',
     name: 'Login',
-    component: () => import('@/views/LoginView.vue'),
+    component: lazyView(() => import('@/views/LoginView.vue')),
     meta: { title: '登录', public: true }
   },
   {
     path: '/',
-    component: () => import('@/views/Layout.vue'),
+    component: lazyView(() => import('@/views/Layout.vue')),
     redirect: defaultHomePath,
     children: [
       {
         path: '/dashboard',
         name: 'Dashboard',
-        component: () => import('@/views/dashboard/Dashboard.vue'),
+        component: lazyView(() => import('@/views/dashboard/Dashboard.vue')),
         meta: { title: '控制台' }
       },
       {
         path: '/datastudio',
         name: 'DataStudio',
-        component: () => import('@/views/datastudio/DataStudioNew.vue'),
+        component: lazyView(() => import('@/views/datastudio/DataStudioNew.vue')),
         meta: { title: 'Data Studio' }
       },
       {
@@ -36,19 +37,19 @@ const routes = [
       {
         path: '/domains',
         name: 'Domains',
-        component: () => import('@/views/domains/DomainManagement.vue'),
+        component: lazyView(() => import('@/views/domains/DomainManagement.vue')),
         meta: { title: '数据建模' }
       },
       {
         path: '/workflows',
         name: 'Workflows',
-        component: () => import('@/views/workflows/WorkflowManagement.vue'),
+        component: lazyView(() => import('@/views/workflows/WorkflowManagement.vue')),
         meta: { title: '任务调度' }
       },
       {
         path: '/workflows/:id(\\d+)',
         name: 'WorkflowDetail',
-        component: () => import('@/views/workflows/WorkflowDetail.vue'),
+        component: lazyView(() => import('@/views/workflows/WorkflowDetail.vue')),
         meta: { title: '工作流详情' }
       },
       {
@@ -59,7 +60,7 @@ const routes = [
       {
         path: '/lineage',
         name: 'Lineage',
-        component: () => import('@/views/lineage/LineageView.vue'),
+        component: lazyView(() => import('@/views/lineage/LineageView.vue')),
         meta: { title: '数据血缘' }
       },
       {
@@ -69,19 +70,19 @@ const routes = [
       {
         path: '/inspection',
         name: 'Inspection',
-        component: () => import('@/views/inspection/InspectionView.vue'),
+        component: lazyView(() => import('@/views/inspection/InspectionView.vue')),
         meta: { title: '数据质量' }
       },
       {
         path: '/integration',
         name: 'Integration',
-        component: () => import('@/views/integration/DataIntegration.vue'),
+        component: lazyView(() => import('@/views/integration/DataIntegration.vue')),
         meta: { title: '数据集成' }
       },
       {
         path: '/intelligent-query',
         name: 'IntelligentQuery',
-        component: () => import('@/views/IntelligentQueryRemoteEmbed.vue'),
+        component: lazyView(() => import('@/views/IntelligentQueryRemoteEmbed.vue')),
         meta: { title: '智能问数' }
       },
       {
@@ -99,7 +100,7 @@ const routes = [
       {
         path: '/settings',
         name: 'Settings',
-        component: () => import('@/views/settings/ConfigurationManagement.vue'),
+        component: lazyView(() => import('@/views/settings/ConfigurationManagement.vue')),
         meta: { title: '设置' }
       },
       {
@@ -117,7 +118,7 @@ const routes = [
       {
         path: '/playground/tabs',
         name: 'TabPlayground',
-        component: () => import('@/views/playground/TabPlayground.vue'),
+        component: lazyView(() => import('@/views/playground/TabPlayground.vue')),
         meta: { title: 'Tab Playground' }
       }
     ]

@@ -28,6 +28,25 @@ describe('routeWarmup', () => {
     expect(pageLoader).toHaveBeenCalledTimes(1)
   })
 
+  it('preloads lazyView-wrapped components through __routeLoader', async () => {
+    const { preloadRouteComponents } = await import('../routeWarmup')
+    const layoutLoader = vi.fn().mockResolvedValue({})
+    const pageLoader = vi.fn().mockResolvedValue({})
+    const router = {
+      resolve: vi.fn().mockReturnValue({
+        matched: [
+          { components: { default: { __routeLoader: layoutLoader } } },
+          { components: { default: { __routeLoader: pageLoader } } }
+        ]
+      })
+    }
+
+    await preloadRouteComponents(router, '/datastudio')
+
+    expect(layoutLoader).toHaveBeenCalledTimes(1)
+    expect(pageLoader).toHaveBeenCalledTimes(1)
+  })
+
   it('schedules a single idle warmup run', async () => {
     const { scheduleRouteWarmup } = await import('../routeWarmup')
     const dashboardLoader = vi.fn().mockResolvedValue({})

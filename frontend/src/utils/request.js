@@ -2,6 +2,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { demoAdapter } from '@/demo/mockServer'
 import { isDemoMode } from '@/demo/runtime'
+import { handleUnauthorized } from '@/utils/authRedirect'
 
 const request = axios.create({
   baseURL: isDemoMode ? '' : '/api',
@@ -46,10 +47,7 @@ request.interceptors.response.use(
 
     // 未登录或会话过期：统一跳转登录页，不再弹错误提示
     if (error?.response?.status === 401 && !config?.skipAuthRedirect && !isDemoMode) {
-      if (window.location.pathname !== '/login') {
-        const redirect = encodeURIComponent(window.location.pathname + window.location.search)
-        window.location.href = `/login?redirect=${redirect}`
-      }
+      handleUnauthorized()
       return Promise.reject(error)
     }
 

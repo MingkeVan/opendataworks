@@ -31,6 +31,12 @@ export const useAuthStore = defineStore('auth', {
       return this.currentUser
     },
 
+    // 会话过期（401）：已确定未登录，initialized 保持 true 避免再探一次 /auth/me
+    markSessionExpired() {
+      this.currentUser = null
+      this.initialized = true
+    },
+
     async logout() {
       try {
         await authApi.logout()
