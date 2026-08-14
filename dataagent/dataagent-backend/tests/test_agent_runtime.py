@@ -189,9 +189,8 @@ def test_build_portal_mcp_servers_defaults_to_stdio_bridge():
         },
     )
 
-    # stdio is the only transport on which the CLI cannot raise
-    # `MCP server "portal" session expired`; both of its throw paths require
-    # config.type === "http".
+    # stdio avoids the CLI's HTTP-only Connection-closed and 60s fetch paths; the
+    # bridge also normalizes remote HTTP 404/session failures before they reach it.
     assert actual == {
         "portal": {
             "type": "stdio",

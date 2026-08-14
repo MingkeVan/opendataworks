@@ -15,35 +15,44 @@ MCP server "portal" session expired
 
 阶段二明确把「客户端层重连/重试」列为后续设计项：**若无状态化后仍复发，再单独立项**。现场仍复发，本设计即该后续项。
 
-## 现状与根因（从本机 CLI 二进制查证）
+## 现状与根因（按生产运行时基线查证）
 
-查证对象：`/opt/node22/lib/node_modules/@anthropic-ai/claude-code/cli.js`（`VERSION: 2.1.42`）。以下均为直接读取压缩后源码得到的事实，不是推测。
+DataAgent 默认不使用宿主机全局安装的 Claude CLI，而是使用
+`claude-agent-sdk==0.2.114` 自带的 CLI `2.1.205`。最初对宿主机
+`/opt/node22/lib/node_modules/@anthropic-ai/claude-code/cli.js`（`2.1.42`）的取证只用于形成
+假设；实现和发布验证必须以 SDK 自带的 `2.1.205` 为准，不能用全局 CLI 的结果替代生产运行时。
 
-### 1. `session expired` 的两条抛出路径都以 transport 类型为前置条件
+以下结论以 `2.1.205` 二进制为准，验证记录见配套计划。`2.1.42` 的旧分支只保留为历史对照；
+两个版本的 stale-session 判定并不完全相同，不能混用。
 
-工具调用的 catch 分支：
+### 1. `session expired` 有两类判定，只有 `Connection closed` 显式限制 transport
 
-```js
-let M = Xn7(X),
-    P = "code" in X && X.code === -32000 && X.message.includes("Connection closed")
-        && (K.type === "http" || K.type === "claudeai-proxy");
-if (M || P) throw ..., await zE(q, K), new bPA(q)   // bPA = McpSessionExpiredError
-```
-
-其中：
+CLI `2.1.205` 的 stale-session matcher 会把错误码 `404`，以及带特定 session 文案的 `400`
+识别为 session 失效：
 
 ```js
-function Xn7(A){ if(("code" in A ? A.code : void 0) !== 404) return !1;
-                 return A.message.includes('"code":-32001') || A.message.includes('"code": -32001') }
+function p0s(error) {
+  if (error instanceof McpSessionExpiredError) return true;
+  let code = "code" in error ? error.code : undefined;
+  if (code === 404) return true;
+  return code === 400 && /Server not initialized|No valid session ID|Mcp-Session-Id header is required/i.test(error.message);
+}
 ```
 
-连接错误回调里同样有类型前置：
+工具调用 catch 分支把 stale-session matcher 与 `Connection closed` 分开判断：
 
 ```js
-if ((u === "http" || u === "claudeai-proxy") && Xn7(S)) { ...triggering reconnection... }
+let stale = p0s(error);
+let closed = error.code === -32000 && error.message.includes("Connection closed")
+  && (config.type === "http" || config.type === "claudeai-proxy");
+if (stale || closed) throw new McpSessionExpiredError(serverName);
 ```
 
-结论：**`McpSessionExpiredError` 只可能在 HTTP 系 transport 上产生**。`Xn7` 依赖一个 HTTP `404` 响应；`P` 显式要求 `K.type === "http"`。`stdio` transport 两条路径都不可达。
+结论：`Connection closed` 路径显式限制为 HTTP 系 transport；`404`/`400` matcher 本身不限制
+transport。因此本方案生效依赖两个同时成立的条件：CLI 看到的是 `stdio` config，且桥把远端 HTTP
+失败统一归一化为 JSON-RPC `-32603`，不能把 HTTP `404` 原样伪装成 stdio JSON-RPC 错误。当前
+portal-mcp 工具契约也不生成正数 `404` 的 JSON-RPC tool error。不能再笼统描述为“只要换成 stdio，
+两条路径都结构上不可达”。
 
 ### 2. CLI 已有一次重试，说明现场是「连续两次失败」
 
@@ -55,16 +64,21 @@ catch (P) { if (P instanceof bPA && M < D) { EA(A.name, `Retrying tool ... after
 
 `D = 1`：第一次 session expired 会清连接缓存（`zE`）并重连重试一次。用户能看到该错误，意味着**重试后再次命中同一路径**。而 `zE` → `cleanup()` → `client.close()` → `transport.close()` 会 abort 该 transport 上**全部在途请求**，被 abort 的兄弟请求随即以 `-32000 Connection closed` 落入同一分支、再次 `zE`——并行工具调用下会互相踢掉对方刚建好的连接，形成级联。这解释了「对话越到后面越容易出现」。
 
-### 3. HTTP transport 上每个 POST 被硬性 60s abort
+### 3. HTTP transport 上每个 POST 默认 60s abort
 
 ```js
-function IPA(A){ return async (q, K) => {
-  if ((K?.method ?? "GET").toUpperCase() === "GET") return A(q, K);
-  let z = AbortSignal.timeout(jn7); ... } }
-var jn7 = 60000;
+function g0s(config) { ... return config?.timeout ?? Z0d; }
+function Azr(fetch, config) {
+  let timeout = g0s(config);
+  ... setTimeout(() => controller.abort(), timeout);
+}
+var Z0d = 60000;
 ```
 
-`type === "http"` 分支构造 transport 时用的正是 `fetch: IPA(kK1())`，其调试日志直接打印 `timeoutMs: jn7`。而 MCP 工具级超时 `MCP_TOOL_TIMEOUT` 默认 `E_z = 1e8` ms（约 27.7 小时，等于不限），**唯一的单次硬上限就是这 60s**。
+`type === "http"` 分支构造 transport 时会用 `Azr` 包装 fetch，未配置时取 `Z0d = 60000`。
+这条 60s 是 HTTP POST 的默认上限，但不是整条 MCP 调用链的唯一上限：
+生产基线 CLI `2.1.205` 还存在默认 5 分钟的 MCP tool idle timeout。后者大于 portal 工具当前
+120s 的契约上限，不影响本次故障修复，但必须保留在超时链说明中。
 
 `portal_query_readonly` 的 `timeout_seconds` 上限是 120s，即工具契约允许的时长本身就能越过这条 60s 线。这条 60s 是阶段一设计中被划到范围外的「工具结果被中断/置空」问题的真实来源，且与 session expired 同源于 HTTP transport。
 
@@ -80,7 +94,7 @@ var jn7 = 60000;
 
 不在本次范围：
 
-- `portal-mcp` 服务端逻辑、工具契约、部署编排（compose / `.env.example` 均不变，keepalive 与无状态化保持原样）。
+- `portal-mcp` 服务端逻辑、工具契约、compose 编排（keepalive 与无状态化保持原样）。
 - dataagent-backend 的「外层重跑整个 turn」兜底（阶段二已论证会扩散到 stream 持久化/前端渲染/副作用判断，风险不成比例）。
 - 前端、权限门、技能链路。
 
@@ -96,15 +110,19 @@ Claude CLI ──stdio(JSON-RPC over pipe)──> portal_mcp_stdio_bridge.py ─
 
 ### 为什么这层 wrapper 是必要的
 
-AGENTS.md 要求「除非有已验证的运行时限制，否则不加额外 wrapper 层」。此处限制已在上文逐条查证：`session expired` 的两条抛出路径与 60s 单请求 abort **都以 `type === "http"` 为前置条件**，且都在 CLI 内部、不可配置、不可修改。换 transport 是我们边界内唯一能从结构上消除该类错误的做法。
+AGENTS.md 要求「除非有已验证的运行时限制，否则不加额外 wrapper 层」。此处限制需在仓库锁定的
+CLI `2.1.205` 上查证：60s POST abort 与 `Connection closed` session-recovery 路径依赖 HTTP
+transport；通用 stale-session matcher 则会识别任意 transport 传入的 `404`/特定 `400`。较新
+CLI 可配置 HTTP request timeout 只能处理 60s 上限，不能消除 session-recovery 分支。本方案因此
+必须同时换成 stdio，并把桥的 HTTP 失败归一化为 `-32603`。
 
 ### 换成 stdio 后各成因的归宿
 
 | 成因 | HTTP transport | stdio + 桥 |
 | --- | --- | --- |
-| 404 + `-32001`（路径 M） | 抛 session expired | 结构上不可达（无 HTTP 响应码进入 CLI） |
+| HTTP 404 / session 400 | 抛 session expired | 桥归一化成 `-32603`，不把 HTTP 状态伪装成 JSON-RPC 404/400 |
 | `-32000 Connection closed`（路径 P） | 抛 session expired | 分支显式要求 `http`/`claudeai-proxy`，不可达 |
-| 单请求 60s 硬 abort | 工具结果被置空 | `IPA` 只包 HTTP/SSE fetch，不存在 |
+| 单请求默认 60s abort | 工具结果被置空 | CLI 的 timeout fetch wrapper 只包 HTTP/SSE，不存在 |
 | uvicorn 空闲回收连接 | 依赖 keepalive 调参 | 桥禁用连接池复用，每次工具调用新连接 |
 | portal-mcp 重启 / OOM | 整个 session 失效 | 单次调用返回工具级错误，模型可重试，run 不死 |
 | 并行工具调用级联 abort | 互相踢连接 | 每个请求独立 HTTP 连接，互不影响 |
@@ -113,12 +131,15 @@ AGENTS.md 要求「除非有已验证的运行时限制，否则不加额外 wra
 
 - 输入：stdin 上的行分隔 JSON-RPC 消息（MCP stdio 标准帧）。
 - 每条消息 POST 到 `PORTAL_MCP_BRIDGE_URL`，带上 `PORTAL_MCP_BRIDGE_HEADERS`（前门 token、`X-Agent-Data-Scope`）。
+- `initialize` 请求不带协议版本头；桥从成功的 `InitializeResult.protocolVersion` 保存协商结果，
+  并在后续 HTTP POST 上发送 `MCP-Protocol-Version`。这保证无状态服务端不会把新协议会话静默
+  回退成 `2025-03-26`。
 - 响应 `application/json` 直接回写；`text/event-stream` 抽取 `data:` 负载回写（Streamable HTTP 规范允许两种，服务端当前固定 JSON）。
 - 通知（无 `id`）POST 后服务端返回 202 空体，不回写任何内容。
 - 并发：每条消息一个 task，stdout 写入加锁串行化；JSON-RPC 靠 `id` 匹配，乱序回复合法。
 - 连接池：`max_keepalive_connections=0`，每次请求新建连接。对应 `encode/httpx#2056` 对「连接池僵尸连接」的标准结论，也让服务端 keepalive 取值不再参与正确性。
 - 重试：**仅** `ConnectError`/`ConnectTimeout` 重试（请求尚未送达，写工具重试也安全），最多 2 次、退避 0.2s/0.5s。`ReadTimeout`、`RemoteProtocolError` 等「可能已执行」的错误不重试。
-- 失败映射：任何转发失败对有 `id` 的请求回 JSON-RPC `-32603`，即**工具级错误**，模型能看到、能改写重试，run 不中断。刻意不使用 `-32000` / `Connection closed` 文案。
+- 失败映射：任何转发失败对有 `id` 的请求回 JSON-RPC `-32603`，即**工具级错误**，模型能看到、能改写重试，run 不中断。刻意不使用正数 HTTP `400`/`404`，也不使用 `-32000` / `Connection closed` 文案。
 - 日志一律走 stderr（stdout 是协议通道）；CLI 会 `stderr: "pipe"` 收集并写入 MCP 日志。
 
 ### 无状态假设
@@ -148,21 +169,28 @@ AGENTS.md 要求「除非有已验证的运行时限制，否则不加额外 wra
 按智能问数超时规则，把这一跳放回整条链核对：
 
 - 后端 run 总超时：交互 360s / 后台 1800s；idle 90s / 300s。
-- CLI 工具级超时：`MCP_TOOL_TIMEOUT` 未设置 ⇒ `1e8` ms，等于不限。
-- 桥单次 HTTP 读超时：**600s**（新增的唯一硬上限）。> portal-mcp → Java 后端 30s，> `portal_query_readonly` 契约上限 120s，> 交互 run 360s；被后台 1800s 覆盖。
+- CLI `2.1.205` MCP tool idle timeout：默认 5 分钟；大于 portal 工具当前 120s 契约上限。
+- 桥单次 HTTP 读超时：**600s**。> portal-mcp → Java 后端 30s，> `portal_query_readonly` 契约上限 120s，> 交互 run 360s；被后台 1800s 覆盖。
 - portal-mcp keepalive：600s，保留但不再参与正确性（桥不复用连接）。
 - CLI ↔ 桥为同容器内管道，反向代理与本跳无关。
 
-净效果：**移除**了原本 60s 的隐式单请求上限，代之以一条显式、可配置、与链上其它值一致的 600s。
+净效果：移除 HTTP transport 原本 60s 的隐式单请求上限，桥这一跳改为显式、可配置的 600s；
+CLI 自身的 5 分钟 idle timeout 与后端总 run timeout 仍保留，不能把桥的读超时描述为整条链的
+唯一硬上限。
 
 ## 风险与回退
 
 - 风险：每次 run 多一个短生命周期 Python 进程（随 CLI 退出而退出）。桥是纯转发，无状态、无磁盘写入。
 - 风险：stdio 帧要求单行 JSON。大结果（`portal_query_readonly` 上限 10000 行）走管道，CLI 对超大工具结果本就有落盘 offload 机制，且不经过 SDK 控制通道（`max_buffer_size` 不受影响）。
 - 风险：沙箱模式下 CLI 在子容器内运行。`Dockerfile.runner` 同样整目录 `COPY dataagent/dataagent-backend`，桥脚本路径与解释器路径在两个镜像中一致（`/opt/dataagent-backend/core/...`、`python:3.11-slim`）。
-- 回退：设 `DATAAGENT_PORTAL_MCP_TRANSPORT=http` 重启 `dataagent-backend` 即可，无需重建镜像；`http` 分支代码原样保留。
+- 回退：设 `DATAAGENT_PORTAL_MCP_TRANSPORT=http` 后重新创建 `dataagent-backend` 和
+  `dataagent-sandbox-runner`。sandbox 模式在 runner/child 内构造 MCP 配置，只重启 backend 不会
+  更新 runner 或已预热 child 的环境；runner 重建时会清理并按新环境重建 warm children。无需重建
+  镜像，`http` 分支代码原样保留。
 
 ## 参考
 
-- 本机 `@anthropic-ai/claude-code` 2.1.42 `cli.js`：`bPA`/`McpSessionExpiredError`、`Xn7`、`IPA`/`jn7=60000`、`Fs`/`E_z=1e8`、`gR` 的 transport 分支。
+- `claude-agent-sdk==0.2.114` 自带 Claude CLI `2.1.205`（生产运行时基线）。
+- 本机 `@anthropic-ai/claude-code` 2.1.42 `cli.js`：初始取证样本，仅作为历史对照，不用于生产
+  runtime 结论。
 - `anthropics/claude-code#27142`、`openai/codex#13969`、`danny-avila/LibreChat#11868`、`Doist/todoist-ai#304`、`encode/httpx#2056`、modelcontextprotocol.io — Transports。

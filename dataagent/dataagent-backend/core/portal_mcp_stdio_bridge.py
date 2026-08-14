@@ -4,11 +4,11 @@
 Claude CLI 以 stdio 子进程方式启动本脚本，本脚本把收到的 JSON-RPC 帧原样 POST 到
 ``portal-mcp``，再把响应写回 stdout。
 
-为什么需要它：CLI 的 ``McpSessionExpiredError``（`MCP server "portal" session expired`）
-两条抛出路径都以 ``config.type === "http"`` 为前置条件——一条要求 HTTP ``404`` +
-``-32001``，另一条显式判断 ``K.type === "http" || "claudeai-proxy"``；同时 CLI 只给
-HTTP/SSE transport 套了 60s 的单请求 ``AbortSignal.timeout``。这些都在 CLI 内部、
-不可配置。把 transport 换成 stdio 后，两条路径在结构上不可达，60s 硬上限也不存在。
+为什么需要它：生产基线 CLI 2.1.205 会把 HTTP ``404`` / 特定 session ``400`` 识别成
+``McpSessionExpiredError``，并在 HTTP/claudeai-proxy transport 上把 ``-32000 Connection
+closed`` 识别成同类错误；HTTP POST 还受 60s 默认超时约束。本桥让 CLI 使用 stdio，并把
+远端 HTTP 失败归一化为 JSON-RPC ``-32603``，从而既不把 HTTP 404/400 泄漏成 stale-session
+信号，也不进入 HTTP-only 的 connection-closed 与 60s fetch 路径。
 详见 docs/design/2026-08-14-portal-mcp-stdio-bridge-design.md。
 
 本桥是协议无关的转发器：不认识任何 portal 工具，也不复制任何工具 schema，工具契约仍然
@@ -33,8 +33,8 @@ import httpx
 
 LOG_PREFIX = "portal-mcp-bridge"
 # 转发失败一律回 JSON-RPC 内部错误：CLI 会把它渲染成工具级错误交给模型，模型可以改写
-# 重试，整个 run 不会中断。刻意不复用 -32000/"Connection closed"——那正是 CLI 判定
-# session expired 的特征组合。
+# 重试，整个 run 不会中断。刻意不复用 HTTP 404/特定 session 400，也不复用
+# -32000/"Connection closed"——这些都会触发 CLI 的 stale-session 判定。
 INTERNAL_ERROR_CODE = -32603
 # 只有「请求尚未送达服务端」的连接类错误才重试，因此对写工具重试同样安全。
 CONNECT_RETRY_BACKOFF_SECONDS = (0.2, 0.5)
@@ -42,6 +42,7 @@ DEFAULT_TIMEOUT_SECONDS = 600.0
 CONNECT_TIMEOUT_SECONDS = 10.0
 # 服务端异常体只用于诊断，截断后放进 error.message，避免把整页 HTML 灌进模型上下文。
 ERROR_BODY_PREVIEW_CHARS = 500
+MCP_PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version"
 
 
 def _log(message: str) -> None:
@@ -130,6 +131,7 @@ class PortalMcpBridge:
         }
         self._stdout_lock = asyncio.Lock()
         self._session_header_warned = False
+        self._protocol_version: str | None = None
 
     async def _write(self, payload: Any) -> None:
         line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
@@ -141,11 +143,35 @@ class PortalMcpBridge:
         sys.stdout.write(line)
         sys.stdout.flush()
 
+    def _request_headers(self, message: Any) -> dict[str, str]:
+        headers = dict(self._headers)
+        method = str(message.get("method") or "") if isinstance(message, dict) else ""
+        # The protocol-version header is defined for requests after negotiation.
+        # A repeated initialize must start clean instead of carrying a stale version.
+        if self._protocol_version and method != "initialize":
+            headers[MCP_PROTOCOL_VERSION_HEADER] = self._protocol_version
+        return headers
+
+    def _capture_protocol_version(self, method: str, payloads: list[Any]) -> None:
+        if method != "initialize":
+            return
+        for payload in payloads:
+            if not isinstance(payload, dict):
+                continue
+            result = payload.get("result")
+            if not isinstance(result, dict):
+                continue
+            value = result.get("protocolVersion")
+            if isinstance(value, str) and value.strip():
+                self._protocol_version = value.strip()
+                return
+
     async def _post(self, message: Any) -> httpx.Response:
+        headers = self._request_headers(message)
         attempts = len(CONNECT_RETRY_BACKOFF_SECONDS) + 1
         for attempt in range(attempts):
             try:
-                return await self._client.post(self._url, headers=self._headers, json=message)
+                return await self._client.post(self._url, headers=headers, json=message)
             except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                 if attempt == attempts - 1:
                     raise
@@ -157,6 +183,10 @@ class PortalMcpBridge:
     async def handle_message(self, message: Any) -> None:
         message_id = message.get("id") if isinstance(message, dict) else None
         method = str(message.get("method") or "") if isinstance(message, dict) else ""
+        if method == "initialize":
+            # A repeated negotiation must not leave the previous version active when
+            # the new initialize fails or returns an invalid result.
+            self._protocol_version = None
         try:
             response = await self._post(message)
         except httpx.HTTPError as exc:
@@ -190,6 +220,7 @@ class PortalMcpBridge:
                 await self._write(_error_response(message_id, f"portal-mcp 响应体不是合法 JSON: {exc}"))
             return
 
+        self._capture_protocol_version(method, payloads)
         for payload in payloads:
             await self._write(payload)
 

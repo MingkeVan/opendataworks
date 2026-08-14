@@ -736,8 +736,8 @@ def _build_portal_mcp_servers(
     url = raw_url.rstrip("/") + "/"
     transport = str(getattr(cfg, "dataagent_portal_mcp_transport", "") or "stdio").strip().lower()
     if transport == "http":
-        # Rollback lever only. Claude CLI raises McpSessionExpiredError exclusively on
-        # HTTP-family transports and caps every POST at 60s there; see the stdio branch.
+        # Rollback lever only. HTTP exposes remote 404/session failures directly to the
+        # CLI and caps every POST at 60s; see the stdio branch.
         return {
             PORTAL_MCP_SERVER_NAME: {
                 "type": "http",
@@ -746,10 +746,11 @@ def _build_portal_mcp_servers(
             }
         }
 
-    # Default: reach portal-mcp through a stdio JSON-RPC bridge. Both CLI paths that
-    # surface `MCP server "portal" session expired` require config.type === "http"
-    # (404 + -32001, or -32000 "Connection closed"), and the CLI's 60s per-request
-    # AbortSignal only wraps HTTP/SSE fetches. Over stdio none of that is reachable.
+    # Default: reach portal-mcp through a stdio JSON-RPC bridge. The CLI's
+    # -32000/"Connection closed" recovery path and 60s per-request AbortSignal are
+    # HTTP-only. Its generic stale-session matcher also recognizes 404/session 400
+    # regardless of transport, so the bridge deliberately maps remote HTTP failures to
+    # -32603 before they reach the stdio client.
     # The bridge forwards frames verbatim, so the tool contract still lives only in
     # portal-mcp. See docs/design/2026-08-14-portal-mcp-stdio-bridge-design.md.
     timeout_seconds = int(getattr(cfg, "dataagent_portal_mcp_request_timeout_seconds", 0) or 600)

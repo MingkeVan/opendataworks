@@ -98,6 +98,88 @@ def test_sends_frontdoor_headers_and_protocol_accept(stdout: StdoutCapture):
     assert seen[0]["x-agent-data-scope"] == "encoded-scope"
     assert seen[0]["content-type"] == "application/json"
     assert seen[0]["accept"] == "application/json, text/event-stream"
+    assert bridge_module.MCP_PROTOCOL_VERSION_HEADER.lower() not in seen[0]
+
+
+def test_forwards_negotiated_protocol_version_after_initialize(stdout: StdoutCapture):
+    seen: list[tuple[str, httpx.Headers]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        message = json.loads(request.content)
+        method = str(message.get("method") or "")
+        seen.append((method, request.headers))
+        if method == "initialize":
+            return httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": message["id"],
+                    "result": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "serverInfo": {"name": "portal-mcp", "version": "1.0.0"},
+                    },
+                },
+            )
+        if method == "notifications/initialized":
+            return httpx.Response(202, content=b"")
+        return httpx.Response(
+            200,
+            json={"jsonrpc": "2.0", "id": message["id"], "result": {"tools": []}},
+        )
+
+    async def scenario():
+        bridge = _build_bridge(handler)
+        await bridge.handle_message({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+        await bridge.handle_message({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        await bridge.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+
+    _run(scenario())
+
+    protocol_header = bridge_module.MCP_PROTOCOL_VERSION_HEADER.lower()
+    assert protocol_header not in seen[0][1]
+    assert seen[1][1][protocol_header] == "2025-06-18"
+    assert seen[2][1][protocol_header] == "2025-06-18"
+
+
+def test_failed_reinitialize_clears_previous_protocol_version(stdout: StdoutCapture):
+    seen: list[tuple[str, httpx.Headers]] = []
+    initialize_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal initialize_count
+        message = json.loads(request.content)
+        method = str(message.get("method") or "")
+        seen.append((method, request.headers))
+        if method == "initialize":
+            initialize_count += 1
+            if initialize_count == 1:
+                return httpx.Response(
+                    200,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": message["id"],
+                        "result": {"protocolVersion": "2025-06-18"},
+                    },
+                )
+            return httpx.Response(503, text="unavailable")
+        return httpx.Response(
+            200,
+            json={"jsonrpc": "2.0", "id": message["id"], "result": {"tools": []}},
+        )
+
+    async def scenario():
+        bridge = _build_bridge(handler)
+        await bridge.handle_message({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+        await bridge.handle_message({"jsonrpc": "2.0", "id": 2, "method": "initialize"})
+        await bridge.handle_message({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
+
+    _run(scenario())
+
+    protocol_header = bridge_module.MCP_PROTOCOL_VERSION_HEADER.lower()
+    assert protocol_header not in seen[0][1]
+    assert protocol_header not in seen[1][1]
+    assert protocol_header not in seen[2][1]
 
 
 def test_notification_produces_no_stdout_frame(stdout: StdoutCapture):
@@ -128,9 +210,13 @@ def test_parses_sse_response_body(stdout: StdoutCapture):
     assert stdout.messages == [{"jsonrpc": "2.0", "id": 3, "result": {"ok": True}}]
 
 
-def test_http_error_becomes_tool_level_jsonrpc_error(stdout: StdoutCapture):
+@pytest.mark.parametrize("status_code", [400, 401, 404, 503])
+def test_http_error_becomes_tool_level_jsonrpc_error(stdout: StdoutCapture, status_code: int):
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(401, json={"success": False, "message": "portal mcp token 无效"})
+        return httpx.Response(
+            status_code,
+            json={"success": False, "message": "portal mcp 转发失败"},
+        )
 
     async def scenario():
         bridge = _build_bridge(handler)
@@ -140,10 +226,10 @@ def test_http_error_becomes_tool_level_jsonrpc_error(stdout: StdoutCapture):
 
     error = stdout.messages[0]["error"]
     assert error["code"] == bridge_module.INTERNAL_ERROR_CODE
-    assert "401" in error["message"]
-    # -32000 + "Connection closed" is exactly what the CLI reads as a dead session;
-    # a forwarding failure must never look like that.
-    assert error["code"] != -32000
+    assert str(status_code) in error["message"]
+    # Positive 404/session 400 and -32000 + "Connection closed" are all stale-session
+    # signals in CLI 2.1.205; a forwarding failure must never reuse them.
+    assert error["code"] not in {400, 404, -32000}
     assert "Connection closed" not in error["message"]
 
 
@@ -257,10 +343,21 @@ def test_end_to_end_against_real_portal_mcp_app(stdout: StdoutCapture, monkeypat
     from portal_mcp.app import create_app
 
     app = create_app()
+    seen_headers: list[dict[str, str]] = []
+
+    async def capture_headers(scope, receive, send):
+        if scope["type"] == "http":
+            seen_headers.append(
+                {
+                    key.decode("latin-1").lower(): value.decode("latin-1")
+                    for key, value in scope.get("headers") or []
+                }
+            )
+        await app(scope, receive, send)
 
     async def scenario():
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://portal-mcp:8801"
+            transport=httpx.ASGITransport(app=capture_headers), base_url="http://portal-mcp:8801"
         ) as client:
             # The Starlette lifespan owns the MCP session manager; run it for the call.
             async with app.router.lifespan_context(app):
@@ -284,5 +381,10 @@ def test_end_to_end_against_real_portal_mcp_app(stdout: StdoutCapture, monkeypat
 
     messages = stdout.messages
     assert messages[0]["id"] == 1 and "result" in messages[0]
+    negotiated_version = messages[0]["result"]["protocolVersion"]
+    protocol_header = bridge_module.MCP_PROTOCOL_VERSION_HEADER.lower()
+    assert protocol_header not in seen_headers[0]
+    assert seen_headers[1][protocol_header] == negotiated_version
+    assert seen_headers[2][protocol_header] == negotiated_version
     tool_names = {tool["name"] for tool in messages[-1]["result"]["tools"]}
     assert "portal_query_readonly" in tool_names

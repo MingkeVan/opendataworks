@@ -7,12 +7,16 @@
 ## 受影响栈
 
 - DataAgent 后端（`dataagent/dataagent-backend`：新增桥脚本、Settings、MCP server 配置构造）
-- 部署：**不改**。compose、`.env.example`、`Dockerfile`、`Dockerfile.runner` 均无需变更（后端目录整体 `COPY`，桥脚本自动进入两个镜像）
+- 部署：compose、`Dockerfile`、`Dockerfile.runner` 无需改动（后端目录整体 `COPY`，桥脚本自动进入
+  两个镜像）；更新 `deploy/.env.example`，公开 transport/timeout 配置并写明 sandbox 回退需要重建
+  backend 与 runner。
 
 ## 任务
 
 1. `dataagent/dataagent-backend/core/portal_mcp_stdio_bridge.py`（新增）
    - stdin 行分隔 JSON-RPC → POST 到 `PORTAL_MCP_BRIDGE_URL` → 响应写回 stdout。
+   - 从成功的 `InitializeResult.protocolVersion` 保存协商版本，后续 POST 注入
+     `MCP-Protocol-Version`；`initialize` 本身不带该头。
    - `application/json` 与 `text/event-stream` 两种合法响应体都能解析；无 `id` 的通知不回写。
    - `httpx.AsyncClient(limits=Limits(max_keepalive_connections=0))`，每次请求新连接。
    - 仅对 `ConnectError`/`ConnectTimeout` 重试（最多 2 次，退避 0.2s/0.5s）；其余错误直接映射为 JSON-RPC `-32603`。
@@ -24,11 +28,15 @@
    - `_build_portal_mcp_servers` 按 transport 返回 stdio 配置（`command`/`args`/`env`）或原 http 配置。
    - 保留 URL 归一化（`/mcp` → `/mcp/`）与 `X-Agent-Data-Scope` 注入，两种 transport 一致。
 4. 测试
-   - `tests/test_portal_mcp_stdio_bridge.py`（新增）：请求转发与响应回写、请求头注入、通知不回写、SSE 响应解析、非 2xx → `-32603`、连接错误重试后成功、不可重试错误只发一次、并发多请求全部有回复。
+   - `tests/test_portal_mcp_stdio_bridge.py`（新增）：请求转发与响应回写、请求头注入、初始化协议版本
+     提取及后续请求转发、通知不回写、SSE 响应解析、非 2xx → `-32603`、连接错误重试后成功、
+     不可重试错误只发一次、并发多请求全部有回复。
    - `tests/test_agent_runtime.py`：默认 stdio 配置断言；`transport="http"` 回滚分支断言；URL 归一化断言改到 headers/env 上。
    - `tests/test_task_executor.py`：`mcp_servers` 期望值同步为 stdio 形态。
 5. 文档
    - 本设计/计划；在 `2026-06-24` 设计文档末尾追加指针，说明后续项已落地。
+   - `deploy/.env.example` 增加 `DATAAGENT_PORTAL_MCP_TRANSPORT` 与
+     `DATAAGENT_PORTAL_MCP_REQUEST_TIMEOUT_SECONDS`，回退说明覆盖 runner/warm child。
 
 ## 验证（已执行）
 
@@ -44,8 +52,16 @@
    - 服务端进程被杀 → 返回 JSON-RPC `-32603` 工具级错误，消息中不含 `Connection closed`
    - 服务端重启后**同一个桥进程**继续正常服务（阶段二的 server 重启 / OOM 故障模式）
    - 关闭 stdin → 退出码 0
-5. 真实 Claude CLI（`@anthropic-ai/claude-code` 2.1.42，即抛该错的同一版本）以 stdio 方式挂载本桥：
-   `claude mcp list` 与 `claude mcp get portal` 均报告 `Status: ✓ Connected`。
+5. 初始验证使用宿主机 `@anthropic-ai/claude-code` 2.1.42；该结果只作为历史故障样本，不能替代
+   生产运行时验证。
+6. 修复 review 后，使用仓库锁定的 `claude-agent-sdk==0.2.114` 自带 Claude CLI `2.1.205`：
+   - 二进制核对确认 HTTP POST 默认 timeout 为 60000ms，`Connection closed` 分支受 transport
+     类型约束；通用 `404`/session `400` matcher 不受 transport 限制，因此桥必须归一化 HTTP
+     失败为 `-32603`。
+   - 以 stdio 方式挂载本桥，对真实 uvicorn portal-mcp 运行 `claude mcp list/get`，均报告
+     `Status: ✔ Connected`。
+   - `tests/test_portal_mcp_stdio_bridge.py` 的真实 portal-mcp ASGI 流程断言 initialize 不带版本头，
+     后续 `notifications/initialized` 与 `tools/list` 均发送协商得到的 `MCP-Protocol-Version`。
 
 ## 未覆盖
 
@@ -62,5 +78,7 @@
 
 ## 回退
 
-- 一级（无需重建镜像）：`DATAAGENT_PORTAL_MCP_TRANSPORT=http`，重启 `dataagent-backend`。
+- 一级（无需重建镜像）：`DATAAGENT_PORTAL_MCP_TRANSPORT=http`，用新环境重新创建
+  `dataagent-backend` 与 `dataagent-sandbox-runner`。runner 重建会清理旧 warm children；只重启
+  backend 不足以改变 sandbox 执行路径。
 - 二级：回滚本次提交。`portal-mcp` 侧 keepalive 与无状态化不受影响，无需同步回滚。
