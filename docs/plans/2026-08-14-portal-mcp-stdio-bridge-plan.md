@@ -17,21 +17,27 @@
    - stdin 行分隔 JSON-RPC → POST 到 `PORTAL_MCP_BRIDGE_URL` → 响应写回 stdout。
    - 从成功的 `InitializeResult.protocolVersion` 保存协商版本，后续 POST 注入
      `MCP-Protocol-Version`；`initialize` 本身不带该头。
-   - `application/json` 与 `text/event-stream` 两种合法响应体都能解析；无 `id` 的通知不回写。
+   - `application/json` 与 `text/event-stream` 两种合法响应体都能解析；SSE 同一 event 的多行
+     `data:` 按规范拼接；无 `id` 的通知不回写。
    - `httpx.AsyncClient(limits=Limits(max_keepalive_connections=0))`，每次请求新连接。
    - 仅对 `ConnectError`/`ConnectTimeout` 重试（最多 2 次，退避 0.2s/0.5s）；其余错误直接映射为 JSON-RPC `-32603`。
-   - 并发处理 + stdout 写锁；全部日志走 stderr。
+   - 对所有带 `id` 的请求保证响应：HTTP 200 空体和非 HTTP 内部异常也返回 `-32603`。
+   - stdin 单帧解码/读取错误不结束进程；并发处理 + stdout 写锁；task 逃逸异常和其它日志全部走 stderr。
+   - `PORTAL_MCP_BRIDGE_HEADERS` 缺失或解析失败时启动失败，禁止无认证信息运行。
 2. `dataagent/dataagent-backend/config.py`
    - 新增 `dataagent_portal_mcp_transport: str = "stdio"`（回滚开关，另一取值 `http`）。
    - 新增 `dataagent_portal_mcp_request_timeout_seconds: int = 600`。
 3. `dataagent/dataagent-backend/core/agent_runtime.py`
    - `_build_portal_mcp_servers` 按 transport 返回 stdio 配置（`command`/`args`/`env`）或原 http 配置。
+   - transport 未知取值直接拒绝，避免回退拼写错误时 fail-open 到 stdio。
    - 保留 URL 归一化（`/mcp` → `/mcp/`）与 `X-Agent-Data-Scope` 注入，两种 transport 一致。
 4. 测试
    - `tests/test_portal_mcp_stdio_bridge.py`（新增）：请求转发与响应回写、请求头注入、初始化协议版本
      提取及后续请求转发、通知不回写、SSE 响应解析、非 2xx → `-32603`、连接错误重试后成功、
-     不可重试错误只发一次、并发多请求全部有回复。
-   - `tests/test_agent_runtime.py`：默认 stdio 配置断言；`transport="http"` 回滚分支断言；URL 归一化断言改到 headers/env 上。
+     不可重试错误只发一次、200 空体和任意内部异常回错误、stdin 非法字节不中断、真实 stdout
+     写路径、并发多请求全部有回复；测试创建的 `AsyncClient` 全部显式关闭。
+   - `tests/test_agent_runtime.py`：默认 stdio 配置断言；`transport="http"` 回滚分支断言并覆盖
+     `X-Agent-Data-Scope`；未知 transport 拒绝；URL 归一化断言改到 headers/env 上。
    - `tests/test_task_executor.py`：`mcp_servers` 期望值同步为 stdio 形态。
 5. 文档
    - 本设计/计划；在 `2026-06-24` 设计文档末尾追加指针，说明后续项已落地。
@@ -62,6 +68,15 @@
      `Status: ✔ Connected`。
    - `tests/test_portal_mcp_stdio_bridge.py` 的真实 portal-mcp ASGI 流程断言 initialize 不带版本头，
      后续 `notifications/initialized` 与 `tools/list` 均发送协商得到的 `MCP-Protocol-Version`。
+7. 第二轮 review 加固验证：
+   - `pytest tests/test_portal_mcp_stdio_bridge.py tests/test_agent_runtime.py tests/test_task_executor.py -q`：
+     **128 passed**；其中覆盖非 HTTP 异常、响应处理异常、200 空体、响应 id 不匹配、跨行 SSE、
+     stdin 解码/OSError、后台 task 异常可观测、真实 stdout、header fail-fast、未知 transport 与
+     HTTP 回退 scope。
+   - `pytest dataagent/portal-mcp/tests -q`：**30 passed**。
+   - 真实桥子进程 + 本地 HTTP server 探针：200 空体返回 `-32603`；跨行 SSE 正常返回；二进制
+     stdin 写入非法 UTF-8 帧后下一请求仍成功；关闭 stdin 后退出码 0。
+   - `py_compile` 与 `git diff --check` 通过；测试创建的 `AsyncClient` 均由 async context manager 关闭。
 
 ## 未覆盖
 

@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
@@ -222,13 +224,38 @@ def test_build_portal_mcp_servers_http_transport_is_the_rollback_lever():
         dataagent_portal_mcp_transport="http",
     )
 
-    assert agent_runtime._build_portal_mcp_servers(cfg) == {
+    assert agent_runtime._build_portal_mcp_servers(
+        cfg,
+        agent_snapshot={
+            "data_scope": {
+                "allowed_scopes": [
+                    {"cluster_id": 3, "source_type": "DORIS", "database": "ads_user"}
+                ]
+            }
+        },
+    ) == {
         "portal": {
             "type": "http",
             "url": "http://portal-mcp:8801/mcp/",
-            "headers": {"X-Portal-MCP-Token": "portal-token"},
+            "headers": {
+                "X-Agent-Data-Scope": "eyJhbGxvd2VkX3Njb3BlcyI6W3siY2x1c3Rlcl9pZCI6MywiZGF0YWJhc2UiOiJhZHNfdXNlciIsInNvdXJjZV90eXBlIjoiRE9SSVMifV19",
+                "X-Portal-MCP-Token": "portal-token",
+            },
         }
     }
+
+
+def test_build_portal_mcp_servers_rejects_unknown_transport():
+    cfg = SimpleNamespace(
+        dataagent_portal_mcp_enabled=True,
+        dataagent_portal_mcp_base_url="http://portal-mcp:8801/mcp/",
+        dataagent_portal_mcp_token="portal-token",
+        dataagent_portal_mcp_token_header_name="X-Portal-MCP-Token",
+        dataagent_portal_mcp_transport="htp",
+    )
+
+    with pytest.raises(ValueError, match="DATAAGENT_PORTAL_MCP_TRANSPORT"):
+        agent_runtime._build_portal_mcp_servers(cfg)
 
 
 def test_build_system_prompt_includes_authorized_data_scope():

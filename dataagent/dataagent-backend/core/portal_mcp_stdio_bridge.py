@@ -54,15 +54,13 @@ def _log(message: str) -> None:
 def _load_headers(raw: str) -> dict[str, str]:
     raw = str(raw or "").strip()
     if not raw:
-        return {}
+        raise ValueError("缺少 PORTAL_MCP_BRIDGE_HEADERS")
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:
-        _log(f"PORTAL_MCP_BRIDGE_HEADERS 不是合法 JSON，已忽略: {exc}")
-        return {}
-    if not isinstance(parsed, dict):
-        _log("PORTAL_MCP_BRIDGE_HEADERS 不是 JSON 对象，已忽略")
-        return {}
+        raise ValueError(f"PORTAL_MCP_BRIDGE_HEADERS 不是合法 JSON: {exc}") from exc
+    if not isinstance(parsed, dict) or not parsed:
+        raise ValueError("PORTAL_MCP_BRIDGE_HEADERS 必须是非空 JSON 对象")
     return {str(key): str(value) for key, value in parsed.items()}
 
 
@@ -89,16 +87,29 @@ def _parse_sse_payloads(body: str) -> list[Any]:
     ``json_response=True``，此分支是为了让桥对规范内的另一种合法响应也成立。
     """
     payloads: list[Any] = []
-    for line in body.splitlines():
-        if not line.startswith("data:"):
-            continue
-        chunk = line[len("data:") :].strip()
-        if not chunk:
-            continue
+    data_lines: list[str] = []
+
+    def flush_event() -> None:
+        if not data_lines:
+            return
+        chunk = "\n".join(data_lines)
         try:
             payloads.append(json.loads(chunk))
         except json.JSONDecodeError as exc:
             _log(f"SSE data 段不是合法 JSON，已跳过: {exc}")
+
+    for line in body.splitlines():
+        if not line:
+            flush_event()
+            data_lines.clear()
+            continue
+        if not line.startswith("data:"):
+            continue
+        value = line[len("data:") :]
+        if value.startswith(" "):
+            value = value[1:]
+        data_lines.append(value)
+    flush_event()
     return payloads
 
 
@@ -137,6 +148,12 @@ class PortalMcpBridge:
         line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
         async with self._stdout_lock:
             await asyncio.to_thread(self._write_blocking, line)
+
+    async def _write_error(self, message_id: Any, message: str) -> None:
+        try:
+            await self._write(_error_response(message_id, message))
+        except Exception as exc:  # stdout 已不可写时只能记录，不能再递归回复。
+            _log(f"写入错误响应失败: {exc.__class__.__name__}: {exc}")
 
     @staticmethod
     def _write_blocking(line: str) -> None:
@@ -181,6 +198,7 @@ class PortalMcpBridge:
         raise AssertionError("unreachable")
 
     async def handle_message(self, message: Any) -> None:
+        has_id = isinstance(message, dict) and "id" in message
         message_id = message.get("id") if isinstance(message, dict) else None
         method = str(message.get("method") or "") if isinstance(message, dict) else ""
         if method == "initialize":
@@ -191,51 +209,90 @@ class PortalMcpBridge:
             response = await self._post(message)
         except httpx.HTTPError as exc:
             _log(f"转发 {method or '<unknown>'} 失败: {exc.__class__.__name__}: {exc}")
-            if message_id is not None:
-                await self._write(
-                    _error_response(message_id, f"portal-mcp 请求失败: {exc.__class__.__name__}: {exc}")
+            if has_id:
+                await self._write_error(
+                    message_id, f"portal-mcp 请求失败: {exc.__class__.__name__}: {exc}"
                 )
             return
-
-        if not self._session_header_warned and "mcp-session-id" in response.headers:
-            # portal-mcp 固化为 stateless_http=True，正常不会下发该头。出现即说明服务端
-            # 配置漂移，需要人工处理；桥不引入第二条有状态分支来掩盖它。
-            self._session_header_warned = True
-            _log("portal-mcp 返回了 mcp-session-id，服务端可能已不是无状态模式")
-
-        if response.status_code >= 400:
-            preview = response.text[:ERROR_BODY_PREVIEW_CHARS]
-            _log(f"portal-mcp 返回 HTTP {response.status_code}: {preview}")
-            if message_id is not None:
-                await self._write(
-                    _error_response(message_id, f"portal-mcp 返回 HTTP {response.status_code}: {preview}")
+        except Exception as exc:
+            _log(f"转发 {method or '<unknown>'} 失败: {exc.__class__.__name__}: {exc}")
+            if has_id:
+                await self._write_error(
+                    message_id, f"portal-mcp 桥内部错误: {exc.__class__.__name__}: {exc}"
                 )
             return
-
         try:
+            if not self._session_header_warned and "mcp-session-id" in response.headers:
+                # portal-mcp 固化为 stateless_http=True，正常不会下发该头。出现即说明服务端
+                # 配置漂移，需要人工处理；桥不引入第二条有状态分支来掩盖它。
+                self._session_header_warned = True
+                _log("portal-mcp 返回了 mcp-session-id，服务端可能已不是无状态模式")
+
+            if response.status_code >= 400:
+                preview = response.text[:ERROR_BODY_PREVIEW_CHARS]
+                _log(f"portal-mcp 返回 HTTP {response.status_code}: {preview}")
+                if has_id:
+                    await self._write_error(
+                        message_id, f"portal-mcp 返回 HTTP {response.status_code}: {preview}"
+                    )
+                return
+
             payloads = _responses_from_http(response)
+            if has_id and not payloads:
+                await self._write_error(message_id, "portal-mcp 对请求返回了空响应")
+                return
+            if has_id and not any(
+                isinstance(payload, dict)
+                and "id" in payload
+                and payload.get("id") == message_id
+                for payload in payloads
+            ):
+                await self._write_error(message_id, "portal-mcp 未返回对应请求的 JSON-RPC 响应")
+                return
+
+            self._capture_protocol_version(method, payloads)
+            for payload in payloads:
+                await self._write(payload)
         except json.JSONDecodeError as exc:
             _log(f"portal-mcp 响应体不是合法 JSON: {exc}")
-            if message_id is not None:
-                await self._write(_error_response(message_id, f"portal-mcp 响应体不是合法 JSON: {exc}"))
-            return
-
-        self._capture_protocol_version(method, payloads)
-        for payload in payloads:
-            await self._write(payload)
+            if has_id:
+                await self._write_error(message_id, f"portal-mcp 响应体不是合法 JSON: {exc}")
+        except Exception as exc:
+            _log(f"处理 {method or '<unknown>'} 失败: {exc.__class__.__name__}: {exc}")
+            if has_id:
+                await self._write_error(
+                    message_id, f"portal-mcp 桥内部错误: {exc.__class__.__name__}: {exc}"
+                )
 
     async def run(self, stdin: Any) -> None:
         pending: set[asyncio.Task[None]] = set()
+
+        def observe_task(task: asyncio.Task[None]) -> None:
+            pending.discard(task)
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc is not None:
+                _log(f"消息任务异常退出: {exc.__class__.__name__}: {exc}")
+
         while True:
-            line = await asyncio.to_thread(stdin.readline)
+            try:
+                line = await asyncio.to_thread(stdin.readline)
+            except (UnicodeError, OSError) as exc:
+                _log(f"读取 stdin 帧失败，已跳过: {exc.__class__.__name__}: {exc}")
+                continue
             if not line:
                 break
-            text = line.strip()
+            try:
+                text = line.decode("utf-8").strip() if isinstance(line, bytes) else line.strip()
+            except UnicodeError as exc:
+                _log(f"stdin 帧不是合法 UTF-8，已丢弃: {exc}")
+                continue
             if not text:
                 continue
             try:
                 message = json.loads(text)
-            except json.JSONDecodeError as exc:
+            except (json.JSONDecodeError, UnicodeError) as exc:
                 # CLI 不会发出非法帧；真出现时丢弃并记录，回复一个 id 未知的错误只会
                 # 让对端更困惑。
                 _log(f"收到非法 JSON 帧，已丢弃: {exc}")
@@ -243,7 +300,7 @@ class PortalMcpBridge:
             # 每帧一个 task：JSON-RPC 按 id 匹配，允许乱序回复，并行工具调用不必互相等待。
             task = asyncio.create_task(self.handle_message(message))
             pending.add(task)
-            task.add_done_callback(pending.discard)
+            task.add_done_callback(observe_task)
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
 
@@ -252,6 +309,12 @@ async def _main() -> int:
     url = str(os.getenv("PORTAL_MCP_BRIDGE_URL") or "").strip()
     if not url:
         _log("缺少 PORTAL_MCP_BRIDGE_URL，无法启动")
+        return 2
+
+    try:
+        headers = _load_headers(os.getenv("PORTAL_MCP_BRIDGE_HEADERS", ""))
+    except ValueError as exc:
+        _log(f"{exc}，无法启动")
         return 2
 
     timeout = _load_timeout(os.getenv("PORTAL_MCP_BRIDGE_TIMEOUT_SECONDS", ""))
@@ -263,8 +326,10 @@ async def _main() -> int:
         # 换取服务端 keepalive 取值不再参与正确性。
         limits=limits,
     ) as client:
-        bridge = PortalMcpBridge(client, url, _load_headers(os.getenv("PORTAL_MCP_BRIDGE_HEADERS", "")))
-        await bridge.run(sys.stdin)
+        bridge = PortalMcpBridge(client, url, headers)
+        # 从二进制流逐行解码，确保一个非法 UTF-8 帧不会让 TextIOWrapper 预读并丢弃
+        # 后续合法帧。
+        await bridge.run(getattr(sys.stdin, "buffer", sys.stdin))
     return 0
 
 

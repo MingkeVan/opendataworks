@@ -735,6 +735,11 @@ def _build_portal_mcp_servers(
     # Streamable HTTP clients may not follow POST redirects.
     url = raw_url.rstrip("/") + "/"
     transport = str(getattr(cfg, "dataagent_portal_mcp_transport", "") or "stdio").strip().lower()
+    if transport not in {"stdio", "http"}:
+        raise ValueError(
+            "DATAAGENT_PORTAL_MCP_TRANSPORT 仅支持 'stdio' 或 'http'，"
+            f"当前值: {transport!r}"
+        )
     if transport == "http":
         # Rollback lever only. HTTP exposes remote 404/session failures directly to the
         # CLI and caps every POST at 60s; see the stdio branch.

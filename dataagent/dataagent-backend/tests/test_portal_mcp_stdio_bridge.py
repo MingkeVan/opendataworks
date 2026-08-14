@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
@@ -42,9 +43,10 @@ def stdout(monkeypatch) -> StdoutCapture:
     return capture
 
 
-def _build_bridge(handler, *, headers: dict[str, str] | None = None) -> PortalMcpBridge:
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return PortalMcpBridge(client, URL, headers)
+@asynccontextmanager
+async def _build_bridge(handler, *, headers: dict[str, str] | None = None):
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        yield PortalMcpBridge(client, URL, headers)
 
 
 def _run(coro):
@@ -69,8 +71,8 @@ def test_forwards_request_and_writes_json_response(stdout: StdoutCapture):
         )
 
     async def scenario():
-        bridge = _build_bridge(handler)
-        await bridge.handle_message({"jsonrpc": "2.0", "id": 7, "method": "tools/list"})
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 7, "method": "tools/list"})
 
     _run(scenario())
 
@@ -86,11 +88,11 @@ def test_sends_frontdoor_headers_and_protocol_accept(stdout: StdoutCapture):
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {}})
 
     async def scenario():
-        bridge = _build_bridge(
+        async with _build_bridge(
             handler,
             headers={"X-Portal-MCP-Token": "portal-token", "X-Agent-Data-Scope": "encoded-scope"},
-        )
-        await bridge.handle_message({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+        ) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
 
     _run(scenario())
 
@@ -129,10 +131,10 @@ def test_forwards_negotiated_protocol_version_after_initialize(stdout: StdoutCap
         )
 
     async def scenario():
-        bridge = _build_bridge(handler)
-        await bridge.handle_message({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
-        await bridge.handle_message({"jsonrpc": "2.0", "method": "notifications/initialized"})
-        await bridge.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+            await bridge.handle_message({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
 
     _run(scenario())
 
@@ -169,10 +171,10 @@ def test_failed_reinitialize_clears_previous_protocol_version(stdout: StdoutCapt
         )
 
     async def scenario():
-        bridge = _build_bridge(handler)
-        await bridge.handle_message({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
-        await bridge.handle_message({"jsonrpc": "2.0", "id": 2, "method": "initialize"})
-        await bridge.handle_message({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 2, "method": "initialize"})
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
 
     _run(scenario())
 
@@ -187,8 +189,8 @@ def test_notification_produces_no_stdout_frame(stdout: StdoutCapture):
         return httpx.Response(202, content=b"", headers={"content-type": "application/json"})
 
     async def scenario():
-        bridge = _build_bridge(handler)
-        await bridge.handle_message({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
     _run(scenario())
 
@@ -196,18 +198,110 @@ def test_notification_produces_no_stdout_frame(stdout: StdoutCapture):
 
 
 def test_parses_sse_response_body(stdout: StdoutCapture):
-    body = 'event: message\ndata: {"jsonrpc":"2.0","id":3,"result":{"ok":true}}\n\n'
+    body = (
+        "event: message\n"
+        'data: {"jsonrpc":"2.0",\n'
+        'data: "id":3,"result":{"ok":true}}\n\n'
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=body.encode(), headers={"content-type": "text/event-stream"})
 
     async def scenario():
-        bridge = _build_bridge(handler)
-        await bridge.handle_message({"jsonrpc": "2.0", "id": 3, "method": "tools/call"})
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 3, "method": "tools/call"})
 
     _run(scenario())
 
     assert stdout.messages == [{"jsonrpc": "2.0", "id": 3, "result": {"ok": True}}]
+
+
+def test_empty_success_response_becomes_jsonrpc_error(stdout: StdoutCapture):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"", headers={"content-type": "application/json"})
+
+    async def scenario():
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 8, "method": "tools/call"})
+
+    _run(scenario())
+
+    assert stdout.messages == [
+        {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "error": {
+                "code": bridge_module.INTERNAL_ERROR_CODE,
+                "message": "portal-mcp 对请求返回了空响应",
+            },
+        }
+    ]
+
+
+def test_success_without_matching_response_id_becomes_jsonrpc_error(stdout: StdoutCapture):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"jsonrpc": "2.0", "method": "notifications/progress", "params": {}},
+        )
+
+    async def scenario():
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 15, "method": "tools/call"})
+
+    _run(scenario())
+
+    assert len(stdout.messages) == 1
+    assert stdout.messages[0]["id"] == 15
+    assert stdout.messages[0]["error"]["code"] == bridge_module.INTERNAL_ERROR_CODE
+    assert "未返回对应请求" in stdout.messages[0]["error"]["message"]
+
+
+def test_non_http_exception_becomes_jsonrpc_error(stdout: StdoutCapture, monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("handler should not run")
+
+    async def scenario():
+        async with _build_bridge(handler) as bridge:
+            async def fail_post(message):
+                raise RuntimeError("probe failure")
+
+            monkeypatch.setattr(bridge, "_post", fail_post)
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 10, "method": "tools/call"})
+
+    _run(scenario())
+
+    assert len(stdout.messages) == 1
+    assert stdout.messages[0]["id"] == 10
+    assert stdout.messages[0]["error"]["code"] == bridge_module.INTERNAL_ERROR_CODE
+    assert "RuntimeError" in stdout.messages[0]["error"]["message"]
+
+
+def test_response_processing_exception_becomes_jsonrpc_error(stdout: StdoutCapture, monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": 13,
+                "result": {"protocolVersion": "2025-06-18"},
+            },
+        )
+
+    async def scenario():
+        async with _build_bridge(handler) as bridge:
+            def fail_capture(method, payloads):
+                raise RuntimeError("capture probe failure")
+
+            monkeypatch.setattr(bridge, "_capture_protocol_version", fail_capture)
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 13, "method": "initialize"})
+
+    _run(scenario())
+
+    assert len(stdout.messages) == 1
+    assert stdout.messages[0]["id"] == 13
+    assert stdout.messages[0]["error"]["code"] == bridge_module.INTERNAL_ERROR_CODE
+    assert "capture probe failure" in stdout.messages[0]["error"]["message"]
 
 
 @pytest.mark.parametrize("status_code", [400, 401, 404, 503])
@@ -219,8 +313,8 @@ def test_http_error_becomes_tool_level_jsonrpc_error(stdout: StdoutCapture, stat
         )
 
     async def scenario():
-        bridge = _build_bridge(handler)
-        await bridge.handle_message({"jsonrpc": "2.0", "id": 9, "method": "tools/call"})
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 9, "method": "tools/call"})
 
     _run(scenario())
 
@@ -244,8 +338,8 @@ def test_retries_connect_errors_then_succeeds(stdout: StdoutCapture, monkeypatch
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": 4, "result": {"rows": []}})
 
     async def scenario():
-        bridge = _build_bridge(handler)
-        await bridge.handle_message({"jsonrpc": "2.0", "id": 4, "method": "tools/call"})
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 4, "method": "tools/call"})
 
     _run(scenario())
 
@@ -264,8 +358,8 @@ def test_read_timeout_is_not_retried(stdout: StdoutCapture, monkeypatch):
         raise httpx.ReadTimeout("timed out", request=request)
 
     async def scenario():
-        bridge = _build_bridge(handler)
-        await bridge.handle_message({"jsonrpc": "2.0", "id": 5, "method": "tools/call"})
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 5, "method": "tools/call"})
 
     _run(scenario())
 
@@ -282,8 +376,8 @@ def test_exhausted_connect_retries_report_error_once(stdout: StdoutCapture, monk
         raise httpx.ConnectError("connection refused", request=request)
 
     async def scenario():
-        bridge = _build_bridge(handler)
-        await bridge.handle_message({"jsonrpc": "2.0", "id": 6, "method": "tools/call"})
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 6, "method": "tools/call"})
 
     _run(scenario())
 
@@ -305,9 +399,8 @@ def test_run_loop_answers_every_concurrent_request(stdout: StdoutCapture):
     )
 
     async def scenario():
-        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        bridge = PortalMcpBridge(client, URL)
-        await bridge.run(io.StringIO(frames))
+        async with _build_bridge(handler) as bridge:
+            await bridge.run(io.StringIO(frames))
 
     _run(scenario())
 
@@ -319,12 +412,102 @@ def test_run_loop_skips_malformed_frames(stdout: StdoutCapture):
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {}})
 
     async def scenario():
-        bridge = _build_bridge(handler)
-        await bridge.run(io.StringIO('not json\n\n{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n'))
+        async with _build_bridge(handler) as bridge:
+            await bridge.run(io.StringIO('not json\n\n{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n'))
 
     _run(scenario())
 
     assert stdout.messages == [{"jsonrpc": "2.0", "id": 1, "result": {}}]
+
+
+@pytest.mark.parametrize(
+    "read_error",
+    [
+        UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+        OSError("stdin probe failure"),
+    ],
+    ids=["invalid-utf8", "os-error"],
+)
+def test_run_loop_recovers_after_stdin_read_error(stdout: StdoutCapture, read_error: Exception):
+    class RecoveringStdin:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def readline(self):
+            self.calls += 1
+            if self.calls == 1:
+                raise read_error
+            if self.calls == 2:
+                return '{"jsonrpc":"2.0","id":11,"method":"tools/list"}\n'
+            return ""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 11, "result": {}})
+
+    async def scenario():
+        async with _build_bridge(handler) as bridge:
+            await bridge.run(RecoveringStdin())
+
+    _run(scenario())
+
+    assert stdout.messages == [{"jsonrpc": "2.0", "id": 11, "result": {}}]
+
+
+def test_run_loop_skips_invalid_utf8_bytes_without_losing_next_frame(stdout: StdoutCapture):
+    frames = b'\xff\n{"jsonrpc":"2.0","id":16,"method":"tools/list"}\n'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 16, "result": {}})
+
+    async def scenario():
+        async with _build_bridge(handler) as bridge:
+            await bridge.run(io.BytesIO(frames))
+
+    _run(scenario())
+
+    assert stdout.messages == [{"jsonrpc": "2.0", "id": 16, "result": {}}]
+
+
+def test_run_loop_observes_escaped_task_exception(monkeypatch, capsys):
+    async def scenario():
+        async with _build_bridge(lambda request: httpx.Response(200, json={})) as bridge:
+            async def fail_message(message):
+                raise RuntimeError("escaped task probe")
+
+            monkeypatch.setattr(bridge, "handle_message", fail_message)
+            await bridge.run(io.StringIO('{"jsonrpc":"2.0","id":14,"method":"tools/list"}\n'))
+
+    _run(scenario())
+
+    assert "消息任务异常退出: RuntimeError: escaped task probe" in capsys.readouterr().err
+
+
+def test_real_stdout_write_path(monkeypatch):
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 12, "result": {"ok": True}})
+
+    async def scenario():
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 12, "method": "tools/list"})
+
+    _run(scenario())
+
+    assert json.loads(output.getvalue()) == {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "result": {"ok": True},
+    }
+
+
+@pytest.mark.parametrize("raw_headers", ["", "{", "[]", "{}"])
+def test_main_fails_fast_on_invalid_headers(monkeypatch, raw_headers: str):
+    monkeypatch.setenv("PORTAL_MCP_BRIDGE_URL", URL)
+    monkeypatch.setenv("PORTAL_MCP_BRIDGE_HEADERS", raw_headers)
+
+    assert _run(bridge_module._main()) == 2
 
 
 @pytest.mark.skipif(not (PORTAL_MCP_ROOT / "portal_mcp").is_dir(), reason="portal-mcp source not present")

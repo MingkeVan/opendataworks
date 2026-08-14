@@ -134,9 +134,14 @@ CLI 可配置 HTTP request timeout 只能处理 60s 上限，不能消除 sessio
 - `initialize` 请求不带协议版本头；桥从成功的 `InitializeResult.protocolVersion` 保存协商结果，
   并在后续 HTTP POST 上发送 `MCP-Protocol-Version`。这保证无状态服务端不会把新协议会话静默
   回退成 `2025-03-26`。
-- 响应 `application/json` 直接回写；`text/event-stream` 抽取 `data:` 负载回写（Streamable HTTP 规范允许两种，服务端当前固定 JSON）。
+- 响应 `application/json` 直接回写；`text/event-stream` 按 SSE event 边界解析，同一 event 的多条
+  `data:` 用换行拼接后再解析 JSON（Streamable HTTP 规范允许两种，服务端当前固定 JSON）。
 - 通知（无 `id`）POST 后服务端返回 202 空体，不回写任何内容。
+- 请求（JSON 对象中存在 `id`）必须产出响应：HTTP 200 空体、无法解析的合法响应形态、桥内部的
+  非 HTTP 异常都归一化为单条 `-32603`，禁止让 per-message task 静默结束。
 - 并发：每条消息一个 task，stdout 写入加锁串行化；JSON-RPC 靠 `id` 匹配，乱序回复合法。
+- stdin 单帧解码或读取失败只记录到 stderr 并跳过，不结束桥进程；task done callback 必须读取并
+  记录仍然逃逸的异常，避免后台 task 无声失败。
 - 连接池：`max_keepalive_connections=0`，每次请求新建连接。对应 `encode/httpx#2056` 对「连接池僵尸连接」的标准结论，也让服务端 keepalive 取值不再参与正确性。
 - 重试：**仅** `ConnectError`/`ConnectTimeout` 重试（请求尚未送达，写工具重试也安全），最多 2 次、退避 0.2s/0.5s。`ReadTimeout`、`RemoteProtocolError` 等「可能已执行」的错误不重试。
 - 失败映射：任何转发失败对有 `id` 的请求回 JSON-RPC `-32603`，即**工具级错误**，模型能看到、能改写重试，run 不中断。刻意不使用正数 HTTP `400`/`404`，也不使用 `-32000` / `Connection closed` 文案。
@@ -150,8 +155,11 @@ CLI 可配置 HTTP request timeout 只能处理 60s 上限，不能消除 sessio
 
 新增 Settings（均可由环境变量覆盖，命名沿用现有 `DATAAGENT_PORTAL_MCP_*` 前缀）：
 
-- `dataagent_portal_mcp_transport`（`stdio` | `http`，默认 `stdio`）：回滚开关，置 `http` 完全恢复原行为。
+- `dataagent_portal_mcp_transport`（`stdio` | `http`，默认 `stdio`）：回滚开关，置 `http` 完全恢复原行为；未知值直接拒绝，避免拼错后静默留在 stdio 路径。
 - `dataagent_portal_mcp_request_timeout_seconds`（int，默认 600）：桥的单次 HTTP 读超时。
+
+桥进程的 `PORTAL_MCP_BRIDGE_HEADERS` 是 backend 构造的认证/数据范围契约。缺失、非法 JSON、
+非对象或空对象均在启动时返回退出码 2，不允许无 token 启动后把所有工具调用退化成 HTTP 401。
 
 `_build_portal_mcp_servers` 在 stdio 模式下返回：
 
@@ -183,6 +191,13 @@ CLI 自身的 5 分钟 idle timeout 与后端总 run timeout 仍保留，不能�
 - 风险：每次 run 多一个短生命周期 Python 进程（随 CLI 退出而退出）。桥是纯转发，无状态、无磁盘写入。
 - 风险：stdio 帧要求单行 JSON。大结果（`portal_query_readonly` 上限 10000 行）走管道，CLI 对超大工具结果本就有落盘 offload 机制，且不经过 SDK 控制通道（`max_buffer_size` 不受影响）。
 - 风险：沙箱模式下 CLI 在子容器内运行。`Dockerfile.runner` 同样整目录 `COPY dataagent/dataagent-backend`，桥脚本路径与解释器路径在两个镜像中一致（`/opt/dataagent-backend/core/...`、`python:3.11-slim`）。
+- 风险：`notifications/cancelled` 会转发到无状态服务端，但桥没有按 request id 取消另一个并发
+  `self._client.post`；服务端无法跨独立 POST 关联时，被放弃的查询可能继续执行，直到请求完成、桥的
+  600s 读超时或桥进程随 CLI 退出。后续若要解决，需要显式维护 request id → task 映射，不能靠
+  transport 的隐式 session。
+- 风险：桥的 600s 读超时大于交互 run 的 360s 总预算，因此交互路径通常先呈现 agent 总超时，
+  而不是桥生成的 `ReadTimeout` 工具错误；600s 主要覆盖后台路径和显式诊断，不应被当作交互错误的
+  可见上限。
 - 回退：设 `DATAAGENT_PORTAL_MCP_TRANSPORT=http` 后重新创建 `dataagent-backend` 和
   `dataagent-sandbox-runner`。sandbox 模式在 runner/child 内构造 MCP 配置，只重启 backend 不会
   更新 runner 或已预热 child 的环境；runner 重建时会清理并按新环境重建 warm children。无需重建
