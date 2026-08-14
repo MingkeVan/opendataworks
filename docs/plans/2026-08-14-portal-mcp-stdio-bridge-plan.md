@@ -77,6 +77,17 @@
    - 真实桥子进程 + 本地 HTTP server 探针：200 空体返回 `-32603`；跨行 SSE 正常返回；二进制
      stdin 写入非法 UTF-8 帧后下一请求仍成功；关闭 stdin 后退出码 0。
    - `py_compile` 与 `git diff --check` 通过；测试创建的 `AsyncClient` 均由 async context manager 关闭。
+8. 第三轮 review 修复（stdin 读失败热循环）：
+   - 探针确认加固版在 `readline` 持续抛 `OSError(EBADF)` 时 5s 内不退出（空转死循环），
+     且 `ValueError: readline of closed file` 仍会杀死桥进程。改为「读失败按 EOF 处理」后两者都
+     干净退出。
+   - `test_run_loop_exits_on_stdin_read_error` 参数化覆盖 `UnicodeDecodeError` / `OSError` /
+     `ValueError`，并断言 `readline` 只被调用一次（锁住不重试，防止回退成空转）。
+   - `test_answered_request_is_not_followed_by_an_error_frame` 锁住「一个 id 只写一个响应帧」。
+   - `test_success_without_matching_response_id_becomes_jsonrpc_error` 改为断言夹带的服务端通知
+     被转发后再补 `-32603`，而不是连通知一起丢弃。
+   - `pytest tests/test_portal_mcp_stdio_bridge.py tests/test_agent_runtime.py tests/test_task_executor.py -q`
+     与真实子进程冒烟重跑通过。
 
 ## 未覆盖
 

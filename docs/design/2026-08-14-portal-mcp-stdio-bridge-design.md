@@ -140,8 +140,14 @@ CLI 可配置 HTTP request timeout 只能处理 60s 上限，不能消除 sessio
 - 请求（JSON 对象中存在 `id`）必须产出响应：HTTP 200 空体、无法解析的合法响应形态、桥内部的
   非 HTTP 异常都归一化为单条 `-32603`，禁止让 per-message task 静默结束。
 - 并发：每条消息一个 task，stdout 写入加锁串行化；JSON-RPC 靠 `id` 匹配，乱序回复合法。
-- stdin 单帧解码或读取失败只记录到 stderr 并跳过，不结束桥进程；task done callback 必须读取并
-  记录仍然逃逸的异常，避免后台 task 无声失败。
+- stdin 的**解码**失败与**读取**失败必须区别对待：
+  - 单帧解码失败（非法 UTF-8、非法 JSON）只记录到 stderr 并跳过该帧，桥继续服务后续帧。
+  - `readline` 本身失败（`OSError`，以及 stdin 被关闭后的 `ValueError: readline of closed file`）
+    按 EOF 处理，收尾在途请求后退出。字节流读不动之后无法重新对齐，`continue` 会退化成 100% CPU
+    的空转死循环（EBADF 这类错误是持续性的），比进程干净退出更糟；退出后 CLI 能明确观察到 stdio
+    server 消失。
+- task done callback 必须读取并记录仍然逃逸的异常，避免后台 task 无声失败。
+- 同一个 `id` 只写出一个响应帧：转发成功后即便后续写入失败，也不再补发 `-32603`。
 - 连接池：`max_keepalive_connections=0`，每次请求新建连接。对应 `encode/httpx#2056` 对「连接池僵尸连接」的标准结论，也让服务端 keepalive 取值不再参与正确性。
 - 重试：**仅** `ConnectError`/`ConnectTimeout` 重试（请求尚未送达，写工具重试也安全），最多 2 次、退避 0.2s/0.5s。`ReadTimeout`、`RemoteProtocolError` 等「可能已执行」的错误不重试。
 - 失败映射：任何转发失败对有 `id` 的请求回 JSON-RPC `-32603`，即**工具级错误**，模型能看到、能改写重试，run 不中断。刻意不使用正数 HTTP `400`/`404`，也不使用 `-32000` / `Connection closed` 文案。

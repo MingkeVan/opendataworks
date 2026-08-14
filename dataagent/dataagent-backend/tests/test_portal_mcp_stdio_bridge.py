@@ -251,10 +251,44 @@ def test_success_without_matching_response_id_becomes_jsonrpc_error(stdout: Stdo
 
     _run(scenario())
 
-    assert len(stdout.messages) == 1
-    assert stdout.messages[0]["id"] == 15
-    assert stdout.messages[0]["error"]["code"] == bridge_module.INTERNAL_ERROR_CODE
-    assert "未返回对应请求" in stdout.messages[0]["error"]["message"]
+    # The body carried no answer for id 15, but the server notification it did carry
+    # is still forwarded — a missing response is no reason to drop unrelated frames.
+    assert stdout.messages[0] == {"jsonrpc": "2.0", "method": "notifications/progress", "params": {}}
+    assert stdout.messages[1]["id"] == 15
+    assert stdout.messages[1]["error"]["code"] == bridge_module.INTERNAL_ERROR_CODE
+    assert "未返回对应请求" in stdout.messages[1]["error"]["message"]
+    assert len(stdout.messages) == 2
+
+
+def test_answered_request_is_not_followed_by_an_error_frame(stdout: StdoutCapture, monkeypatch):
+    """A write failure after the response landed must not add a second frame for one id."""
+    written: list[str] = []
+
+    def flaky_write(line: str) -> None:
+        written.append(line)
+        if len(written) == 2:
+            raise OSError("stdout broke after the response was already flushed")
+
+    monkeypatch.setattr(PortalMcpBridge, "_write_blocking", staticmethod(flaky_write))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {"jsonrpc": "2.0", "id": 17, "result": {"ok": True}},
+                {"jsonrpc": "2.0", "method": "notifications/message", "params": {}},
+            ],
+        )
+
+    async def scenario():
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 17, "method": "tools/call"})
+
+    _run(scenario())
+
+    assert [json.loads(line)["id"] for line in written[:1]] == [17]
+    assert "error" not in json.loads(written[0])
+    assert len(written) == 2
 
 
 def test_non_http_exception_becomes_jsonrpc_error(stdout: StdoutCapture, monkeypatch):
@@ -424,33 +458,40 @@ def test_run_loop_skips_malformed_frames(stdout: StdoutCapture):
     "read_error",
     [
         UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
-        OSError("stdin probe failure"),
+        OSError(9, "Bad file descriptor"),
+        # What CPython raises once stdin has been closed underneath the reader.
+        ValueError("readline of closed file"),
     ],
-    ids=["invalid-utf8", "os-error"],
+    ids=["invalid-utf8", "os-error", "closed-file"],
 )
-def test_run_loop_recovers_after_stdin_read_error(stdout: StdoutCapture, read_error: Exception):
-    class RecoveringStdin:
+def test_run_loop_exits_on_stdin_read_error(stdout: StdoutCapture, read_error: Exception):
+    """A failed read is terminal, unlike a failed decode of a frame that was read.
+
+    Retrying it would spin: the byte stream cannot be resynced, and errors like EBADF
+    repeat on every call, so `continue` burns 100% CPU in a process that never exits.
+    """
+
+    class FailingStdin:
         def __init__(self) -> None:
             self.calls = 0
 
         def readline(self):
             self.calls += 1
-            if self.calls == 1:
-                raise read_error
-            if self.calls == 2:
-                return '{"jsonrpc":"2.0","id":11,"method":"tools/list"}\n'
-            return ""
+            raise read_error
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": 11, "result": {}})
 
+    stdin = FailingStdin()
+
     async def scenario():
         async with _build_bridge(handler) as bridge:
-            await bridge.run(RecoveringStdin())
+            await asyncio.wait_for(bridge.run(stdin), timeout=5)
 
     _run(scenario())
 
-    assert stdout.messages == [{"jsonrpc": "2.0", "id": 11, "result": {}}]
+    assert stdin.calls == 1
+    assert stdout.lines == []
 
 
 def test_run_loop_skips_invalid_utf8_bytes_without_losing_next_frame(stdout: StdoutCapture):

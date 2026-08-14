@@ -201,6 +201,8 @@ class PortalMcpBridge:
         has_id = isinstance(message, dict) and "id" in message
         message_id = message.get("id") if isinstance(message, dict) else None
         method = str(message.get("method") or "") if isinstance(message, dict) else ""
+        # 是否已经为本请求写出过响应帧，用于避免同一个 id 收到两条响应。
+        answered = False
         if method == "initialize":
             # A repeated negotiation must not leave the previous version active when
             # the new initialize fails or returns an invalid result.
@@ -241,25 +243,29 @@ class PortalMcpBridge:
             if has_id and not payloads:
                 await self._write_error(message_id, "portal-mcp 对请求返回了空响应")
                 return
-            if has_id and not any(
-                isinstance(payload, dict)
-                and "id" in payload
-                and payload.get("id") == message_id
-                for payload in payloads
-            ):
-                await self._write_error(message_id, "portal-mcp 未返回对应请求的 JSON-RPC 响应")
-                return
 
             self._capture_protocol_version(method, payloads)
+            # 先原样转发所有帧，再判断本请求是否拿到了响应：响应体里可能同时夹带服务端
+            # 通知，本请求没等到响应不是丢掉那些通知的理由。
             for payload in payloads:
+                if (
+                    has_id
+                    and isinstance(payload, dict)
+                    and "id" in payload
+                    and payload.get("id") == message_id
+                ):
+                    answered = True
                 await self._write(payload)
+            if has_id and not answered:
+                await self._write_error(message_id, "portal-mcp 未返回对应请求的 JSON-RPC 响应")
         except json.JSONDecodeError as exc:
             _log(f"portal-mcp 响应体不是合法 JSON: {exc}")
-            if has_id:
+            if has_id and not answered:
                 await self._write_error(message_id, f"portal-mcp 响应体不是合法 JSON: {exc}")
         except Exception as exc:
             _log(f"处理 {method or '<unknown>'} 失败: {exc.__class__.__name__}: {exc}")
-            if has_id:
+            # answered 守卫：响应已经写出后再补一条 error 会让同一个 id 出现两个响应。
+            if has_id and not answered:
                 await self._write_error(
                     message_id, f"portal-mcp 桥内部错误: {exc.__class__.__name__}: {exc}"
                 )
@@ -278,9 +284,14 @@ class PortalMcpBridge:
         while True:
             try:
                 line = await asyncio.to_thread(stdin.readline)
-            except (UnicodeError, OSError) as exc:
-                _log(f"读取 stdin 帧失败，已跳过: {exc.__class__.__name__}: {exc}")
-                continue
+            except (OSError, ValueError) as exc:
+                # 读失败和解码失败必须区别对待：一帧解码失败可以跳过继续读下一帧，但字节流
+                # 本身读不动之后没法重新对齐，`continue` 会变成 100% CPU 的空转死循环
+                # （EBADF 这类错误是持续性的），比进程直接退出更糟。这里按 EOF 处理：
+                # 收尾在途请求后干净退出，CLI 侧能明确观察到 stdio server 消失。
+                # ValueError 覆盖 stdin 被关闭后的 "readline of closed file"。
+                _log(f"stdin 读取失败，桥退出: {exc.__class__.__name__}: {exc}")
+                break
             if not line:
                 break
             try:
