@@ -1,0 +1,66 @@
+# Portal MCP stdio Bridge 计划
+
+配套设计：`docs/design/2026-08-14-portal-mcp-stdio-bridge-design.md`
+
+前置阶段：`docs/design/2026-06-24-portal-mcp-keepalive-session-expired-design.md`（keepalive + 无状态固化，保持生效，本次不动）
+
+## 受影响栈
+
+- DataAgent 后端（`dataagent/dataagent-backend`：新增桥脚本、Settings、MCP server 配置构造）
+- 部署：**不改**。compose、`.env.example`、`Dockerfile`、`Dockerfile.runner` 均无需变更（后端目录整体 `COPY`，桥脚本自动进入两个镜像）
+
+## 任务
+
+1. `dataagent/dataagent-backend/core/portal_mcp_stdio_bridge.py`（新增）
+   - stdin 行分隔 JSON-RPC → POST 到 `PORTAL_MCP_BRIDGE_URL` → 响应写回 stdout。
+   - `application/json` 与 `text/event-stream` 两种合法响应体都能解析；无 `id` 的通知不回写。
+   - `httpx.AsyncClient(limits=Limits(max_keepalive_connections=0))`，每次请求新连接。
+   - 仅对 `ConnectError`/`ConnectTimeout` 重试（最多 2 次，退避 0.2s/0.5s）；其余错误直接映射为 JSON-RPC `-32603`。
+   - 并发处理 + stdout 写锁；全部日志走 stderr。
+2. `dataagent/dataagent-backend/config.py`
+   - 新增 `dataagent_portal_mcp_transport: str = "stdio"`（回滚开关，另一取值 `http`）。
+   - 新增 `dataagent_portal_mcp_request_timeout_seconds: int = 600`。
+3. `dataagent/dataagent-backend/core/agent_runtime.py`
+   - `_build_portal_mcp_servers` 按 transport 返回 stdio 配置（`command`/`args`/`env`）或原 http 配置。
+   - 保留 URL 归一化（`/mcp` → `/mcp/`）与 `X-Agent-Data-Scope` 注入，两种 transport 一致。
+4. 测试
+   - `tests/test_portal_mcp_stdio_bridge.py`（新增）：请求转发与响应回写、请求头注入、通知不回写、SSE 响应解析、非 2xx → `-32603`、连接错误重试后成功、不可重试错误只发一次、并发多请求全部有回复。
+   - `tests/test_agent_runtime.py`：默认 stdio 配置断言；`transport="http"` 回滚分支断言；URL 归一化断言改到 headers/env 上。
+   - `tests/test_task_executor.py`：`mcp_servers` 期望值同步为 stdio 形态。
+5. 文档
+   - 本设计/计划；在 `2026-06-24` 设计文档末尾追加指针，说明后续项已落地。
+
+## 验证（已执行）
+
+1. `pytest dataagent/dataagent-backend/tests -q`：**446 passed**（排除 6 个本环境预先就无法 collect 的模块）。
+   排除项 `test_admin_routes` / `test_auth_routes` / `test_readonly_query_proxy` / `test_routes_contract` /
+   `test_runtime_excludes_eval_api` / `test_widget_runtime_routes` 在 `git stash` 后的未改动树上同样报
+   `ModuleNotFoundError: No module named 'pymysql.cursors'`，属本容器环境问题，与本次改动无关。
+2. `pytest dataagent/portal-mcp/tests -q`：**30 passed**（服务端契约未受本次改动影响）。
+3. 桥 × 真实 `portal-mcp` app（测试内 ASGI transport）：`initialize` → `notifications/initialized` →
+   `tools/list`，断言返回真实工具清单而非 mock。
+4. 桥作为**真实子进程**对真实 uvicorn 服务端跑通，并逐条复现历史故障场景：
+   - `--timeout-keep-alive 1` + 空闲 3s 后继续调用 → 成功（阶段一的空闲断连故障模式）
+   - 服务端进程被杀 → 返回 JSON-RPC `-32603` 工具级错误，消息中不含 `Connection closed`
+   - 服务端重启后**同一个桥进程**继续正常服务（阶段二的 server 重启 / OOM 故障模式）
+   - 关闭 stdin → 退出码 0
+5. 真实 Claude CLI（`@anthropic-ai/claude-code` 2.1.42，即抛该错的同一版本）以 stdio 方式挂载本桥：
+   `claude mcp list` 与 `claude mcp get portal` 均报告 `Status: ✓ Connected`。
+
+## 未覆盖
+
+- 当前会话环境不具备 MySQL / Redis / 真实模型凭据，**未执行** AGENTS.md 要求的本地全链路智能问数冒烟
+  （真实 widget 对话 → 任务创建 → 事件流 → 终态落库）。
+- 已验证的是：transport 挂载、协议往返、故障注入下的降级行为、CLI 侧连通性。**未验证**的是：
+  真实模型驱动的多轮对话中密集工具调用时的现场表现。上线后按下面的观察项确认。
+
+## 上线观察
+
+- `dataagent-backend` 日志中 `task.start ... mcp_servers=portal` 仍出现，说明工具已挂载。
+- CLI MCP 日志中不应再出现 `session expired`；桥的异常一律以 `portal-mcp-bridge` 前缀出现在 stderr。
+- 关注是否出现新的 `-32603` 工具级错误——那是原本被吞成 session expired 的失败被正确暴露，需按其 message 定位 portal-mcp 侧问题。
+
+## 回退
+
+- 一级（无需重建镜像）：`DATAAGENT_PORTAL_MCP_TRANSPORT=http`，重启 `dataagent-backend`。
+- 二级：回滚本次提交。`portal-mcp` 侧 keepalive 与无状态化不受影响，无需同步回滚。

@@ -86,6 +86,14 @@ class Settings(BaseSettings):
     dataagent_portal_mcp_base_url: str = ""
     dataagent_portal_mcp_token: str = ""
     dataagent_portal_mcp_token_header_name: str = "X-Portal-MCP-Token"
+    # Claude CLI 只在 HTTP 系 transport 上抛 `MCP server "portal" session expired`，
+    # 也只给 HTTP fetch 套了 60s 单请求硬超时，因此 portal MCP 默认走 stdio 桥
+    # （core/portal_mcp_stdio_bridge.py）。置 "http" 可不重建镜像退回直连 HTTP，
+    # 是本改动的一级回退开关。见 docs/design/2026-08-14-portal-mcp-stdio-bridge-design.md
+    dataagent_portal_mcp_transport: str = "stdio"
+    # stdio 桥转发到 portal-mcp 的单次请求读超时。取值需大于 portal-mcp 侧的后端超时
+    # (30s) 与 portal_query_readonly 契约上限 (120s)，并覆盖交互 run 总超时 (360s)。
+    dataagent_portal_mcp_request_timeout_seconds: int = 600
 
     # ---- Agent 交互能力 ----
     # AskUserQuestion 让 agent 通过选择卡片向用户提问。开启时会为每次运行安装

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import sys
 from pathlib import Path
@@ -168,12 +169,13 @@ def test_resolve_claude_cli_path_supports_env_alias(monkeypatch):
     assert resolve_claude_cli_path(SimpleNamespace(claude_cli_path="")) == "/tmp/from-alias"
 
 
-def test_build_portal_mcp_servers_returns_http_config():
+def test_build_portal_mcp_servers_defaults_to_stdio_bridge():
     cfg = SimpleNamespace(
         dataagent_portal_mcp_enabled=True,
         dataagent_portal_mcp_base_url="http://portal-mcp:8801/mcp/",
         dataagent_portal_mcp_token="portal-token",
         dataagent_portal_mcp_token_header_name="X-Portal-MCP-Token",
+        dataagent_portal_mcp_request_timeout_seconds=600,
     )
 
     actual = agent_runtime._build_portal_mcp_servers(
@@ -187,14 +189,45 @@ def test_build_portal_mcp_servers_returns_http_config():
         },
     )
 
+    # stdio is the only transport on which the CLI cannot raise
+    # `MCP server "portal" session expired`; both of its throw paths require
+    # config.type === "http".
     assert actual == {
+        "portal": {
+            "type": "stdio",
+            "command": sys.executable,
+            "args": [str(agent_runtime.PORTAL_MCP_STDIO_BRIDGE_PATH)],
+            "env": {
+                "PORTAL_MCP_BRIDGE_URL": "http://portal-mcp:8801/mcp/",
+                "PORTAL_MCP_BRIDGE_HEADERS": json.dumps(
+                    {
+                        "X-Agent-Data-Scope": "eyJhbGxvd2VkX3Njb3BlcyI6W3siY2x1c3Rlcl9pZCI6MywiZGF0YWJhc2UiOiJhZHNfdXNlciIsInNvdXJjZV90eXBlIjoiRE9SSVMifV19",
+                        "X-Portal-MCP-Token": "portal-token",
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                "PORTAL_MCP_BRIDGE_TIMEOUT_SECONDS": "600",
+            },
+        }
+    }
+    assert agent_runtime.PORTAL_MCP_STDIO_BRIDGE_PATH.is_file()
+
+
+def test_build_portal_mcp_servers_http_transport_is_the_rollback_lever():
+    cfg = SimpleNamespace(
+        dataagent_portal_mcp_enabled=True,
+        dataagent_portal_mcp_base_url="http://portal-mcp:8801/mcp/",
+        dataagent_portal_mcp_token="portal-token",
+        dataagent_portal_mcp_token_header_name="X-Portal-MCP-Token",
+        dataagent_portal_mcp_transport="http",
+    )
+
+    assert agent_runtime._build_portal_mcp_servers(cfg) == {
         "portal": {
             "type": "http",
             "url": "http://portal-mcp:8801/mcp/",
-            "headers": {
-                "X-Portal-MCP-Token": "portal-token",
-                "X-Agent-Data-Scope": "eyJhbGxvd2VkX3Njb3BlcyI6W3siY2x1c3Rlcl9pZCI6MywiZGF0YWJhc2UiOiJhZHNfdXNlciIsInNvdXJjZV90eXBlIjoiRE9SSVMifV19",
-            },
+            "headers": {"X-Portal-MCP-Token": "portal-token"},
         }
     }
 
@@ -242,7 +275,7 @@ def test_build_portal_mcp_servers_adds_streamable_http_mount_slash():
 
     actual = agent_runtime._build_portal_mcp_servers(cfg)
 
-    assert actual["portal"]["url"] == "http://portal-mcp:8801/mcp/"
+    assert actual["portal"]["env"]["PORTAL_MCP_BRIDGE_URL"] == "http://portal-mcp:8801/mcp/"
 
 
 def test_build_allowed_tools_includes_portal_mcp_tools_once():

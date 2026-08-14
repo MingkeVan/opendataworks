@@ -134,3 +134,16 @@ keepalive 仅覆盖①。②③与「客户端不重连」均在 keepalive 之�
 ### 参考
 
 `anthropics/claude-code#27142`、`openai/codex#13969`、`danny-avila/LibreChat#11868`、`Doist/todoist-ai#304`、`encode/httpx#2056`、modelcontextprotocol.io — Transports。
+
+## 更新（2026-08-14）：后续项已立项落地
+
+阶段二留下的「客户端层重连」后续项已单独设计并实现，见
+`docs/design/2026-08-14-portal-mcp-stdio-bridge-design.md`。
+
+结论要点：查证 CLI 二进制后确认，`McpSessionExpiredError` 的两条抛出路径**都以
+`config.type === "http"` 为前置条件**，且 CLI 只给 HTTP/SSE fetch 套了 60s 单请求
+`AbortSignal.timeout`。因此把 portal MCP 的接入 transport 换成 stdio（经一个协议无关的
+JSON-RPC 转发桥连到同一个 `portal-mcp` HTTP 服务）即可从结构上消除该类错误。
+
+本文档描述的服务端侧措施（keepalive=600、`stateless_http=True`、版本钉死）保持生效，
+不需要回滚；换 transport 后 keepalive 不再参与正确性，仅作为服务端的常规配置。

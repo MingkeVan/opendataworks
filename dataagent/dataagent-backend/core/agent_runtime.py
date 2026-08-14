@@ -37,6 +37,9 @@ PORTAL_MCP_TOOL_NAMES = [
     "portal_query_readonly",
 ]
 PLATFORM_TOOLS_SKILL_FOLDER = "opendataworks-platform-tools"
+# Shipped inside both the backend and the sandbox-runner image (each COPYs the whole
+# dataagent-backend tree), so the same absolute path resolves in either container.
+PORTAL_MCP_STDIO_BRIDGE_PATH = Path(__file__).resolve().parent / "portal_mcp_stdio_bridge.py"
 SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "data_agent_system_prompt.md"
 _FILE_BOUNDARY_PATH_KEYS = {
     "Read": ("file_path", "path"),
@@ -728,13 +731,38 @@ def _build_portal_mcp_servers(
     if agent_snapshot is not None:
         headers["X-Agent-Data-Scope"] = encode_scope_header((agent_snapshot or {}).get("data_scope") or {})
 
+    # portal-mcp is mounted as a Starlette sub-app; /mcp redirects to /mcp/, and
+    # Streamable HTTP clients may not follow POST redirects.
+    url = raw_url.rstrip("/") + "/"
+    transport = str(getattr(cfg, "dataagent_portal_mcp_transport", "") or "stdio").strip().lower()
+    if transport == "http":
+        # Rollback lever only. Claude CLI raises McpSessionExpiredError exclusively on
+        # HTTP-family transports and caps every POST at 60s there; see the stdio branch.
+        return {
+            PORTAL_MCP_SERVER_NAME: {
+                "type": "http",
+                "url": url,
+                "headers": headers,
+            }
+        }
+
+    # Default: reach portal-mcp through a stdio JSON-RPC bridge. Both CLI paths that
+    # surface `MCP server "portal" session expired` require config.type === "http"
+    # (404 + -32001, or -32000 "Connection closed"), and the CLI's 60s per-request
+    # AbortSignal only wraps HTTP/SSE fetches. Over stdio none of that is reachable.
+    # The bridge forwards frames verbatim, so the tool contract still lives only in
+    # portal-mcp. See docs/design/2026-08-14-portal-mcp-stdio-bridge-design.md.
+    timeout_seconds = int(getattr(cfg, "dataagent_portal_mcp_request_timeout_seconds", 0) or 600)
     return {
         PORTAL_MCP_SERVER_NAME: {
-            "type": "http",
-            # portal-mcp is mounted as a Starlette sub-app; /mcp redirects to
-            # /mcp/, and Streamable HTTP clients may not follow POST redirects.
-            "url": raw_url.rstrip("/") + "/",
-            "headers": headers,
+            "type": "stdio",
+            "command": sys.executable,
+            "args": [str(PORTAL_MCP_STDIO_BRIDGE_PATH)],
+            "env": {
+                "PORTAL_MCP_BRIDGE_URL": url,
+                "PORTAL_MCP_BRIDGE_HEADERS": json.dumps(headers, ensure_ascii=False, sort_keys=True),
+                "PORTAL_MCP_BRIDGE_TIMEOUT_SECONDS": str(timeout_seconds),
+            },
         }
     }
 
