@@ -1,6 +1,6 @@
 # Portal MCP Streamable HTTP 直连可靠性计划
 
-配套设计：`docs/design/2026-08-14-portal-mcp-streamable-http-design.md`
+配套设计：`docs/design/2026-08-17-portal-mcp-streamable-http-design.md`
 
 ## 受影响栈
 
@@ -18,6 +18,7 @@
    - 保留 URL 尾斜杠、token 与 `X-Agent-Data-Scope`。
    - 删除 `portal_mcp_stdio_bridge.py` 及其测试。
    - 删除 transport 开关和 bridge request timeout 配置。
+   - 恢复旧设计/计划文档并标记 superseded，只保留取证历史。
 3. 注入官方 CLI 配置
    - 新增 `dataagent_portal_mcp_tool_timeout_seconds=180`。
    - `_build_runtime_env` 输出 `MCP_TOOL_TIMEOUT=180000`。
@@ -48,16 +49,22 @@
 
 已通过：
 
-- SDK `0.2.115` 下 DataAgent 针对性测试 `100 passed`，portal-mcp 测试 `30 passed`。
+- SDK `0.2.115` 下 backend 测试 `435 passed`（排除本地既有的 6 个
+  `pymysql.cursors` 收集失败模块），portal-mcp 测试 `30 passed`。
 - 使用 SDK `0.2.115` 所带原生 Claude CLI `2.1.206`，直连本地真实 FastMCP
   Streamable HTTP 端点；65s 与 130s 工具调用分别在约 69.6s、135.6s 正常结束，
   均返回 `probe-ok`，CLI 退出码为 0。模型 API 由本地 SSE stub 提供，未调用外部模型。
+- 同一 CLI 会话先调用 portal 工具成功，再杀死并重建 FastMCP 进程；重启前后的
+  `marker` 均产生 `TOOL_COMPLETED`，最终返回 `restart-ok`，退出码为 0。
+- 两个 HTTP MCP server 均完成初始化后，关闭其中一个并并发调用：健康 server 的 5s
+  工具继续完成，关闭端口的调用产生独立 `is_error` tool result；模型收到两条结果并返回
+  `parallel-ok:2`，退出码为 0，未发生级联取消。
 - dev/prod compose 文件通过 YAML 解析，并确认 backend 与 sandbox runner 均注入
   `DATAAGENT_PORTAL_MCP_TOOL_TIMEOUT_SECONDS`。
-- Python 编译检查、`git diff --check` 与旧 bridge/transport 配置静态扫描通过。
+- Python 编译检查、`git diff --check` 与 runtime/deploy 旧 bridge/transport 配置扫描通过；
+  superseded 文档中的历史引用按预期保留。
 
 未完成：
 
-- server 重启恢复与并行单请求故障探针。
 - 使用真实 provider 的 NL2SQL 全链路冒烟。
 - 当前主机没有 Docker CLI，未运行 `docker compose config`；已用 YAML 解析代替语法检查。

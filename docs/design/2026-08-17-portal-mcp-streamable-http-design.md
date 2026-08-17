@@ -1,5 +1,7 @@
 # Portal MCP Streamable HTTP 直连可靠性设计
 
+日期：2026-08-17
+
 ## Background
 
 DataAgent 通过 `claude-agent-sdk` 挂载远程 `portal-mcp`。原运行时锁定
@@ -31,6 +33,8 @@ Claude Code 后续版本已提供直接的 Streamable HTTP 解法：
 - portal MCP 只使用 Streamable HTTP 直连。
 - 通过 ClaudeAgentOptions 的运行时 env 注入官方 MCP 超时。
 - 删除 stdio bridge、bridge 测试、transport 开关与 bridge 专用配置。
+- 保留 stdio 阶段的设计与计划文档并标记 superseded，作为版本取证历史，不作为当前
+  运行或回退路径。
 
 不改 `portal-mcp` 工具 schema、鉴权头、数据范围头和权限门。
 
@@ -68,6 +72,9 @@ MCP_TOOL_TIMEOUT=180000
 ```
 
 - 180s 覆盖 portal 工具 120s 契约上限，且小于交互 run 360s 总预算。
+- `MCP_TOOL_TIMEOUT` 是 CLI 进程级配置，并非 portal server 私有配置。当前进程只有
+  portal MCP；以后增加其它 MCP server 时，它们也会继承 180s，必须重新评估或改用
+  已验证的 per-server timeout。
 
 Python SDK `0.2.115` 的 `McpHttpServerConfig` TypedDict 仍未公开 per-server timeout 字段。
 本方案使用官方文档化的 `MCP_TOOL_TIMEOUT`，不向 SDK TypedDict 塞未声明字段。
@@ -82,6 +89,10 @@ Python SDK `0.2.115` 的 `McpHttpServerConfig` TypedDict 仍未公开 per-server
 - portal MCP tool：最长 120s。
 - Claude CLI MCP wall-clock timeout：180s。
 - Claude CLI network idle timeout：默认 300s，但会被有效 wall-clock timeout 封顶为 180s。
+- 同一个 `MCP_TOOL_TIMEOUT=180000` 同时把 wall-clock 从近似不限的 `1e8ms` 收紧到
+  180s，并把 HTTP fetch abort 从默认 60s 抬到 180s。以后若把该值调到 300s 以上，
+  network idle 300s 将先成为约束；portal 工具不发送 progress notification，必须同时
+  设置并验证 `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`。
 - DataAgent run：交互 360s，后台 1800s。
 - `agent_*_idle_timeout_seconds` 目前只是配置项，task 执行路径尚未消费；当前有效的
   DataAgent 外层保护是 run 总超时。后续若接入 idle 判定，必须识别工具在途状态，或把
@@ -89,11 +100,19 @@ Python SDK `0.2.115` 的 `McpHttpServerConfig` TypedDict 仍未公开 per-server
 
 ## Error semantics
 
-- MCP 端点的真实 401/403/404 是配置或鉴权错误，允许快速失败，不把它伪装成工具业务错误。
+- MCP 端点的 401/403 是配置或鉴权错误，允许快速失败，不把它伪装成工具业务错误。
+- Claude CLI `2.1.206` 会把绝大多数 HTTP 404 归类为 stale session。因此 URL、mount
+  path 或尾斜杠配置错误的现场表现可能是 `MCP server "portal" session expired`，
+  排查时应先核对 `DATAAGENT_PORTAL_MCP_BASE_URL` 与 `PORTAL_MCP_MOUNT_PATH`，不能把
+  该报错直接等同于真实服务端 session 过期。
 - portal 工具业务失败必须返回 HTTP 200 下的 MCP tool error / JSON-RPC error，
   不用 HTTP 404 表达“业务对象不存在”。
-- `portal-mcp` 是无状态服务；连接中断时当前在途调用失败，后续调用通过新的 HTTP 请求
-  恢复，不在 DataAgent 外层重跑整个 turn，避免写工具被重复执行。
+- `portal-mcp` 是无状态服务，后续调用不依赖旧逻辑 session；但 CLI `2.1.206` 的 HTTP
+  transport 仍会把 JSON-RPC `-32000 Connection closed` 归类为
+  `McpSessionExpiredError`。CLI 会清理 server cache 并重连重试一次，单次瞬时故障可能
+  被吸收，portal-mcp 重启/OOM 或连续连接失败仍可能暴露同名 session-expired 错误。
+  180s 配置移除了确定性的 60s HTTP abort 路径，但不宣称消除所有 Connection closed。
+- DataAgent 不在外层重跑整个 turn，避免写工具被重复执行。
 
 ## Verification gates
 

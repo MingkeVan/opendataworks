@@ -138,7 +138,7 @@ keepalive 仅覆盖①。②③与「客户端不重连」均在 keepalive 之�
 
 ## 更新（2026-08-17）：收敛到官方 Streamable HTTP 客户端
 
-后续设计见 `docs/design/2026-08-14-portal-mcp-streamable-http-design.md`。
+后续设计见 `docs/design/2026-08-17-portal-mcp-streamable-http-design.md`。
 
 进一步核对官方配置与 changelog 后确认：Claude Code `2.1.142` 已修复
 `MCP_TOOL_TIMEOUT` 不能抬高 HTTP/SSE 单请求 60s 上限，`2.1.206` 又修复
@@ -146,5 +146,10 @@ keepalive 仅覆盖①。②③与「客户端不重连」均在 keepalive 之�
 显式配置官方超时，并保持单一 Streamable HTTP 直连；不再引入 stdio 转发桥。
 `portal-mcp` 继续保持无状态，使后续调用不依赖旧逻辑 session；在途连接中断仍按
 单次调用失败处理，不做可能重复写操作的整轮重试。
+
+同时校正本文早期基于旧 CLI 的 404 描述：`2.1.206` 会把绝大多数 HTTP 404 直接
+判为 stale session，不再要求响应体含 JSON-RPC `-32001`。所以 base URL、mount path
+或尾斜杠错误也可能表现为 `MCP server "portal" session expired`；排查时应先核对
+`DATAAGENT_PORTAL_MCP_BASE_URL` 与 `PORTAL_MCP_MOUNT_PATH`。
 
 本文档的服务端措施（keepalive=600、`stateless_http=True`、版本锁定）继续生效。

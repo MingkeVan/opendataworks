@@ -676,10 +676,12 @@ def _build_runtime_env(
         agent_env = dict((getattr(params, "agent_snapshot", None) or {}).get("env_vars") or {})
     if isinstance(agent_env, dict):
         runtime_env.update({str(key): str(value) for key, value in agent_env.items()})
-    # Keep the portal MCP timeout deterministic. Claude Code 2.1.142+ uses
-    # MCP_TOOL_TIMEOUT for both the overall call and the HTTP/SSE per-request fetch
-    # ceiling. Apply this after profile env so an agent cannot silently restore the
-    # old 60s ceiling.
+    # Keep the portal-selected MCP timeout deterministic. MCP_TOOL_TIMEOUT is
+    # process-wide (other MCP servers in this CLI would inherit it); Claude Code
+    # 2.1.142+ uses it for both the overall call and the HTTP/SSE per-request fetch
+    # ceiling. Apply it after profile env so an agent cannot silently restore the
+    # old 60s ceiling. Values above 300s also require raising and verifying
+    # CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT; see the Streamable HTTP design.
     portal_mcp_timeout_seconds = max(
         1,
         int(getattr(cfg, "dataagent_portal_mcp_tool_timeout_seconds", 0) or 180),
