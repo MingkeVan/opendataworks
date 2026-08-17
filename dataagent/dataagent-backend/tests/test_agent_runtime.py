@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 import sys
 from pathlib import Path
@@ -52,6 +51,7 @@ def test_build_runtime_env_does_not_expose_direct_db_connection_settings(monkeyp
     assert runtime_env["DATAAGENT_PLATFORM_SKILL_ROOT"] == str(Path("/tmp/platform-tools").resolve())
     assert runtime_env["DATAAGENT_ENABLED_SKILLS"] == "opendataworks-business-knowledge,opendataworks-platform-tools,marketing-insights"
     assert "marketing-insights" in runtime_env["DATAAGENT_ENABLED_SKILL_ROOTS"]
+    assert runtime_env["MCP_TOOL_TIMEOUT"] == "180000"
     assert "ODW_MYSQL_HOST" not in runtime_env
     assert "ODW_MYSQL_PORT" not in runtime_env
     assert "ODW_MYSQL_USER" not in runtime_env
@@ -71,6 +71,27 @@ def test_build_runtime_env_defaults_query_limit_to_backend_max(monkeypatch):
 
     assert runtime_env["DATAAGENT_QUERY_LIMIT"] == "1000"
     assert runtime_env["DATAAGENT_RESULT_PREVIEW_ROWS"] == "20"
+
+
+def test_build_runtime_env_uses_configured_portal_mcp_timeout_and_protects_cli_invariants(monkeypatch):
+    monkeypatch.setattr(agent_runtime, "resolve_builtin_skill_root_dir", lambda: Path("/tmp/skill-root"))
+
+    runtime_env = agent_runtime._build_runtime_env(
+        SimpleNamespace(
+            query_result_limit=1000,
+            dataagent_portal_mcp_tool_timeout_seconds=240,
+        ),
+        {},
+        SimpleNamespace(
+            question="",
+            sql_read_timeout_seconds=30,
+            agent_env_vars={
+                "MCP_TOOL_TIMEOUT": "1",
+            },
+        ),
+    )
+
+    assert runtime_env["MCP_TOOL_TIMEOUT"] == "240000"
 
 
 def test_build_runtime_env_derives_platform_root_from_primary_root_when_enabled_roots_lag(tmp_path: Path):
@@ -171,13 +192,12 @@ def test_resolve_claude_cli_path_supports_env_alias(monkeypatch):
     assert resolve_claude_cli_path(SimpleNamespace(claude_cli_path="")) == "/tmp/from-alias"
 
 
-def test_build_portal_mcp_servers_defaults_to_stdio_bridge():
+def test_build_portal_mcp_servers_uses_streamable_http_with_data_scope():
     cfg = SimpleNamespace(
         dataagent_portal_mcp_enabled=True,
         dataagent_portal_mcp_base_url="http://portal-mcp:8801/mcp/",
         dataagent_portal_mcp_token="portal-token",
         dataagent_portal_mcp_token_header_name="X-Portal-MCP-Token",
-        dataagent_portal_mcp_request_timeout_seconds=600,
     )
 
     actual = agent_runtime._build_portal_mcp_servers(
@@ -191,49 +211,7 @@ def test_build_portal_mcp_servers_defaults_to_stdio_bridge():
         },
     )
 
-    # stdio avoids the CLI's HTTP-only Connection-closed and 60s fetch paths; the
-    # bridge also normalizes remote HTTP 404/session failures before they reach it.
     assert actual == {
-        "portal": {
-            "type": "stdio",
-            "command": sys.executable,
-            "args": [str(agent_runtime.PORTAL_MCP_STDIO_BRIDGE_PATH)],
-            "env": {
-                "PORTAL_MCP_BRIDGE_URL": "http://portal-mcp:8801/mcp/",
-                "PORTAL_MCP_BRIDGE_HEADERS": json.dumps(
-                    {
-                        "X-Agent-Data-Scope": "eyJhbGxvd2VkX3Njb3BlcyI6W3siY2x1c3Rlcl9pZCI6MywiZGF0YWJhc2UiOiJhZHNfdXNlciIsInNvdXJjZV90eXBlIjoiRE9SSVMifV19",
-                        "X-Portal-MCP-Token": "portal-token",
-                    },
-                    ensure_ascii=False,
-                    sort_keys=True,
-                ),
-                "PORTAL_MCP_BRIDGE_TIMEOUT_SECONDS": "600",
-            },
-        }
-    }
-    assert agent_runtime.PORTAL_MCP_STDIO_BRIDGE_PATH.is_file()
-
-
-def test_build_portal_mcp_servers_http_transport_is_the_rollback_lever():
-    cfg = SimpleNamespace(
-        dataagent_portal_mcp_enabled=True,
-        dataagent_portal_mcp_base_url="http://portal-mcp:8801/mcp/",
-        dataagent_portal_mcp_token="portal-token",
-        dataagent_portal_mcp_token_header_name="X-Portal-MCP-Token",
-        dataagent_portal_mcp_transport="http",
-    )
-
-    assert agent_runtime._build_portal_mcp_servers(
-        cfg,
-        agent_snapshot={
-            "data_scope": {
-                "allowed_scopes": [
-                    {"cluster_id": 3, "source_type": "DORIS", "database": "ads_user"}
-                ]
-            }
-        },
-    ) == {
         "portal": {
             "type": "http",
             "url": "http://portal-mcp:8801/mcp/",
@@ -243,19 +221,6 @@ def test_build_portal_mcp_servers_http_transport_is_the_rollback_lever():
             },
         }
     }
-
-
-def test_build_portal_mcp_servers_rejects_unknown_transport():
-    cfg = SimpleNamespace(
-        dataagent_portal_mcp_enabled=True,
-        dataagent_portal_mcp_base_url="http://portal-mcp:8801/mcp/",
-        dataagent_portal_mcp_token="portal-token",
-        dataagent_portal_mcp_token_header_name="X-Portal-MCP-Token",
-        dataagent_portal_mcp_transport="htp",
-    )
-
-    with pytest.raises(ValueError, match="DATAAGENT_PORTAL_MCP_TRANSPORT"):
-        agent_runtime._build_portal_mcp_servers(cfg)
 
 
 def test_build_system_prompt_includes_authorized_data_scope():
@@ -301,7 +266,7 @@ def test_build_portal_mcp_servers_adds_streamable_http_mount_slash():
 
     actual = agent_runtime._build_portal_mcp_servers(cfg)
 
-    assert actual["portal"]["env"]["PORTAL_MCP_BRIDGE_URL"] == "http://portal-mcp:8801/mcp/"
+    assert actual["portal"]["url"] == "http://portal-mcp:8801/mcp/"
 
 
 def test_build_allowed_tools_includes_portal_mcp_tools_once():

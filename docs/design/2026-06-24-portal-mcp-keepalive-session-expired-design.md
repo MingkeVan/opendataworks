@@ -70,7 +70,8 @@ CMD ["uvicorn", "portal_mcp.app:app", "--host", "0.0.0.0", "--port", "8801"]
 将相关超时视为一条链，确认 keep-alive 的取值边界：
 
 - 后端 agent run 总超时：交互 `agent_interactive_timeout_seconds = 360s`，后台 `agent_background_timeout_seconds = 1800s`。
-- 后端 idle/进度超时：交互 `90s`，后台 `300s`（无新流/工具输出才判定停滞）。
+- 后端配置保留交互 `90s`、后台 `300s` 的 idle 值，但当前 task 执行路径尚未消费；
+  实际外层保护仍是 run 总超时。后续接入 idle 判定时必须识别工具在途状态。
 - portal 只读 SQL：单次 `timeout_seconds` 默认 30s、上限 120s；运行期 env `agent_*_sql_read_timeout_seconds` 300s/900s。
 - CLI→portal-mcp 为容器内直连，不经反向代理，反向代理超时与本跳无关。
 
@@ -135,15 +136,15 @@ keepalive 仅覆盖①。②③与「客户端不重连」均在 keepalive 之�
 
 `anthropics/claude-code#27142`、`openai/codex#13969`、`danny-avila/LibreChat#11868`、`Doist/todoist-ai#304`、`encode/httpx#2056`、modelcontextprotocol.io — Transports。
 
-## 更新（2026-08-14）：后续项已立项落地
+## 更新（2026-08-17）：收敛到官方 Streamable HTTP 客户端
 
-阶段二留下的「客户端层重连」后续项已单独设计并实现，见
-`docs/design/2026-08-14-portal-mcp-stdio-bridge-design.md`。
+后续设计见 `docs/design/2026-08-14-portal-mcp-streamable-http-design.md`。
 
-结论要点：查证 CLI 二进制后确认，`McpSessionExpiredError` 的两条抛出路径**都以
-`config.type === "http"` 为前置条件**，且 CLI 只给 HTTP/SSE fetch 套了 60s 单请求
-`AbortSignal.timeout`。因此把 portal MCP 的接入 transport 换成 stdio（经一个协议无关的
-JSON-RPC 转发桥连到同一个 `portal-mcp` HTTP 服务）即可从结构上消除该类错误。
+进一步核对官方配置与 changelog 后确认：Claude Code `2.1.142` 已修复
+`MCP_TOOL_TIMEOUT` 不能抬高 HTTP/SSE 单请求 60s 上限，`2.1.206` 又修复
+`--mcp-config` 新会话忽略 per-server request timeout。因此 DataAgent 升级 SDK/CLI，
+显式配置官方超时，并保持单一 Streamable HTTP 直连；不再引入 stdio 转发桥。
+`portal-mcp` 继续保持无状态，使后续调用不依赖旧逻辑 session；在途连接中断仍按
+单次调用失败处理，不做可能重复写操作的整轮重试。
 
-本文档描述的服务端侧措施（keepalive=600、`stateless_http=True`、版本钉死）保持生效，
-不需要回滚；换 transport 后 keepalive 不再参与正确性，仅作为服务端的常规配置。
+本文档的服务端措施（keepalive=600、`stateless_http=True`、版本锁定）继续生效。

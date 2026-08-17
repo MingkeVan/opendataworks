@@ -86,14 +86,10 @@ class Settings(BaseSettings):
     dataagent_portal_mcp_base_url: str = ""
     dataagent_portal_mcp_token: str = ""
     dataagent_portal_mcp_token_header_name: str = "X-Portal-MCP-Token"
-    # Claude CLI 的 Connection-closed recovery 和默认 60s fetch timeout 属于 HTTP
-    # transport；通用 404/session-400 matcher 则不受 transport 限制。portal MCP 默认走
-    # stdio 桥并把 HTTP 失败归一化为 -32603。置 "http" 可退回直连；其它值会被拒绝。
-    # 见 docs/design/2026-08-14-portal-mcp-stdio-bridge-design.md
-    dataagent_portal_mcp_transport: str = "stdio"
-    # stdio 桥转发到 portal-mcp 的单次请求读超时。取值需大于 portal-mcp 侧的后端超时
-    # (30s) 与 portal_query_readonly 契约上限 (120s)，并覆盖交互 run 总超时 (360s)。
-    dataagent_portal_mcp_request_timeout_seconds: int = 600
+    # Claude Code 官方 MCP_TOOL_TIMEOUT，由 runtime 转为毫秒。180s 覆盖
+    # portal_query_readonly 的 120s 契约上限，且低于交互 run 总预算 360s。
+    # 见 docs/design/2026-08-14-portal-mcp-streamable-http-design.md
+    dataagent_portal_mcp_tool_timeout_seconds: int = 180
 
     # ---- Agent 交互能力 ----
     # AskUserQuestion 让 agent 通过选择卡片向用户提问。开启时会为每次运行安装

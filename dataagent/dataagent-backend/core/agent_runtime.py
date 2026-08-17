@@ -39,7 +39,6 @@ PORTAL_MCP_TOOL_NAMES = [
 PLATFORM_TOOLS_SKILL_FOLDER = "opendataworks-platform-tools"
 # Shipped inside both the backend and the sandbox-runner image (each COPYs the whole
 # dataagent-backend tree), so the same absolute path resolves in either container.
-PORTAL_MCP_STDIO_BRIDGE_PATH = Path(__file__).resolve().parent / "portal_mcp_stdio_bridge.py"
 SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "data_agent_system_prompt.md"
 _FILE_BOUNDARY_PATH_KEYS = {
     "Read": ("file_path", "path"),
@@ -677,6 +676,15 @@ def _build_runtime_env(
         agent_env = dict((getattr(params, "agent_snapshot", None) or {}).get("env_vars") or {})
     if isinstance(agent_env, dict):
         runtime_env.update({str(key): str(value) for key, value in agent_env.items()})
+    # Keep the portal MCP timeout deterministic. Claude Code 2.1.142+ uses
+    # MCP_TOOL_TIMEOUT for both the overall call and the HTTP/SSE per-request fetch
+    # ceiling. Apply this after profile env so an agent cannot silently restore the
+    # old 60s ceiling.
+    portal_mcp_timeout_seconds = max(
+        1,
+        int(getattr(cfg, "dataagent_portal_mcp_tool_timeout_seconds", 0) or 180),
+    )
+    runtime_env["MCP_TOOL_TIMEOUT"] = str(portal_mcp_timeout_seconds * 1000)
     return runtime_env
 
 
@@ -734,41 +742,18 @@ def _build_portal_mcp_servers(
     # portal-mcp is mounted as a Starlette sub-app; /mcp redirects to /mcp/, and
     # Streamable HTTP clients may not follow POST redirects.
     url = raw_url.rstrip("/") + "/"
-    transport = str(getattr(cfg, "dataagent_portal_mcp_transport", "") or "stdio").strip().lower()
-    if transport not in {"stdio", "http"}:
-        raise ValueError(
-            "DATAAGENT_PORTAL_MCP_TRANSPORT 仅支持 'stdio' 或 'http'，"
-            f"当前值: {transport!r}"
-        )
-    if transport == "http":
-        # Rollback lever only. HTTP exposes remote 404/session failures directly to the
-        # CLI and caps every POST at 60s; see the stdio branch.
-        return {
-            PORTAL_MCP_SERVER_NAME: {
-                "type": "http",
-                "url": url,
-                "headers": headers,
-            }
-        }
-
-    # Default: reach portal-mcp through a stdio JSON-RPC bridge. The CLI's
-    # -32000/"Connection closed" recovery path and 60s per-request AbortSignal are
-    # HTTP-only. Its generic stale-session matcher also recognizes 404/session 400
-    # regardless of transport, so the bridge deliberately maps remote HTTP failures to
-    # -32603 before they reach the stdio client.
-    # The bridge forwards frames verbatim, so the tool contract still lives only in
-    # portal-mcp. See docs/design/2026-08-14-portal-mcp-stdio-bridge-design.md.
-    timeout_seconds = int(getattr(cfg, "dataagent_portal_mcp_request_timeout_seconds", 0) or 600)
+    # portal-mcp is a remote service, so use the protocol's native Streamable HTTP
+    # transport. Claude Code 2.1.142+ honors MCP_TOOL_TIMEOUT for the HTTP request
+    # ceiling. The server is stateless, so subsequent calls do not depend on a
+    # logical MCP session surviving; an interrupted in-flight call still fails
+    # instead of being retried implicitly. Keep one transport path instead of
+    # duplicating JSON-RPC/SSE semantics in a local stdio bridge. See the
+    # Streamable HTTP design document.
     return {
         PORTAL_MCP_SERVER_NAME: {
-            "type": "stdio",
-            "command": sys.executable,
-            "args": [str(PORTAL_MCP_STDIO_BRIDGE_PATH)],
-            "env": {
-                "PORTAL_MCP_BRIDGE_URL": url,
-                "PORTAL_MCP_BRIDGE_HEADERS": json.dumps(headers, ensure_ascii=False, sort_keys=True),
-                "PORTAL_MCP_BRIDGE_TIMEOUT_SECONDS": str(timeout_seconds),
-            },
+            "type": "http",
+            "url": url,
+            "headers": headers,
         }
     }
 
