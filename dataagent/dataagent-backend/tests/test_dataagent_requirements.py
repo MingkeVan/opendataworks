@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 REQUIREMENTS = Path(__file__).resolve().parents[1] / "requirements.txt"
-CLAUDE_AGENT_SDK_VERSION = "0.2.114"
+CLAUDE_AGENT_SDK_VERSION = "0.2.115"
 
 
 def test_dataagent_runtime_preinstalls_pytest_for_skill_validation():

@@ -1437,12 +1437,11 @@ def test_execute_task_stream_injects_portal_mcp_servers(monkeypatch, tmp_path: P
 
     assert result.task_status == "finished"
     assert result.session_id == "sdk-session-mcp"
-    assert ClaudeAgentOptions.last_kwargs["mcp_servers"] == {
-        "portal": {
-            "type": "http",
-            "url": "http://portal-mcp:8801/mcp/",
-            "headers": {"X-Portal-MCP-Token": "portal-token"},
-        }
+    portal_server = ClaudeAgentOptions.last_kwargs["mcp_servers"]["portal"]
+    assert portal_server["type"] == "http"
+    assert portal_server["url"] == "http://portal-mcp:8801/mcp/"
+    assert portal_server["headers"] == {
+        "X-Portal-MCP-Token": "portal-token"
     }
     assert "mcp__portal__portal_search_tables" in ClaudeAgentOptions.last_kwargs["allowed_tools"]
     assert "mcp__portal__portal_query_readonly" in ClaudeAgentOptions.last_kwargs["allowed_tools"]

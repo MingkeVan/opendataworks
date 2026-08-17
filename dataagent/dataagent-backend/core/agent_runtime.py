@@ -37,6 +37,8 @@ PORTAL_MCP_TOOL_NAMES = [
     "portal_query_readonly",
 ]
 PLATFORM_TOOLS_SKILL_FOLDER = "opendataworks-platform-tools"
+# Shipped inside both the backend and the sandbox-runner image (each COPYs the whole
+# dataagent-backend tree), so the same absolute path resolves in either container.
 SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "data_agent_system_prompt.md"
 _FILE_BOUNDARY_PATH_KEYS = {
     "Read": ("file_path", "path"),
@@ -674,6 +676,17 @@ def _build_runtime_env(
         agent_env = dict((getattr(params, "agent_snapshot", None) or {}).get("env_vars") or {})
     if isinstance(agent_env, dict):
         runtime_env.update({str(key): str(value) for key, value in agent_env.items()})
+    # Keep the portal-selected MCP timeout deterministic. MCP_TOOL_TIMEOUT is
+    # process-wide (other MCP servers in this CLI would inherit it); Claude Code
+    # 2.1.142+ uses it for both the overall call and the HTTP/SSE per-request fetch
+    # ceiling. Apply it after profile env so an agent cannot silently restore the
+    # old 60s ceiling. Values above 300s also require raising and verifying
+    # CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT; see the Streamable HTTP design.
+    portal_mcp_timeout_seconds = max(
+        1,
+        int(getattr(cfg, "dataagent_portal_mcp_tool_timeout_seconds", 0) or 180),
+    )
+    runtime_env["MCP_TOOL_TIMEOUT"] = str(portal_mcp_timeout_seconds * 1000)
     return runtime_env
 
 
@@ -728,12 +741,20 @@ def _build_portal_mcp_servers(
     if agent_snapshot is not None:
         headers["X-Agent-Data-Scope"] = encode_scope_header((agent_snapshot or {}).get("data_scope") or {})
 
+    # portal-mcp is mounted as a Starlette sub-app; /mcp redirects to /mcp/, and
+    # Streamable HTTP clients may not follow POST redirects.
+    url = raw_url.rstrip("/") + "/"
+    # portal-mcp is a remote service, so use the protocol's native Streamable HTTP
+    # transport. Claude Code 2.1.142+ honors MCP_TOOL_TIMEOUT for the HTTP request
+    # ceiling. The server is stateless, so subsequent calls do not depend on a
+    # logical MCP session surviving; an interrupted in-flight call still fails
+    # instead of being retried implicitly. Keep one transport path instead of
+    # duplicating JSON-RPC/SSE semantics in a local stdio bridge. See the
+    # Streamable HTTP design document.
     return {
         PORTAL_MCP_SERVER_NAME: {
             "type": "http",
-            # portal-mcp is mounted as a Starlette sub-app; /mcp redirects to
-            # /mcp/, and Streamable HTTP clients may not follow POST redirects.
-            "url": raw_url.rstrip("/") + "/",
+            "url": url,
             "headers": headers,
         }
     }

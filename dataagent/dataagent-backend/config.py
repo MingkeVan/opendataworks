@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     dataagent_portal_mcp_base_url: str = ""
     dataagent_portal_mcp_token: str = ""
     dataagent_portal_mcp_token_header_name: str = "X-Portal-MCP-Token"
+    # Claude Code 进程级 MCP_TOOL_TIMEOUT，由 runtime 转为毫秒。虽然配置名沿用
+    # portal 前缀，该值也会作用于同一 CLI 进程中的其它 MCP server。180s 覆盖
+    # portal_query_readonly 的 120s 契约上限，且低于交互 run 总预算 360s；若调到
+    # 300s 以上，还必须同步配置并验证 CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT。
+    # 见 docs/design/2026-08-17-portal-mcp-streamable-http-design.md
+    dataagent_portal_mcp_tool_timeout_seconds: int = 180
 
     # ---- Agent 交互能力 ----
     # AskUserQuestion 让 agent 通过选择卡片向用户提问。开启时会为每次运行安装

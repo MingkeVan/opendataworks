@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
@@ -49,6 +51,7 @@ def test_build_runtime_env_does_not_expose_direct_db_connection_settings(monkeyp
     assert runtime_env["DATAAGENT_PLATFORM_SKILL_ROOT"] == str(Path("/tmp/platform-tools").resolve())
     assert runtime_env["DATAAGENT_ENABLED_SKILLS"] == "opendataworks-business-knowledge,opendataworks-platform-tools,marketing-insights"
     assert "marketing-insights" in runtime_env["DATAAGENT_ENABLED_SKILL_ROOTS"]
+    assert runtime_env["MCP_TOOL_TIMEOUT"] == "180000"
     assert "ODW_MYSQL_HOST" not in runtime_env
     assert "ODW_MYSQL_PORT" not in runtime_env
     assert "ODW_MYSQL_USER" not in runtime_env
@@ -68,6 +71,27 @@ def test_build_runtime_env_defaults_query_limit_to_backend_max(monkeypatch):
 
     assert runtime_env["DATAAGENT_QUERY_LIMIT"] == "1000"
     assert runtime_env["DATAAGENT_RESULT_PREVIEW_ROWS"] == "20"
+
+
+def test_build_runtime_env_uses_configured_portal_mcp_timeout_and_protects_cli_invariants(monkeypatch):
+    monkeypatch.setattr(agent_runtime, "resolve_builtin_skill_root_dir", lambda: Path("/tmp/skill-root"))
+
+    runtime_env = agent_runtime._build_runtime_env(
+        SimpleNamespace(
+            query_result_limit=1000,
+            dataagent_portal_mcp_tool_timeout_seconds=240,
+        ),
+        {},
+        SimpleNamespace(
+            question="",
+            sql_read_timeout_seconds=30,
+            agent_env_vars={
+                "MCP_TOOL_TIMEOUT": "1",
+            },
+        ),
+    )
+
+    assert runtime_env["MCP_TOOL_TIMEOUT"] == "240000"
 
 
 def test_build_runtime_env_derives_platform_root_from_primary_root_when_enabled_roots_lag(tmp_path: Path):
@@ -168,7 +192,7 @@ def test_resolve_claude_cli_path_supports_env_alias(monkeypatch):
     assert resolve_claude_cli_path(SimpleNamespace(claude_cli_path="")) == "/tmp/from-alias"
 
 
-def test_build_portal_mcp_servers_returns_http_config():
+def test_build_portal_mcp_servers_uses_streamable_http_with_data_scope():
     cfg = SimpleNamespace(
         dataagent_portal_mcp_enabled=True,
         dataagent_portal_mcp_base_url="http://portal-mcp:8801/mcp/",
@@ -192,8 +216,8 @@ def test_build_portal_mcp_servers_returns_http_config():
             "type": "http",
             "url": "http://portal-mcp:8801/mcp/",
             "headers": {
-                "X-Portal-MCP-Token": "portal-token",
                 "X-Agent-Data-Scope": "eyJhbGxvd2VkX3Njb3BlcyI6W3siY2x1c3Rlcl9pZCI6MywiZGF0YWJhc2UiOiJhZHNfdXNlciIsInNvdXJjZV90eXBlIjoiRE9SSVMifV19",
+                "X-Portal-MCP-Token": "portal-token",
             },
         }
     }
