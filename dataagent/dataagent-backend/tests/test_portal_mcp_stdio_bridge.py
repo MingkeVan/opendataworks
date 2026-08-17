@@ -291,6 +291,37 @@ def test_answered_request_is_not_followed_by_an_error_frame(stdout: StdoutCaptur
     assert len(written) == 2
 
 
+def test_failed_response_write_still_reports_an_error(stdout: StdoutCapture, monkeypatch):
+    """The answered flag must be set after the write, not before.
+
+    Setting it first means a failed write leaves the request both unanswered and
+    un-errored — the exact hang this bridge exists to remove.
+    """
+    written: list[str] = []
+
+    def flaky_write(line: str) -> None:
+        payload = json.loads(line)
+        if payload.get("id") == 18 and "result" in payload:
+            raise OSError("stdout broke while flushing the response")
+        written.append(line)
+
+    monkeypatch.setattr(PortalMcpBridge, "_write_blocking", staticmethod(flaky_write))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 18, "result": {"ok": True}})
+
+    async def scenario():
+        async with _build_bridge(handler) as bridge:
+            await bridge.handle_message({"jsonrpc": "2.0", "id": 18, "method": "tools/call"})
+
+    _run(scenario())
+
+    assert len(written) == 1
+    reported = json.loads(written[0])
+    assert reported["id"] == 18
+    assert reported["error"]["code"] == bridge_module.INTERNAL_ERROR_CODE
+
+
 def test_non_http_exception_becomes_jsonrpc_error(stdout: StdoutCapture, monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("handler should not run")

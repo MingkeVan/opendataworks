@@ -209,9 +209,87 @@ CLI 自身的 5 分钟 idle timeout 与后端总 run timeout 仍保留，不能�
   更新 runner 或已预热 child 的环境；runner 重建时会清理并按新环境重建 warm children。无需重建
   镜像，`http` 分支代码原样保留。
 
+## 定位：这是兼容层，不是目标形态
+
+MCP 规范对 transport 的定位是按**服务端部署形态**划分的：stdio 用于客户端拉起的本地子进程，
+Streamable HTTP 用于独立部署的远程服务。`portal-mcp` 是后者，这一点本次没有改变——它仍然是一个
+独立部署、独立认证、统一数据范围边界的 Streamable HTTP 远程服务。改变的只是**某一个客户端**
+（锁定版本的 Claude CLI）如何抵达它：
+
+```
+原来：Claude CLI ──Streamable HTTP──> portal-mcp
+现在：Claude CLI ──stdio──> bridge ──Streamable HTTP──> portal-mcp
+```
+
+HTTP 没有消失，只是不再由 CLI 自己管理。桥的唯一价值是建立**故障隔离边界**：把 HTTP/网络故障
+归一化成一次工具级错误，不让它升级成整个 MCP session 失效。因此本层：
+
+- 只做 transport 转换、错误归一化、协议头透传、进程生命周期。
+- **不得**包含任何 portal 工具定义、schema、业务规则或数据范围判断——那些仍然只属于 `portal-mcp`。
+- 必须有明确的删除条件（下一节），不能沉淀成永久架构。
+
+被否掉的两个替代方案：
+
+- **把 `portal-mcp` 整体改成本地 stdio server**：要求每个 backend/sandbox 容器各自运行完整
+  `portal-mcp`，破坏独立服务、前门认证与统一数据范围边界，部署与升级成本显著上升。
+- **改用旧版 HTTP+SSE transport**：那是规范里的兼容路径，新服务不应回退过去；且 CLI 对 `sse`
+  同样套用 HTTP fetch 超时。
+
+## 退出条件：何时删除本兼容层
+
+长期目标是回到 CLI 直连 Streamable HTTP。触发条件不是「有新版本了」，而是**在即将上线的那个
+锁定版本上重新验证过下列行为**。任何一项不通过就继续保留桥。
+
+前置：验证对象必须是 `dataagent/dataagent-backend/requirements.txt` 里锁定的
+`claude-agent-sdk` 所自带的 CLI，不是 `latest`，也不是开发机上恰好装着的那个。
+
+```bash
+# 定位待验证的 CLI 二进制（本仓库 2026-08 基线为 claude-agent-sdk==0.2.114 → CLI 2.1.205）
+find "$(python -c 'import claude_agent_sdk,pathlib;print(pathlib.Path(claude_agent_sdk.__file__).parent)')" \
+     -name cli.js 2>/dev/null || which claude
+```
+
+### A. 二进制静态核对（便宜，先做）
+
+| # | 待确认 | 判据 |
+| --- | --- | --- |
+| A1 | 单请求硬超时 | 不再存在对 HTTP POST 无条件套用的 `AbortSignal.timeout(60000)`；或该值可由环境变量配置到 ≥ 交互 run 预算 |
+| A2 | stale-session matcher | HTTP `404` / session `400` 不再被无条件识别为 session expired；至少不应把普通后端故障升级成 session 失效 |
+| A3 | connection-closed 恢复 | `-32000 "Connection closed"` 的处理不再清理共享 transport，或清理范围不波及其它在途请求 |
+
+### B. 真实运行时验证（需要真实 portal-mcp，A 全过之后再做）
+
+| # | 场景 | 通过标准 |
+| --- | --- | --- |
+| B1 | 90–120s 的 `portal_query_readonly` | 正常返回结果，不在 60s 被截断、不返回空结果 |
+| B2 | 调用中途重启 `portal-mcp` | 只有当前这次调用失败，**后续调用自动恢复**，会话存活 |
+| B3 | 并发多个 portal 工具调用，其中一个连接出错 | 其余调用不受影响，不出现级联失败 |
+| B4 | 服务端返回 HTTP 400/404 | 呈现为工具级错误，会话继续，不出现 `session expired` |
+| B5 | 协议版本头 | `initialize` 之后的请求携带协商得到的 `MCP-Protocol-Version` |
+| B6 | 取消 | 取消一次进行中的工具调用后，服务端侧请求确实被中断 |
+| B7 | 深会话回归 | 一次真实 widget 对话内密集调用 portal 工具，不复现 `session expired` |
+
+B1–B4、B7 可复用本次的现成资产：`tests/test_portal_mcp_stdio_bridge.py` 的真实 ASGI 流程、
+`deploy/docker-compose.dev.yml` 起的 `portal-mcp`，以及把 `DATAAGENT_PORTAL_MCP_TRANSPORT`
+切到 `http` 做 A/B 对比。B6、B7 需要真实模型凭据。
+
+### 删除动作
+
+全部通过后：`dataagent_portal_mcp_transport` 默认值改回 `http` → 观察一个发布周期 → 删除
+`core/portal_mcp_stdio_bridge.py`、其测试、`dataagent_portal_mcp_request_timeout_seconds`
+与 `deploy/.env.example` 中的相关条目，并在本设计文档追加「已退役」说明。
+
+### 保留期间的已知取舍
+
+- 取消未映射到在途 POST（见「风险与回退」）。
+- SSE 是整体读完再回写，不是增量消费；因此长工具调用期间的服务端进度通知不会实时到达 CLI。
+  当前 `portal-mcp` 固定 `json_response=True`，没有增量流可丢，但这条限制会随服务端改流式而生效。
+- 单一 600s 读超时同时服务交互与后台两档，交互路径拿不到桥自己的 `ReadTimeout` 诊断。
+
 ## 参考
 
 - `claude-agent-sdk==0.2.114` 自带 Claude CLI `2.1.205`（生产运行时基线）。
+- MCP 规范 Transports：stdio 用于本地子进程，Streamable HTTP 用于远程服务。
 - 本机 `@anthropic-ai/claude-code` 2.1.42 `cli.js`：初始取证样本，仅作为历史对照，不用于生产
   runtime 结论。
 - `anthropics/claude-code#27142`、`openai/codex#13969`、`danny-avila/LibreChat#11868`、`Doist/todoist-ai#304`、`encode/httpx#2056`、modelcontextprotocol.io — Transports。

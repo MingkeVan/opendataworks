@@ -248,14 +248,17 @@ class PortalMcpBridge:
             # 先原样转发所有帧，再判断本请求是否拿到了响应：响应体里可能同时夹带服务端
             # 通知，本请求没等到响应不是丢掉那些通知的理由。
             for payload in payloads:
-                if (
+                is_response = (
                     has_id
                     and isinstance(payload, dict)
                     and "id" in payload
                     and payload.get("id") == message_id
-                ):
-                    answered = True
+                )
+                # 置位必须在写成功之后：写失败时这一帧并没有到达对端，此时若已置位，
+                # 下面的错误补发会被跳过，请求就永远收不到回复——正是本改动要消灭的挂死。
                 await self._write(payload)
+                if is_response:
+                    answered = True
             if has_id and not answered:
                 await self._write_error(message_id, "portal-mcp 未返回对应请求的 JSON-RPC 响应")
         except json.JSONDecodeError as exc:

@@ -108,3 +108,19 @@
   `dataagent-backend` 与 `dataagent-sandbox-runner`。runner 重建会清理旧 warm children；只重启
   backend 不足以改变 sandbox 执行路径。
 - 二级：回滚本次提交。`portal-mcp` 侧 keepalive 与无状态化不受影响，无需同步回滚。
+
+## 后续项（不在本 PR）
+
+桥是兼容层，退出条件见设计文档「退出条件：何时删除本兼容层」。在它被删除之前，若需要长期保留，
+按优先级补下面两项——两项都改变行为契约，应各自单独提 PR 并配套设计更新：
+
+1. **cancellation 映射**：维护 `request_id → asyncio.Task`，收到 `notifications/cancelled` 时取消
+   对应的在途 `httpx` 请求，让服务端感知 socket 断开。注意这只保证释放桥与 `portal-mcp` 侧的
+   连接与 ASGI task；底层 SQL 是否真的被杀，取决于 `portal-mcp` 是否把取消继续传播到 Java 后端，
+   不要在文档里过度承诺。代价：给一个刻意无状态的转发器引入按 request id 的状态，需要限定在
+   transport 层、不得外溢成业务状态。
+2. **分层超时**：现在交互与后台共用 600s，交互路径永远拿不到桥自己的 `ReadTimeout` 诊断。按
+   `portal-mcp → Java 后端 30s`、`portal_query_readonly` 契约上限 120s 推算，交互档 `150-180s`
+   足够覆盖最坏合法情况并早于 360s run 预算触发；后台档需要单独取值（后台 run 预算 1800s、
+   `agent_background_sql_read_timeout_seconds` 900s）。代价：一个值变两个值，
+   `_build_portal_mcp_servers` 需要拿到 `execution_mode`，是一处真实的参数透传改动。
