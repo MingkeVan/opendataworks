@@ -8,7 +8,13 @@
  *   → message_delta → message_stop
  *   tool_result record (after each UserMessage with tool results)
  *   done record (after ResultMessage)
+ *
+ * Records written by the Pi data plane (record_type "pi_event") carry neutral
+ * agent events instead and are reduced by agentEvents/reducer.js into the same
+ * block shapes, so nothing downstream of this module knows which engine ran.
  */
+
+import { reducePiEvent } from './agentEvents/reducer.js'
 
 const SKILL_LAUNCH_OUTPUT_RE = /^Launching skill(?::\s*(.+))?$/i
 
@@ -41,6 +47,12 @@ export function createChatState() {
 export function processV2Record(state, record) {
   if (record.record_type === 'stream') {
     _handleStreamEvent(state, record.data || {})
+  } else if (record.record_type === 'pi_event') {
+    // Rows written by the Pi data plane. Dispatching here rather than at each
+    // call site keeps every consumer (portal chat, widget, history replay)
+    // engine-agnostic for free, and mirrors the backend projection, which also
+    // handles both engines in one function.
+    reducePiEvent(state, record)
   } else if (record.record_type === 'tool_result') {
     _handleToolResult(state, record.data || {})
   } else if (record.record_type === 'permission_request') {
