@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opendataworks.io/schemas/dataagent/runtime/v1/cell-frame.schema.json",
+  "title": "CellProtocolFrame",
+  "description": "Framed bidirectional NDJSON message exchanged over stdio between Runtime Gateway and Pi Runtime Cell.",
+  "type": "object",
+  "required": [
+    "protocol_version",
+    "cell_id",
+    "run_id",
+    "task_attempt_id",
+    "frame_id",
+    "type",
+    "payload"
+  ],
+  "properties": {
+    "protocol_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "cell_id": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "task_attempt_id": {
+      "type": "string"
+    },
+    "frame_id": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "hello",
+        "hello.ack",
+        "run.start",
+        "run.accepted",
+        "run.event",
+        "run.heartbeat",
+        "interaction.resolve",
+        "run.steer",
+        "run.follow_up",
+        "run.cancel",
+        "run.settled",
+        "cell.shutdown",
+        "protocol.error"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

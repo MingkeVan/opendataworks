@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opendataworks.io/schemas/dataagent/agent-events/v1/agent-event.schema.json",
+  "title": "AgentEvent",
+  "description": "Neutral Agent Event Protocol v1. Canonical event representation across Node.js Cell, Python Gateway/Control Plane, and Vue Frontend.",
+  "type": "object",
+  "required": [
+    "event_id",
+    "run_id",
+    "task_id",
+    "task_attempt_id",
+    "sequence",
+    "timestamp",
+    "type",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "description": "Unique event identifier."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Run execution attempt identifier."
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Task identifier."
+    },
+    "task_attempt_id": {
+      "type": "string",
+      "description": "Task attempt identifier."
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Strictly monotonic 1-based sequence number per run."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC timestamp."
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "run.started",
+        "turn.started",
+        "content.started",
+        "content.delta",
+        "content.completed",
+        "tool.started",
+        "tool.progress",
+        "tool.completed",
+        "interaction.requested",
+        "interaction.resolved",
+        "usage.updated",
+        "turn.completed",
+        "run.completed",
+        "run.failed",
+        "run.cancelled",
+        "run.suspended"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

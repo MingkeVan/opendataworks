@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opendataworks.io/schemas/dataagent/runtime/v1/runtime-request.schema.json",
+  "title": "AgentRunRequest",
+  "description": "Immutable request submitted by DataAgent Control Plane to Runtime Gateway for executing an agent run.",
+  "type": "object",
+  "required": [
+    "runtime_protocol_version",
+    "agent_event_protocol_version",
+    "run_id",
+    "task_id",
+    "task_attempt_id",
+    "topic_id",
+    "purpose",
+    "context",
+    "model",
+    "workspace",
+    "limits"
+  ],
+  "properties": {
+    "runtime_protocol_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Supported runtime protocol version."
+    },
+    "agent_event_protocol_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Supported agent event protocol version."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Unique identifier for this single execution attempt."
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Business task identifier."
+    },
+    "task_attempt_id": {
+      "type": "string",
+      "description": "Attempt identifier within the task."
+    },
+    "topic_id": {
+      "type": "string",
+      "description": "Topic/conversation identifier."
+    },
+    "purpose": {
+      "type": "string",
+      "enum": ["interactive", "background", "eval"],
+      "description": "Execution purpose."
+    },
+    "context": {
+      "type": "object",
+      "required": [
+        "context_snapshot_id",
+        "policy_version",
+        "renderer_target",
+        "system_instructions",
+        "messages"
+      ],
+      "properties": {
+        "context_snapshot_id": { "type": "string" },
+        "history_watermark": { "type": "string" },
+        "policy_version": { "type": "string" },
+        "renderer_target": {
+          "type": "string",
+          "const": "pi_agent_core"
+        },
+        "system_instructions": { "type": "string" },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["role", "content"],
+            "properties": {
+              "message_id": { "type": "string" },
+              "role": { "type": "string", "enum": ["user", "assistant", "system", "custom"] },
+              "content": { "type": "string" },
+              "attachments": { "type": "array" },
+              "created_at": { "type": "string" }
+            }
+          }
+        },
+        "attachments": { "type": "array", "default": [] },
+        "artifacts": { "type": "array", "default": [] },
+        "enabled_skills": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "tool_catalog_digest": { "type": "string" },
+        "data_scope": { "type": "object", "default": {} },
+        "locale": { "type": "string", "default": "zh-CN" },
+        "timezone": { "type": "string", "default": "Asia/Shanghai" },
+        "content_digest": { "type": "string" }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["provider_id", "model_id"],
+      "properties": {
+        "provider_id": { "type": "string" },
+        "model_id": { "type": "string" },
+        "endpoint_ref": { "type": "string" },
+        "region": { "type": "string" },
+        "options": { "type": "object", "default": {} }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["workspace_root"],
+      "properties": {
+        "workspace_root": { "type": "string" },
+        "scratch_root": { "type": "string" },
+        "read_only": { "type": "boolean", "default": false }
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "root_path"],
+        "properties": {
+          "name": { "type": "string" },
+          "root_path": { "type": "string" }
+        }
+      },
+      "default": []
+    },
+    "mcp_servers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "transport"],
+        "properties": {
+          "name": { "type": "string" },
+          "transport": { "type": "string", "enum": ["stdio", "streamable_http"] },
+          "endpoint": { "type": "string" },
+          "token": { "type": "string" },
+          "tool_allowlist": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "default": []
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "policy_version": { "type": "string", "default": "v1" },
+        "require_plan_approval": { "type": "boolean", "default": false },
+        "require_write_confirmation": { "type": "boolean", "default": true },
+        "allowed_tools": { "type": "array", "items": { "type": "string" } }
+      },
+      "default": {}
+    },
+    "limits": {
+      "type": "object",
+      "required": ["timeout_seconds"],
+      "properties": {
+        "timeout_seconds": { "type": "integer", "default": 360 },
+        "idle_timeout_seconds": { "type": "integer", "default": 120 },
+        "max_turns": { "type": "integer", "default": 30 },
+        "max_tool_calls": { "type": "integer", "default": 50 },
+        "max_output_tokens": { "type": "integer", "default": 4096 }
+      }
+    },
+    "secret_envelope": {
+      "type": "object",
+      "description": "Short-lived decrypted/encrypted secret bag injected directly into run memory.",
+      "properties": {
+        "api_key": { "type": "string" },
+        "mcp_tokens": { "type": "object" },
+        "custom_headers": { "type": "object" }
+      },
+      "default": {}
+    }
+  },
+  "additionalProperties": false
+}

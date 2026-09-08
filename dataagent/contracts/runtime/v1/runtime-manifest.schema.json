@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opendataworks.io/schemas/dataagent/runtime/v1/runtime-manifest.schema.json",
+  "title": "RuntimeManifest",
+  "description": "Declared immutable capability manifest of the runtime artifact (readiness audit).",
+  "type": "object",
+  "required": [
+    "runtime_kind",
+    "runtime_version",
+    "pi_agent_core_version",
+    "pi_ai_version",
+    "node_version",
+    "runtime_protocol_versions",
+    "agent_event_protocol_versions",
+    "providers",
+    "features",
+    "artifact_digest"
+  ],
+  "properties": {
+    "runtime_kind": {
+      "type": "string",
+      "const": "pi_agent_core"
+    },
+    "runtime_version": {
+      "type": "string"
+    },
+    "pi_agent_core_version": {
+      "type": "string"
+    },
+    "pi_ai_version": {
+      "type": "string"
+    },
+    "node_version": {
+      "type": "string"
+    },
+    "runtime_protocol_versions": {
+      "type": "array",
+      "items": { "type": "integer" }
+    },
+    "agent_event_protocol_versions": {
+      "type": "array",
+      "items": { "type": "integer" }
+    },
+    "context_renderer_versions": {
+      "type": "array",
+      "items": { "type": "integer" }
+    },
+    "providers": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "features": {
+      "type": "object",
+      "required": [
+        "streaming",
+        "reasoning",
+        "tools",
+        "tool_progress",
+        "permission_interaction",
+        "cancel"
+      ],
+      "properties": {
+        "streaming": { "type": "boolean" },
+        "reasoning": { "type": "boolean" },
+        "tools": { "type": "boolean" },
+        "tool_progress": { "type": "boolean" },
+        "permission_interaction": { "type": "boolean" },
+        "question_interaction": { "type": "boolean" },
+        "plan_interaction": { "type": "boolean" },
+        "cancel": { "type": "boolean" },
+        "steer": { "type": "boolean" },
+        "follow_up": { "type": "boolean" },
+        "mcp": { "type": "boolean" },
+        "skills": { "type": "boolean" }
+      }
+    },
+    "limits": {
+      "type": "object"
+    },
+    "artifact_digest": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

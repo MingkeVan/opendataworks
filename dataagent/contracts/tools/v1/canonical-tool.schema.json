@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opendataworks.io/schemas/dataagent/tools/v1/canonical-tool.schema.json",
+  "title": "CanonicalToolDefinition",
+  "description": "Definition of a canonical tool decoupled from LLM aliases and specific agent SDK naming.",
+  "type": "object",
+  "required": [
+    "canonical_id",
+    "initial_alias",
+    "description",
+    "side_effect",
+    "execution_mode"
+  ],
+  "properties": {
+    "canonical_id": {
+      "type": "string",
+      "description": "Unique stable identifier for audit and permission policy, e.g. 'workspace.read', 'process.exec'."
+    },
+    "initial_alias": {
+      "type": "string",
+      "description": "Model-facing alias presented to LLM, e.g. 'Read', 'Bash', 'LS'."
+    },
+    "description": {
+      "type": "string"
+    },
+    "parameters_schema": {
+      "type": "object"
+    },
+    "side_effect": {
+      "type": "string",
+      "enum": ["none", "read", "write", "admin"],
+      "default": "none"
+    },
+    "parallel_safe": {
+      "type": "boolean",
+      "default": false
+    },
+    "execution_mode": {
+      "type": "string",
+      "enum": ["sequential", "parallel"],
+      "default": "sequential"
+    }
+  },
+  "additionalProperties": false
+}

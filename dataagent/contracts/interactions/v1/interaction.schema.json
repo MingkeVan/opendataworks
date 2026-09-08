@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opendataworks.io/schemas/dataagent/interactions/v1/interaction.schema.json",
+  "title": "AgentInteraction",
+  "description": "Lifecycle state and payload of an interactive human-in-the-loop request (permission, question, plan).",
+  "type": "object",
+  "required": [
+    "interaction_id",
+    "run_id",
+    "task_id",
+    "kind",
+    "status",
+    "request",
+    "created_at"
+  ],
+  "properties": {
+    "interaction_id": { "type": "string" },
+    "run_id": { "type": "string" },
+    "task_id": { "type": "string" },
+    "tool_call_id": { "type": "string" },
+    "canonical_tool_id": { "type": "string" },
+    "kind": {
+      "type": "string",
+      "enum": ["permission", "question", "plan"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "resolved", "expired", "cancelled"]
+    },
+    "request": {
+      "type": "object",
+      "required": ["prompt"],
+      "properties": {
+        "prompt": { "type": "string" },
+        "options": { "type": "array", "items": { "type": "string" } },
+        "context_preview": { "type": "object" },
+        "timeout_seconds": { "type": "integer", "default": 300 }
+      }
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": ["allow", "deny", "answered", "timeout", "cancelled"]
+        },
+        "answer": { "type": "string" },
+        "selected_options": { "type": "array", "items": { "type": "string" } },
+        "resolved_by": { "type": "string" },
+        "resolved_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}
