@@ -8,7 +8,7 @@
 
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentEvent as PiAgentEvent, StreamFn } from "@earendil-works/pi-agent-core";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, Usage } from "@earendil-works/pi-ai";
 import type { CellInitPayload, NeutralAgentEvent } from "../protocol/frames.js";
 import { RunStateMachine } from "./run-state-machine.js";
 import { EventNormalizer } from "./event-normalizer.js";
@@ -118,12 +118,35 @@ export class Cell {
         }
       });
 
+      const emptyUsage: Usage = {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      };
+
       await agent.prompt(
-        init.messages.map((message) => ({
-          role: message.role === "assistant" ? ("assistant" as const) : ("user" as const),
-          content: [{ type: "text" as const, text: message.content }],
-          timestamp: Date.now(),
-        })) as never
+        init.messages.map((message) => {
+          if (message.role === "assistant") {
+            return {
+              role: "assistant" as const,
+              content: [{ type: "text" as const, text: message.content }],
+              api: model.api,
+              provider: model.provider,
+              model: model.id,
+              usage: emptyUsage,
+              stopReason: "stop" as const,
+              timestamp: Date.now(),
+            };
+          }
+          return {
+            role: "user" as const,
+            content: [{ type: "text" as const, text: message.content }],
+            timestamp: Date.now(),
+          };
+        }) as never
       );
 
       if (this.cancelled || agent.signal?.aborted) {
