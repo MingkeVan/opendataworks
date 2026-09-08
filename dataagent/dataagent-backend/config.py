@@ -100,6 +100,20 @@ class Settings(BaseSettings):
     # 纯字符串形态（更接近 v1.3.0 的调用形态）。写工具确认门控不受本开关影响。
     dataagent_ask_user_question_enabled: bool = True
 
+    # ---- Agent runtime kind (data plane engine) ----
+    # Which execution engine runs one NL2SQL turn. This is orthogonal to
+    # dataagent_sandbox_mode: that one picks the isolation topology (in-process
+    # vs. child container), this one picks the engine inside whichever topology
+    # was selected. Deployment-level only; never resolved per request.
+    #   claude_code   -> claude-agent-sdk (default, current behaviour)
+    #   pi_agent_core -> Node Pi Cell over stdio (dataagent-runtime-pi)
+    dataagent_runtime_kind: str = "claude_code"
+    # Node binary and built Pi Cell entrypoint used when runtime kind is
+    # pi_agent_core. Empty values fall back to `node` on PATH and the in-repo
+    # dataagent-runtime-pi build output.
+    dataagent_node_bin: str = ""
+    dataagent_runtime_pi_dir: str = ""
+
     # ---- Topic runtime root / sandbox ----
     # Filesystem root visible to the current process. Containerized backend
     # processes read the shared volume at /dataagent_runtime; local execution
@@ -186,6 +200,24 @@ def resolve_sql_read_timeout_seconds(cfg: Settings, execution_mode) -> int:
     if is_background_execution_mode(execution_mode):
         return int(getattr(cfg, "agent_background_sql_read_timeout_seconds", 0) or 900)
     return int(getattr(cfg, "agent_interactive_sql_read_timeout_seconds", 0) or 300)
+
+
+SUPPORTED_RUNTIME_KINDS = ("claude_code", "pi_agent_core")
+DEFAULT_RUNTIME_KIND = "claude_code"
+
+
+def resolve_runtime_kind(cfg: Settings) -> str:
+    """解析当前部署激活的执行引擎（数据面）。
+
+    唯一解析入口。与 ``dataagent_sandbox_mode`` 正交：后者决定隔离拓扑（进程内 /
+    子容器），本函数只决定在选定拓扑内部由哪个引擎执行一轮问答。部署级配置，
+    不接受请求级切换。无法识别的取值回落到默认引擎而不是抛错，保证一个写错的
+    环境变量不会让整个后端拒绝服务。
+    """
+    raw = str(getattr(cfg, "dataagent_runtime_kind", "") or "").strip().lower()
+    if raw in SUPPORTED_RUNTIME_KINDS:
+        return raw
+    return DEFAULT_RUNTIME_KIND
 
 
 def resolve_workspace_scratch_dirs(cfg: Settings) -> list[str]:

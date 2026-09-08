@@ -13,7 +13,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from config import get_settings
+from config import get_settings, resolve_runtime_kind, resolve_workspace_scratch_dirs
 from core.agent_profile_service import DEFAULT_AGENT_ID, normalize_agent_snapshot, normalize_permission_mode
 from core.ask_user_question import (
     ASK_USER_QUESTION_TOOL_NAME,
@@ -881,6 +881,121 @@ async def _execute_task_stream_via_runner(
     )
 
 
+async def _execute_task_stream_via_pi_runtime(
+    params: TaskExecutionInput,
+    *,
+    provider_id: str,
+    model: str,
+    system_prompt: str,
+    skill_runtime: dict[str, Any],
+    project_cwd: Path,
+    runtime_env: dict[str, str],
+    provider_env: dict[str, str],
+    agent_snapshot: dict[str, Any] | None,
+    cancel_reason: Callable[[], Awaitable[CancelReason | None]],
+) -> TaskExecutionResult:
+    """Run one turn on the Node Pi Cell instead of the Claude Agent SDK.
+
+    Imported lazily for the same reason the SDK import is: the module is only
+    needed by the engine actually selected, and neither should be a hard import
+    cost for a deployment running the other one.
+    """
+    from core.boundary_policy import build_boundary_policy
+    from core.pi_event_writer import PiEventWriter
+    from core.pi_runtime import PiRunContext, PiRuntimeUnavailable, execute_pi_run, resolve_cell_command
+
+    cfg = get_settings()
+    writer = PiEventWriter(get_topic_task_store(), params.task_id, params.topic_id)
+
+    # Session continuity differs by engine. The SDK resumes an engine-level
+    # session and is therefore handed only the new question; Pi has no such
+    # session and must replay the transcript, so history is always rebuilt here
+    # and params.resume_session_id is intentionally ignored.
+    messages: list[dict[str, str]] = []
+    for item in params.history or []:
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        role = "user" if item.get("role") == "user" else "assistant"
+        messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": str(params.question or "").strip()})
+
+    try:
+        cell_command = resolve_cell_command(cfg)
+    except PiRuntimeUnavailable as exc:
+        reason = str(exc)
+        writer.append_error(code="pi_runtime_missing", message=reason)
+        return TaskExecutionResult(
+            task_status="error",
+            content=reason,
+            error={"code": "pi_runtime_missing", "message": reason},
+            provider_id=provider_id,
+            model=model,
+            session_id="",
+        )
+
+    ctx = PiRunContext(
+        task_id=params.task_id,
+        topic_id=params.topic_id,
+        provider_id=provider_id,
+        model=model,
+        system_prompt=system_prompt,
+        messages=messages,
+        project_cwd=Path(project_cwd),
+        boundary_policy=build_boundary_policy(
+            project_cwd,
+            skill_runtime,
+            resolve_workspace_scratch_dirs(cfg),
+            runtime_env,
+            profile="pi_agent_core",
+        ),
+        runtime_env=dict(runtime_env),
+        provider_env=dict(provider_env),
+        skills=[
+            {"name": name, "root_path": str(root)}
+            for name, root in dict((skill_runtime or {}).get("enabled_roots") or {}).items()
+        ],
+        total_timeout_seconds=int(params.timeout_seconds or 0) or 360,
+        max_turns=_resolve_max_turns(cfg, params.execution_mode, int((agent_snapshot or {}).get("max_turns") or 0)),
+    )
+
+    outcome = await execute_pi_run(ctx, writer=writer, cancel_reason=cancel_reason)
+
+    # session_id must be task-scoped, not topic-scoped. It is read back as the
+    # next turn's resume_session_id, and a topic-level constant would make the
+    # SDK path take its "resume" branch — dropping all history — if the
+    # deployment is ever switched back to claude_code.
+    session_id = f"pi-{params.topic_id}-{params.task_id}"
+
+    if outcome.terminal_status == "success":
+        return TaskExecutionResult(
+            task_status="success",
+            content=outcome.answer,
+            usage=outcome.usage,
+            provider_id=provider_id,
+            model=model,
+            session_id=session_id,
+        )
+    if outcome.terminal_status == "cancelled":
+        return TaskExecutionResult(
+            task_status="cancelled",
+            content=outcome.answer,
+            usage=outcome.usage,
+            provider_id=provider_id,
+            model=model,
+            session_id=session_id,
+        )
+    return TaskExecutionResult(
+        task_status="error",
+        content=outcome.answer or outcome.error_message,
+        usage=outcome.usage,
+        error={"code": outcome.error_code or "pi_runtime_error", "message": outcome.error_message},
+        provider_id=provider_id,
+        model=model,
+        session_id=session_id,
+    )
+
+
 async def _execute_task_stream_local(
     params: TaskExecutionInput,
     *,
@@ -923,20 +1038,6 @@ async def _execute_task_stream_local(
     )
     system_prompt = _build_system_prompt(params.database_hint, skill_runtime, agent_snapshot)
 
-    try:
-        from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
-    except ImportError as exc:
-        reason = "claude-agent-sdk 未安装"
-        sdk_writer.append_error(code="sdk_not_installed", message=reason, detail=str(exc))
-        return TaskExecutionResult(
-            task_status="error",
-            content=reason,
-            error={"code": "sdk_not_installed", "message": reason, "detail": str(exc)},
-            provider_id=provider_id,
-            model=model,
-            session_id=accumulator.session_id,
-        )
-
     env_payload = _build_provider_env(
         provider_id,
         api_key=str(runtime_target.get("api_key") or ""),
@@ -963,6 +1064,42 @@ async def _execute_task_stream_local(
     runtime_env.update(workspace_env)
     for key, value in workspace_env.items():
         os.environ[key] = value
+
+    # ---- Data plane fork -------------------------------------------------
+    # Everything above is engine-neutral preparation and is shared by both data
+    # planes. The engine choice is deployment-level (resolve_runtime_kind) and
+    # deliberately *orthogonal* to sandbox mode: sandbox mode already chose the
+    # isolation topology further up in execute_task_stream, and this fork picks
+    # the engine inside whichever topology that selected. Forking on the two
+    # together would let a Pi deployment silently lose container isolation.
+    if resolve_runtime_kind(cfg) == "pi_agent_core":
+        return await _execute_task_stream_via_pi_runtime(
+            params,
+            provider_id=provider_id,
+            model=model,
+            system_prompt=system_prompt,
+            skill_runtime=skill_runtime,
+            project_cwd=project_cwd,
+            runtime_env=runtime_env,
+            provider_env=env_payload,
+            agent_snapshot=agent_snapshot,
+            cancel_reason=_cancel_reason,
+        )
+
+    try:
+        from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
+    except ImportError as exc:
+        reason = "claude-agent-sdk 未安装"
+        sdk_writer.append_error(code="sdk_not_installed", message=reason, detail=str(exc))
+        return TaskExecutionResult(
+            task_status="error",
+            content=reason,
+            error={"code": "sdk_not_installed", "message": reason, "detail": str(exc)},
+            provider_id=provider_id,
+            model=model,
+            session_id=accumulator.session_id,
+        )
+
     # Permission mode is a session-level choice carried on TaskExecutionInput.
     # Older snapshots may still embed permission_mode; honor it only as a fallback.
     requested_permission_mode = params.permission_mode

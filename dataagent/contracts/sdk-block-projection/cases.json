@@ -1,5 +1,5 @@
 {
-  "description": "Golden contract fixtures for SDK-record -> rendered-block projection. Both the backend (topic_task_store._project_sdk_records) and the frontend (v2StreamParser.processV2Record) must normalize each case's `records` to the same canonical `expected` block list. Canonical block shape: {kind: 'thinking'|'text'|'tool_use', text?, tool_name?, input?, output?, is_error?}. Empty thinking/text blocks are dropped.",
+  "description": "Golden contract fixtures for SDK-record -> rendered-block projection. Both the backend (topic_task_store._project_sdk_records) and the frontend (v2StreamParser.processV2Record) must normalize each case's `records` to the same canonical `expected` block list. Canonical block shape: {kind: 'thinking'|'text'|'tool_use', text?, tool_name?, input?, output?, is_error?}. Empty thinking/text blocks are dropped. Cases prefixed \"pi \" feed neutral pi_event records from the Pi data plane; each mirrors an SDK case and carries the byte-identical expected output, which is what proves a turn renders the same regardless of which engine executed it.",
   "cases": [
     {
       "name": "text answer only",
@@ -1067,6 +1067,358 @@
           ]
         }
       ]
+    },
+    {
+      "name": "pi text answer only",
+      "records": [
+        {
+          "seq_id": 1,
+          "record_type": "pi_event",
+          "event_type": "turn.started",
+          "data": {
+            "turn_id": "turn-1"
+          }
+        },
+        {
+          "seq_id": 2,
+          "record_type": "pi_event",
+          "event_type": "content.delta",
+          "data": {
+            "turn_id": "turn-1",
+            "content_id": "c-0",
+            "kind": "answer",
+            "delta": "Hello "
+          }
+        },
+        {
+          "seq_id": 3,
+          "record_type": "pi_event",
+          "event_type": "content.delta",
+          "data": {
+            "turn_id": "turn-1",
+            "content_id": "c-0",
+            "kind": "answer",
+            "delta": "world"
+          }
+        },
+        {
+          "seq_id": 4,
+          "record_type": "pi_event",
+          "event_type": "turn.completed",
+          "data": {
+            "turn_id": "turn-1"
+          }
+        },
+        {
+          "seq_id": 5,
+          "record_type": "pi_event",
+          "event_type": "run.completed",
+          "data": {
+            "terminal_status": "success"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "kind": "text",
+          "text": "Hello world"
+        }
+      ]
+    },
+    {
+      "name": "pi thinking then text",
+      "records": [
+        {
+          "seq_id": 1,
+          "record_type": "pi_event",
+          "event_type": "turn.started",
+          "data": {
+            "turn_id": "turn-1"
+          }
+        },
+        {
+          "seq_id": 2,
+          "record_type": "pi_event",
+          "event_type": "content.delta",
+          "data": {
+            "turn_id": "turn-1",
+            "content_id": "c-0",
+            "kind": "reasoning",
+            "delta": "let me think"
+          }
+        },
+        {
+          "seq_id": 3,
+          "record_type": "pi_event",
+          "event_type": "content.delta",
+          "data": {
+            "turn_id": "turn-1",
+            "content_id": "c-1",
+            "kind": "answer",
+            "delta": "answer"
+          }
+        },
+        {
+          "seq_id": 4,
+          "record_type": "pi_event",
+          "event_type": "run.completed",
+          "data": {
+            "terminal_status": "success"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "kind": "thinking",
+          "text": "let me think"
+        },
+        {
+          "kind": "text",
+          "text": "answer"
+        }
+      ]
+    },
+    {
+      "name": "pi tool_use with success result then text",
+      "records": [
+        {
+          "seq_id": 1,
+          "record_type": "pi_event",
+          "event_type": "turn.started",
+          "data": {
+            "turn_id": "turn-1"
+          }
+        },
+        {
+          "seq_id": 2,
+          "record_type": "pi_event",
+          "event_type": "tool.started",
+          "data": {
+            "turn_id": "turn-1",
+            "tool_call_id": "toolu_1",
+            "tool_name": "run_sql",
+            "input": {
+              "sql": "select 1"
+            }
+          }
+        },
+        {
+          "seq_id": 3,
+          "record_type": "pi_event",
+          "event_type": "tool.completed",
+          "data": {
+            "turn_id": "turn-1",
+            "tool_call_id": "toolu_1",
+            "tool_name": "run_sql",
+            "output": [
+              {
+                "type": "text",
+                "text": "rows: 3"
+              }
+            ],
+            "is_error": false
+          }
+        },
+        {
+          "seq_id": 4,
+          "record_type": "pi_event",
+          "event_type": "content.delta",
+          "data": {
+            "turn_id": "turn-1",
+            "content_id": "c-0",
+            "kind": "answer",
+            "delta": "done"
+          }
+        },
+        {
+          "seq_id": 5,
+          "record_type": "pi_event",
+          "event_type": "run.completed",
+          "data": {
+            "terminal_status": "success"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "kind": "tool_use",
+          "tool_name": "run_sql",
+          "input": {
+            "sql": "select 1"
+          },
+          "output": [
+            {
+              "type": "text",
+              "text": "rows: 3"
+            }
+          ],
+          "is_error": false
+        },
+        {
+          "kind": "text",
+          "text": "done"
+        }
+      ]
+    },
+    {
+      "name": "pi tool_use with error result",
+      "records": [
+        {
+          "seq_id": 1,
+          "record_type": "pi_event",
+          "event_type": "turn.started",
+          "data": {
+            "turn_id": "turn-1"
+          }
+        },
+        {
+          "seq_id": 2,
+          "record_type": "pi_event",
+          "event_type": "tool.started",
+          "data": {
+            "turn_id": "turn-1",
+            "tool_call_id": "toolu_1",
+            "tool_name": "run_sql",
+            "input": {
+              "sql": "bad"
+            }
+          }
+        },
+        {
+          "seq_id": 3,
+          "record_type": "pi_event",
+          "event_type": "tool.completed",
+          "data": {
+            "turn_id": "turn-1",
+            "tool_call_id": "toolu_1",
+            "tool_name": "run_sql",
+            "output": "boom",
+            "is_error": true
+          }
+        },
+        {
+          "seq_id": 4,
+          "record_type": "pi_event",
+          "event_type": "run.failed",
+          "data": {
+            "error_code": "EXECUTION_ERROR",
+            "message": "tool failed"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "kind": "tool_use",
+          "tool_name": "run_sql",
+          "input": {
+            "sql": "bad"
+          },
+          "output": "boom",
+          "is_error": true
+        }
+      ]
+    },
+    {
+      "name": "pi two turns are flattened in order",
+      "records": [
+        {
+          "seq_id": 1,
+          "record_type": "pi_event",
+          "event_type": "turn.started",
+          "data": {
+            "turn_id": "turn-1"
+          }
+        },
+        {
+          "seq_id": 2,
+          "record_type": "pi_event",
+          "event_type": "content.delta",
+          "data": {
+            "turn_id": "turn-1",
+            "content_id": "c-0",
+            "kind": "answer",
+            "delta": "a"
+          }
+        },
+        {
+          "seq_id": 3,
+          "record_type": "pi_event",
+          "event_type": "turn.completed",
+          "data": {
+            "turn_id": "turn-1"
+          }
+        },
+        {
+          "seq_id": 4,
+          "record_type": "pi_event",
+          "event_type": "turn.started",
+          "data": {
+            "turn_id": "turn-2"
+          }
+        },
+        {
+          "seq_id": 5,
+          "record_type": "pi_event",
+          "event_type": "content.delta",
+          "data": {
+            "turn_id": "turn-2",
+            "content_id": "c-0",
+            "kind": "answer",
+            "delta": "b"
+          }
+        },
+        {
+          "seq_id": 6,
+          "record_type": "pi_event",
+          "event_type": "run.completed",
+          "data": {
+            "terminal_status": "success"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "kind": "text",
+          "text": "a"
+        },
+        {
+          "kind": "text",
+          "text": "b"
+        }
+      ]
+    },
+    {
+      "name": "pi empty text block is dropped",
+      "records": [
+        {
+          "seq_id": 1,
+          "record_type": "pi_event",
+          "event_type": "turn.started",
+          "data": {
+            "turn_id": "turn-1"
+          }
+        },
+        {
+          "seq_id": 2,
+          "record_type": "pi_event",
+          "event_type": "content.delta",
+          "data": {
+            "turn_id": "turn-1",
+            "content_id": "c-0",
+            "kind": "answer",
+            "delta": "   "
+          }
+        },
+        {
+          "seq_id": 3,
+          "record_type": "pi_event",
+          "event_type": "run.completed",
+          "data": {
+            "terminal_status": "success"
+          }
+        }
+      ],
+      "expected": []
     }
   ]
 }

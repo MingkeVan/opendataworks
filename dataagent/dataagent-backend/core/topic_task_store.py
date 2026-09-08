@@ -101,6 +101,9 @@ def _project_sdk_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     ordered_blocks: list[dict[str, Any]] = []
     current_turn_blocks: list[dict[str, Any]] | None = None
     block_by_index: dict[int, dict[str, Any]] = {}
+    # Pi events address content blocks by an opaque content_id rather than the
+    # SDK's integer block index, so they need their own lookup.
+    block_by_content_id: dict[str, dict[str, Any]] = {}
     blocks_by_tool_id: dict[str, dict[str, Any]] = {}
     perm_blocks_by_request_id: dict[str, dict[str, Any]] = {}
     max_seq_id = 0
@@ -178,6 +181,56 @@ def _project_sdk_records(records: list[dict[str, Any]]) -> dict[str, Any]:
                             block["input"] = json.loads(input_json)
                         except Exception:
                             block["input"] = input_json
+
+        elif record_type == "pi_event":
+            # Neutral events from the Pi data plane. Projected into exactly the
+            # same block shapes the SDK "stream" branch above produces, so a
+            # topic whose turns were executed by different engines still renders
+            # through one set of components. Locked by the shared fixture at
+            # dataagent/contracts/sdk-block-projection/cases.json.
+            etype = str(record.get("event_type") or "")
+
+            if etype == "turn.started":
+                current_turn_blocks = []
+                block_by_content_id = {}
+
+            elif etype == "content.delta" and current_turn_blocks is not None:
+                is_reasoning = str(data.get("kind") or "") == "reasoning"
+                block_type = "thinking" if is_reasoning else "main_text"
+                key = str(data.get("content_id") or "")
+                block = block_by_content_id.get(key) if key else None
+                if block is None or block.get("type") != block_type:
+                    index = len(current_turn_blocks)
+                    block = {"type": block_type, "text": "", "_idx": index}
+                    current_turn_blocks.append(block)
+                    ordered_blocks.append(block)
+                    if key:
+                        block_by_content_id[key] = block
+                block["text"] = str(block.get("text") or "") + str(data.get("delta") or "")
+
+            elif etype == "tool.started" and current_turn_blocks is not None:
+                tool_id = str(data.get("tool_call_id") or "")
+                block = {
+                    "type": "tool_use",
+                    "tool_id": tool_id,
+                    "tool_name": str(data.get("tool_name") or "Tool"),
+                    "_input_json": "",
+                    "input": data.get("input"),
+                    "output": None,
+                    "is_error": False,
+                    "_idx": len(current_turn_blocks),
+                }
+                current_turn_blocks.append(block)
+                ordered_blocks.append(block)
+                if tool_id:
+                    blocks_by_tool_id[tool_id] = block
+
+            elif etype == "tool.completed":
+                tool_id = str(data.get("tool_call_id") or "")
+                block = blocks_by_tool_id.get(tool_id) if tool_id else None
+                if block is not None:
+                    block["output"] = data.get("output")
+                    block["is_error"] = bool(data.get("is_error"))
 
         elif record_type == "permission_request":
             request_id = str(data.get("request_id") or "")
