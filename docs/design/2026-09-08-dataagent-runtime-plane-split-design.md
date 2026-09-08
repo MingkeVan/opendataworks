@@ -219,6 +219,26 @@ event_type, data)`：
 
 表结构与迁移零改动。
 
+### 投影：三方契约，不是单侧分流
+
+**（实施期修正，2026-09-08）** 初版设计只说了「前端加一次 `record_type` 分流」，
+这是不完整的。`da_agent_sdk_record` 的「记录 → 渲染块」投影在仓库里存在于**两处**，
+并且已有共享夹具锁定：
+
+| 投影 | 位置 | 用途 |
+|---|---|---|
+| 后端 | `core/topic_task_store.py:_project_sdk_records` | 历史回放 / eval 证据 |
+| 前端 | `v2StreamParser.js:processV2Record` | 实时流 |
+| 夹具 | `dataagent/contracts/sdk-block-projection/cases.json` | 同时锁住上面两者 |
+| 契约测试 | `tests/test_sdk_block_projection_contract.py` + `sdkBlockProjection.contract.spec.js` | 两侧跑同一夹具 |
+
+若只改前端，Pi 执行过的轮次在**刷新页面或切回历史话题时会整段消失**——后端投影
+不认识 `record_type == "pi_event"`，返回空 blocks。
+
+因此 `pi_event` 必须同时进两条投影，并**产出与 SDK 路径完全一致的 canonical block**。
+现有夹具追加 Pi 用例，两侧契约测试自动覆盖。这也让「两个数据面对前端不可见」
+这一目标有了可执行的验收标准，而不只是一句意图。
+
 ### 事件契约与前端
 
 Cell → Python 的中立事件沿用 PR #450 的 `AgentEventType` 枚举（
