@@ -50,6 +50,11 @@ jobs:
             context: .
             dockerfile: ./dataagent/dataagent-backend/Dockerfile.runner
             build_args: ""
+          - name: dataagent-runtime-pi
+            image: opendataworks-dataagent-runtime-pi
+            context: ./dataagent/dataagent-runtime-pi
+            dockerfile: ./dataagent/dataagent-runtime-pi/Dockerfile
+            build_args: ""
           - name: portal-mcp
             image: opendataworks-portal-mcp
             context: .

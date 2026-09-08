@@ -124,6 +124,52 @@
   对外导出未变，不影响调用方。
 - 无 schema 变更、无数据迁移；历史 `pi_event` 记录对 SDK 路径读取无影响。
 
-## 验证记录
+## 验证记录（2026-09-08）
 
-（待填写：每个阶段完成后追加实际执行的命令与结果，未执行的层次显式标注。）
+### 环境
+
+- Python：临时 venv（3.11.15），按 `dataagent-backend/requirements.txt` 安装。
+  仓库默认的 `.venv-py313` 在本容器不存在。
+- Node：系统 `/opt/node22/bin/node` v22.22.2。**本容器无 nvm**，`.nvmrc` 指定
+  22.19.0，实际使用 22.22.2（同一 major）。
+- 容器运行时：`docker` CLI 存在但无 daemon，`podman` 不存在。
+- MySQL / Redis：均不可用。
+
+### 已执行并通过
+
+| 层次 | 命令 | 结果 |
+|---|---|---|
+| Python 回归基线 | `pytest tests/` on `origin/main` | 435 passed |
+| Python 全量 | `pytest tests/` 本分支 | **508 passed**，零回归 |
+| 边界一致性（Python） | `pytest tests/test_boundary_conformance.py` | 43 passed（40 用例 + 3 策略断言）|
+| 边界一致性（TS） | `node --test dist/test/boundary_conformance.test.js` | **41 passed，同一份夹具** |
+| 投影契约（Python） | `pytest tests/test_sdk_block_projection_contract.py` | 2 passed（20 用例，含 6 条 Pi）|
+| 跨进程协议 | `pytest tests/test_pi_runtime_contract.py` | 11 passed（真实子进程）|
+| 端到端 Python↔Node | `pytest tests/test_pi_runtime_e2e.py` | **3 passed（真实构建的 Node Cell）** |
+| Node 全量 | `npm run typecheck && npx tsc && node --test dist/test/*.test.js` | 0 错误，54 passed |
+| 前端全量 | `npx vitest run` | 42 files，**428 passed** |
+| npm NODE_ENV 行为 | 实测 `NODE_ENV=production npm ci` | 确认不安装 devDependencies，验证 Dockerfile 修复必要性 |
+
+变异检验（确认一致性夹具能失败而非空转）：
+
+- 把 discard sink 从精确匹配改为前缀匹配 → 1 条失败（`/dev/null/passwd` 会被放行）
+- 去掉 bash 赋值语句里的路径提取 → 6 条失败（`dd if=`、`PYTHONPATH=`、变量间接引用等）
+
+### 未执行 —— 必须在合入前补齐
+
+1. **本地端到端 smoke（AGENTS.md 要求的最低验证）未执行。**
+   本容器无 MySQL、无 Redis、无容器运行时，无法按
+   「Intelligent Query local smoke method」启动依赖。因此以下路径**未经真实验证**：
+   - `DATAAGENT_RUNTIME_KIND=pi_agent_core` 下的真实 NL2SQL 请求
+   - 任务创建 → 事件写入 `da_agent_sdk_record` → 终态落库 → 前端渲染的完整链路
+   - 真实 provider 凭据下的模型调用（`stream-fn-resolver` 只经过类型检查与
+     单元测试，从未对真实 Anthropic/OpenAI 端点发过请求）
+2. **所有 Docker 改动未经构建验证。** 无 daemon 可用。涉及：
+   - `dataagent-runtime-pi/Dockerfile`
+   - `dataagent-backend/Dockerfile` 与 `Dockerfile.runner` 新增的 Pi Cell 构建阶段
+   - 特别是 `COPY --from=node:22-bookworm-slim /usr/local/bin/node`——该模式与
+     仓库既有的 `COPY --from=docker:27-cli` 同源，且两侧均为 debian bookworm，
+     但**未实际构建过**
+3. **里程碑 2（确认/暂停回路）未实现**，按设计属于独立范围。当前 Pi 数据面
+   不提供写确认；`policy.require_write_confirmation` 在该引擎下无效。
+4. compose 改动仅通过 YAML 语法校验，未 `docker compose up` 验证。
