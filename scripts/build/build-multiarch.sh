@@ -60,7 +60,7 @@ usage() {
     echo ""
     echo "示例:"
     echo "  $0 -u myuser -p mytoken --push"
-    echo "  $0 -u myuser -p mytoken -v v1.4.0 --push"
+    echo "  $0 -u myuser -p mytoken -v v1.5.0 --push"
     echo "  $0 -u myuser -p mytoken --no-dataagent-backend --push"
     echo ""
     exit 1

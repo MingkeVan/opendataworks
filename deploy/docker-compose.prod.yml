@@ -57,7 +57,7 @@ services:
 
   # 后端服务
   backend:
-    image: ${OPENDATAWORKS_BACKEND_IMAGE:-mikefan2019/opendataworks-backend:1.4.0}
+    image: ${OPENDATAWORKS_BACKEND_IMAGE:-mikefan2019/opendataworks-backend:1.5.0}
     container_name: opendataworks-backend
     logging: *default-logging
     restart: always
@@ -85,7 +85,7 @@ services:
 
   # 前端服务
   frontend:
-    image: ${OPENDATAWORKS_FRONTEND_IMAGE:-mikefan2019/opendataworks-frontend:1.4.0}
+    image: ${OPENDATAWORKS_FRONTEND_IMAGE:-mikefan2019/opendataworks-frontend:1.5.0}
     container_name: opendataworks-frontend
     logging: *default-logging
     restart: always
@@ -111,7 +111,7 @@ services:
       retries: 3
 
   dataagent-frontend:
-    image: ${OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE:-mikefan2019/opendataworks-dataagent-frontend:1.4.0}
+    image: ${OPENDATAWORKS_DATAAGENT_FRONTEND_IMAGE:-mikefan2019/opendataworks-dataagent-frontend:1.5.0}
     container_name: opendataworks-dataagent-frontend
     logging: *default-logging
     restart: always
@@ -134,7 +134,7 @@ services:
 
   # DataAgent 持久化目录初始化（以 root 预创建并修正属主，避免非 root 容器写 /dataagent_runtime 报 permission denied）
   dataagent-home-init:
-    image: ${OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE:-mikefan2019/opendataworks-dataagent-backend:1.4.0}
+    image: ${OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE:-mikefan2019/opendataworks-dataagent-backend:1.5.0}
     container_name: opendataworks-dataagent-home-init
     logging: *default-logging
     user: "0:0"
@@ -154,7 +154,7 @@ services:
 
   # DataAgent 后端服务（NL2SQL）
   dataagent-backend:
-    image: ${OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE:-mikefan2019/opendataworks-dataagent-backend:1.4.0}
+    image: ${OPENDATAWORKS_DATAAGENT_BACKEND_IMAGE:-mikefan2019/opendataworks-dataagent-backend:1.5.0}
     container_name: opendataworks-dataagent-backend
     logging: *default-logging
     restart: always
@@ -289,7 +289,7 @@ services:
       - ${DATAAGENT_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
 
   portal-mcp:
-    image: ${OPENDATAWORKS_PORTAL_MCP_IMAGE:-mikefan2019/opendataworks-portal-mcp:1.4.0}
+    image: ${OPENDATAWORKS_PORTAL_MCP_IMAGE:-mikefan2019/opendataworks-portal-mcp:1.5.0}
     container_name: opendataworks-portal-mcp
     logging: *default-logging
     restart: always

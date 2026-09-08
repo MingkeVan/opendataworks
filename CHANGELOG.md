@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-08
+
 ### Added
 - 新增类 dbt 的数据新鲜度（freshness）检查：**表级契约**（时间字段取值方式 + warn/error 两级阈值 + 可选 filter，每张表各自声明），支持 `column` / `custom_sql` / `partition` / `metadata` 四种取值模式；检查结果留痕并可查询历史；提供表级契约 REST 接口、Data Studio「数据新鲜度」页签与巡检页只读新鲜度视图。
 - 新鲜度检查采用**事件驱动**：工作流执行成功后即检查其写出的表（回答「任务报成功了，数据真的到了吗」；补数不触发），另提供页面按需触发。检查绑定到「运行」，不设时钟轮询。检查结果带触发实例ID，可按「每次运行」聚合并反查执行。
@@ -168,7 +170,8 @@
 
 以上早期版本请参考 GitHub Releases 与 Git tags 历史记录。
 
-[Unreleased]: https://github.com/MingkeVan/opendataworks/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/MingkeVan/opendataworks/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/MingkeVan/opendataworks/releases/tag/v1.5.0
 [1.4.0]: https://github.com/MingkeVan/opendataworks/releases/tag/v1.4.0
 [1.3.0]: https://github.com/MingkeVan/opendataworks/releases/tag/v1.3.0
 [1.2.0]: https://github.com/MingkeVan/opendataworks/releases/tag/v1.2.0
